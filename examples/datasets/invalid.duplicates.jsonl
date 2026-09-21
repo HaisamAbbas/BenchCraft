@@ -1,0 +1,3 @@
+{"case_id":"dup-001","input":"first"}
+{"case_id":"dup-001","input":"second, same id"}
+{"input":"no id, should get a generated id"}

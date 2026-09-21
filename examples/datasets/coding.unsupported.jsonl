@@ -1,0 +1,1 @@
+{"case_id":"code-001","input":"Find and fix the authentication bug.","repository":"./repos/auth-service","metadata":{"bug_id":"AUTH-017"}}

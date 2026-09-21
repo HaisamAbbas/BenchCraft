@@ -1,0 +1,2 @@
+{"case_id":"agent-001","input":"Book me a flight to Dubai.","expected_tools":["search_flights","book_flight"],"metadata":{"category":"booking"}}
+{"case_id":"agent-002","input":"Cancel my flight to Dubai.","expected_tools":["cancel_flight"],"metadata":{"category":"cancellation"}}

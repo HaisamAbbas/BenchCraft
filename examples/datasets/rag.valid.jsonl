@@ -1,0 +1,2 @@
+{"case_id":"rag-001","input":"What is your refund policy?","expected_output":"Refunds are available within 30 days.","context":["Refunds may be requested within 30 days of purchase."],"metadata":{"category":"refund"}}
+{"case_id":"rag-002","input":"How long is the warranty?","expected_output":"The warranty lasts one year.","context":["All products carry a one-year limited warranty."],"metadata":{"category":"warranty"}}

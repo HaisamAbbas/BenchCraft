@@ -1,0 +1,5 @@
+{"case_id":"bad-001","input":"valid line"}
+{"case_id":"bad-002","input": this is not json}
+{"case_id":"bad-003","input":"missing input handled ok"}
+{"input":"missing unknown field","made_up_field":"oops"}
+{"case_id":"bad-005","input":"bad context type","context":"not-a-list"}
