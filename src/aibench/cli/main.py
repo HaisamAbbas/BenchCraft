@@ -10,6 +10,7 @@ import typer
 
 from aibench import __version__
 from aibench.cli import dataset as dataset_cli
+from aibench.cli import runs as runs_cli
 
 app = typer.Typer(
     name="aibench",
@@ -17,6 +18,7 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 app.add_typer(dataset_cli.app, name="dataset")
+app.add_typer(runs_cli.app, name="runs")
 
 
 @app.callback(invoke_without_command=True)
