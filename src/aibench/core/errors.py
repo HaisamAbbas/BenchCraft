@@ -27,3 +27,9 @@ class PolicyError(AibenchError):
 
 class ConfigError(AibenchError):
     """Configuration resolution or precedence failed."""
+
+
+class ConflictError(AibenchError):
+    """A logical commit collided with an existing record under the same identity but with
+    different content. A duplicate commit of *identical* content is idempotent and must not
+    raise this; only a genuine mismatch (same key, different data) does."""

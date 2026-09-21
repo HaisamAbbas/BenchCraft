@@ -341,6 +341,68 @@ class ArtifactRef(FrozenModel):
     run_id: str | None = None
 
 
+# --------------------------------------------------------------------------- scheduling / usage
+
+
+class WorkItemState(str, Enum):
+    """§15: "Work states: pending, running, succeeded, failed, blocked, cancelled, and
+    unknown-effect." This model records identity/state only — the scheduler that assigns
+    and transitions work items is engine scope (Prompt 06), not storage scope (Prompt 02)."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    CANCELLED = "cancelled"
+    UNKNOWN_EFFECT = "unknown_effect"
+
+
+class WorkItem(FrozenModel):
+    work_item_id: str
+    run_id: str
+    task_key: str  # stable logical key; unique per run so a retried commit cannot duplicate it
+    kind: str  # e.g. "execution", "evaluation"
+    dependency_keys: tuple[str, ...] = Field(default_factory=tuple)
+    state: WorkItemState = WorkItemState.PENDING
+    attempt: int = 0
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
+
+
+class UsageRole(str, Enum):
+    """§2: "Treat model calls in three distinct roles: application model, planning model,
+    and judging model. Each has separate credentials, budgets, usage records, and
+    provenance." """
+
+    APPLICATION = "application"
+    PLANNER = "planner"
+    EVALUATOR = "evaluator"
+
+
+class UsageEvent(FrozenModel):
+    usage_event_id: str
+    run_id: str
+    role: UsageRole
+    provider: str | None = None
+    tokens: FrozenValue = None
+    calls: int | None = None
+    cost: float | None = None
+    recorded_at: datetime = Field(default_factory=utcnow)
+
+
+class Approval(FrozenModel):
+    """§16: "Bind approvals to target/config/plan/environment hashes and allowed actions.
+    Approval rules are evaluated by code." """
+
+    approval_id: str
+    scope_hash: str
+    allowed_actions: tuple[str, ...] = Field(default_factory=tuple)
+    granted_by: str | None = None
+    granted_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime | None = None
+
+
 ALL_MODELS: tuple[type[BaseModel], ...] = (
     ToolExpectation,
     ReferenceAnswer,
@@ -357,4 +419,7 @@ ALL_MODELS: tuple[type[BaseModel], ...] = (
     EvaluationResult,
     RunManifest,
     ArtifactRef,
+    WorkItem,
+    UsageEvent,
+    Approval,
 )
