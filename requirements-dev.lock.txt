@@ -1,0 +1,30 @@
+# Locked development environment (00-T2). Generated on Python 3.12.10 / win32 with:
+#   .venv/Scripts/pip install -e ".[dev]"
+#   .venv/Scripts/pip freeze > requirements-dev.lock.txt
+# Regenerate after any pyproject.toml dependency change. Install with:
+#   .venv/Scripts/pip install -r requirements-dev.lock.txt -e . --no-deps
+annotated-doc==0.0.5
+annotated-types==0.8.0
+ast_serialize==0.11.2
+colorama==0.4.6
+coverage==7.16.1
+iniconfig==2.3.0
+librt==0.15.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+mypy==2.3.1
+mypy_extensions==1.1.0
+packaging==26.3
+pathspec==1.1.1
+pluggy==1.6.0
+pydantic==2.13.5
+pydantic_core==2.46.5
+Pygments==2.21.0
+pytest==9.1.1
+pytest-cov==7.1.0
+rich==13.9.4
+ruff==0.16.8
+shellingham==1.5.4
+typer==0.27.2
+typing-inspection==0.4.4
+typing_extensions==4.16.0
