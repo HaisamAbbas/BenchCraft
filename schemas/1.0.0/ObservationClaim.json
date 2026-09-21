@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "ObservationState": {
+      "enum": [
+        "observed",
+        "declared",
+        "inferred",
+        "unknown"
+      ],
+      "title": "ObservationState",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ObservationClaim.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "capability": {
+      "title": "Capability",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "limitations": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Limitations"
+    },
+    "method": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Method"
+    },
+    "observation_id": {
+      "title": "Observation Id",
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scope"
+    },
+    "state": {
+      "$ref": "#/$defs/ObservationState"
+    }
+  },
+  "required": [
+    "observation_id",
+    "capability",
+    "state"
+  ],
+  "title": "ObservationClaim",
+  "type": "object"
+}

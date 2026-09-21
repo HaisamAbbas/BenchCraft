@@ -1,0 +1,65 @@
+{
+  "$id": "aibench/1.0.0/RepositoryFixture.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "Coding-case repository reference. Execution prerequisites are intentionally\nincomplete in MVP (\u00a76): an immutable commit, execution environment, setup recipe,\nhidden tests, and success criteria are required before this is executable.",
+  "properties": {
+    "commit": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Commit"
+    },
+    "hidden_tests_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hidden Tests Ref"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "setup_recipe": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Setup Recipe"
+    },
+    "success_criteria": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Success Criteria"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "title": "RepositoryFixture",
+  "type": "object"
+}

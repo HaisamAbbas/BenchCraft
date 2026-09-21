@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "ReferenceStatus": {
+      "enum": [
+        "synthetic_unverified",
+        "source_verified",
+        "human_reviewed",
+        "executable_oracle",
+        "human_authored"
+      ],
+      "title": "ReferenceStatus",
+      "type": "string"
+    },
+    "ToolExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "match_mode": {
+          "$ref": "#/$defs/ToolMatchMode",
+          "default": "contains_all"
+        },
+        "tool_names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tool Names",
+          "type": "array"
+        }
+      },
+      "title": "ToolExpectation",
+      "type": "object"
+    },
+    "ToolMatchMode": {
+      "enum": [
+        "contains_all",
+        "exact",
+        "ordered_subsequence"
+      ],
+      "title": "ToolMatchMode",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ReferenceAnswer.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "Judge-only reference data. Never sent to the application unless explicitly bound.",
+  "properties": {
+    "answer": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Answer"
+    },
+    "context": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Context",
+      "type": "array"
+    },
+    "status": {
+      "$ref": "#/$defs/ReferenceStatus",
+      "default": "human_authored"
+    },
+    "tools": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToolExpectation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "ReferenceAnswer",
+  "type": "object"
+}

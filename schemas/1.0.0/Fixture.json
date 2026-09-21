@@ -1,0 +1,26 @@
+{
+  "$id": "aibench/1.0.0/Fixture.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "A named piece of case data. `app_visible=True` is an explicit opt-in to expose it\nto the application; it is otherwise judge-only, like `reference`.",
+  "properties": {
+    "app_visible": {
+      "default": false,
+      "title": "App Visible",
+      "type": "boolean"
+    },
+    "content": {
+      "default": null,
+      "title": "Content"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "Fixture",
+  "type": "object"
+}

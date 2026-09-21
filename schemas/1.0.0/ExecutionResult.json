@@ -1,0 +1,118 @@
+{
+  "$defs": {
+    "ExecutionStatus": {
+      "enum": [
+        "ok",
+        "error",
+        "not_applicable",
+        "skipped",
+        "cancelled"
+      ],
+      "title": "ExecutionStatus",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ExecutionResult.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "attempt_id": {
+      "default": 0,
+      "title": "Attempt Id",
+      "type": "integer"
+    },
+    "case_id": {
+      "title": "Case Id",
+      "type": "string"
+    },
+    "cost": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cost"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "execution_id": {
+      "title": "Execution Id",
+      "type": "string"
+    },
+    "observation_completeness": {
+      "title": "Observation Completeness"
+    },
+    "output": {
+      "default": null,
+      "title": "Output"
+    },
+    "repetition_id": {
+      "default": 0,
+      "title": "Repetition Id",
+      "type": "integer"
+    },
+    "retrieved_context": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Retrieved Context"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ExecutionStatus"
+    },
+    "timing": {
+      "title": "Timing"
+    },
+    "tool_events": {
+      "items": {},
+      "title": "Tool Events",
+      "type": "array"
+    },
+    "trace_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Trace Refs",
+      "type": "array"
+    },
+    "usage": {
+      "default": null,
+      "title": "Usage"
+    }
+  },
+  "required": [
+    "execution_id",
+    "run_id",
+    "case_id",
+    "status"
+  ],
+  "title": "ExecutionResult",
+  "type": "object"
+}

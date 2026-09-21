@@ -1,0 +1,63 @@
+{
+  "$defs": {
+    "RedactionClass": {
+      "enum": [
+        "none",
+        "redacted",
+        "restricted"
+      ],
+      "title": "RedactionClass",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ArtifactRef.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_id": {
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "digest": {
+      "title": "Digest",
+      "type": "string"
+    },
+    "mime_type": {
+      "title": "Mime Type",
+      "type": "string"
+    },
+    "redaction": {
+      "$ref": "#/$defs/RedactionClass",
+      "default": "none"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "size_bytes": {
+      "title": "Size Bytes",
+      "type": "integer"
+    },
+    "uri": {
+      "title": "Uri",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifact_id",
+    "digest",
+    "uri",
+    "mime_type",
+    "size_bytes"
+  ],
+  "title": "ArtifactRef",
+  "type": "object"
+}

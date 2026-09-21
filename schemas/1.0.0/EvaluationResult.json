@@ -1,0 +1,133 @@
+{
+  "$defs": {
+    "Decision": {
+      "enum": [
+        "pass",
+        "fail",
+        "indeterminate",
+        "not_evaluated"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "ExecutionStatus": {
+      "enum": [
+        "ok",
+        "error",
+        "not_applicable",
+        "skipped",
+        "cancelled"
+      ],
+      "title": "ExecutionStatus",
+      "type": "string"
+    },
+    "MetricValue": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "scalar",
+            "boolean",
+            "category",
+            "vector",
+            "distribution",
+            "structured"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "MetricValue",
+      "type": "object"
+    }
+  },
+  "$id": "aibench/1.0.0/EvaluationResult.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "case_id": {
+      "title": "Case Id",
+      "type": "string"
+    },
+    "decision": {
+      "$ref": "#/$defs/Decision"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "metric_id": {
+      "title": "Metric Id",
+      "type": "string"
+    },
+    "metric_version": {
+      "title": "Metric Version",
+      "type": "string"
+    },
+    "provenance": {
+      "title": "Provenance"
+    },
+    "raw_artifact_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Raw Artifact Ref"
+    },
+    "resources": {
+      "title": "Resources"
+    },
+    "result_id": {
+      "title": "Result Id",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ExecutionStatus"
+    },
+    "uncertainty": {
+      "default": null,
+      "title": "Uncertainty"
+    },
+    "value": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MetricValue"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "result_id",
+    "run_id",
+    "case_id",
+    "metric_id",
+    "metric_version",
+    "status",
+    "decision"
+  ],
+  "title": "EvaluationResult",
+  "type": "object"
+}

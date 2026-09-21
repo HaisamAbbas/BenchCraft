@@ -1,0 +1,28 @@
+{
+  "$id": "aibench/1.0.0/MetricValue.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "enum": [
+        "scalar",
+        "boolean",
+        "category",
+        "vector",
+        "distribution",
+        "structured"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "value": {
+      "title": "Value"
+    }
+  },
+  "required": [
+    "kind",
+    "value"
+  ],
+  "title": "MetricValue",
+  "type": "object"
+}

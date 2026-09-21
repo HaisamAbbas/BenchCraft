@@ -1,0 +1,31 @@
+{
+  "$defs": {
+    "ToolMatchMode": {
+      "enum": [
+        "contains_all",
+        "exact",
+        "ordered_subsequence"
+      ],
+      "title": "ToolMatchMode",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ToolExpectation.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "match_mode": {
+      "$ref": "#/$defs/ToolMatchMode",
+      "default": "contains_all"
+    },
+    "tool_names": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tool Names",
+      "type": "array"
+    }
+  },
+  "title": "ToolExpectation",
+  "type": "object"
+}

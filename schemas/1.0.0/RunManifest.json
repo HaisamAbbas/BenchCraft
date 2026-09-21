@@ -1,0 +1,72 @@
+{
+  "$id": "aibench/1.0.0/RunManifest.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "application_hash": {
+      "title": "Application Hash",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "dataset_hash": {
+      "title": "Dataset Hash",
+      "type": "string"
+    },
+    "dependency_lock_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dependency Lock Hash"
+    },
+    "environment": {
+      "title": "Environment"
+    },
+    "model_identifiers": {
+      "title": "Model Identifiers"
+    },
+    "parameters": {
+      "title": "Parameters"
+    },
+    "plan_hash": {
+      "title": "Plan Hash",
+      "type": "string"
+    },
+    "plugin_hashes": {
+      "title": "Plugin Hashes"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seed"
+    }
+  },
+  "required": [
+    "run_id",
+    "dataset_hash",
+    "application_hash",
+    "plan_hash"
+  ],
+  "title": "RunManifest",
+  "type": "object"
+}

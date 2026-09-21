@@ -1,0 +1,69 @@
+{
+  "$defs": {
+    "ReferenceStatus": {
+      "enum": [
+        "synthetic_unverified",
+        "source_verified",
+        "human_reviewed",
+        "executable_oracle",
+        "human_authored"
+      ],
+      "title": "ReferenceStatus",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/Provenance.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "generator_identity": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Generator Identity"
+    },
+    "origin": {
+      "$ref": "#/$defs/ReferenceStatus",
+      "default": "human_authored"
+    },
+    "prompt_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prompt Hash"
+    },
+    "reviewer_identity": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reviewer Identity"
+    },
+    "source_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Refs",
+      "type": "array"
+    }
+  },
+  "title": "Provenance",
+  "type": "object"
+}

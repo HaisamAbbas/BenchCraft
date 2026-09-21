@@ -1,0 +1,91 @@
+{
+  "$defs": {
+    "EffectLevel": {
+      "enum": [
+        "none",
+        "reversible",
+        "irreversible"
+      ],
+      "title": "EffectLevel",
+      "type": "string"
+    },
+    "ResetPolicy": {
+      "enum": [
+        "per_case",
+        "per_episode",
+        "shared"
+      ],
+      "title": "ResetPolicy",
+      "type": "string"
+    },
+    "RunnerKind": {
+      "enum": [
+        "cli",
+        "http"
+      ],
+      "title": "RunnerKind",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ApplicationSpec.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "application_id": {
+      "title": "Application Id",
+      "type": "string"
+    },
+    "effects": {
+      "$ref": "#/$defs/EffectLevel",
+      "default": "none"
+    },
+    "environment_digest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Environment Digest"
+    },
+    "input_binding": {
+      "title": "Input Binding"
+    },
+    "output_binding": {
+      "title": "Output Binding"
+    },
+    "reset_policy": {
+      "$ref": "#/$defs/ResetPolicy",
+      "default": "per_case"
+    },
+    "revision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Revision"
+    },
+    "runner": {
+      "$ref": "#/$defs/RunnerKind"
+    },
+    "target": {
+      "title": "Target",
+      "type": "string"
+    }
+  },
+  "required": [
+    "application_id",
+    "runner",
+    "target"
+  ],
+  "title": "ApplicationSpec",
+  "type": "object"
+}

@@ -1,0 +1,58 @@
+{
+  "$id": "aibench/1.0.0/EvaluationPlan.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "aggregations": {
+      "title": "Aggregations"
+    },
+    "bindings": {
+      "title": "Bindings"
+    },
+    "budgets": {
+      "title": "Budgets"
+    },
+    "gates": {
+      "title": "Gates"
+    },
+    "metric_specs": {
+      "items": {},
+      "title": "Metric Specs",
+      "type": "array"
+    },
+    "objectives": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Objectives",
+      "type": "array"
+    },
+    "plan_id": {
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "policy_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Policy Hash"
+    },
+    "sampling": {
+      "title": "Sampling"
+    },
+    "selectors": {
+      "title": "Selectors"
+    }
+  },
+  "required": [
+    "plan_id"
+  ],
+  "title": "EvaluationPlan",
+  "type": "object"
+}

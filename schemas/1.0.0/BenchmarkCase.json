@@ -1,0 +1,321 @@
+{
+  "$defs": {
+    "Fixture": {
+      "additionalProperties": false,
+      "description": "A named piece of case data. `app_visible=True` is an explicit opt-in to expose it\nto the application; it is otherwise judge-only, like `reference`.",
+      "properties": {
+        "app_visible": {
+          "default": false,
+          "title": "App Visible",
+          "type": "boolean"
+        },
+        "content": {
+          "default": null,
+          "title": "Content"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Fixture",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "generator_identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generator Identity"
+        },
+        "origin": {
+          "$ref": "#/$defs/ReferenceStatus",
+          "default": "human_authored"
+        },
+        "prompt_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Hash"
+        },
+        "reviewer_identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewer Identity"
+        },
+        "source_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "title": "Provenance",
+      "type": "object"
+    },
+    "ReferenceAnswer": {
+      "additionalProperties": false,
+      "description": "Judge-only reference data. Never sent to the application unless explicitly bound.",
+      "properties": {
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answer"
+        },
+        "context": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/ReferenceStatus",
+          "default": "human_authored"
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ReferenceAnswer",
+      "type": "object"
+    },
+    "ReferenceStatus": {
+      "enum": [
+        "synthetic_unverified",
+        "source_verified",
+        "human_reviewed",
+        "executable_oracle",
+        "human_authored"
+      ],
+      "title": "ReferenceStatus",
+      "type": "string"
+    },
+    "RepositoryFixture": {
+      "additionalProperties": false,
+      "description": "Coding-case repository reference. Execution prerequisites are intentionally\nincomplete in MVP (\u00a76): an immutable commit, execution environment, setup recipe,\nhidden tests, and success criteria are required before this is executable.",
+      "properties": {
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit"
+        },
+        "hidden_tests_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hidden Tests Ref"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "setup_recipe": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setup Recipe"
+        },
+        "success_criteria": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Success Criteria"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "RepositoryFixture",
+      "type": "object"
+    },
+    "ToolExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "match_mode": {
+          "$ref": "#/$defs/ToolMatchMode",
+          "default": "contains_all"
+        },
+        "tool_names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tool Names",
+          "type": "array"
+        }
+      },
+      "title": "ToolExpectation",
+      "type": "object"
+    },
+    "ToolMatchMode": {
+      "enum": [
+        "contains_all",
+        "exact",
+        "ordered_subsequence"
+      ],
+      "title": "ToolMatchMode",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/BenchmarkCase.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "Golden. Facts, input, references, expectations and fixtures known before\nexecution. Runtime data must never be written into it (\u00a72).",
+  "properties": {
+    "case_id": {
+      "title": "Case Id",
+      "type": "string"
+    },
+    "duplicate_of_line": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duplicate Of Line"
+    },
+    "expectations": {
+      "title": "Expectations"
+    },
+    "extensions": {
+      "title": "Extensions"
+    },
+    "fixtures": {
+      "items": {
+        "$ref": "#/$defs/Fixture"
+      },
+      "title": "Fixtures",
+      "type": "array"
+    },
+    "group_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Group Id"
+    },
+    "input": {
+      "title": "Input"
+    },
+    "metadata": {
+      "title": "Metadata"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "reference": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReferenceAnswer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "repository": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RepositoryFixture"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "source_line": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Line"
+    }
+  },
+  "required": [
+    "case_id",
+    "input"
+  ],
+  "title": "BenchmarkCase",
+  "type": "object"
+}
