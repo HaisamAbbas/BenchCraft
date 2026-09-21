@@ -29,3 +29,25 @@ remediation passes: (1) deep immutability, bounded-memory ingestion mode, nested
 handling, extension namespacing, explicit identities; (2) disk-backed duplicate-ID index for
 large files (`src/aibench/datasets/ingest.py::_DedupIndex`) and a more robust, sandbox-aware
 pytest temp-directory selection (`tests/conftest.py`).
+
+## Prompt 02 — Durable run storage and artifacts
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 02-T1 | Persistence repositories: datasets, cases, applications, profiles, plans, runs, work items, execution/evaluation attempts, metric results, artifacts, usage, approvals | DONE | `src/aibench/storage/migrations.py` (13 tables + `schema_migrations`, 3 versioned migrations), `src/aibench/storage/repositories.py` (`Storage` facade, transactional/idempotent commits, `ConflictError` on mismatched duplicate commits) |
+| 02-T2 | Artifact commit protocol: temp write, flush+fsync, atomic rename, then separate DB commit; content-addressed dedup; orphan GC with grace period; path-validated, content-verified reads and commits; verification enforced at the only production-intended commit entry point | DONE | `src/aibench/storage/artifacts.py` (`ArtifactStore`, `verify_ref`, `_resolve_and_validate_uri`, `commit_verified_artifact`); `src/aibench/storage/repositories.py::Storage.commit_artifact_unverified` (renamed and docstring-flagged; not the recommended call site) |
+| 02-T3 | Record attempts/manifests; `runs list`/`runs show` with machine-readable output | DONE | `src/aibench/storage/repositories.py::RunRecord`, `src/aibench/cli/runs.py` |
+| 02-T4 | Restart-safe loading; unique commit behavior; session storage explicitly deferred to Prompt 08 | DONE | `src/aibench/storage/db.py::Database.open`/`Workspace`/`open_in_memory`; migrations deliberately exclude `sessions`/`conversation_turns`/`decision_records`/`pending_questions`/`action_requests`/`run_events` |
+
+Gates: 02-G1..G4, all satisfied — see `docs/engineering/reports/02.md`, including two review
+remediation passes. §1a: `commit_artifact` conflict-checks the complete `ArtifactRef` content
+(not just `digest`), `ArtifactStore` rejects out-of-root URIs and verifies file existence/
+size/digest before every read or verified commit, and the migration/repository pure-logic
+test suites moved to in-memory SQLite (`Database.open_in_memory`) to remove their dependency
+on a writable temp directory. §1b: the artifacts schema change moved out of the already-numbered
+migration 1 into a proper new migration 3 (with a Python `post_apply` backfill hook and a test
+proving a pre-migration-3 database upgrades cleanly), and the unverified commit method was
+renamed to `commit_artifact_unverified` so `commit_verified_artifact` is unambiguously the only
+production-intended entry point. New core identity models added to support this phase: `WorkItem`/`WorkItemState`,
+`UsageEvent`/`UsageRole`, `Approval` (`src/aibench/core/models.py`); new `ConflictError`
+(`src/aibench/core/errors.py`).
