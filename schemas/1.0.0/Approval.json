@@ -1,0 +1,59 @@
+{
+  "$id": "aibench/1.0.0/Approval.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "\u00a716: \"Bind approvals to target/config/plan/environment hashes and allowed actions.\nApproval rules are evaluated by code.\" ",
+  "properties": {
+    "allowed_actions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Actions",
+      "type": "array"
+    },
+    "approval_id": {
+      "title": "Approval Id",
+      "type": "string"
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expires At"
+    },
+    "granted_at": {
+      "format": "date-time",
+      "title": "Granted At",
+      "type": "string"
+    },
+    "granted_by": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Granted By"
+    },
+    "scope_hash": {
+      "title": "Scope Hash",
+      "type": "string"
+    }
+  },
+  "required": [
+    "approval_id",
+    "scope_hash"
+  ],
+  "title": "Approval",
+  "type": "object"
+}

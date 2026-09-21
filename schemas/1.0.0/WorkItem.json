@@ -1,0 +1,88 @@
+{
+  "$defs": {
+    "WorkItemState": {
+      "description": "\u00a715: \"Work states: pending, running, succeeded, failed, blocked, cancelled, and\nunknown-effect.\" This model records identity/state only \u2014 the scheduler that assigns\nand transitions work items is engine scope (Prompt 06), not storage scope (Prompt 02).",
+      "enum": [
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "blocked",
+        "cancelled",
+        "unknown_effect"
+      ],
+      "title": "WorkItemState",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/WorkItem.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "attempt": {
+      "default": 0,
+      "title": "Attempt",
+      "type": "integer"
+    },
+    "dependency_keys": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Dependency Keys",
+      "type": "array"
+    },
+    "kind": {
+      "title": "Kind",
+      "type": "string"
+    },
+    "lease_expires_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lease Expires At"
+    },
+    "lease_owner": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lease Owner"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/WorkItemState",
+      "default": "pending"
+    },
+    "task_key": {
+      "title": "Task Key",
+      "type": "string"
+    },
+    "work_item_id": {
+      "title": "Work Item Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item_id",
+    "run_id",
+    "task_key",
+    "kind"
+  ],
+  "title": "WorkItem",
+  "type": "object"
+}

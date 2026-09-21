@@ -1,0 +1,82 @@
+{
+  "$defs": {
+    "UsageRole": {
+      "description": "\u00a72: \"Treat model calls in three distinct roles: application model, planning model,\nand judging model. Each has separate credentials, budgets, usage records, and\nprovenance.\" ",
+      "enum": [
+        "application",
+        "planner",
+        "evaluator"
+      ],
+      "title": "UsageRole",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/UsageEvent.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "calls": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Calls"
+    },
+    "cost": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cost"
+    },
+    "provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider"
+    },
+    "recorded_at": {
+      "format": "date-time",
+      "title": "Recorded At",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/UsageRole"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "tokens": {
+      "default": null,
+      "title": "Tokens"
+    },
+    "usage_event_id": {
+      "title": "Usage Event Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "usage_event_id",
+    "run_id",
+    "role"
+  ],
+  "title": "UsageEvent",
+  "type": "object"
+}

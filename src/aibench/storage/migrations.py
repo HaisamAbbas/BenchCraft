@@ -1,0 +1,348 @@
+"""SQLite schema migrations (§14). Session/conversation tables (`sessions`,
+`conversation_turns`, `decision_records`, `pending_questions`, `action_requests`,
+`run_events`) are explicitly reserved for Prompt 08 and are not created here (02-T4).
+
+Migrations are plain SQL, applied in order inside one transaction each, and tracked in
+`schema_migrations` so re-running `apply_migrations` on an already-migrated database is a
+no-op. Add new migrations by appending to `MIGRATIONS`; never edit an already-shipped one.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Callable
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Migration:
+    version: int
+    name: str
+    sql: str
+    # Optional Python step run after `sql`, inside the same open transaction, for changes
+    # SQL alone can't express — e.g. backfilling a new column from existing row data using
+    # our own hashing logic (SQLite has no built-in SHA-256). Most migrations don't need one.
+    post_apply: Callable[[sqlite3.Connection], None] | None = None
+
+
+_0001_initial = Migration(
+    version=1,
+    name="initial_schema",
+    sql="""
+    CREATE TABLE datasets (
+        content_hash        TEXT PRIMARY KEY,
+        dataset_id          TEXT NOT NULL,
+        schema_version      TEXT NOT NULL,
+        case_count          INTEGER NOT NULL,
+        source_refs         TEXT NOT NULL,   -- JSON array
+        split               TEXT,
+        duplicate_case_ids  TEXT NOT NULL,   -- JSON array
+        created_at          TEXT NOT NULL,
+        committed_at        TEXT NOT NULL
+    );
+    CREATE INDEX idx_datasets_dataset_id ON datasets(dataset_id);
+
+    CREATE TABLE cases (
+        dataset_content_hash TEXT NOT NULL REFERENCES datasets(content_hash),
+        case_id              TEXT NOT NULL,
+        source_line          INTEGER,
+        duplicate_of_line    INTEGER,
+        group_id             TEXT,
+        data                 TEXT NOT NULL,  -- canonical JSON of BenchmarkCase
+        committed_at         TEXT NOT NULL,
+        PRIMARY KEY (dataset_content_hash, case_id, source_line)
+    );
+    CREATE INDEX idx_cases_group_id ON cases(dataset_content_hash, group_id);
+
+    CREATE TABLE applications (
+        application_id      TEXT PRIMARY KEY,
+        content_hash         TEXT NOT NULL,
+        runner               TEXT NOT NULL,
+        target                TEXT NOT NULL,
+        data                 TEXT NOT NULL,  -- canonical JSON of ApplicationSpec
+        committed_at         TEXT NOT NULL
+    );
+
+    CREATE TABLE profiles (
+        observation_id       TEXT PRIMARY KEY,
+        application_id       TEXT NOT NULL REFERENCES applications(application_id),
+        capability           TEXT NOT NULL,
+        state                TEXT NOT NULL,
+        data                 TEXT NOT NULL,  -- canonical JSON of ObservationClaim
+        committed_at         TEXT NOT NULL
+    );
+    CREATE INDEX idx_profiles_application_id ON profiles(application_id);
+
+    CREATE TABLE plans (
+        plan_id              TEXT PRIMARY KEY,
+        content_hash         TEXT NOT NULL,
+        policy_hash          TEXT,
+        data                 TEXT NOT NULL,  -- canonical JSON of EvaluationPlan
+        committed_at         TEXT NOT NULL
+    );
+
+    CREATE TABLE runs (
+        run_id                TEXT PRIMARY KEY,
+        dataset_hash          TEXT NOT NULL,
+        application_hash      TEXT NOT NULL,
+        plan_hash              TEXT NOT NULL,
+        content_hash          TEXT NOT NULL,  -- hash of the full manifest, for idempotency checks
+        status                TEXT NOT NULL DEFAULT 'created',
+        data                 TEXT NOT NULL,  -- canonical JSON of RunManifest
+        created_at            TEXT NOT NULL,
+        committed_at          TEXT NOT NULL,
+        updated_at            TEXT NOT NULL
+    );
+
+    CREATE TABLE work_items (
+        work_item_id          TEXT PRIMARY KEY,
+        run_id                TEXT NOT NULL REFERENCES runs(run_id),
+        task_key              TEXT NOT NULL,
+        kind                  TEXT NOT NULL,
+        state                 TEXT NOT NULL,
+        attempt               INTEGER NOT NULL DEFAULT 0,
+        data                 TEXT NOT NULL,  -- canonical JSON of WorkItem
+        committed_at          TEXT NOT NULL,
+        updated_at            TEXT NOT NULL,
+        UNIQUE (run_id, task_key)
+    );
+    CREATE INDEX idx_work_items_run_id ON work_items(run_id);
+
+    CREATE TABLE execution_attempts (
+        execution_id          TEXT PRIMARY KEY,
+        run_id                TEXT NOT NULL REFERENCES runs(run_id),
+        case_id               TEXT NOT NULL,
+        repetition_id         INTEGER NOT NULL,
+        attempt_id            INTEGER NOT NULL,
+        status                TEXT NOT NULL,
+        content_hash          TEXT NOT NULL,
+        data                 TEXT NOT NULL,  -- canonical JSON of ExecutionResult
+        committed_at          TEXT NOT NULL
+    );
+    CREATE INDEX idx_execution_attempts_run_case
+        ON execution_attempts(run_id, case_id);
+
+    CREATE TABLE evaluation_attempts (
+        run_id                TEXT NOT NULL REFERENCES runs(run_id),
+        case_id               TEXT NOT NULL,
+        metric_id             TEXT NOT NULL,
+        attempt_number        INTEGER NOT NULL,
+        status                TEXT NOT NULL,
+        decision              TEXT NOT NULL,
+        content_hash          TEXT NOT NULL,
+        data                 TEXT NOT NULL,  -- canonical JSON of EvaluationResult
+        committed_at          TEXT NOT NULL,
+        PRIMARY KEY (run_id, case_id, metric_id, attempt_number)
+    );
+
+    CREATE TABLE metric_results (
+        result_id             TEXT PRIMARY KEY,
+        run_id                TEXT NOT NULL REFERENCES runs(run_id),
+        case_id               TEXT NOT NULL,
+        metric_id             TEXT NOT NULL,
+        status                TEXT NOT NULL,
+        decision              TEXT NOT NULL,
+        content_hash          TEXT NOT NULL,
+        data                 TEXT NOT NULL,  -- canonical JSON of EvaluationResult
+        committed_at          TEXT NOT NULL
+    );
+    CREATE INDEX idx_metric_results_run_case_metric
+        ON metric_results(run_id, case_id, metric_id);
+
+    CREATE TABLE artifacts (
+        artifact_id           TEXT PRIMARY KEY,
+        digest                TEXT NOT NULL,
+        uri                    TEXT NOT NULL,
+        mime_type              TEXT NOT NULL,
+        size_bytes             INTEGER NOT NULL,
+        redaction              TEXT NOT NULL,
+        run_id                 TEXT REFERENCES runs(run_id),
+        committed_at           TEXT NOT NULL
+    );
+    CREATE INDEX idx_artifacts_digest ON artifacts(digest);
+    CREATE INDEX idx_artifacts_run_id ON artifacts(run_id);
+
+    CREATE TABLE usage_events (
+        usage_event_id         TEXT PRIMARY KEY,
+        run_id                 TEXT NOT NULL REFERENCES runs(run_id),
+        role                   TEXT NOT NULL,
+        provider               TEXT,
+        cost                   REAL,
+        data                   TEXT NOT NULL,  -- canonical JSON of UsageEvent
+        committed_at           TEXT NOT NULL
+    );
+    CREATE INDEX idx_usage_events_run_id ON usage_events(run_id);
+
+    CREATE TABLE approvals (
+        approval_id            TEXT PRIMARY KEY,
+        scope_hash              TEXT NOT NULL,
+        data                    TEXT NOT NULL,  -- canonical JSON of Approval
+        committed_at             TEXT NOT NULL
+    );
+    CREATE INDEX idx_approvals_scope_hash ON approvals(scope_hash);
+    """,
+)
+
+_0002_run_lookup_indexes = Migration(
+    version=2,
+    name="run_lookup_indexes",
+    sql="""
+    CREATE INDEX idx_runs_status ON runs(status);
+    CREATE INDEX idx_runs_created_at ON runs(created_at);
+    """,
+)
+
+
+def _backfill_content_hash_columns(conn: sqlite3.Connection) -> None:
+    """Populate the `content_hash`/`manifest_hash` columns `_0003` just added, for any rows
+    that existed before this migration ran. Computing these requires our own hashing logic
+    (SQLite has no SHA-256 builtin), hence a Python `post_apply` step rather than pure SQL.
+
+    For tables whose `data` column already holds the model's full canonical JSON (`cases`,
+    `profiles`, `work_items`, `usage_events`, `approvals`), the backfilled hash is simply
+    `content_hash(data)` — exactly what a fresh commit of byte-identical content would
+    compute, since `Storage`'s commit methods hash that same already-serialized string
+    rather than re-serializing. For `datasets` and `artifacts`, which store individual
+    columns instead of one JSON blob, the row is reconstructed into the corresponding core
+    model and re-serialized the same way `Storage.commit_dataset`/`commit_artifact` do
+    before hashing, so the backfilled value matches what those methods would compute for
+    identical field values — a later identical commit is correctly treated as a no-op, not a
+    false-positive conflict.
+    """
+    import json
+
+    from aibench.core.hashes import content_hash
+    from aibench.core.models import ArtifactRef, DatasetManifest
+
+    for table in ("cases", "profiles", "work_items", "usage_events", "approvals"):
+        for row in conn.execute(f"SELECT rowid, data FROM {table}").fetchall():
+            digest = content_hash(row[1])
+            conn.execute(
+                f"UPDATE {table} SET content_hash = ? WHERE rowid = ?",
+                (digest, row[0]),
+            )
+
+    for row in conn.execute(
+        "SELECT content_hash, dataset_id, schema_version, case_count, source_refs, "
+        "split, duplicate_case_ids, created_at FROM datasets"
+    ).fetchall():
+        manifest = DatasetManifest(
+            content_hash=row[0],
+            dataset_id=row[1],
+            schema_version=row[2],
+            case_count=row[3],
+            source_refs=tuple(json.loads(row[4])),
+            split=row[5],
+            duplicate_case_ids=tuple(json.loads(row[6])),
+            created_at=row[7],
+        )
+        digest = content_hash(manifest.model_dump_json())
+        conn.execute(
+            "UPDATE datasets SET manifest_hash = ? WHERE content_hash = ?",
+            (digest, row[0]),
+        )
+
+    for row in conn.execute(
+        "SELECT artifact_id, digest, uri, mime_type, size_bytes, redaction, run_id "
+        "FROM artifacts"
+    ).fetchall():
+        ref = ArtifactRef(
+            artifact_id=row[0],
+            digest=row[1],
+            uri=row[2],
+            mime_type=row[3],
+            size_bytes=row[4],
+            redaction=row[5],
+            run_id=row[6],
+        )
+        digest = content_hash(ref.model_dump_json())
+        conn.execute(
+            "UPDATE artifacts SET content_hash = ? WHERE artifact_id = ?",
+            (digest, row[0]),
+        )
+
+
+_0003_content_hash_columns = Migration(
+    version=3,
+    name="content_hash_columns_for_conflict_detection",
+    sql="""
+    ALTER TABLE datasets ADD COLUMN manifest_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE cases ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE profiles ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE work_items ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE artifacts ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE usage_events ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE approvals ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+    """,
+    post_apply=_backfill_content_hash_columns,
+)
+
+MIGRATIONS: tuple[Migration, ...] = (
+    _0001_initial,
+    _0002_run_lookup_indexes,
+    _0003_content_hash_columns,
+)
+
+
+def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version     INTEGER PRIMARY KEY,
+            name        TEXT NOT NULL,
+            applied_at  TEXT NOT NULL
+        )
+        """
+    )
+
+
+def applied_versions(conn: sqlite3.Connection) -> set[int]:
+    _ensure_migrations_table(conn)
+    rows = conn.execute("SELECT version FROM schema_migrations").fetchall()
+    return {row[0] for row in rows}
+
+
+def apply_migrations(conn: sqlite3.Connection) -> list[int]:
+    """Apply every migration in `MIGRATIONS` not yet recorded in `schema_migrations`, each
+    as one atomic transaction (modern SQLite supports transactional DDL). The migration's SQL
+    is run via a `BEGIN`-prefixed `executescript` that deliberately leaves the transaction
+    open (no trailing `COMMIT` in the script), so its optional `post_apply` Python step — for
+    changes SQL alone can't express, like backfilling a new column via our own hashing logic
+    — runs inside the *same* transaction, before a final explicit `COMMIT` closes it along
+    with recording the migration as applied. If anything fails partway (the SQL or the
+    Python step), the whole transaction is rolled back, so a crash mid-migration never leaves
+    a half-applied schema or a recorded-but-not-really-applied version.
+
+    Returns the versions actually applied this call (empty on an already up-to-date
+    database — idempotent and restart-safe)."""
+    from datetime import UTC, datetime
+
+    _ensure_migrations_table(conn)
+    already = applied_versions(conn)
+    newly_applied: list[int] = []
+    for migration in MIGRATIONS:
+        if migration.version in already:
+            continue
+        applied_at = datetime.now(UTC).isoformat()
+        script = "BEGIN;\n" + migration.sql  # no trailing COMMIT: stays open for post_apply
+        try:
+            conn.executescript(script)
+            if migration.post_apply is not None:
+                migration.post_apply(conn)
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+                (migration.version, migration.name, applied_at),
+            )
+            conn.execute("COMMIT")
+        except BaseException:
+            # A mid-transaction failure (SQL or the Python post_apply step) leaves the
+            # literal BEGIN's transaction open rather than rolled back — sqlite3's
+            # implicit-transaction handling only applies to statements it issues itself, not
+            # to a literal BEGIN we supplied — and an open, uncommitted transaction is still
+            # visible to *this* connection even though it was never durably committed. Roll
+            # it back explicitly so a caller inspecting schema state on this same connection
+            # sees the true (unmigrated) state, not a phantom partially-applied one.
+            conn.rollback()
+            raise
+        newly_applied.append(migration.version)
+    return newly_applied
