@@ -9,4 +9,6 @@ __pycache__/
 .pytest-tmp/
 dist/
 build/
+# setuptools sdist staging dir; left behind on Windows when another process holds a file open
+/aibench-*/
 plugins/*/.venv/

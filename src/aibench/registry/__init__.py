@@ -269,43 +269,53 @@ class EvaluatorRegistry:
         seen: set[str] = set()
         for binding in bindings:
             try:
-                manifest, factory = self.resolve(binding.metric)
-            except RegistryError as exc:
-                problems.append(BindingProblem(binding.metric, str(exc)))
-                continue
-            evaluator = factory()
-            issues = evaluator.validate_binding(binding)
-            if issues:
-                problems.extend(BindingProblem(binding.metric, issue) for issue in issues)
-                continue
-            requirements = evaluator.required_fields(deep_unfreeze(binding.params) or {})
-            requirement_issues = _requirement_problems(requirements)
-            if requirement_issues:
-                problems.extend(BindingProblem(binding.metric, i) for i in requirement_issues)
+                metric = self.resolve_binding(binding)
+            except BindingValidationError as exc:
+                problems.extend(exc.problems)
                 continue
             problems.extend(
                 BindingProblem(binding.metric, issue)
-                for issue in _applicability_problems(requirements, application)
+                for issue in applicability_problems(metric.requirements, application)
             )
-            # Identity of what will actually run — not how the reference was spelled — so
-            # `x`, `x@1` and `x@1.0.0` with the default rule are recognised as duplicates.
-            effective_rule = rule_for(binding, manifest)
-            binding_hash = content_hash(
-                {
-                    "evaluator_id": manifest.evaluator_id,
-                    "version": manifest.version,
-                    "params": deep_unfreeze(binding.params) or {},
-                    "rule": effective_rule.model_dump(mode="json") if effective_rule else None,
-                }
-            )
-            if binding_hash in seen:
+            if metric.binding_hash in seen:
                 problems.append(BindingProblem(binding.metric, "duplicate binding"))
                 continue
-            seen.add(binding_hash)
-            resolved.append(ResolvedMetric(binding, manifest, factory, binding_hash, requirements))
+            seen.add(metric.binding_hash)
+            resolved.append(metric)
         if problems:
             raise BindingValidationError(problems)
         return resolved
+
+    def resolve_binding(self, binding: MetricBinding) -> ResolvedMetric:
+        """Resolve one binding and check it structurally (ID, version, parameters, rule,
+        requirement paths); raises `BindingValidationError`. Applicability to a specific
+        application and duplicates across bindings are checked by `validate`."""
+        try:
+            manifest, factory = self.resolve(binding.metric)
+        except RegistryError as exc:
+            raise BindingValidationError([BindingProblem(binding.metric, str(exc))]) from exc
+        evaluator = factory()
+        issues = evaluator.validate_binding(binding)
+        if issues:
+            raise BindingValidationError([BindingProblem(binding.metric, i) for i in issues])
+        requirements = evaluator.required_fields(deep_unfreeze(binding.params) or {})
+        requirement_issues = _requirement_problems(requirements)
+        if requirement_issues:
+            raise BindingValidationError(
+                [BindingProblem(binding.metric, i) for i in requirement_issues]
+            )
+        # Identity of what will actually run — not how the reference was spelled — so
+        # `x`, `x@1` and `x@1.0.0` with the default rule are recognised as duplicates.
+        effective_rule = rule_for(binding, manifest)
+        binding_hash = content_hash(
+            {
+                "evaluator_id": manifest.evaluator_id,
+                "version": manifest.version,
+                "params": deep_unfreeze(binding.params) or {},
+                "rule": effective_rule.model_dump(mode="json") if effective_rule else None,
+            }
+        )
+        return ResolvedMetric(binding, manifest, factory, binding_hash, requirements)
 
 
 def _requirement_problems(requirements: Sequence[FieldRequirement]) -> list[str]:
@@ -324,7 +334,7 @@ def _requirement_problems(requirements: Sequence[FieldRequirement]) -> list[str]
     return problems
 
 
-def _applicability_problems(
+def applicability_problems(
     requirements: Sequence[FieldRequirement], application: ApplicationSpec | None
 ) -> list[str]:
     """A metric that needs an observation the application does not expose would be

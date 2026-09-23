@@ -24,6 +24,7 @@ from typing import Any
 
 from aibench.core.errors import AibenchError
 from aibench.core.models import (
+    ApplicationSpec,
     BenchmarkCase,
     Decision,
     DecisionRule,
@@ -134,12 +135,15 @@ async def score_recorded_run(
     timeout_seconds: float = DEFAULT_EVALUATION_TIMEOUT_SECONDS,
     prepare_timeout_seconds: float = DEFAULT_PREPARE_TIMEOUT_SECONDS,
     cancel: asyncio.Event | None = None,
+    application: ApplicationSpec | None = None,
 ) -> ScoringReport:
+    """`application` overrides the catalog lookup (the engine passes the run's frozen spec)."""
     record = storage.get_run(run_id)
     if record is None:
         raise ScoringError(f"no run committed with run_id={run_id!r}")
     application_id = record.manifest.application_id
-    application = storage.get_application(application_id) if application_id else None
+    if application is None and application_id:
+        application = storage.get_application(application_id)
     resolved = registry.validate(bindings, application=application)  # raises on any problem
 
     executions = select_final_executions(storage.list_execution_attempts(run_id))
@@ -151,7 +155,7 @@ async def score_recorded_run(
 
     report = ScoringReport(scoring_id=f"score-{uuid.uuid4().hex[:12]}", run_id=run_id)
     for metric in resolved:
-        scorer = _Scorer(
+        scorer = BindingScorer(
             storage,
             artifacts,
             report.scoring_id,
@@ -173,7 +177,24 @@ async def score_recorded_run(
     return report
 
 
-class _Scorer:
+@dataclass(frozen=True)
+class MissingExecution:
+    """A planned (case, repetition) with no execution to score, e.g. never dispatched
+    because a budget ran out, or cancelled. Scored as `skipped` so it stays in the
+    denominator as lost coverage (ADR 0003 decision 4)."""
+
+    run_id: str
+    case_id: str
+    repetition_id: int
+    execution_id: str | None = None
+
+
+class BindingScorer:
+    """Scores executions for one metric binding within one scoring pass. Used whole by
+    `score_recorded_run`, and item by item (with engine-level retries) by the engine:
+    `open` → `score` per attempt (committed to evaluation_attempts) → `finalize` the
+    chosen attempt (committed to metric_results) → `close`."""
+
     def __init__(
         self,
         storage: Storage,
@@ -195,6 +216,56 @@ class _Scorer:
         self.prepare_timeout_seconds = prepare_timeout_seconds
         self.cancel = cancel or asyncio.Event()
         self.prepare_error: str | None = None
+        self._evaluator: Evaluator | None = None
+
+    async def open(self) -> None:
+        """Construct and prepare the evaluator. Construction and prepare() are evaluator
+        code too: a failure there becomes a recorded error for every case it would have
+        evaluated, never an aborted pass."""
+        try:
+            self._evaluator = self.metric.factory()
+            await asyncio.wait_for(
+                self._evaluator.prepare(deep_unfreeze(self.metric.binding.params) or {}),
+                self.prepare_timeout_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001 - see docstring
+            self.prepare_error = f"evaluator_prepare_failed:{type(exc).__name__}: {exc}"[:500]
+
+    async def score(
+        self, execution: ExecutionResult, candidates: list[BenchmarkCase]
+    ) -> EvaluationResult:
+        """Evaluate one execution and commit the attempt (evaluation_attempts)."""
+        result = await self._score_one(self._evaluator, execution, candidates)
+        self.storage.commit_evaluation_attempt(result, attempt_number=result.attempt_number)
+        return result
+
+    def score_missing(
+        self,
+        target: MissingExecution,
+        reason: str,
+        *,
+        status: ExecutionStatus = ExecutionStatus.SKIPPED,
+    ) -> EvaluationResult:
+        """Record a planned (case, repetition) that was not evaluated: no usable execution
+        (`skipped`), or evaluation cancelled (`cancelled`). No evaluator call is made."""
+        result = self._result(target, EvaluationOutcome(status, reason=reason))
+        self.storage.commit_evaluation_attempt(result, attempt_number=result.attempt_number)
+        return result
+
+    def finalize(self, result: EvaluationResult) -> None:
+        """Commit the attempt chosen as this item's result (metric_results)."""
+        self.storage.commit_metric_result(result)
+
+    async def close(self, warnings: list[str]) -> None:
+        """Results are already recorded; a failed cleanup cannot change them, so it is
+        reported as a warning instead of discarding the pass."""
+        if self._evaluator is None:
+            return
+        label = f"{self.manifest.evaluator_id}@{self.manifest.version}"
+        try:
+            await asyncio.wait_for(self._evaluator.close(), self.timeout_seconds)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"{label}: close() failed: {type(exc).__name__}: {exc}"[:500])
 
     async def score_all(
         self,
@@ -202,35 +273,15 @@ class _Scorer:
         cases: dict[str, list[BenchmarkCase]],
         warnings: list[str],
     ) -> list[EvaluationResult]:
-        label = f"{self.manifest.evaluator_id}@{self.manifest.version}"
-        evaluator: Evaluator | None = None
-        # Construction and prepare() are evaluator code too: a failure there becomes a
-        # recorded error for every case it would have evaluated, never an aborted pass.
-        try:
-            evaluator = self.metric.factory()
-            await asyncio.wait_for(
-                evaluator.prepare(deep_unfreeze(self.metric.binding.params) or {}),
-                self.prepare_timeout_seconds,
-            )
-        except Exception as exc:  # noqa: BLE001 - see comment above
-            self.prepare_error = f"evaluator_prepare_failed:{type(exc).__name__}: {exc}"[:500]
+        await self.open()
         results = []
         try:
             for execution in executions:
-                result = await self._score_one(
-                    evaluator, execution, cases.get(execution.case_id, [])
-                )
-                self.storage.commit_evaluation_attempt(result, attempt_number=result.attempt_number)
-                self.storage.commit_metric_result(result)
+                result = await self.score(execution, cases.get(execution.case_id, []))
+                self.finalize(result)
                 results.append(result)
         finally:
-            if evaluator is not None:
-                # Results are already recorded; a failed cleanup cannot change them, so it
-                # is reported as a warning instead of discarding the pass.
-                try:
-                    await asyncio.wait_for(evaluator.close(), self.timeout_seconds)
-                except Exception as exc:  # noqa: BLE001
-                    warnings.append(f"{label}: close() failed: {type(exc).__name__}: {exc}"[:500])
+            await self.close(warnings)
         return results
 
     async def _score_one(
@@ -377,11 +428,17 @@ class _Scorer:
                 cost=None if None in costs else round(sum(c for c in costs if c is not None), 6),
                 accounting="reported" if None not in costs else "partial",
             )
+            tokens: dict[str, int] = {}
+            for usage in ctx.usage:
+                for name, count in usage.tokens.items():
+                    tokens[name] = tokens.get(name, 0) + count
+            if tokens:
+                resources["tokens"] = tokens  # absent means unknown, never zero
         return resources
 
     def _result(
         self,
-        execution: ExecutionResult,
+        execution: ExecutionResult | MissingExecution,
         outcome: EvaluationOutcome,
         *,
         ctx: EvaluatorContext | None = None,

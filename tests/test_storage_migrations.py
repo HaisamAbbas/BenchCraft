@@ -80,6 +80,8 @@ def test_expected_tables_exist_after_migration() -> None:
         "schema_migrations",
     }
     assert expected.issubset(tables)
+    # run_events and run_leases arrived with the engine (Prompt 06, migrations 5-6; ADR 0005).
+    assert {"run_events", "run_leases"} <= tables
     # Session/conversation tables are explicitly reserved for Prompt 08 (02-T4).
     reserved_for_prompt_08 = {
         "sessions",
@@ -87,7 +89,6 @@ def test_expected_tables_exist_after_migration() -> None:
         "decision_records",
         "pending_questions",
         "action_requests",
-        "run_events",
     }
     assert reserved_for_prompt_08.isdisjoint(tables)
 
@@ -188,7 +189,7 @@ def test_upgrading_a_pre_remediation_database_backfills_content_hash_columns() -
 
     # Upgrade: apply the full, current migration set from migration 3 onward.
     applied = apply_migrations(conn)
-    assert applied == [3, 4]
+    assert applied == [3, 4, 5, 6]
 
     db = Database(conn)
     storage = Storage(db)
@@ -259,7 +260,7 @@ def test_migration_4_rekeys_existing_evaluation_attempts() -> None:
         "'ok','pass','h',?, 'now')",
         (legacy.model_dump_json(),),
     )
-    assert apply_migrations(conn) == [4]
+    assert apply_migrations(conn) == [4, 5, 6]
     row = conn.execute(
         "SELECT repetition_id, binding_hash, scoring_id FROM evaluation_attempts"
     ).fetchone()

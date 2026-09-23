@@ -63,33 +63,12 @@ class EvaluationView:
                 # application's answer, not missing evidence.
                 return deep_unfreeze(value)
             return MISSING if value is None else deep_unfreeze(value)
-        if head != "case" or not parts:
-            raise KeyError(f"unknown evaluation view path {path!r}")
-        first, remainder = parts[0], parts[1:]
-        if first in ("input", "case_id") and not remainder:
-            return deep_unfreeze(getattr(self.case, first))
-        if first == "reference" and len(remainder) == 1 and remainder[0] in _REFERENCE_FIELDS:
-            reference = self.case.reference
-            if reference is None:
-                return MISSING
-            if remainder[0] == "answer":
-                return MISSING if reference.answer is None else reference.answer
-            if remainder[0] == "context":
-                return list(reference.context)
-            return MISSING if reference.tools is None else reference.tools.model_dump(mode="json")
-        if first in ("expectations", "metadata") and remainder:
-            current: Any = deep_unfreeze(getattr(self.case, first))
-            for key in remainder:
-                if not isinstance(current, dict) or key not in current:
-                    return MISSING
-                current = current[key]
-            return current
-        if first == "fixtures" and len(remainder) == 1:
-            for fixture in self.case.fixtures:
-                if fixture.name == remainder[0]:
-                    return deep_unfreeze(fixture.content)
-            return MISSING
-        raise KeyError(f"unknown evaluation view path {path!r}")
+        return case_field(self.case, path)
+
+    @staticmethod
+    def case_state(case: BenchmarkCase, path: str) -> FieldState:
+        """State of a `case.*` path on a Golden alone (planning, selection)."""
+        return _state_of(case_field(case, path))
 
     @staticmethod
     def path_problem(path: str) -> str | None:
@@ -112,12 +91,48 @@ class EvaluationView:
         return None if valid else f"unknown evaluation view path {path!r}"
 
     def state(self, path: str) -> FieldState:
-        value = self.get(path)
-        if value is MISSING:
-            return "missing"
-        if value in ("", [], {}, ()):
-            return "empty"
-        return "present"
+        return _state_of(self.get(path))
+
+
+def _state_of(value: Any) -> FieldState:
+    if value is MISSING:
+        return "missing"
+    if value in ("", [], {}, ()):
+        return "empty"
+    return "present"
+
+
+def case_field(case: BenchmarkCase, path: str) -> Any:
+    """Value of a `case.*` evaluation-view path on a Golden, or MISSING."""
+    head, _, rest = path.partition(".")
+    parts = rest.split(".") if rest else []
+    if head != "case" or not parts:
+        raise KeyError(f"unknown evaluation view path {path!r}")
+    first, remainder = parts[0], parts[1:]
+    if first in ("input", "case_id") and not remainder:
+        return deep_unfreeze(getattr(case, first))
+    if first == "reference" and len(remainder) == 1 and remainder[0] in _REFERENCE_FIELDS:
+        reference = case.reference
+        if reference is None:
+            return MISSING
+        if remainder[0] == "answer":
+            return MISSING if reference.answer is None else reference.answer
+        if remainder[0] == "context":
+            return list(reference.context)
+        return MISSING if reference.tools is None else reference.tools.model_dump(mode="json")
+    if first in ("expectations", "metadata") and remainder:
+        current: Any = deep_unfreeze(getattr(case, first))
+        for key in remainder:
+            if not isinstance(current, dict) or key not in current:
+                return MISSING
+            current = current[key]
+        return current
+    if first == "fixtures" and len(remainder) == 1:
+        for fixture in case.fixtures:
+            if fixture.name == remainder[0]:
+                return deep_unfreeze(fixture.content)
+        return MISSING
+    raise KeyError(f"unknown evaluation view path {path!r}")
 
 
 @dataclass(frozen=True)

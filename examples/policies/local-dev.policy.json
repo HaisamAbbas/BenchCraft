@@ -1,0 +1,8 @@
+{
+  "allow_trusted_local": true,
+  "max_effects": "none",
+  "allowed_evaluators": ["native.*"],
+  "allow_model_evaluators": false,
+  "data_roots": [".."],
+  "ceilings": {"max_application_calls": 1000, "max_wall_seconds": 3600}
+}

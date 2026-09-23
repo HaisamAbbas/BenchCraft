@@ -1,0 +1,13 @@
+{
+  "plan_id": "support-chatbot-v1",
+  "dataset": "../datasets/support.valid.jsonl",
+  "application": "../apps/cli_chatbot.app.json",
+  "metrics": [
+    {"metric": "native.exact_match@1"},
+    {"metric": "native.exact_match@1", "params": {"case_sensitive": false, "collapse_whitespace": true}}
+  ],
+  "repetitions": 1,
+  "concurrency": {"application": 2, "evaluation": 2},
+  "retry": {"max_attempts": 3, "initial_backoff_seconds": 0.5, "max_backoff_seconds": 10},
+  "budgets": {"max_application_calls": 20, "max_evaluator_calls": 50, "max_wall_seconds": 600}
+}

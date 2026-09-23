@@ -31,6 +31,12 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §10 Independent metric instances | New metric and judge per case; concurrency control test | 05 | 05-G3 |
 | §16 Credentials / publishing | Judge secrets passed explicitly; telemetry, .env, legacy key file off; no Confident AI publishing | 05 | 05-G4 |
 | §15 Execution/concurrency | Deterministic scheduling, budgets, retries, resume | 06 | 06-G1..G5 |
+| §15 Scheduling | Work graph from validated plans; bounded concurrency per role; single writer (compare-and-set transitions + run lease) | 06 | 06-G1, 06-G4 |
+| §15 Budget control | Reserve/reconcile; separate application/evaluator/planner accounting; hard call/token/wall limits; soft cost estimate; unknown never zero; carried across resume | 06 | 06-G4 |
+| §15 Retry policy (engine side) | Effect-aware transient retries, bounded seeded backoff honouring Retry-After, no multiplication with evaluator retries, low scores never retried | 06 | 06-G3, 06-G4 |
+| §15 Recovery | Frozen plan/app/bindings verified on resume; conservative in-flight recovery; ambiguous effects become `unknown_effect`; no exactly-once promise | 06 | 06-G3 |
+| §16 Execution policy | Approved targets, data scope, credentials, effects, evaluator/data-egress, plugin environments and paths, budget ceilings — decided before dispatch | 06 | 06-G2 |
+| §13 CLI design | `aibench plan validate`, `run --plan`, `resume`, `evaluate`, `runs status`; exit codes 0/2/3/4/130 | 06 | 06-G1, 06-G5 |
 | §8 Agent architecture | Bounded LLM planner, plan compiler/validator | 07 | 07-G1..G5 |
 | §2–5, §8 | Persistent session, decisions, typed actions | 08 | 08-G1..G5 |
 | §3, §13 | Interactive terminal, slash controls | 09 | 09-G1..G5 |

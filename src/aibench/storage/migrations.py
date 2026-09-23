@@ -334,11 +334,48 @@ _0004_evaluation_attempt_identity = Migration(
     post_apply=_backfill_evaluation_attempt_keys,
 )
 
+# Durable run events (§14 "Store emitted run events with sequence numbers"; 06-T4). Prompt 02
+# reserved this table for Prompt 08; the engine needs it first. Sequence numbers are
+# per run and strictly increasing, so a reconnecting client can replay what it missed.
+_0005_run_events = Migration(
+    version=5,
+    name="run_events",
+    sql="""
+    CREATE TABLE run_events (
+        run_id       TEXT NOT NULL REFERENCES runs(run_id),
+        sequence     INTEGER NOT NULL,
+        event_type   TEXT NOT NULL,
+        payload      TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        PRIMARY KEY (run_id, sequence)
+    );
+    """,
+)
+
+# One live session per run (06-T1 single writer): a session holds the lease while it
+# runs and heartbeats it; a second session is refused unless the lease is stale.
+_0006_run_leases = Migration(
+    version=6,
+    name="run_leases",
+    sql="""
+    CREATE TABLE run_leases (
+        run_id        TEXT PRIMARY KEY REFERENCES runs(run_id),
+        owner         TEXT NOT NULL,
+        host          TEXT NOT NULL,
+        pid           INTEGER NOT NULL,
+        acquired_at   REAL NOT NULL,
+        heartbeat_at  REAL NOT NULL
+    );
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
     _0003_content_hash_columns,
     _0004_evaluation_attempt_identity,
+    _0005_run_events,
+    _0006_run_leases,
 )
 
 

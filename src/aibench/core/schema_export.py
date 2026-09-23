@@ -5,7 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from aibench.core.models import ALL_MODELS, SCHEMA_VERSION
+from aibench.core.plans import ExecutablePlan
+
+# Authoring formats validated at the edge, exported alongside the canonical records.
+EXPORTED_MODELS: tuple[type[BaseModel], ...] = (*ALL_MODELS, ExecutablePlan)
 
 
 def export_schemas(target_dir: Path) -> list[Path]:
@@ -13,7 +19,7 @@ def export_schemas(target_dir: Path) -> list[Path]:
     version_dir = target_dir / SCHEMA_VERSION
     version_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    for model in ALL_MODELS:
+    for model in EXPORTED_MODELS:
         schema = model.model_json_schema()
         schema["$id"] = f"aibench/{SCHEMA_VERSION}/{model.__name__}.json"
         schema["$schemaVersion"] = SCHEMA_VERSION

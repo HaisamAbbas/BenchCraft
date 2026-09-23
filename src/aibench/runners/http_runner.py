@@ -91,6 +91,13 @@ class _Exchange:
         return EffectState.UNKNOWN if self.dispatched else EffectState.NOT_DISPATCHED
 
 
+def _retry_after_seconds(headers: dict[str, str]) -> float | None:
+    """Retry-After in its delta-seconds form (RFC 9110 §10.2.3); the HTTP-date form is
+    ignored rather than trusting a remote clock."""
+    value = headers.get("retry-after", "").strip()
+    return float(value) if value.isdigit() else None
+
+
 def _check_header(name: str, value: str) -> None:
     if any(c in name + value for c in "\r\n\0"):
         raise ConfigError(f"header {name!r} contains control characters")
@@ -298,6 +305,7 @@ class HttpRunner(BaseRunner):
                 else ObservationState.UNKNOWN,
                 "present" if exchange.status is not None else "missing",
                 value=exchange.status,
+                retry_after_seconds=_retry_after_seconds(exchange.response_headers),
             )
         }
         dispatch = exchange.dispatch_state()

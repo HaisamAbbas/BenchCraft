@@ -87,3 +87,15 @@ Review remediation (ADR 0003, "Changes after independent review"): `tests/test_s
 | 05-T4 | Honest compatibility checks: real package with an injected deterministic judge; optional budgeted live smoke | DONE (live smoke not run: no credentials/budget authorized) | `tests/fixtures/deepeval_judges/aibench_test_judges.py` (real `DeepEvalBaseLLM` subclasses), `tests/test_deepeval_adapter.py`, `test_live_provider_smoke` (opt-in), CI job `deepeval-plugin` |
 
 Gates: 05-G1..G5. See `docs/engineering/reports/05.md`. Decisions: ADR 0004.
+
+## Prompt 06 — Deterministic scheduling, policy, budgets, and recovery
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 06-T1 | Compile and schedule validated work: structural validation, dependency order, bounded queues, per-role concurrency caps, single writer, shared services | DONE | `src/aibench/core/plans.py` (`ExecutablePlan`), `src/aibench/engine/compile.py`, `src/aibench/engine/engine.py` (`RunEngine`), `storage/repositories.py` (`transition_work_item`, `acquire_run_lease`), migrations 5–6; `test_application_concurrency_cap_bounds_in_flight_calls`, `test_evaluation_concurrency_cap_bounds_in_flight_evaluations`, `test_a_second_session_cannot_resume_a_live_run` |
+| 06-T2 | Policy and accounting: approved targets, data scope, credentials, effects, evaluator/data egress, plugin environments and paths; reserve/reconcile; separate app/evaluator/planner costs; hard call/token limits vs soft monetary estimates | DONE | `src/aibench/security/policy.py`, `src/aibench/engine/budget.py`; `tests/test_engine_policy.py`, `tests/test_retry_budget.py`, `test_plugin_import_paths_need_policy_approval_and_nothing_loads_when_denied`, `test_data_roots_scope_the_plans_data`, `test_a_call_dispatched_before_a_crash_counts_against_the_hard_limit` |
+| 06-T3 | Attempts and effect-aware retries: bounded backoff, no multiplication, every attempt and cost recorded, unknown effects preserved, low scores never retried | DONE | `src/aibench/engine/retry.py`, `runners/http_runner.py` (Retry-After); `test_execution_retry_classification`, `test_evaluation_retries_never_repeat_valid_results_or_multiply`, `test_transient_timeouts_are_retried_and_every_attempt_is_recorded`, `test_recovery_never_retries_past_max_attempts` |
+| 06-T4 | `run`/`evaluate`/`resume` commands; internal status/pause/resume/cancel; durable events; frozen manifests; safe checkpoint on interrupt | DONE | `src/aibench/services/runs.py`, `src/aibench/cli/run.py`, `RunController`; `tests/test_cli_run.py`, `tests/test_engine_faults.py`, `test_interrupt_then_resume_completes_without_duplicates`, `test_a_second_interrupt_aborts_in_flight_work_but_keeps_the_run_resumable` |
+
+Gates: 06-G1..G5. See `docs/engineering/reports/06.md`. Decisions: ADR 0005.
+Review remediation: `tests/test_engine_review_regressions.py`.

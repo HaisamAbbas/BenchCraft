@@ -1,0 +1,374 @@
+{
+  "$defs": {
+    "BudgetLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "estimated_cost_per_application_call_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Cost Per Application Call Usd"
+        },
+        "estimated_cost_per_evaluation_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Cost Per Evaluation Usd"
+        },
+        "max_application_calls": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Application Calls"
+        },
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
+        "max_evaluator_calls": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Evaluator Calls"
+        },
+        "max_judge_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Judge Tokens"
+        },
+        "max_wall_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Wall Seconds"
+        }
+      },
+      "title": "BudgetLimits",
+      "type": "object"
+    },
+    "CaseSelection": {
+      "additionalProperties": false,
+      "description": "Which cases of the dataset the run selects. Empty `case_ids` means all cases (then\n`limit`, if set, keeps the first N in dataset order).",
+      "properties": {
+        "case_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Case Ids",
+          "type": "array"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        }
+      },
+      "title": "CaseSelection",
+      "type": "object"
+    },
+    "ConcurrencyLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "default": 1,
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Application",
+          "type": "integer"
+        },
+        "evaluation": {
+          "default": 1,
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Evaluation",
+          "type": "integer"
+        }
+      },
+      "title": "ConcurrencyLimits",
+      "type": "object"
+    },
+    "DecisionRule": {
+      "additionalProperties": false,
+      "description": "Harness-owned pass/fail rule using frozen thresholds.",
+      "properties": {
+        "categories": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "comparator": {
+          "enum": [
+            "is_true",
+            ">=",
+            ">",
+            "<=",
+            "<",
+            "==",
+            "in"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "rule_id": {
+          "default": "threshold",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "version": {
+          "default": "1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comparator"
+      ],
+      "title": "DecisionRule",
+      "type": "object"
+    },
+    "MetricBinding": {
+      "additionalProperties": false,
+      "description": "One metric binding with parameters and an optional rule override.",
+      "properties": {
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "params": {
+          "title": "Params"
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DecisionRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "metric"
+      ],
+      "title": "MetricBinding",
+      "type": "object"
+    },
+    "PluginEnvironmentRef": {
+      "additionalProperties": false,
+      "description": "A plugin environment whose evaluators run in workers (see ADR 0004).",
+      "properties": {
+        "paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "python": {
+          "title": "Python",
+          "type": "string"
+        },
+        "secret_env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Secret Env",
+          "type": "object"
+        }
+      },
+      "required": [
+        "python"
+      ],
+      "title": "PluginEnvironmentRef",
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "additionalProperties": false,
+      "description": "Engine-level retries for retryable failures only (\u00a715). Total attempts per work item,\nincluding the first; delays grow exponentially with jitter and are capped.",
+      "properties": {
+        "initial_backoff_seconds": {
+          "default": 0.5,
+          "maximum": 60,
+          "minimum": 0,
+          "title": "Initial Backoff Seconds",
+          "type": "number"
+        },
+        "jitter": {
+          "default": 0.25,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Jitter",
+          "type": "number"
+        },
+        "max_attempts": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "max_backoff_seconds": {
+          "default": 30.0,
+          "maximum": 600,
+          "minimum": 0,
+          "title": "Max Backoff Seconds",
+          "type": "number"
+        }
+      },
+      "title": "RetryPolicy",
+      "type": "object"
+    }
+  },
+  "$id": "aibench/1.0.0/ExecutablePlan.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "application": {
+      "title": "Application",
+      "type": "string"
+    },
+    "budgets": {
+      "$ref": "#/$defs/BudgetLimits"
+    },
+    "concurrency": {
+      "$ref": "#/$defs/ConcurrencyLimits"
+    },
+    "dataset": {
+      "title": "Dataset",
+      "type": "string"
+    },
+    "evaluation_timeout_seconds": {
+      "default": 60.0,
+      "exclusiveMinimum": 0,
+      "maximum": 3600,
+      "title": "Evaluation Timeout Seconds",
+      "type": "number"
+    },
+    "metrics": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MetricBinding"
+      },
+      "title": "Metrics",
+      "type": "array"
+    },
+    "plan_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "plugin_environments": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PluginEnvironmentRef"
+      },
+      "title": "Plugin Environments",
+      "type": "array"
+    },
+    "repetitions": {
+      "default": 1,
+      "maximum": 100,
+      "minimum": 1,
+      "title": "Repetitions",
+      "type": "integer"
+    },
+    "retry": {
+      "$ref": "#/$defs/RetryPolicy"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "selection": {
+      "$ref": "#/$defs/CaseSelection"
+    }
+  },
+  "required": [
+    "plan_id",
+    "dataset",
+    "application"
+  ],
+  "title": "ExecutablePlan",
+  "type": "object"
+}

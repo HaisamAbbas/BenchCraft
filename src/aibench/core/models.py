@@ -611,6 +611,7 @@ class WorkItem(FrozenModel):
     attempt: int = 0
     lease_owner: str | None = None
     lease_expires_at: datetime | None = None
+    last_error: str | None = None  # why the item is failed/blocked/unknown_effect (Prompt 06)
 
 
 class UsageRole(str, Enum):

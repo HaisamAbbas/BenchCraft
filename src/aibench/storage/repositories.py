@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from aibench.core.errors import ConflictError
 from aibench.core.hashes import content_hash
@@ -28,12 +29,34 @@ from aibench.core.models import (
     RunManifest,
     UsageEvent,
     WorkItem,
+    WorkItemState,
 )
 from aibench.storage.db import Database
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+@dataclass(frozen=True)
+class RunLease:
+    run_id: str
+    owner: str  # one session's random token
+    host: str
+    pid: int
+    acquired_at: float  # epoch seconds
+    heartbeat_at: float
+
+
+class LeaseHeld(ConflictError):
+    """Another live session is running this run."""
+
+    def __init__(self, lease: RunLease) -> None:
+        self.lease = lease
+        super().__init__(
+            f"run {lease.run_id} is being run by another session (host {lease.host}, "
+            f"pid {lease.pid})"
+        )
 
 
 def _hash_of(model_json: str) -> str:
@@ -424,6 +447,139 @@ class Storage:
                 _now(),
             ),
         )
+
+    def transition_work_item(
+        self,
+        run_id: str,
+        task_key: str,
+        *,
+        from_states: Iterable[WorkItemState],
+        to_state: WorkItemState,
+        attempt: int | None = None,
+        last_error: str | None = None,
+    ) -> WorkItem | None:
+        """Compare-and-set a work item's state: applied only if the item is currently in one
+        of `from_states`, so a stale or duplicate transition can never overwrite a newer
+        one. Returns the updated item, or None if the transition did not apply."""
+        allowed = [s.value for s in from_states]
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.conn.execute(
+                "SELECT data, state FROM work_items WHERE run_id = ? AND task_key = ?",
+                (run_id, task_key),
+            ).fetchone()
+            if row is None or row["state"] not in allowed:
+                self.conn.execute("ROLLBACK")
+                return None
+            current = WorkItem.model_validate_json(row["data"])
+            updated = current.model_copy(
+                update={
+                    "state": to_state,
+                    "attempt": current.attempt if attempt is None else attempt,
+                    "last_error": last_error,
+                }
+            )
+            data = updated.model_dump_json()
+            self.conn.execute(
+                "UPDATE work_items SET state = ?, attempt = ?, data = ?, content_hash = ?, "
+                "updated_at = ? WHERE run_id = ? AND task_key = ?",
+                (to_state.value, updated.attempt, data, _hash_of(data), _now(), run_id, task_key),
+            )
+            self.conn.execute("COMMIT")
+            return updated
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    # ---------------------------------------------------------------- run events
+
+    def append_run_event(self, run_id: str, event_type: str, payload: dict[str, object]) -> int:
+        """Append an event with the next per-run sequence number; returns that number."""
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.conn.execute(
+                "SELECT COALESCE(MAX(sequence), 0) FROM run_events WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            sequence = int(row[0]) + 1
+            self.conn.execute(
+                "INSERT INTO run_events (run_id, sequence, event_type, payload, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (run_id, sequence, event_type, json.dumps(payload, sort_keys=True), _now()),
+            )
+            self.conn.execute("COMMIT")
+            return sequence
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    # ---------------------------------------------------------------- run leases
+
+    def acquire_run_lease(
+        self,
+        run_id: str,
+        *,
+        owner: str,
+        host: str,
+        pid: int,
+        now: float,
+        is_stale: Callable[[RunLease], bool],
+    ) -> RunLease | None:
+        """Take the run's single-session lease. Raises `LeaseHeld` if another session holds
+        a lease that `is_stale` does not release; returns the stale lease that was replaced
+        (its session ended without releasing it), or None."""
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.conn.execute(
+                "SELECT owner, host, pid, acquired_at, heartbeat_at FROM run_leases "
+                "WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            previous = None
+            if row is not None:
+                previous = RunLease(run_id, row[0], row[1], int(row[2]), row[3], row[4])
+                if previous.owner != owner and not is_stale(previous):
+                    raise LeaseHeld(previous)
+            self.conn.execute(
+                "INSERT OR REPLACE INTO run_leases "
+                "(run_id, owner, host, pid, acquired_at, heartbeat_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (run_id, owner, host, pid, now, now),
+            )
+            self.conn.execute("COMMIT")
+            return previous
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    def heartbeat_run_lease(self, run_id: str, owner: str, now: float) -> bool:
+        """Refresh the lease; False if this session no longer holds it."""
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE run_leases SET heartbeat_at = ? WHERE run_id = ? AND owner = ?",
+                (now, run_id, owner),
+            )
+        return cursor.rowcount == 1
+
+    def release_run_lease(self, run_id: str, owner: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM run_leases WHERE run_id = ? AND owner = ?", (run_id, owner)
+            )
+
+    def list_run_events(self, run_id: str, *, after: int = 0) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT sequence, event_type, payload, created_at FROM run_events "
+            "WHERE run_id = ? AND sequence > ? ORDER BY sequence",
+            (run_id, after),
+        ).fetchall()
+        return [
+            {
+                "sequence": row["sequence"],
+                "event_type": row["event_type"],
+                "payload": json.loads(row["payload"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def get_work_item_by_task_key(self, run_id: str, task_key: str) -> WorkItem | None:
         row = self.conn.execute(

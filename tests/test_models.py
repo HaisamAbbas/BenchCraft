@@ -118,7 +118,8 @@ def test_json_schema_round_trip(model) -> None:
 
 def test_export_schemas_writes_versioned_files(tmp_path) -> None:
     written = export_schemas(tmp_path)
-    assert len(written) == len(ALL_MODELS)
+    assert len(written) == len(ALL_MODELS) + 1  # plus the ExecutablePlan authoring format
+    assert tmp_path / "1.0.0" / "ExecutablePlan.json" in written
     for path in written:
         assert path.exists()
         data = json.loads(path.read_text(encoding="utf-8"))
