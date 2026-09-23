@@ -31,7 +31,7 @@ def test_plan_validate_reports_shape_and_dispatches_nothing(tmp_path: Path) -> N
     assert (summary["cases"], summary["execution_items"], summary["evaluation_items"]) == (2, 4, 4)
     denied = cli.invoke(app, ["plan", "validate", str(plan)])
     assert denied.exit_code == 4
-    assert "requires trusted-local mode" in denied.output
+    assert "requires trusted-local mode" in " ".join(denied.output.split())
     invalid = h.plan(dataset="missing.jsonl", application=h.cli_app())
     assert cli.invoke(app, ["plan", "validate", str(invalid), "--trust-local-app"]).exit_code == 2
     assert h.count() == 0

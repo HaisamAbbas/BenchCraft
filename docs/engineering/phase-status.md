@@ -12,7 +12,7 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 04 | MVP | Evaluator contracts, native checks, and registry | COMPLETE | `docs/engineering/reports/04.md` |
 | 05 | MVP | DeepEval adapter | COMPLETE | `docs/engineering/reports/05.md` |
 | 06 | MVP | Deterministic scheduling, policy, budgets, and recovery | COMPLETE | `docs/engineering/reports/06.md` |
-| 07 | MVP | Evaluation planning and bounded LLM reasoning | NOT_STARTED | — |
+| 07 | MVP | Evaluation planning and bounded LLM reasoning | COMPLETE | `docs/engineering/reports/07.md` |
 | 08 | MVP | Persistent two-way conversation and typed actions | NOT_STARTED | — |
 | 09 | MVP | Interactive terminal and live controls | NOT_STARTED | — |
 | 10 | MVP | Conversation recovery and adversarial interaction | NOT_STARTED | — |

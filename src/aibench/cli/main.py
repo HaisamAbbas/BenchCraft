@@ -11,6 +11,8 @@ import typer
 from aibench import __version__
 from aibench.cli import app as app_cli
 from aibench.cli import dataset as dataset_cli
+from aibench.cli import inspect as inspect_cli
+from aibench.cli import plan as plan_cli
 from aibench.cli import run as run_cli
 from aibench.cli import runs as runs_cli
 from aibench.cli import score as score_cli
@@ -25,7 +27,8 @@ app.add_typer(runs_cli.app, name="runs")
 app.add_typer(app_cli.app, name="app")
 app.add_typer(score_cli.evaluators_app, name="evaluators")
 app.command("score")(score_cli.score)
-app.add_typer(run_cli.plan_app, name="plan")
+app.add_typer(plan_cli.plan_app, name="plan")
+app.command("inspect")(inspect_cli.inspect)
 app.command("run")(run_cli.run_plan)
 app.command("resume")(run_cli.resume)
 app.command("evaluate")(run_cli.evaluate)

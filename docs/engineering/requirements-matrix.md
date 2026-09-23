@@ -38,6 +38,13 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §16 Execution policy | Approved targets, data scope, credentials, effects, evaluator/data-egress, plugin environments and paths, budget ceilings — decided before dispatch | 06 | 06-G2 |
 | §13 CLI design | `aibench plan validate`, `run --plan`, `resume`, `evaluate`, `runs status`; exit codes 0/2/3/4/130 | 06 | 06-G1, 06-G5 |
 | §8 Agent architecture | Bounded LLM planner, plan compiler/validator | 07 | 07-G1..G5 |
+| §3, §13 `inspect` | Evidence-backed profile from declared config and recorded runs; observability gaps with integration recipes; limited scope stated | 07 | 07-G3 |
+| §5 Observation states | observed / declared / inferred / unknown with evidence locations; dataset hints recorded as inferred with limitations | 07 | 07-G3 |
+| §8 Preventing invented capabilities | Registry-resolved IDs, deterministic eligibility, per-case field requirements, unavailable bindings/selectors/aggregations rejected outside the model | 07 | 07-G1 |
+| §8 Planner tools | Narrow read-only tools (`read_profile` … `write_plan_draft`); no general terminal; bounded repairs/spend; template fallback | 07 | 07-G4 |
+| §3, §13 `plan` / `plan validate` | Draft with objectives, rationale, gaps, pending questions, classified findings, coverage and spend estimate; revisions never silently overwritten | 07 | 07-G3, 07-G5 |
+| §17 Manual vs generated plans | Hand-written and generated plans with identical content produce identical deterministic metrics | 07 | 07-G2 |
+| §23 Benchmark the planner | Annotated fixtures, precision/recall/gap scoring, static template baseline | 07 | 07-G3 |
 | §2–5, §8 | Persistent session, decisions, typed actions | 08 | 08-G1..G5 |
 | §3, §13 | Interactive terminal, slash controls | 09 | 09-G1..G5 |
 | §8, §13–16 | Conversation recovery, adversarial hardening | 10 | 10-G1..G5 |

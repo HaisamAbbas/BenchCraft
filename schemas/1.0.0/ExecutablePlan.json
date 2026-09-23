@@ -98,9 +98,45 @@
       "title": "BudgetLimits",
       "type": "object"
     },
+    "CasePredicate": {
+      "additionalProperties": false,
+      "description": "A selector over Golden fields only (never execution data): `path` is a `case.*`\nevaluation-view path, e.g. `case.metadata.category` or `case.reference.answer`.\n`exists` means present and non-empty.",
+      "properties": {
+        "op": {
+          "default": "exists",
+          "enum": [
+            "exists",
+            "equals",
+            "in"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^case\\.",
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "default": null,
+          "title": "Value"
+        },
+        "values": {
+          "default": [],
+          "items": {},
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "CasePredicate",
+      "type": "object"
+    },
     "CaseSelection": {
       "additionalProperties": false,
-      "description": "Which cases of the dataset the run selects. Empty `case_ids` means all cases (then\n`limit`, if set, keeps the first N in dataset order).",
+      "description": "Which cases of the dataset the run selects, applied in this order:\n`case_ids` (empty means all), then every `where` predicate, then either a seeded\nrandom `sample_size` (kept in dataset order) or the first `limit` cases.",
       "properties": {
         "case_ids": {
           "default": [],
@@ -122,6 +158,40 @@
           ],
           "default": null,
           "title": "Limit"
+        },
+        "sample_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Size"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "where": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CasePredicate"
+          },
+          "title": "Where",
+          "type": "array"
         }
       },
       "title": "CaseSelection",

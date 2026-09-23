@@ -10,6 +10,8 @@ Defaults deny everything a run could need special trust for:
 - only built-in `native.*` evaluators, and no model-backed evaluator — those send case data
   to a judge provider (data egress);
 - no plugin environments, no extra plugin import paths and no secrets, unless listed;
+- the conversation model sees result IDs, decisions and scores, but no case inputs or
+  application outputs unless `share_case_content_with_assistant` is set;
 - data scope: when `data_roots` is set, the plan's dataset and application config must
   resolve inside one of them (unset means local files are not restricted).
 
@@ -34,7 +36,7 @@ from aibench.core.models import (
     FrozenModel,
     HttpTransport,
 )
-from aibench.core.plans import BudgetLimits, ExecutablePlan
+from aibench.core.plans import BudgetLimits, ExecutablePlan, PluginEnvironmentRef
 from aibench.security.endpoints import is_loopback, origin_of
 
 _EFFECT_ORDER = (EffectLevel.NONE, EffectLevel.REVERSIBLE, EffectLevel.IRREVERSIBLE)
@@ -44,6 +46,12 @@ class ExecutionPolicy(FrozenModel):
     allowed_applications: tuple[str, ...] = ("*",)  # application_id glob patterns
     allow_trusted_local: bool = False
     allowed_http_origins: tuple[str, ...] = ()  # beyond loopback, e.g. "https://rag.internal"
+    # Planner model endpoints (planning briefings leave the machine); https only.
+    allowed_planner_origins: tuple[str, ...] = ()
+    # Whether the conversation model may see case inputs and application outputs when
+    # explaining results (data egress to the planner endpoint). Reference answers and other
+    # judge-only fields are never sent to it.
+    share_case_content_with_assistant: bool = False
     max_effects: EffectLevel = EffectLevel.NONE
     allowed_evaluators: tuple[str, ...] = ("native.*",)  # evaluator_id glob patterns
     allow_model_evaluators: bool = False
@@ -143,13 +151,12 @@ def evaluator_denials(policy: ExecutionPolicy, manifests: Iterable[EvaluatorMani
     return denials
 
 
-def plan_denials(policy: ExecutionPolicy, plan: ExecutablePlan, plan_dir: Path) -> list[str]:
-    denials = []
-    if policy.data_roots:
-        for label, value in (("dataset", plan.dataset), ("application config", plan.application)):
-            if not any(_inside(_plan_path(plan_dir, value), r) for r in policy.data_roots):
-                denials.append(f"{label} {value} is outside the policy's data_roots")
-    for env in plan.plugin_environments:
+def plugin_denials(
+    policy: ExecutionPolicy, environments: Iterable[PluginEnvironmentRef], plan_dir: Path
+) -> list[str]:
+    """Plugin interpreters, import paths and secrets — checked before any plugin starts."""
+    denials: list[str] = []
+    for env in environments:
         python = str(_plan_path(plan_dir, env.python))
         if not any(_same_path(python, allowed) for allowed in policy.allowed_plugin_environments):
             denials.append(f"plugin environment {env.python} is not allowed by the policy")
@@ -166,6 +173,16 @@ def plan_denials(policy: ExecutionPolicy, plan: ExecutablePlan, plan_dir: Path) 
             for ref in env.secret_env.values()
             if ref not in policy.allowed_secret_refs
         )
+    return denials
+
+
+def plan_denials(policy: ExecutionPolicy, plan: ExecutablePlan, plan_dir: Path) -> list[str]:
+    denials = []
+    if policy.data_roots:
+        for label, value in (("dataset", plan.dataset), ("application config", plan.application)):
+            if not any(_inside(_plan_path(plan_dir, value), r) for r in policy.data_roots):
+                denials.append(f"{label} {value} is outside the policy's data_roots")
+    denials.extend(plugin_denials(policy, plan.plugin_environments, plan_dir))
     ceilings, budgets = policy.ceilings, plan.budgets
     for field in (
         "max_application_calls",

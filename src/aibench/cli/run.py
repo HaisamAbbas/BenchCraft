@@ -1,4 +1,4 @@
-"""`aibench plan validate`, `run --plan`, `resume`, `evaluate`, `runs status` (06-T4).
+"""`aibench run --plan`, `resume`, `evaluate`, `runs status` (06-T4).
 
 Exit codes (§13): 0 complete; 2 invalid input or plan; 3 incomplete (failures, unknown
 effects, blocked or cancelled work, evaluation errors); 4 authorization required (policy
@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import signal
 from pathlib import Path
-from typing import Any
 
 import typer
 from rich.console import Console
@@ -35,7 +34,6 @@ from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
 
-plan_app = typer.Typer(help="Validate executable plans.")
 console = Console()
 err_console = Console(stderr=True)
 
@@ -127,38 +125,6 @@ def _print_outcome(run_id: str, outcome: RunOutcome, json_output: bool) -> None:
         console.print(f"  [yellow]stopped dispatching:[/yellow] {escape(outcome.stop_reason)}")
     if outcome.state is RunState.INTERRUPTED:
         console.print(f"  resume with: aibench resume {run_id}")
-
-
-@plan_app.command("validate")
-def validate_plan(
-    plan: Path = typer.Argument(..., help="Plan file (JSON/YAML)."),  # noqa: B008
-    policy: Path | None = _POLICY,
-    trust_local_app: bool = typer.Option(
-        False, "--trust-local-app", help="Grant trusted-local mode."
-    ),
-    json_output: bool = _JSON,
-) -> None:
-    """Structural and policy validation only; nothing is dispatched."""
-    try:
-        compiled = compile_plan(plan, policy=load_policy(policy), trusted_local=trust_local_app)
-    except AibenchError as exc:
-        raise _report_problems(exc) from exc
-    summary: dict[str, Any] = {
-        "valid": True,
-        "plan_hash": compiled.plan_hash,
-        "cases": len(compiled.cases),
-        "repetitions": compiled.plan.repetitions,
-        "execution_items": len(compiled.cases) * compiled.plan.repetitions,
-        "evaluation_items": len(compiled.cases) * compiled.plan.repetitions * len(compiled.metrics),
-        "metrics": [f"{m.manifest.evaluator_id}@{m.manifest.version}" for m in compiled.metrics],
-    }
-    if json_output:
-        console.print_json(data=summary)
-    else:
-        console.print(
-            f"plan valid: {summary['cases']} case(s) x {summary['repetitions']} repetition(s), "
-            f"{len(summary['metrics'])} metric(s); nothing was dispatched"
-        )
 
 
 def run_plan(

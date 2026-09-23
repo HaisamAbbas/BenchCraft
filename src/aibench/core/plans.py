@@ -100,6 +100,8 @@ class CaseSelection(FrozenModel):
     def _sampling(self) -> CaseSelection:
         if self.sample_size is not None and self.seed is None:
             raise ValueError("selection.sample_size needs an explicit selection.seed")
+        if self.seed is not None and self.sample_size is None:
+            raise ValueError("selection.seed needs selection.sample_size")
         if self.sample_size is not None and self.limit is not None:
             raise ValueError("use selection.limit or selection.sample_size, not both")
         return self

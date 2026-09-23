@@ -23,8 +23,8 @@ loaded, so a denied plan never runs plugin code.
 
 from __future__ import annotations
 
+import hashlib
 import json
-import random
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -52,6 +52,7 @@ from aibench.security.policy import (
     application_denials,
     evaluator_denials,
     plan_denials,
+    plugin_denials,
 )
 
 FindingKind = Literal["invalid", "missing_information", "missing_permission"]
@@ -179,6 +180,20 @@ def _matches(case: BenchmarkCase, predicate: CasePredicate) -> bool:
     return any(value == deep_unfreeze(v) for v in predicate.values)
 
 
+def sample_cases(cases: list[BenchmarkCase], size: int, seed: int) -> list[BenchmarkCase]:
+    """A seeded sample kept in dataset order. Ranks cases by SHA-256 of the seed and case
+    identity, so the same seed selects the same cases on every platform and Python version
+    (unlike `random.sample`, whose algorithm is not guaranteed stable across versions)."""
+
+    def rank(item: tuple[int, BenchmarkCase]) -> str:
+        index, case = item
+        key = json.dumps([seed, case.case_id, case.source_line, index])
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    picked = sorted(sorted(enumerate(cases), key=rank)[:size], key=lambda item: item[0])
+    return [case for _, case in picked]
+
+
 def _select(analysis: PlanAnalysis, cases: list[BenchmarkCase]) -> list[BenchmarkCase]:
     selection = analysis.plan.selection
     by_id: dict[str, list[BenchmarkCase]] = {}
@@ -210,9 +225,7 @@ def _select(analysis: PlanAnalysis, cases: list[BenchmarkCase]) -> list[Benchmar
                 "selection",
             )
         else:
-            order = {id(c): i for i, c in enumerate(chosen)}
-            picked = random.Random(selection.seed).sample(chosen, selection.sample_size)
-            chosen = sorted(picked, key=lambda c: order[id(c)])  # keep dataset order
+            chosen = sample_cases(chosen, selection.sample_size, selection.seed)
     if selection.limit is not None:
         chosen = chosen[: selection.limit]
     duplicated = sorted({c.case_id for c in chosen if len(by_id[c.case_id]) > 1})
@@ -249,7 +262,9 @@ def _load_registry(analysis: PlanAnalysis) -> EvaluatorRegistry:
     return registry
 
 
-def _resolve_metrics(analysis: PlanAnalysis, *, plugins_permitted: bool) -> None:
+def _resolve_metrics(analysis: PlanAnalysis, *, plugins_not_loaded: str | None) -> None:
+    """`plugins_not_loaded` says why plugin evaluators could not be resolved, if they
+    could not; an unknown non-native ID is then a permission problem, not a typo."""
     registry = analysis.registry
     assert registry is not None
     seen: set[str] = set()
@@ -259,11 +274,11 @@ def _resolve_metrics(analysis: PlanAnalysis, *, plugins_permitted: bool) -> None
             metric = registry.resolve_binding(binding)
         except BindingValidationError as exc:
             unknown = any(p.problem.startswith("unknown evaluator") for p in exc.problems)
-            if unknown and not plugins_permitted and analysis.plan.plugin_environments:
+            native = binding.metric.startswith("native.")
+            if unknown and plugins_not_loaded and not native:
                 analysis.add(
                     "missing_permission",
-                    f"{binding.metric}: not validated, because its plugin environment is "
-                    "not permitted by the policy",
+                    f"{binding.metric}: not validated, because {plugins_not_loaded}",
                     subject,
                 )
             else:
@@ -435,9 +450,12 @@ def analyze_plan(
     *,
     policy: ExecutionPolicy,
     trusted_local: bool = False,
+    registry: EvaluatorRegistry | None = None,
 ) -> PlanAnalysis:
     """Collect every finding for `plan` (paths relative to `plan_dir`). Never dispatches;
-    loads plugin environments only when the policy permits the plan."""
+    loads plugin environments only when the policy permits the plan. A caller that already
+    loaded the plan's plugin environments may pass that `registry` to avoid reloading them
+    (it is still used only when the policy permits the plan)."""
     effective = policy.with_trusted_local(trusted_local)
     analysis = PlanAnalysis(plan=plan, plan_dir=plan_dir.resolve(), policy=effective)
     for denial in plan_denials(effective, plan, analysis.plan_dir):
@@ -462,8 +480,17 @@ def analyze_plan(
         analysis.add("invalid", f"dataset: {exc}", "dataset")
 
     permitted = not analysis.blocking("missing_permission")
-    analysis.registry = _load_registry(analysis) if permitted else EvaluatorRegistry.with_native()
-    _resolve_metrics(analysis, plugins_permitted=permitted)
+    if not permitted:
+        analysis.registry = EvaluatorRegistry.with_native()
+    else:
+        analysis.registry = registry if registry is not None else _load_registry(analysis)
+    if plugin_denials(effective, plan.plugin_environments, analysis.plan_dir):
+        not_loaded = "its plugin environment is not permitted by the policy"
+    elif not permitted and plan.plugin_environments:
+        not_loaded = "plugin environments are not started while other permissions are missing"
+    else:
+        not_loaded = None
+    _resolve_metrics(analysis, plugins_not_loaded=not_loaded)
     for denial in evaluator_denials(effective, [m.manifest for m in analysis.metrics]):
         analysis.add("missing_permission", denial, "evaluators")
     _check_coverage(analysis)

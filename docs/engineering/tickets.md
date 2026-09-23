@@ -99,3 +99,15 @@ Gates: 05-G1..G5. See `docs/engineering/reports/05.md`. Decisions: ADR 0004.
 
 Gates: 06-G1..G5. See `docs/engineering/reports/06.md`. Decisions: ADR 0005.
 Review remediation: `tests/test_engine_review_regressions.py`.
+
+## Prompt 07 — Evaluation planning and bounded LLM reasoning
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 07-T1 | Evidence and requirement summaries: declared config, dataset field coverage, installed manifests; observed/declared/inferred/unknown; no architecture-discovery claims | DONE | `src/aibench/inspection/profile.py`, `src/aibench/inspection/dataset_summary.py`, `src/aibench/planning/catalog.py`; `tests/test_inspection.py` |
+| 07-T2 | Plan compiler/validator: metric eligibility, per-case field requirements, selectors, DAG, sampling seeds, budgets, aggregation semantics, policy; missing information vs missing permission | DONE | `src/aibench/engine/compile.py` (`analyze_plan`, `PlanFinding`, `work_graph`, `dag_problems`), `core/plans.py` (`CasePredicate`, seeded `CaseSelection`), `planning/drafts.py` (`validate_draft`); `tests/test_plan_validation.py` |
+| 07-T3 | Bounded planning loop: narrow provider interface, schema-constrained drafts, bounded repairs/tool calls, deterministic template and manual mode, fake provider offline, one real configurable provider | DONE (live provider not run: no credentials/budget authorized) | `src/aibench/planning/planner.py`, `template.py`, `openai_provider.py`; `tests/test_planner.py`, `tests/test_openai_provider.py`, `tests/test_planner_benchmark.py` |
+| 07-T4 | `inspect` and `plan` commands: profile, draft, validation results, objective coverage, observability gaps, estimated spend, pending clarification; frozen executable revisions | DONE | `src/aibench/cli/inspect.py`, `src/aibench/cli/plan.py`, `src/aibench/planning/service.py`; `tests/test_cli_plan.py`, `tests/test_plan_equivalence.py` |
+
+Gates: 07-G1..G5. See `docs/engineering/reports/07.md`. Decisions: ADR 0006.
+Review remediation: `tests/test_planning_review_regressions.py`.
