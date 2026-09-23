@@ -43,10 +43,52 @@ def _fail(message: str, code: int = 2) -> typer.Exit:
     return typer.Exit(code=code)
 
 
-def _registry(custom: Path | None, trusted: bool) -> EvaluatorRegistry:
+_PLUGIN_ENV_OPTION = typer.Option(
+    None,
+    "--plugin-env",
+    help="Python interpreter of a plugin environment (e.g. plugins/deepeval/.venv/...). "
+    "Its evaluators run only in worker processes using that interpreter.",
+)
+_PLUGIN_PATH_OPTION = typer.Option(
+    [],
+    "--plugin-path",
+    help="Extra import path for plugin workers, e.g. a directory with a local judge factory. "
+    "Code there runs in the worker.",
+)
+_PLUGIN_SECRET_OPTION = typer.Option(
+    [],
+    "--plugin-secret",
+    help="NAME=source:name secret passed to plugin workers, e.g. OPENAI_API_KEY=env:OPENAI_API_KEY.",
+)
+
+
+def _registry(
+    custom: Path | None,
+    trusted: bool,
+    plugin_env: Path | None = None,
+    plugin_secrets: list[str] | None = None,
+    plugin_paths: list[Path] | None = None,
+) -> EvaluatorRegistry:
     registry = EvaluatorRegistry.with_native()
     if custom is not None:
         registry.load_local_file(custom, trusted=trusted)
+    if plugin_env is not None:
+        secrets: dict[str, str] = {}
+        for item in plugin_secrets or []:
+            name, sep, ref = item.partition("=")
+            if not sep or not name or ":" not in ref:
+                raise AibenchError(f"--plugin-secret must look like NAME=source:name, got {item!r}")
+            secrets[name] = ref
+        loads = registry.load_plugin_environment(
+            plugin_env, secret_env=secrets, extra_paths=[p.resolve() for p in plugin_paths or []]
+        )
+        for load in loads:
+            if load.error:
+                err_console.print(
+                    f"[yellow]plugin {escape(load.plugin.name)} not loaded:[/yellow] {escape(load.error)}"
+                )
+    elif plugin_secrets or plugin_paths:
+        raise AibenchError("--plugin-secret and --plugin-path require --plugin-env")
     return registry
 
 
@@ -54,12 +96,15 @@ def _registry(custom: Path | None, trusted: bool) -> EvaluatorRegistry:
 def list_evaluators(
     custom: Path | None = _CUSTOM_OPTION,
     trust_local_code: bool = _TRUST_OPTION,
+    plugin_env: Path | None = _PLUGIN_ENV_OPTION,
+    plugin_secret: list[str] = _PLUGIN_SECRET_OPTION,
+    plugin_path: list[Path] = _PLUGIN_PATH_OPTION,
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
     """Built-in and trusted local evaluators, plus installed plugins found by metadata
     (plugins are listed, not imported)."""
     try:
-        registry = _registry(custom, trust_local_code)
+        registry = _registry(custom, trust_local_code, plugin_env, plugin_secret, plugin_path)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
     plugins = discover_plugins()
@@ -89,10 +134,15 @@ def describe_evaluator(
     reference: str = typer.Argument(..., help="namespace.name[@version]"),
     custom: Path | None = _CUSTOM_OPTION,
     trust_local_code: bool = _TRUST_OPTION,
+    plugin_env: Path | None = _PLUGIN_ENV_OPTION,
+    plugin_secret: list[str] = _PLUGIN_SECRET_OPTION,
+    plugin_path: list[Path] = _PLUGIN_PATH_OPTION,
 ) -> None:
     """Full manifest of one evaluator."""
     try:
-        manifest, _ = _registry(custom, trust_local_code).resolve(reference)
+        manifest, _ = _registry(
+            custom, trust_local_code, plugin_env, plugin_secret, plugin_path
+        ).resolve(reference)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
     console.print_json(data=manifest.model_dump(mode="json"))
@@ -156,11 +206,14 @@ def score(
     ),
     custom: Path | None = _CUSTOM_OPTION,
     trust_local_code: bool = _TRUST_OPTION,
+    plugin_env: Path | None = _PLUGIN_ENV_OPTION,
+    plugin_secret: list[str] = _PLUGIN_SECRET_OPTION,
+    plugin_path: list[Path] = _PLUGIN_PATH_OPTION,
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
     """Score a run's recorded outputs. Never invokes the application."""
     try:
-        registry = _registry(custom, trust_local_code)
+        registry = _registry(custom, trust_local_code, plugin_env, plugin_secret, plugin_path)
         bindings = _load_bindings(metrics)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc

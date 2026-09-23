@@ -26,6 +26,10 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §14 Storage | evaluation_attempts / metric_results persisted per scoring pass without overwrite | 04 | 04-G3 |
 | ADR 0001 | Dependency-boundary test for core | 04 | 04-G4 |
 | §10 DeepEval adapter | Pinned faithfulness adapter | 05 | 05-G1..G5 |
+| §9 Controlled workers for plugin code | Third-party evaluators execute only in workers using the plugin environment's interpreter; enforceable cancellation | 05 | 05-G3, 05-G4 |
+| §10 Field mapping / missing vs empty context | input, recorded output, observed retrieval; reference context never substituted; documented empty-context policy | 05 | 05-G1, 05-G2 |
+| §10 Independent metric instances | New metric and judge per case; concurrency control test | 05 | 05-G3 |
+| §16 Credentials / publishing | Judge secrets passed explicitly; telemetry, .env, legacy key file off; no Confident AI publishing | 05 | 05-G4 |
 | §15 Execution/concurrency | Deterministic scheduling, budgets, retries, resume | 06 | 06-G1..G5 |
 | §8 Agent architecture | Bounded LLM planner, plan compiler/validator | 07 | 07-G1..G5 |
 | §2–5, §8 | Persistent session, decisions, typed actions | 08 | 08-G1..G5 |

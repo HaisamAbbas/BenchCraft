@@ -187,6 +187,7 @@ def run_contained(
     env: Mapping[str, str],
     input_bytes: bytes = b"",
     max_output_bytes: int = 1_048_576,
+    cwd: str | None = None,
 ) -> ContainedResult:
     """Run a short-lived helper process under hard limits: wall-clock `timeout`, and at
     most `max_output_bytes` kept per stream, enforced *while it runs* — once either stream
@@ -199,6 +200,7 @@ def run_contained(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=dict(env),
+        cwd=cwd,
         **spawn_kwargs(),
     )
     tree = ProcessTree(proc.pid)

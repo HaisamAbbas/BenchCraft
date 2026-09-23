@@ -156,8 +156,15 @@
       "title": "Evaluator Id",
       "type": "string"
     },
+    "internal_concurrency": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Internal Concurrency",
+      "type": "integer"
+    },
     "internal_retries": {
       "default": 0,
+      "minimum": 0,
       "title": "Internal Retries",
       "type": "integer"
     },

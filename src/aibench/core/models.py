@@ -516,7 +516,8 @@ class EvaluatorManifest(FrozenModel):
     credentials: tuple[str, ...] = ()
     network_destinations: tuple[str, ...] = ()
     supports_batch: bool = False
-    internal_retries: int = 0
+    internal_retries: int = Field(default=0, ge=0)  # retries it performs itself, per evaluation
+    internal_concurrency: int = Field(default=1, ge=1)  # parallel judge calls per evaluation
     requires_worker: bool = False
 
 

@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib import metadata
@@ -68,23 +70,47 @@ def discover_plugins(paths: Sequence[Path] | None = None) -> list[DiscoveredPlug
     return sorted(found.values(), key=lambda p: (p.distribution, p.name))
 
 
+def environment_site_paths(python: Path, *, timeout: float = WORKER_TIMEOUT_SECONDS) -> list[Path]:
+    """The site-packages directories of another Python environment, asked of that
+    environment's own interpreter (nothing is imported from it here)."""
+    probe = "import json, sysconfig; p = sysconfig.get_paths(); print(json.dumps([p['purelib'], p['platlib']]))"
+    env = {k: os.environ[k] for k in _WORKER_ENV_KEEP if k in os.environ}
+    result = run_contained([str(python), "-I", "-c", probe], timeout=timeout, env=env)
+    try:
+        if result.timed_out or result.returncode != 0:
+            raise ValueError("probe failed")
+        return sorted({Path(p) for p in json.loads(result.stdout)})
+    except (ValueError, TypeError):
+        detail = result.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise OSError(
+            f"could not inspect Python environment {python}: "
+            f"{detail[-1] if detail else result.returncode}"
+        ) from None
+
+
 def load_manifests(
     plugin: DiscoveredPlugin,
     *,
     extra_paths: Sequence[Path] = (),
     timeout: float = WORKER_TIMEOUT_SECONDS,
+    python: Path | None = None,
 ) -> ManifestLoad:
     """Ask a worker process for the plugin's manifests. The plugin's code runs only in
     that process."""
     env = {k: os.environ[k] for k in _WORKER_ENV_KEEP if k in os.environ}
     if extra_paths:
         env["PYTHONPATH"] = os.pathsep.join(str(p) for p in extra_paths)
+    # A private working directory, so a module in the user's project (first on sys.path
+    # under `-m`) can never shadow the plugin.
+    workdir = tempfile.mkdtemp(prefix="aibench-manifest-")
     result = run_contained(
-        [sys.executable, "-m", "aibench.registry.worker", plugin.target],
+        [str(python or sys.executable), "-m", "aibench.registry.worker", plugin.target],
+        cwd=workdir,
         timeout=timeout,
         env=env,
         max_output_bytes=MAX_WORKER_OUTPUT_BYTES,
     )
+    shutil.rmtree(workdir, ignore_errors=True)
     if result.timed_out:
         return ManifestLoad(plugin, error=f"manifest worker timed out after {timeout}s")
     if result.truncated:

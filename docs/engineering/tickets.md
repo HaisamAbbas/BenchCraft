@@ -76,3 +76,14 @@ Gates: 03-G1..G5. See `docs/engineering/reports/03.md`. Decisions: ADR 0002
 
 Gates: 04-G1..G5. See `docs/engineering/reports/04.md`. Decisions: ADR 0003.
 Review remediation (ADR 0003, "Changes after independent review"): `tests/test_scoring_review_regressions.py`, migration 4 (`storage/migrations.py`), `runners/process_tree.py::run_contained`, `evaluators/schema_worker.py`.
+
+## Prompt 05 — DeepEval adapter
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 05-T1 | Inspect and pin the real upstream API; record tested dependency and judge configuration; keep dependencies isolated from core | DONE | `deepeval==4.2.5` inspected in the installed package (ADR 0004 "Findings"); `plugins/deepeval/pyproject.toml` (exact pin), separate environment `plugins/deepeval/.venv`; `test_deepeval_is_imported_only_inside_its_plugin_package`, `test_version_drift_is_refused` |
+| 05-T2 | Exact field semantics; never fill retrieval from reference.context; explicit missing/empty policies | DONE | `plugins/deepeval/src/aibench_deepeval/faithfulness.py` (`build_test_case`, policies); `test_test_case_conversion_matches_the_pinned_deepeval_api`, `test_missing_retrieval_is_never_filled_from_reference_context`, `test_empty_context_and_unscorable_output_follow_the_documented_policy` |
+| 05-T3 | Independent metric instances, controlled worker execution, timeouts, declared nested retries/concurrency, raw outputs and unknown accounting, no publishing | DONE | `src/aibench/registry/eval_worker.py`, `src/aibench/evaluators/worker_client.py`, `registry.load_plugin_environment`, CLI `--plugin-env/--plugin-secret/--plugin-path`; `tests/test_worker_evaluator.py`, `test_concurrent_cases_never_share_metric_or_judge_state`, `test_blocking_judge_is_killed_and_the_next_case_runs_in_a_fresh_worker`, `test_no_deepeval_files_or_types_leak_into_the_harness` |
+| 05-T4 | Honest compatibility checks: real package with an injected deterministic judge; optional budgeted live smoke | DONE (live smoke not run: no credentials/budget authorized) | `tests/fixtures/deepeval_judges/aibench_test_judges.py` (real `DeepEvalBaseLLM` subclasses), `tests/test_deepeval_adapter.py`, `test_live_provider_smoke` (opt-in), CI job `deepeval-plugin` |
+
+Gates: 05-G1..G5. See `docs/engineering/reports/05.md`. Decisions: ADR 0004.

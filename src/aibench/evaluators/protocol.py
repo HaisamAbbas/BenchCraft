@@ -151,7 +151,7 @@ class EvaluationOutcome:
 @dataclass
 class UsageReport:
     provider: str | None = None
-    calls: int = 0
+    calls: int | None = None  # None: the evaluator could not count its calls
     tokens: dict[str, int] = field(default_factory=dict)
     cost: float | None = None
 
@@ -189,7 +189,7 @@ class EvaluatorContext:
         self,
         *,
         provider: str | None,
-        calls: int,
+        calls: int | None,
         tokens: Mapping[str, int] | None = None,
         cost: float | None = None,
     ) -> None:
@@ -224,6 +224,12 @@ class Evaluator(abc.ABC):
 
     async def prepare(self, params: Mapping[str, Any]) -> None:
         self.params = dict(params)
+
+    async def ensure_ready(self) -> None:
+        """Called before each case, outside that case's time budget. Evaluators that can
+        lose their runtime (e.g. a worker killed after a timeout) rebuild it here, so
+        startup cost is never charged to the next case."""
+        return
 
     @abc.abstractmethod
     async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome: ...

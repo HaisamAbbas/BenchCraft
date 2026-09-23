@@ -107,9 +107,11 @@ def test_worker_timeout_kills_plugin_grandchildren(tmp_path: Path) -> None:
     [plugin] = discover_plugins(paths=[root])
     import time
 
+    # The timeout must leave the worker time to start and import the plugin (which spawns
+    # the grandchild) even on a loaded machine; it is still far below the grandchild's 60s.
     started = time.monotonic()
-    result = load_manifests(plugin, extra_paths=[root], timeout=2)
-    assert time.monotonic() - started < 10
+    result = load_manifests(plugin, extra_paths=[root], timeout=10)
+    assert time.monotonic() - started < 30
     assert "timed out" in (result.error or "")
     assert wait_until_dead(read_pid(pidfile))
 

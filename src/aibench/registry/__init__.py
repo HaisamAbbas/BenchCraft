@@ -10,13 +10,14 @@ are read by a subprocess worker, and they are never instantiated in this process
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from aibench.core.errors import AibenchError, PolicyError
+from aibench.core.errors import AibenchError, ConfigError, PolicyError
 from aibench.core.hashes import content_hash
 from aibench.core.models import (
     SCHEMA_VERSION,
@@ -28,6 +29,14 @@ from aibench.core.models import (
 )
 from aibench.evaluators.native import NATIVE_EVALUATORS, NATIVE_PLUGIN_ID
 from aibench.evaluators.protocol import EvaluationView, Evaluator, rule_for
+from aibench.evaluators.worker_client import WorkerSpec, make_worker_factory
+from aibench.registry.discovery import (
+    ManifestLoad,
+    discover_plugins,
+    environment_site_paths,
+    load_manifests,
+)
+from aibench.security.secrets import resolve_secret
 
 RESERVED_NAMESPACE = "native."
 _SPEC = re.compile(
@@ -94,6 +103,7 @@ class EvaluatorRegistry:
     def __init__(self) -> None:
         self._factories: dict[tuple[str, str], type[Evaluator]] = {}
         self._external: dict[tuple[str, str], EvaluatorManifest] = {}
+        self._workers: dict[tuple[str, str], WorkerSpec] = {}
 
     @classmethod
     def with_native(cls) -> EvaluatorRegistry:
@@ -129,12 +139,55 @@ class EvaluatorRegistry:
             )
         self._factories[key] = factory
 
-    def register_external(self, manifest: EvaluatorManifest) -> None:
+    def register_external(
+        self, manifest: EvaluatorManifest, *, worker: WorkerSpec | None = None
+    ) -> None:
         """Record a third-party manifest read by the discovery worker: listable and
         validatable, never executable in this process."""
         self._check_namespace(manifest, allow_native=False)
         external = manifest.model_copy(update={"requires_worker": True})
         self._external[(external.evaluator_id, external.version)] = external
+        if worker is not None:
+            self._workers[(external.evaluator_id, external.version)] = worker
+
+    def load_plugin_environment(
+        self,
+        python: Path,
+        *,
+        secret_env: Mapping[str, str] | None = None,
+        extra_paths: Sequence[Path] = (),
+    ) -> list[ManifestLoad]:
+        """Discover evaluator plugins installed in another Python environment and make
+        them runnable through workers that use that environment's interpreter. Nothing
+        from that environment is imported into this process."""
+        # Absolute, not resolved: workers start in a private directory, and on POSIX a
+        # relative executable is looked up after the chdir. `resolve()` would follow a venv's
+        # python symlink to the base interpreter and lose the venv.
+        python = Path(os.path.abspath(python))
+        if not python.is_file():
+            raise RegistryError(f"plugin environment interpreter not found: {python}")
+        for name, ref in (secret_env or {}).items():
+            try:
+                resolve_secret(ref, os.environ)  # fail now, not as an error on every case
+            except ConfigError as exc:
+                raise RegistryError(f"plugin secret {name}: {exc}") from exc
+        try:
+            site_paths = environment_site_paths(python)
+        except OSError as exc:
+            raise RegistryError(str(exc)) from exc
+        loads = []
+        for plugin in discover_plugins(paths=site_paths):
+            loaded = load_manifests(plugin, python=python, extra_paths=extra_paths)
+            loads.append(loaded)
+            spec = WorkerSpec(
+                python=python,
+                target=plugin.target,
+                extra_paths=tuple(extra_paths),
+                secret_env=dict(secret_env or {}),
+            )
+            for manifest in loaded.manifests:
+                self.register_external(manifest, worker=spec)
+        return loads
 
     def load_local_file(self, path: Path, *, trusted: bool) -> list[EvaluatorManifest]:
         """Import evaluator classes from a project file. This executes the file, so it
@@ -190,11 +243,14 @@ class EvaluatorRegistry:
                 f"{evaluator_id}@{manifest.version} supports core schema {manifest.core_schema!r}, "
                 f"not {SCHEMA_VERSION}"
             )
-        factory = self._factories.get((manifest.evaluator_id, manifest.version))
+        key = (manifest.evaluator_id, manifest.version)
+        factory = self._factories.get(key)
+        if factory is None and key in self._workers:
+            factory = make_worker_factory(manifest, self._workers[key])
         if factory is None:
             raise RegistryError(
                 f"{evaluator_id}@{manifest.version} is a third-party plugin that must run in an "
-                "isolated worker; worker execution is not available yet"
+                "isolated worker; load its plugin environment first (--plugin-env)"
             )
         return manifest, factory
 

@@ -51,6 +51,9 @@ from aibench.storage.repositories import Storage
 
 FINAL_ATTEMPT_RULE = "highest_attempt_id_per_case_and_repetition"
 DEFAULT_EVALUATION_TIMEOUT_SECONDS = 60.0
+# Evaluator startup (prepare, and rebuilding a worker after a timeout) has its own bound, so
+# a slow framework import never eats into a case's evaluation budget.
+DEFAULT_PREPARE_TIMEOUT_SECONDS = 300.0
 _VALUE_TYPES: dict[str, tuple[type, ...]] = {
     "boolean": (bool,),
     "scalar": (int, float),
@@ -129,6 +132,7 @@ async def score_recorded_run(
     run_id: str,
     bindings: Sequence[MetricBinding],
     timeout_seconds: float = DEFAULT_EVALUATION_TIMEOUT_SECONDS,
+    prepare_timeout_seconds: float = DEFAULT_PREPARE_TIMEOUT_SECONDS,
     cancel: asyncio.Event | None = None,
 ) -> ScoringReport:
     record = storage.get_run(run_id)
@@ -147,7 +151,15 @@ async def score_recorded_run(
 
     report = ScoringReport(scoring_id=f"score-{uuid.uuid4().hex[:12]}", run_id=run_id)
     for metric in resolved:
-        scorer = _Scorer(storage, artifacts, report.scoring_id, metric, timeout_seconds, cancel)
+        scorer = _Scorer(
+            storage,
+            artifacts,
+            report.scoring_id,
+            metric,
+            timeout_seconds,
+            cancel,
+            prepare_timeout_seconds=prepare_timeout_seconds,
+        )
         metric_results = await scorer.score_all(executions, cases, report.warnings)
         report.results.extend(metric_results)
         report.summaries.append(
@@ -170,6 +182,8 @@ class _Scorer:
         metric: ResolvedMetric,
         timeout_seconds: float,
         cancel: asyncio.Event | None,
+        *,
+        prepare_timeout_seconds: float = DEFAULT_PREPARE_TIMEOUT_SECONDS,
     ) -> None:
         self.storage = storage
         self.artifacts = artifacts
@@ -178,6 +192,7 @@ class _Scorer:
         self.manifest = metric.manifest
         self.rule = rule_for(metric.binding, metric.manifest)
         self.timeout_seconds = timeout_seconds
+        self.prepare_timeout_seconds = prepare_timeout_seconds
         self.cancel = cancel or asyncio.Event()
         self.prepare_error: str | None = None
 
@@ -195,7 +210,7 @@ class _Scorer:
             evaluator = self.metric.factory()
             await asyncio.wait_for(
                 evaluator.prepare(deep_unfreeze(self.metric.binding.params) or {}),
-                self.timeout_seconds,
+                self.prepare_timeout_seconds,
             )
         except Exception as exc:  # noqa: BLE001 - see comment above
             self.prepare_error = f"evaluator_prepare_failed:{type(exc).__name__}: {exc}"[:500]
@@ -264,6 +279,15 @@ class _Scorer:
             cancel=self.cancel,
             write_artifact=lambda data, mime: self._write(data, mime, execution.run_id),
         )
+        try:
+            await asyncio.wait_for(evaluator.ensure_ready(), self.prepare_timeout_seconds)
+        except Exception as exc:  # noqa: BLE001 - a lost runtime is an evaluator error
+            return self._result(
+                execution,
+                EvaluationOutcome.error(
+                    f"evaluator_restart_failed:{type(exc).__name__}: {exc}"[:500]
+                ),
+            )
         started = time.perf_counter()
         try:
             outcome = await asyncio.wait_for(evaluator.evaluate(view, ctx), self.timeout_seconds)
@@ -345,7 +369,11 @@ class _Scorer:
         else:
             costs = [u.cost for u in ctx.usage]
             resources.update(
-                model_calls=sum(u.calls for u in ctx.usage),
+                model_calls=(
+                    None
+                    if any(u.calls is None for u in ctx.usage)
+                    else sum(u.calls or 0 for u in ctx.usage)
+                ),
                 cost=None if None in costs else round(sum(c for c in costs if c is not None), 6),
                 accounting="reported" if None not in costs else "partial",
             )

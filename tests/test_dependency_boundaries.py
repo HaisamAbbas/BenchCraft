@@ -77,3 +77,20 @@ def test_evaluator_protocol_and_registry_stay_free_of_ui_packages() -> None:
         for path in (SRC / package).rglob("*.py"):
             ui = {name for name in _imports(path) if _top(name) in UI_PACKAGES}
             assert ui == set(), f"{path.relative_to(SRC)} imports {ui}"
+
+
+def test_deepeval_is_imported_only_inside_its_plugin_package() -> None:
+    """05-G4: framework-specific types stay inside the adapter. Anything outside
+    plugins/deepeval/src (and the test judges that run inside its worker) must not import it."""
+    repo = SRC.parents[1]
+    allowed = (
+        repo / "plugins" / "deepeval" / "src",
+        repo / "tests" / "fixtures" / "deepeval_judges",
+    )
+    offenders = []
+    for path in list((repo / "src").rglob("*.py")) + list((repo / "plugins").rglob("*.py")):
+        if ".venv" in path.parts or any(path.is_relative_to(a) for a in allowed):
+            continue
+        if any(_top(name) == "deepeval" for name in _imports(path)):
+            offenders.append(str(path.relative_to(repo)))
+    assert offenders == []
