@@ -1,0 +1,248 @@
+{
+  "$defs": {
+    "DecisionRule": {
+      "additionalProperties": false,
+      "description": "Harness-owned pass/fail rule using frozen thresholds.",
+      "properties": {
+        "categories": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "comparator": {
+          "enum": [
+            "is_true",
+            ">=",
+            ">",
+            "<=",
+            "<",
+            "==",
+            "in"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "rule_id": {
+          "default": "threshold",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "version": {
+          "default": "1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comparator"
+      ],
+      "title": "DecisionRule",
+      "type": "object"
+    },
+    "FieldRequirement": {
+      "additionalProperties": false,
+      "description": "A field an evaluator reads from the evaluation view.",
+      "properties": {
+        "non_empty": {
+          "default": true,
+          "title": "Non Empty",
+          "type": "boolean"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FieldRequirement",
+      "type": "object"
+    },
+    "MetricDirection": {
+      "enum": [
+        "higher",
+        "lower",
+        "target",
+        "none"
+      ],
+      "title": "MetricDirection",
+      "type": "string"
+    },
+    "MetricScope": {
+      "enum": [
+        "case",
+        "episode",
+        "component",
+        "slice",
+        "run"
+      ],
+      "title": "MetricScope",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/EvaluatorManifest.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "What an evaluator is and needs, readable without running it.",
+  "properties": {
+    "aggregation": {
+      "enum": [
+        "rate",
+        "mean",
+        "category_counts",
+        "none"
+      ],
+      "title": "Aggregation",
+      "type": "string"
+    },
+    "consumes": {
+      "default": "recorded_outputs",
+      "enum": [
+        "recorded_outputs",
+        "owns_execution"
+      ],
+      "title": "Consumes",
+      "type": "string"
+    },
+    "core_schema": {
+      "default": ">=1.0.0,<2.0.0",
+      "title": "Core Schema",
+      "type": "string"
+    },
+    "credentials": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Credentials",
+      "type": "array"
+    },
+    "default_rule": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DecisionRule"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "direction": {
+      "$ref": "#/$defs/MetricDirection"
+    },
+    "evaluator_id": {
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_.]*$",
+      "title": "Evaluator Id",
+      "type": "string"
+    },
+    "internal_retries": {
+      "default": 0,
+      "title": "Internal Retries",
+      "type": "integer"
+    },
+    "limitations": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "network_destinations": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Network Destinations",
+      "type": "array"
+    },
+    "parameters_schema": {
+      "title": "Parameters Schema"
+    },
+    "plugin_id": {
+      "title": "Plugin Id",
+      "type": "string"
+    },
+    "plugin_version": {
+      "title": "Plugin Version",
+      "type": "string"
+    },
+    "requires": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/FieldRequirement"
+      },
+      "title": "Requires",
+      "type": "array"
+    },
+    "requires_worker": {
+      "default": false,
+      "title": "Requires Worker",
+      "type": "boolean"
+    },
+    "scope": {
+      "$ref": "#/$defs/MetricScope",
+      "default": "case"
+    },
+    "supports_batch": {
+      "default": false,
+      "title": "Supports Batch",
+      "type": "boolean"
+    },
+    "uses_models": {
+      "default": false,
+      "title": "Uses Models",
+      "type": "boolean"
+    },
+    "value_kind": {
+      "enum": [
+        "scalar",
+        "boolean",
+        "category",
+        "vector",
+        "distribution",
+        "structured"
+      ],
+      "title": "Value Kind",
+      "type": "string"
+    },
+    "version": {
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "evaluator_id",
+    "version",
+    "plugin_id",
+    "plugin_version",
+    "description",
+    "value_kind",
+    "direction",
+    "aggregation"
+  ],
+  "title": "EvaluatorManifest",
+  "type": "object"
+}

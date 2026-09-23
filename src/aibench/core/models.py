@@ -445,9 +445,87 @@ class ExecutionResult(FrozenModel):
 # --------------------------------------------------------------------------- result
 
 
+ValueKind = Literal["scalar", "boolean", "category", "vector", "distribution", "structured"]
+
+
 class MetricValue(FrozenModel):
-    kind: Literal["scalar", "boolean", "category", "vector", "distribution", "structured"]
+    kind: ValueKind
     value: FrozenValue
+
+
+class MetricDirection(str, Enum):
+    HIGHER = "higher"
+    LOWER = "lower"
+    TARGET = "target"
+    NONE = "none"
+
+
+class MetricScope(str, Enum):
+    CASE = "case"
+    EPISODE = "episode"
+    COMPONENT = "component"
+    SLICE = "slice"
+    RUN = "run"
+
+
+class DecisionRule(FrozenModel):
+    """Harness-owned pass/fail rule using frozen thresholds."""
+
+    rule_id: str = "threshold"
+    version: str = "1"
+    comparator: Literal["is_true", ">=", ">", "<=", "<", "==", "in"]
+    # Strict and finite: `True` is not 1.0 and NaN would make every comparison fail.
+    threshold: Annotated[float, Field(strict=True, allow_inf_nan=False)] | None = None
+    categories: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _operands_match_comparator(self) -> DecisionRule:
+        if self.comparator in (">=", ">", "<=", "<", "==") and self.threshold is None:
+            raise ValueError(f"comparator {self.comparator!r} needs a numeric threshold")
+        if self.comparator == "in" and not self.categories:
+            raise ValueError("comparator 'in' needs at least one category")
+        return self
+
+
+class FieldRequirement(FrozenModel):
+    """A field an evaluator reads from the evaluation view."""
+
+    path: str
+    non_empty: bool = True
+
+
+class EvaluatorManifest(FrozenModel):
+    """What an evaluator is and needs, readable without running it."""
+
+    evaluator_id: str = Field(pattern=r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_.]*$")
+    version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
+    plugin_id: str
+    plugin_version: str
+    core_schema: str = ">=1.0.0,<2.0.0"
+    description: str
+    limitations: tuple[str, ...] = ()
+    value_kind: ValueKind
+    direction: MetricDirection
+    scope: MetricScope = MetricScope.CASE
+    aggregation: Literal["rate", "mean", "category_counts", "none"]
+    requires: tuple[FieldRequirement, ...] = ()
+    default_rule: DecisionRule | None = None
+    parameters_schema: FrozenValue = Field(default_factory=dict)
+    consumes: Literal["recorded_outputs", "owns_execution"] = "recorded_outputs"
+    uses_models: bool = False
+    credentials: tuple[str, ...] = ()
+    network_destinations: tuple[str, ...] = ()
+    supports_batch: bool = False
+    internal_retries: int = 0
+    requires_worker: bool = False
+
+
+class MetricBinding(FrozenModel):
+    """One metric binding with parameters and an optional rule override."""
+
+    metric: str
+    params: FrozenValue = Field(default_factory=dict)
+    rule: DecisionRule | None = None
 
 
 class EvaluationResult(FrozenModel):
@@ -464,6 +542,17 @@ class EvaluationResult(FrozenModel):
     uncertainty: FrozenValue = None
     resources: FrozenValue = Field(default_factory=dict)
     raw_artifact_ref: str | None = None
+    # Added in Prompt 04 (optional so earlier records still load; ADR 0003).
+    schema_version: str = SCHEMA_VERSION
+    scoring_id: str | None = None
+    execution_id: str | None = None
+    repetition_id: int = 0
+    attempt_number: int = 0
+    scope: MetricScope = MetricScope.CASE
+    direction: MetricDirection | None = None
+    rule: DecisionRule | None = None
+    binding_hash: str | None = None
+    reason: str | None = None
 
 
 # --------------------------------------------------------------------------- run / artifact
@@ -481,6 +570,7 @@ class RunManifest(FrozenModel):
     seed: int | None = None
     environment: FrozenValue = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
+    application_id: str | None = None  # added in Prompt 04; lets scoring check applicability
 
 
 class ArtifactRef(FrozenModel):
@@ -571,6 +661,10 @@ ALL_MODELS: tuple[type[BaseModel], ...] = (
     EvaluationPlan,
     ExecutionResult,
     MetricValue,
+    DecisionRule,
+    FieldRequirement,
+    EvaluatorManifest,
+    MetricBinding,
     EvaluationResult,
     RunManifest,
     ArtifactRef,

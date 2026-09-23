@@ -19,6 +19,12 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §15 Retry policy (runner side) | Runners never retry; `effect_state` marks ambiguous effects | 03 (engine use: 06) | 03-G3 |
 | §16 Security | Trusted-local mode explicit; Goldens never sent to apps; scoped app credentials; control-char/markup scrubbing of app output | 03 | 03-G2 |
 | §9, §12 Evaluator/plugin architecture | Evaluator protocol, registry, native checks, canonical aggregation | 04 | 04-G1..G5 |
+| §9 Plugin manifest / discovery | Manifests; entry-point discovery without import; subprocess manifest worker | 04 (worker execution: 05) | 04-G2 |
+| §9 Adapter contract | describe/validate_binding/prepare/evaluate/evaluate_batch/close; scores recorded outputs by default | 04 | 04-G1, 04-G3 |
+| §12 Unified result schema | Typed value union, status vs decision, frozen rule, evidence, provenance, resources/accounting, raw artifact ref | 04 | 04-G1 |
+| §12 Aggregation | Per-metric summaries with explicit denominators and coverage; no cross-metric averages | 04 | 04-G1 |
+| §14 Storage | evaluation_attempts / metric_results persisted per scoring pass without overwrite | 04 | 04-G3 |
+| ADR 0001 | Dependency-boundary test for core | 04 | 04-G4 |
 | §10 DeepEval adapter | Pinned faithfulness adapter | 05 | 05-G1..G5 |
 | §15 Execution/concurrency | Deterministic scheduling, budgets, retries, resume | 06 | 06-G1..G5 |
 | §8 Agent architecture | Bounded LLM planner, plan compiler/validator | 07 | 07-G1..G5 |

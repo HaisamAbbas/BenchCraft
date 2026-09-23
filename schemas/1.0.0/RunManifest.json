@@ -7,6 +7,18 @@
       "title": "Application Hash",
       "type": "string"
     },
+    "application_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Application Id"
+    },
     "created_at": {
       "format": "date-time",
       "title": "Created At",

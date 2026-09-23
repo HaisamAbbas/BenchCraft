@@ -1,0 +1,7 @@
+{
+  "metrics": [
+    {"metric": "native.exact_match@1"},
+    {"metric": "native.exact_match@1", "params": {"case_sensitive": false, "collapse_whitespace": true}},
+    {"metric": "acme.refund_window@1"}
+  ]
+}

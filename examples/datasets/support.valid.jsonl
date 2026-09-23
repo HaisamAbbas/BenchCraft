@@ -1,0 +1,4 @@
+{"case_id":"support-001","input":"What is your refund policy?","expected_output":"Refunds are available within 30 days of purchase.","expectations":{"refund_days":30,"answer_schema":{"type":"object","required":["output"]}}}
+{"case_id":"support-002","input":"Can I get my money back after two weeks?","expected_output":"Refunds are available within 30 days of purchase.","expectations":{"refund_days":30}}
+{"case_id":"support-003","input":"Do you ship internationally?","expected_output":"We ship to over 40 countries; delivery takes 5-10 days."}
+{"case_id":"support-004","input":"Who founded the company?","expected_output":"The company was founded in 2009."}

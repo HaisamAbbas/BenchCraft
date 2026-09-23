@@ -64,3 +64,15 @@ production-intended entry point. New core identity models added to support this 
 Gates: 03-G1..G5. See `docs/engineering/reports/03.md`. Decisions: ADR 0002
 (`docs/adr/0002-runner-transports-and-effect-semantics.md`). App-author guide:
 `docs/runner-protocol.md`.
+
+## Prompt 04 — Evaluator contracts, native checks, and registry
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 04-T1 | Evaluator protocol: manifests; describe/validate_binding/prepare/evaluate/evaluate_batch/close; typed context for artifacts, cancellation, accounting | DONE | `core/models.py` (`EvaluatorManifest`, `MetricBinding`, `DecisionRule`, `FieldRequirement`), `src/aibench/evaluators/protocol.py` (`Evaluator`, `EvaluationView`, `EvaluatorContext`, `EvaluationOutcome`), `evaluators/validation.py`; `tests/test_scoring_service.py` |
+| 04-T2 | Registry and controlled discovery: versioned namespaced IDs, schema ranges, applicability, required observations; metadata-only discovery; worker for plugin code | DONE | `src/aibench/registry/__init__.py`, `registry/discovery.py`, `registry/worker.py`; `tests/test_registry.py`, `tests/test_plugin_discovery.py` |
+| 04-T3 | Native and custom evaluators; low scores vs errors vs not-applicable | DONE | `src/aibench/evaluators/native.py` (`native.exact_match`, `native.json_schema`), `examples/evaluators/refund_window.py` (`acme.refund_window`); `tests/test_native_evaluators.py` |
+| 04-T4 | Normalize, persist, aggregate; score recorded executions without invoking the app | DONE | `src/aibench/services/scoring.py`, `src/aibench/reporting/aggregation.py`, `storage/repositories.py` (`next_evaluation_attempt_number`, `list_evaluation_attempts`), `src/aibench/cli/score.py` (`aibench score`, `aibench evaluators list/describe/plugin`); `tests/test_scoring_service.py`, `tests/test_cli_score.py` |
+
+Gates: 04-G1..G5. See `docs/engineering/reports/04.md`. Decisions: ADR 0003.
+Review remediation (ADR 0003, "Changes after independent review"): `tests/test_scoring_review_regressions.py`, migration 4 (`storage/migrations.py`), `runners/process_tree.py::run_contained`, `evaluators/schema_worker.py`.

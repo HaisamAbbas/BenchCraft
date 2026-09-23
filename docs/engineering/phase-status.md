@@ -9,7 +9,7 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 01 | MVP | Canonical models, configuration, and datasets | COMPLETE | `docs/engineering/reports/01.md` |
 | 02 | MVP | Durable run storage and artifacts | COMPLETE | `docs/engineering/reports/02.md` |
 | 03 | MVP | Application runners and observation capture | COMPLETE | `docs/engineering/reports/03.md` |
-| 04 | MVP | Evaluator contracts, native checks, and registry | NOT_STARTED | — |
+| 04 | MVP | Evaluator contracts, native checks, and registry | COMPLETE | `docs/engineering/reports/04.md` |
 | 05 | MVP | DeepEval adapter | NOT_STARTED | — |
 | 06 | MVP | Deterministic scheduling, policy, budgets, and recovery | NOT_STARTED | — |
 | 07 | MVP | Evaluation planning and bounded LLM reasoning | NOT_STARTED | — |

@@ -1,0 +1,87 @@
+{
+  "$defs": {
+    "DecisionRule": {
+      "additionalProperties": false,
+      "description": "Harness-owned pass/fail rule using frozen thresholds.",
+      "properties": {
+        "categories": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "comparator": {
+          "enum": [
+            "is_true",
+            ">=",
+            ">",
+            "<=",
+            "<",
+            "==",
+            "in"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "rule_id": {
+          "default": "threshold",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "version": {
+          "default": "1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comparator"
+      ],
+      "title": "DecisionRule",
+      "type": "object"
+    }
+  },
+  "$id": "aibench/1.0.0/MetricBinding.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "One metric binding with parameters and an optional rule override.",
+  "properties": {
+    "metric": {
+      "title": "Metric",
+      "type": "string"
+    },
+    "params": {
+      "title": "Params"
+    },
+    "rule": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DecisionRule"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "metric"
+  ],
+  "title": "MetricBinding",
+  "type": "object"
+}

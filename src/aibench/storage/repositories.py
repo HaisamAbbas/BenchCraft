@@ -495,33 +495,38 @@ class Storage:
         conn = self.conn
         conn.execute("BEGIN")
         try:
+            key = (
+                result.run_id,
+                result.case_id,
+                result.repetition_id,
+                result.metric_id,
+                result.binding_hash or "",
+                attempt_number,
+            )
             existing = conn.execute(
-                "SELECT content_hash FROM evaluation_attempts "
-                "WHERE run_id = ? AND case_id = ? AND metric_id = ? AND attempt_number = ?",
-                (result.run_id, result.case_id, result.metric_id, attempt_number),
+                "SELECT content_hash FROM evaluation_attempts WHERE run_id = ? AND "
+                "case_id = ? AND repetition_id = ? AND metric_id = ? AND binding_hash = ? "
+                "AND attempt_number = ?",
+                key,
             ).fetchone()
             if existing is not None:
                 if existing[0] != digest:
                     raise ConflictError(
-                        "evaluation_attempts "
-                        f"(run_id={result.run_id!r}, case_id={result.case_id!r}, "
-                        f"metric_id={result.metric_id!r}, attempt_number={attempt_number}) "
-                        "already committed with different content"
+                        f"evaluation_attempts {key!r} already committed with different content"
                     )
                 conn.execute("ROLLBACK")
                 return False
             conn.execute(
                 """
                 INSERT INTO evaluation_attempts
-                    (run_id, case_id, metric_id, attempt_number, status, decision,
-                     content_hash, data, committed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (run_id, case_id, repetition_id, metric_id, binding_hash,
+                     attempt_number, scoring_id, status, decision, content_hash, data,
+                     committed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    result.run_id,
-                    result.case_id,
-                    result.metric_id,
-                    attempt_number,
+                    *key,
+                    result.scoring_id,
                     result.status.value,
                     result.decision.value,
                     digest,
@@ -534,6 +539,27 @@ class Storage:
         except BaseException:
             conn.execute("ROLLBACK")
             raise
+
+    def next_evaluation_attempt_number(
+        self, run_id: str, case_id: str, repetition_id: int, metric_id: str, binding_hash: str
+    ) -> int:
+        """Attempt N = the Nth time this binding scored this (case, repetition) of the run,
+        across scoring passes. Single-writer convention (ADR 0001): numbering is not safe
+        against a second concurrent writer on the same workspace."""
+        row = self.conn.execute(
+            "SELECT MAX(attempt_number) FROM evaluation_attempts WHERE run_id = ? AND "
+            "case_id = ? AND repetition_id = ? AND metric_id = ? AND binding_hash = ?",
+            (run_id, case_id, repetition_id, metric_id, binding_hash),
+        ).fetchone()
+        return 0 if row[0] is None else row[0] + 1
+
+    def list_evaluation_attempts(self, run_id: str) -> list[EvaluationResult]:
+        rows = self.conn.execute(
+            "SELECT data FROM evaluation_attempts WHERE run_id = ? "
+            "ORDER BY case_id, metric_id, attempt_number",
+            (run_id,),
+        ).fetchall()
+        return [EvaluationResult.model_validate_json(row["data"]) for row in rows]
 
     def commit_metric_result(self, result: EvaluationResult) -> bool:
         data = result.model_dump_json()
@@ -564,7 +590,15 @@ class Storage:
             ),
         )
 
-    def list_metric_results(self, run_id: str, case_id: str | None = None) -> list[EvaluationResult]:
+    def list_metric_results(
+        self, run_id: str, case_id: str | None = None, *, scoring_id: str | None = None
+    ) -> list[EvaluationResult]:
+        results = self._list_metric_results(run_id, case_id)
+        if scoring_id is None:
+            return results
+        return [r for r in results if r.scoring_id == scoring_id]
+
+    def _list_metric_results(self, run_id: str, case_id: str | None) -> list[EvaluationResult]:
         if case_id is not None:
             rows = self.conn.execute(
                 "SELECT data FROM metric_results WHERE run_id = ? AND case_id = ?",

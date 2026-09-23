@@ -1,0 +1,22 @@
+{
+  "$id": "aibench/1.0.0/FieldRequirement.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "A field an evaluator reads from the evaluation view.",
+  "properties": {
+    "non_empty": {
+      "default": true,
+      "title": "Non Empty",
+      "type": "boolean"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "title": "FieldRequirement",
+  "type": "object"
+}

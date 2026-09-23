@@ -20,7 +20,11 @@ import os
 import signal
 import subprocess
 import sys
-from typing import Any
+import threading
+import time
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import IO, Any
 
 if sys.platform == "win32":
     import ctypes
@@ -160,3 +164,106 @@ class ProcessTree:
         if sys.platform == "win32" and self._job is not None:
             _k32.CloseHandle(self._job)
             self._job = None
+
+
+_CONTAINED_READ_CHUNK = 65_536
+_CONTAINED_POLL_SECONDS = 0.05
+_CONTAINED_JOIN_SECONDS = 2.0
+
+
+@dataclass(frozen=True)
+class ContainedResult:
+    returncode: int | None
+    stdout: bytes
+    stderr: bytes
+    timed_out: bool
+    truncated: bool
+
+
+def run_contained(
+    argv: Sequence[str],
+    *,
+    timeout: float,
+    env: Mapping[str, str],
+    input_bytes: bytes = b"",
+    max_output_bytes: int = 1_048_576,
+) -> ContainedResult:
+    """Run a short-lived helper process under hard limits: wall-clock `timeout`, and at
+    most `max_output_bytes` kept per stream, enforced *while it runs* — once either stream
+    exceeds the cap the whole tree is killed and the excess is discarded, never buffered or
+    spooled. The tree is always killed at the end. Pipe readers are joined with a bounded
+    wait, so a descendant outside containment that keeps a pipe open cannot block us."""
+    proc = subprocess.Popen(  # argv list, never a shell
+        list(argv),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=dict(env),
+        **spawn_kwargs(),
+    )
+    tree = ProcessTree(proc.pid)
+    overflow = threading.Event()
+    kept: list[bytearray] = [bytearray(), bytearray()]
+
+    def drain(stream: IO[bytes], sink: bytearray) -> None:
+        total = 0
+        try:
+            while chunk := stream.read1(_CONTAINED_READ_CHUNK):  # type: ignore[attr-defined]
+                total += len(chunk)
+                room = max_output_bytes - len(sink)
+                if room > 0:
+                    sink.extend(chunk[:room])
+                if total > max_output_bytes:
+                    overflow.set()  # keep reading (and discarding) so the writer never blocks
+        except (OSError, ValueError):
+            pass  # pipe closed underneath us during cleanup
+
+    def feed() -> None:
+        assert proc.stdin is not None
+        try:
+            proc.stdin.write(input_bytes)
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+
+    assert proc.stdout is not None and proc.stderr is not None
+    threads = [
+        threading.Thread(target=drain, args=(proc.stdout, kept[0]), daemon=True),
+        threading.Thread(target=drain, args=(proc.stderr, kept[1]), daemon=True),
+        threading.Thread(target=feed, daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+
+    deadline = time.monotonic() + timeout
+    timed_out = False
+    try:
+        while proc.poll() is None and not overflow.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            overflow.wait(min(remaining, _CONTAINED_POLL_SECONDS))
+    finally:
+        tree.close()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        for thread in threads:
+            thread.join(timeout=_CONTAINED_JOIN_SECONDS)
+        for pipe in (proc.stdout, proc.stderr):
+            try:
+                pipe.close()
+            except OSError:
+                pass
+    return ContainedResult(
+        None if timed_out else proc.returncode,
+        bytes(kept[0]),
+        bytes(kept[1]),
+        timed_out,
+        overflow.is_set(),
+    )

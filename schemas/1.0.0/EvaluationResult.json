@@ -10,6 +10,60 @@
       "title": "Decision",
       "type": "string"
     },
+    "DecisionRule": {
+      "additionalProperties": false,
+      "description": "Harness-owned pass/fail rule using frozen thresholds.",
+      "properties": {
+        "categories": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "comparator": {
+          "enum": [
+            "is_true",
+            ">=",
+            ">",
+            "<=",
+            "<",
+            "==",
+            "in"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "rule_id": {
+          "default": "threshold",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "version": {
+          "default": "1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comparator"
+      ],
+      "title": "DecisionRule",
+      "type": "object"
+    },
     "ExecutionStatus": {
       "enum": [
         "ok",
@@ -19,6 +73,27 @@
         "cancelled"
       ],
       "title": "ExecutionStatus",
+      "type": "string"
+    },
+    "MetricDirection": {
+      "enum": [
+        "higher",
+        "lower",
+        "target",
+        "none"
+      ],
+      "title": "MetricDirection",
+      "type": "string"
+    },
+    "MetricScope": {
+      "enum": [
+        "case",
+        "episode",
+        "component",
+        "slice",
+        "run"
+      ],
+      "title": "MetricScope",
       "type": "string"
     },
     "MetricValue": {
@@ -52,6 +127,23 @@
   "$schemaVersion": "1.0.0",
   "additionalProperties": false,
   "properties": {
+    "attempt_number": {
+      "default": 0,
+      "title": "Attempt Number",
+      "type": "integer"
+    },
+    "binding_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Binding Hash"
+    },
     "case_id": {
       "title": "Case Id",
       "type": "string"
@@ -59,12 +151,35 @@
     "decision": {
       "$ref": "#/$defs/Decision"
     },
+    "direction": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MetricDirection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "evidence_refs": {
       "items": {
         "type": "string"
       },
       "title": "Evidence Refs",
       "type": "array"
+    },
+    "execution_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Execution Id"
     },
     "metric_id": {
       "title": "Metric Id",
@@ -89,6 +204,23 @@
       "default": null,
       "title": "Raw Artifact Ref"
     },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "repetition_id": {
+      "default": 0,
+      "title": "Repetition Id",
+      "type": "integer"
+    },
     "resources": {
       "title": "Resources"
     },
@@ -96,9 +228,41 @@
       "title": "Result Id",
       "type": "string"
     },
+    "rule": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DecisionRule"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "run_id": {
       "title": "Run Id",
       "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/MetricScope",
+      "default": "case"
+    },
+    "scoring_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scoring Id"
     },
     "status": {
       "$ref": "#/$defs/ExecutionStatus"

@@ -277,10 +277,68 @@ _0003_content_hash_columns = Migration(
     post_apply=_backfill_content_hash_columns,
 )
 
+
+def _backfill_evaluation_attempt_keys(conn: sqlite3.Connection) -> None:
+    """Fill the key columns `_0004` added from each row's stored `EvaluationResult` JSON."""
+    import json
+
+    rows = conn.execute("SELECT rowid, data FROM evaluation_attempts").fetchall()
+    for rowid, data in rows:
+        record = json.loads(data)
+        conn.execute(
+            "UPDATE evaluation_attempts SET repetition_id = ?, binding_hash = ?, "
+            "scoring_id = ? WHERE rowid = ?",
+            (
+                record.get("repetition_id", 0),
+                record.get("binding_hash") or "",
+                record.get("scoring_id"),
+                rowid,
+            ),
+        )
+
+
+# Evaluation attempts were keyed by (run, case, metric, attempt), so two bindings of one
+# metric, or two repetitions of one case, shared one attempt counter. Attempts are now
+# numbered per (run, case, repetition, metric, binding): attempt N means "the Nth time
+# this binding scored this execution". SQLite cannot alter a primary key, so the table is
+# rebuilt; existing rows keep their attempt numbers and gain their key values.
+_0004_evaluation_attempt_identity = Migration(
+    version=4,
+    name="evaluation_attempts_keyed_by_repetition_and_binding",
+    sql="""
+    CREATE TABLE evaluation_attempts_v4 (
+        run_id                TEXT NOT NULL REFERENCES runs(run_id),
+        case_id               TEXT NOT NULL,
+        repetition_id         INTEGER NOT NULL DEFAULT 0,
+        metric_id             TEXT NOT NULL,
+        binding_hash          TEXT NOT NULL DEFAULT '',
+        attempt_number        INTEGER NOT NULL,
+        scoring_id            TEXT,
+        status                TEXT NOT NULL,
+        decision              TEXT NOT NULL,
+        content_hash          TEXT NOT NULL,
+        data                  TEXT NOT NULL,
+        committed_at          TEXT NOT NULL,
+        PRIMARY KEY (run_id, case_id, repetition_id, metric_id, binding_hash, attempt_number)
+    );
+    INSERT INTO evaluation_attempts_v4
+        (run_id, case_id, metric_id, attempt_number, status, decision, content_hash, data,
+         committed_at)
+    SELECT run_id, case_id, metric_id, attempt_number, status, decision, content_hash, data,
+           committed_at
+    FROM evaluation_attempts;
+    DROP TABLE evaluation_attempts;
+    ALTER TABLE evaluation_attempts_v4 RENAME TO evaluation_attempts;
+    CREATE INDEX idx_evaluation_attempts_scoring ON evaluation_attempts(scoring_id);
+    """,
+    post_apply=_backfill_evaluation_attempt_keys,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
     _0003_content_hash_columns,
+    _0004_evaluation_attempt_identity,
 )
 
 

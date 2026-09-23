@@ -50,9 +50,7 @@ def test_reopening_database_reapplies_migrations_idempotently(tmp_path) -> None:
     assert applied_again == []
     tables = {
         row[0]
-        for row in conn2.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
+        for row in conn2.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     }
     assert "runs" in tables
     conn2.close()
@@ -63,9 +61,7 @@ def test_expected_tables_exist_after_migration() -> None:
     apply_migrations(conn)
     tables = {
         row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     }
     expected = {
         "datasets",
@@ -136,9 +132,7 @@ def test_a_failing_migration_leaves_no_partial_schema() -> None:
 
     tables = {
         row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     }
     assert "should_not_persist" not in tables
     assert 9999 not in applied_versions(conn)
@@ -192,9 +186,9 @@ def test_upgrading_a_pre_remediation_database_backfills_content_hash_columns() -
     finally:
         migrations_module.MIGRATIONS = original_migrations
 
-    # Upgrade: apply the full, current migration set, including migration 3.
+    # Upgrade: apply the full, current migration set from migration 3 onward.
     applied = apply_migrations(conn)
-    assert applied == [3]
+    assert applied == [3, 4]
 
     db = Database(conn)
     storage = Storage(db)
@@ -225,3 +219,52 @@ def test_upgrading_a_pre_remediation_database_backfills_content_hash_columns() -
         storage.commit_artifact_unverified(legacy_artifact.model_copy(update={"size_bytes": 999}))
 
     db.close()
+
+
+def test_migration_4_rekeys_existing_evaluation_attempts() -> None:
+    """A database scored before migration 4 keeps its attempts, which gain repetition,
+    binding and scoring keys from their stored JSON; rescoring then continues numbering."""
+    from aibench.core.models import Decision, EvaluationResult, ExecutionStatus, RunManifest
+    from aibench.storage import migrations as migrations_module
+    from aibench.storage.db import Database
+    from aibench.storage.repositories import Storage
+
+    conn = _connect_in_memory()
+    conn.row_factory = sqlite3.Row  # as Database.open does; Storage reads rows by name
+    original = migrations_module.MIGRATIONS
+    try:
+        migrations_module.MIGRATIONS = tuple(m for m in original if m.version < 4)  # type: ignore[assignment]
+        apply_migrations(conn)
+    finally:
+        migrations_module.MIGRATIONS = original  # type: ignore[assignment]
+    legacy = EvaluationResult(
+        result_id="old",
+        run_id="r1",
+        case_id="c1",
+        metric_id="native.exact_match",
+        metric_version="1.0.0",
+        status=ExecutionStatus.OK,
+        decision=Decision.PASS,
+        repetition_id=2,
+        binding_hash="sha256:b",
+        scoring_id="score-old",
+    )
+    storage = Storage(Database(conn))
+    storage.commit_run(
+        RunManifest(run_id="r1", dataset_hash="d", application_hash="a", plan_hash="p")
+    )
+    conn.execute(
+        "INSERT INTO evaluation_attempts (run_id, case_id, metric_id, attempt_number, status, "
+        "decision, content_hash, data, committed_at) VALUES ('r1','c1','native.exact_match',0,"
+        "'ok','pass','h',?, 'now')",
+        (legacy.model_dump_json(),),
+    )
+    assert apply_migrations(conn) == [4]
+    row = conn.execute(
+        "SELECT repetition_id, binding_hash, scoring_id FROM evaluation_attempts"
+    ).fetchone()
+    assert tuple(row) == (2, "sha256:b", "score-old")
+    assert storage.list_evaluation_attempts("r1") == [legacy]
+    assert (
+        storage.next_evaluation_attempt_number("r1", "c1", 2, "native.exact_match", "sha256:b") == 1
+    )
