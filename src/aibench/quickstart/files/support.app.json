@@ -1,0 +1,19 @@
+{
+  "application_id": "quickstart-support",
+  "runner": "cli",
+  "target": "support_app.py",
+  "effects": "none",
+  "revision": "quickstart-1",
+  "transport": {
+    "kind": "cli",
+    "argv": [
+      "python",
+      "support_app.py"
+    ],
+    "timeout_seconds": 30
+  },
+  "output_binding": {
+    "output": "/answer",
+    "retrieved_context": "/retrieved"
+  }
+}

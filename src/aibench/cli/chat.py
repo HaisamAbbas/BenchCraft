@@ -318,6 +318,8 @@ async def _send(
             payload: dict[str, Any] = {"session_id": controller.session_id, **result.as_dict()}
             ok = result.ok
             actions = [result.data] if result.kind == "action" else []
+            if result.kind == "confirm":  # /run showed the plan first: nothing was started
+                actions = [{"state": "confirmation_required"}]
             if not json_output:
                 render_result(console, result)
         else:
@@ -352,8 +354,8 @@ async def _send(
     states = {a.get("state") for a in actions}
     if run_codes:
         code = max(run_codes, key=_EXIT_SEVERITY.index)
-    elif "denied" in states:
-        code = EXIT_DENIED
+    elif states & {"denied", "confirmation_required"}:
+        code = EXIT_DENIED  # authorization required: nothing ran
     elif not ok or states & {"rejected", "blocked"}:
         code = EXIT_INVALID
     else:

@@ -1,0 +1,51 @@
+{
+  "plan_id": "quickstart-support",
+  "dataset": "dataset.jsonl",
+  "application": "support.app.json",
+  "metrics": [
+    {
+      "metric": "native.exact_match",
+      "params": {
+        "case_sensitive": false,
+        "collapse_whitespace": true
+      }
+    },
+    {
+      "metric": "native.json_schema",
+      "params": {
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parse_text": false
+      }
+    }
+  ],
+  "repetitions": 1,
+  "concurrency": {
+    "application": 2,
+    "evaluation": 2
+  },
+  "retry": {
+    "max_attempts": 2,
+    "initial_backoff_seconds": 0.2,
+    "max_backoff_seconds": 1
+  },
+  "budgets": {
+    "max_application_calls": 30,
+    "max_evaluator_calls": 60,
+    "max_wall_seconds": 600
+  },
+  "gates": [
+    {
+      "gate_id": "correct-answers",
+      "binding": 0,
+      "min_pass_rate": 0.9
+    },
+    {
+      "gate_id": "answers-present",
+      "binding": 1,
+      "min_completed_coverage": 0.9
+    }
+  ]
+}

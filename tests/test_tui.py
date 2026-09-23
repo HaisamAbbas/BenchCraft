@@ -125,7 +125,7 @@ def test_slash_commands_use_real_session_services_and_cover_the_contract(tmp_pat
         case = await commands.run("/case a")
         assert case.kind == "case" and case.data["case_id"] == "a", case.data
         partial = ctl.report(run_id)
-        assert partial["partial"] is True and partial["provisional"] is False
+        assert partial["run"]["partial"] is True and partial["run"]["provisional"] is False
         final_status = ctl.run_status(run_id)
         assert final_status["partial"] is True and final_status["provisional"] is False
 

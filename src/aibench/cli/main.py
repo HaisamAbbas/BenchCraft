@@ -8,10 +8,13 @@ import typer
 
 from aibench import __version__
 from aibench.cli import app as app_cli
+from aibench.cli import benchmark as benchmark_cli
 from aibench.cli import chat as chat_cli
 from aibench.cli import dataset as dataset_cli
 from aibench.cli import inspect as inspect_cli
 from aibench.cli import plan as plan_cli
+from aibench.cli import project as project_cli
+from aibench.cli import report as report_cli
 from aibench.cli import run as run_cli
 from aibench.cli import runs as runs_cli
 from aibench.cli import score as score_cli
@@ -34,6 +37,12 @@ app.command("run")(run_cli.run_plan)
 app.command("resume")(run_cli.resume)
 app.command("evaluate")(run_cli.evaluate)
 app.command("chat")(chat_cli.chat)
+app.command("init")(project_cli.init)
+app.command("doctor")(project_cli.doctor)
+app.command("benchmark")(benchmark_cli.benchmark)
+app.command("report")(report_cli.report)
+app.command("compare")(project_cli.compare)
+app.add_typer(project_cli.plugins_app, name="plugins")
 runs_cli.app.command("status")(run_cli.status)
 
 
@@ -62,6 +71,7 @@ def main(
                 provider_config=None,
                 send=None,
                 json_output=False,
+                objectives=[],
             )
             return
         typer.echo(ctx.get_help())

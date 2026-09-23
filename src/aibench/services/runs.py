@@ -54,7 +54,6 @@ from aibench.core.models import (
     RunManifest,
     WorkItem,
     WorkItemState,
-    deep_unfreeze,
 )
 from aibench.core.plans import ExecutablePlan
 from aibench.engine.budget import BudgetLedger
@@ -71,16 +70,14 @@ from aibench.engine.engine import (
     work_counts,
 )
 from aibench.engine.retry import classify_execution
-from aibench.evaluators.protocol import rule_for
 from aibench.registry import (
     BindingValidationError,
     EvaluatorRegistry,
     RegistryError,
-    ResolvedMetric,
 )
 from aibench.runners import LoadedApplication, create_runner
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
-from aibench.services.scoring import ScoringReport, score_recorded_run
+from aibench.services.scoring import ScoringReport, metric_profiles, score_recorded_run
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.repositories import RunLease, Storage
 
@@ -121,22 +118,6 @@ def _approval_scope(run_id: str, manifest: RunManifest, policy_hash: str) -> str
             "policy_hash": policy_hash,
         }
     )
-
-
-def metric_profiles(metrics: list[ResolvedMetric]) -> dict[str, dict[str, Any]]:
-    """What reports need to interpret each binding's results, frozen at scoring time:
-    binding hash -> manifest, parameters and decision rule."""
-    profiles: dict[str, dict[str, Any]] = {}
-    for metric in metrics:
-        rule = rule_for(metric.binding, metric.manifest)
-        profiles[metric.binding_hash] = {
-            "metric": metric.binding.metric,
-            "manifest": metric.manifest.model_dump(mode="json"),
-            "params": deep_unfreeze(metric.binding.params) or {},
-            "rule": rule.model_dump(mode="json") if rule else None,
-            "source": "frozen_with_run",
-        }
-    return profiles
 
 
 def create_run(
@@ -382,7 +363,7 @@ _SESSION_EVENTS = ("run_session_ended", "run_session_aborted", "run_session_lost
 
 
 def _replay_prior_spend(
-    storage: Storage, run_id: str, ledger: BudgetLedger, scoring_id: str | None
+    storage: Storage, run_id: str, ledger: BudgetLedger, scoring_id: str | None = None
 ) -> None:
     """Replay every committed attempt of earlier sessions into the ledger, so hard limits,
     tokens and known costs carry across sessions of the same run. Only the run's own
@@ -651,7 +632,7 @@ async def evaluate_run(
     denials = evaluator_denials(policy, [m.manifest for m in metrics])
     if denials:
         raise PolicyDenied(denials)
-    report = await score_recorded_run(
+    return await score_recorded_run(
         storage=storage,
         artifacts=artifacts,
         registry=registry,
@@ -660,16 +641,6 @@ async def evaluate_run(
         timeout_seconds=plan.evaluation_timeout_seconds,
         application=application,
     )
-    storage.append_run_event(
-        run_id,
-        "scoring_pass",
-        {
-            "scoring_id": report.scoring_id,
-            "plan_id": plan.plan_id,
-            "metric_profiles": metric_profiles(metrics),
-        },
-    )
-    return report
 
 
 def outcome_json(outcome: RunOutcome) -> dict[str, Any]:

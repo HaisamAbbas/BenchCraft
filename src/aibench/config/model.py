@@ -39,6 +39,7 @@ class AibenchConfig(BaseModel):
     dataset_path: str | None = None
     application_target: str | None = None
     policy_path: str | None = None
+    plan_path: str | None = None  # the executable plan `aibench run` uses (Prompt 11)
     secrets: dict[str, SecretRef] = Field(default_factory=dict)
     extensions: dict[str, object] = Field(default_factory=dict)
 

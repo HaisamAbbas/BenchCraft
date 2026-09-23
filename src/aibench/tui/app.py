@@ -39,7 +39,6 @@ from rich.console import Console
 
 from aibench.conversation.agent import ConversationAgent, TurnEvent, TurnLimits, TurnOutcome
 from aibench.planning.planner import PlannerProvider
-from aibench.security.redaction import sanitize_value
 from aibench.services.runs import RunError
 from aibench.sessions.controller import SessionController
 from aibench.tui import render
@@ -124,7 +123,7 @@ def render_result(console: Console, result: CommandResult) -> None:
     elif kind == "budget":
         render.budget(console, data)
     elif kind == "report":
-        console.print_json(data=sanitize_value(data))
+        render.report(console, data)
     elif kind == "sessions":
         for row in data["sessions"]:
             mark = "*" if row["current"] else " "

@@ -331,6 +331,57 @@
       "title": "PluginEnvironmentRef",
       "type": "object"
     },
+    "ReleaseGate": {
+      "additionalProperties": false,
+      "description": "A predeclared release gate on one metric binding (\u00a712), checked against the run's\nstored results. Both thresholds use every selected case as the denominator, so losing\nobservations can only fail a gate, never pass it:\n- `min_pass_rate`: passing decisions / selected;\n- `min_completed_coverage`: completed evaluations / selected.\nA gate is decided only for a finished run; a partial snapshot leaves it undecided.",
+      "properties": {
+        "binding": {
+          "minimum": 0,
+          "title": "Binding",
+          "type": "integer"
+        },
+        "gate_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Gate Id",
+          "type": "string"
+        },
+        "min_completed_coverage": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Completed Coverage"
+        },
+        "min_pass_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Pass Rate"
+        }
+      },
+      "required": [
+        "gate_id",
+        "binding"
+      ],
+      "title": "ReleaseGate",
+      "type": "object"
+    },
     "RetryPolicy": {
       "additionalProperties": false,
       "description": "Engine-level retries for retryable failures only (\u00a715). Total attempts per work item,\nincluding the first; delays grow exponentially with jitter and are capped.",
@@ -392,6 +443,14 @@
       "maximum": 3600,
       "title": "Evaluation Timeout Seconds",
       "type": "number"
+    },
+    "gates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ReleaseGate"
+      },
+      "title": "Gates",
+      "type": "array"
     },
     "metrics": {
       "default": [],

@@ -296,6 +296,23 @@ def _resolve_metrics(analysis: PlanAnalysis, *, plugins_not_loaded: str | None) 
         _check_aggregation(analysis, metric, subject)
 
 
+def _check_gates(analysis: PlanAnalysis) -> None:
+    """A pass-rate gate needs a decision rule on its binding: without one every decision is
+    indeterminate and the gate could only ever fail (§12: gates are predeclared)."""
+    for gate in analysis.plan.gates:
+        binding = analysis.plan.metrics[gate.binding]
+        metric = next((m for m in analysis.metrics if m.binding == binding), None)
+        if metric is None or gate.min_pass_rate is None:
+            continue
+        if (binding.rule or metric.manifest.default_rule) is None:
+            analysis.add(
+                "invalid",
+                f"gate {gate.gate_id!r}: {binding.metric} has no pass/fail rule, so a pass rate "
+                "cannot be measured; add a rule to the binding or use min_completed_coverage",
+                f"gate:{gate.gate_id}",
+            )
+
+
 def _check_aggregation(analysis: PlanAnalysis, metric: ResolvedMetric, subject: str) -> None:
     manifest = metric.manifest
     if manifest.aggregation == "none":
@@ -491,6 +508,7 @@ def analyze_plan(
     else:
         not_loaded = None
     _resolve_metrics(analysis, plugins_not_loaded=not_loaded)
+    _check_gates(analysis)
     for denial in evaluator_denials(effective, [m.manifest for m in analysis.metrics]):
         analysis.add("missing_permission", denial, "evaluators")
     _check_coverage(analysis)

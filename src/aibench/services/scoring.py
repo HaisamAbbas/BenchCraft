@@ -89,6 +89,22 @@ class ScoringReport:
     warnings: list[str] = field(default_factory=list)
 
 
+def metric_profiles(metrics: Sequence[ResolvedMetric]) -> dict[str, dict[str, Any]]:
+    """What reports need to interpret each binding's results, frozen at scoring time:
+    binding hash -> manifest, parameters and decision rule."""
+    profiles: dict[str, dict[str, Any]] = {}
+    for metric in metrics:
+        rule = rule_for(metric.binding, metric.manifest)
+        profiles[metric.binding_hash] = {
+            "metric": metric.binding.metric,
+            "manifest": metric.manifest.model_dump(mode="json"),
+            "params": deep_unfreeze(metric.binding.params) or {},
+            "rule": rule.model_dump(mode="json") if rule else None,
+            "source": "frozen_with_run",
+        }
+    return profiles
+
+
 def select_final_executions(executions: Sequence[ExecutionResult]) -> list[ExecutionResult]:
     """One execution per (case, repetition): the highest attempt. Earlier attempts stay
     stored; they are simply not the scored one (§15: declare the final-attempt rule)."""
@@ -154,6 +170,12 @@ async def score_recorded_run(
         cases.setdefault(stored.case_id, []).append(stored)
 
     report = ScoringReport(scoring_id=f"score-{uuid.uuid4().hex[:12]}", run_id=run_id)
+    # Recorded first, so a report can interpret this pass's results even if it is cut short.
+    storage.append_run_event(
+        run_id,
+        "scoring_pass",
+        {"scoring_id": report.scoring_id, "metric_profiles": metric_profiles(resolved)},
+    )
     for metric in resolved:
         scorer = BindingScorer(
             storage,

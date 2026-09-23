@@ -35,6 +35,10 @@ aibench = "aibench.cli.main:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# `aibench init` copies these into a new project (11-T4).
+"aibench.quickstart" = ["files/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

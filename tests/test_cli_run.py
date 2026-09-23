@@ -124,17 +124,28 @@ def test_interrupted_run_resumes_through_the_cli_and_rescoring_never_invokes(
 
 
 def test_exit_codes_map_run_outcomes() -> None:
-    from aibench.cli.run import _exit_code
-    from aibench.engine.engine import RunOutcome
+    """§13, shared by `run`, `resume`, `benchmark --auto` and `chat --send`."""
+    from aibench.services.reports import outcome_summary
+    from aibench.services.runs import run_exit_code
 
-    def outcome(state: RunState, counts: dict[str, dict[str, int]]) -> RunOutcome:
-        return RunOutcome(state=state, counts=counts, budget={}, stop_reason=None)
+    def code(state: RunState, status: str, counts: dict, gates: tuple[str, ...] = ()) -> int:
+        report = {
+            "run": {"status": status},
+            "work": {"counts": counts},
+            "gates": [{"gate_id": f"g{i}", "status": g} for i, g in enumerate(gates)],
+        }
+        report["outcome"] = outcome_summary(report)
+        return run_exit_code(state, report)
 
-    assert _exit_code(outcome(RunState.COMPLETED, {"execution": {"succeeded": 2}})) == 0
-    assert _exit_code(outcome(RunState.INTERRUPTED, {"execution": {"pending": 2}})) == 130
-    assert _exit_code(outcome(RunState.CANCELLED, {"execution": {"cancelled": 1}})) == 3
+    ok = {"execution": {"succeeded": 2}}
+    assert code(RunState.COMPLETED, "completed", ok) == 0
+    assert code(RunState.COMPLETED, "completed", ok, ("pass", "pass")) == 0
+    assert code(RunState.COMPLETED, "completed", ok, ("pass", "fail")) == 1
+    assert code(RunState.INTERRUPTED, "interrupted", {"execution": {"pending": 2}}) == 130
+    assert code(RunState.CANCELLED, "cancelled", {"execution": {"cancelled": 1}}) == 3
     for state in ("failed", "blocked", "unknown_effect"):
-        assert _exit_code(outcome(RunState.COMPLETED, {"execution": {state: 1}})) == 3
+        # incompleteness wins over a failed gate; both stay in the JSON output
+        assert code(RunState.COMPLETED, "completed", {"execution": {state: 1}}, ("fail",)) == 3
 
 
 def test_read_commands_never_create_a_workspace(tmp_path: Path) -> None:

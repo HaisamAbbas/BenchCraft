@@ -353,6 +353,9 @@ def test_the_assistant_has_no_terminal_file_or_network_tool(tmp_path: Path) -> N
         "get_run_status",
         "list_failures",
         "get_case_evidence",
+        "get_report",
+        # Writes only the run's own report under .aibench/reports/; it takes no path.
+        "export_report",
         "request_action",
     }
     h = SessionHarness(tmp_path)
@@ -440,7 +443,7 @@ def test_without_a_model_messages_get_guidance_and_commands_still_work(tmp_path:
 
     async def scenario() -> None:
         outcome = await agent.handle_message("run it")
-        assert outcome.actions == [] and "Commands still work" in outcome.text
+        assert outcome.actions == [] and "Slash commands still work" in outcome.text
         action = await ctl.start_run(action_id="act-1", expected_revision=1)
         assert action.state is ActionState.DONE
         await ctl.wait_for_run(action.run_id)

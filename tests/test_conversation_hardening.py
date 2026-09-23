@@ -353,7 +353,7 @@ def test_deleting_a_session_keeps_its_runs_and_their_results(tmp_path: Path) -> 
     from aibench.services.runs import run_report
 
     after = run_report(storage, artifacts, run_id)
-    assert after["metrics"] == report_before["metrics"]
+    assert after["scoring_passes"] == report_before["scoring_passes"]
     assert storage.list_run_events(run_id)
     storage.db.close()
 

@@ -194,6 +194,78 @@ def budget(console: Console, data: dict[str, Any]) -> None:
         )
 
 
+def _of(numerator: int | None, denominator: int | None) -> str:
+    if numerator is None or denominator is None:
+        return "unknown"
+    if denominator == 0:
+        return f"{numerator}/0"
+    return f"{numerator}/{denominator} ({100 * numerator / denominator:.1f}%)"
+
+
+def report(console: Console, data: dict[str, Any]) -> None:
+    """`/report`: the report's aggregates, each count with its denominator."""
+    label = (
+        " [yellow](partial snapshot: not finished)[/yellow]"
+        if data.get("provisional")
+        else " [yellow](partial results)[/yellow]"
+        if data.get("partial")
+        else ""
+    )
+    out(console, f"[bold]report for run {safe(data['run_id'])}[/bold]: {data['status']}{label}")
+    out(console, f"  {safe(data['basis'])}")
+    for gate in data["gates"]:
+        colour = {"pass": "green", "fail": "red"}.get(gate["status"], "yellow")
+        reason = f": {gate['reason']}" if gate.get("reason") else ""
+        out(
+            console,
+            f"  gate {safe(gate['gate_id'])}: [{colour}]{gate['status']}[/{colour}]{safe(reason)}",
+        )
+    for m in data["metrics"]:
+        d = m["decisions"]
+        out(
+            console,
+            f"  {safe(m['metric'])}: pass {_of(d.get('pass', 0), m['selected'])} of selected, "
+            f"completed {_of(m['completed'], m['selected'])}; evaluator errors "
+            f"{m['evaluator_errors']}, not applicable {m['not_applicable']}, unavailable "
+            f"{m['unavailable']}, cancelled {m.get('cancelled', 0)}, pending {m['pending']}",
+        )
+    app = data["application"]
+    latency = data["latency_ms"]
+    out(
+        console,
+        f"  application: completed {_of(app['completed'], app['planned'] or app['recorded'])}, "
+        f"failed {app['failed']}; successful-request latency "
+        + (
+            f"p50 {latency['p50_ms']} ms, p95 {latency['p95_ms']} ms over "
+            f"{latency['successful_requests']}"
+            if latency["successful_requests"]
+            else "not measured (no successful request)"
+        ),
+    )
+    for role, cost in data["cost"].items():
+        if cost.get("accounting") in (None, "not_attributed"):
+            continue
+        if cost["accounting"] == "no_calls":
+            spent = "no calls"
+        elif cost["total_cost_usd"] is not None:
+            spent = f"USD {cost['total_cost_usd']:g} (complete)"
+        elif cost["accounting"] == "unknown":
+            spent = "unknown (no call reported its cost)"
+        else:
+            spent = f"at least USD {cost['known_cost_usd']:g} ({cost['accounting']})"
+        out(console, f"  {safe(role)} cost: {safe(spent)}")
+    cases = data["non_passing_cases"]
+    if cases["total"]:
+        more = cases["total"] - len(cases["first"])
+        tail = f" and {more} more" if more else ""
+        out(
+            console,
+            f"  non-passing cases: {safe(', '.join(cases['first']))}{tail} (/case CASE_ID)",
+        )
+    for fmt, path in data.get("exported", {}).items():
+        out(console, f"  wrote {safe(fmt)}: {safe(path)}")
+
+
 def tool_call(name: str, args: dict[str, Any]) -> str:
     shown = ", ".join(f"{k}={v}" for k, v in args.items() if k not in ("patch", "user_quote"))
     if "patch" in args:
@@ -214,4 +286,6 @@ def tool_result(name: str, data: dict[str, Any]) -> str | None:
         return safe(f"    {data.get('kind')}: {data.get('state')}{run}{reason}"[:200])
     if data.get("status") == "rejected":
         return safe(f"    rejected: {'; '.join(data.get('problems', []))}"[:200])
+    if name == "export_report" and data.get("paths"):
+        return safe("    wrote " + ", ".join(data["paths"].values()))
     return None

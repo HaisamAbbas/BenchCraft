@@ -18,6 +18,7 @@ from typing import Any
 
 from aibench.core.errors import AibenchError
 from aibench.core.sessions import ActionKind
+from aibench.services.reports import FORMATS
 from aibench.sessions.controller import SessionController
 
 COMMANDS: dict[str, str] = {
@@ -31,7 +32,7 @@ COMMANDS: dict[str, str] = {
     "/failures": "failed and errored results of the current run",
     "/case": "/case CASE_ID - one case's evidence",
     "/budget": "ceilings, committed spend and unknown accounting",
-    "/report": "the current run's machine-readable summary",
+    "/report": "/report [html|markdown|json] - the current run's report, from stored facts",
     "/sessions": "sessions of this project",
     "/new": "start a fresh session in this project",
     "/exit": "leave; an active run stops dispatching and stays resumable",
@@ -157,8 +158,21 @@ class Commands:
     async def _budget(self, _: str) -> CommandResult:
         return CommandResult("/budget", "budget", self.controller.budget())
 
-    async def _report(self, _: str) -> CommandResult:
-        return CommandResult("/report", "report", self.controller.report())
+    async def _report(self, argument: str) -> CommandResult:
+        """Render the current run's report from stored facts: a terminal summary, and the
+        report files (HTML and JSON by default; `/report markdown` etc. to choose)."""
+        formats = tuple(argument.split()) or ("html", "json")
+        unknown = [f for f in formats if f not in FORMATS]
+        if unknown:
+            return CommandResult(
+                "/report",
+                "error",
+                {"error": f"unknown format {' '.join(unknown)}; use html, markdown or json"},
+                ok=False,
+            )
+        exported = self.controller.export_report(formats=formats)
+        facts = self.controller.report_facts(exported["run_id"])
+        return CommandResult("/report", "report", {**facts, "exported": exported["paths"]})
 
     async def _sessions(self, _: str) -> CommandResult:
         root = self.controller.session.project_root

@@ -115,6 +115,26 @@ class PluginEnvironmentRef(FrozenModel):
     secret_env: FrozenSecretRefMap = Field(default_factory=dict)
 
 
+class ReleaseGate(FrozenModel):
+    """A predeclared release gate on one metric binding (§12), checked against the run's
+    stored results. Both thresholds use every selected case as the denominator, so losing
+    observations can only fail a gate, never pass it:
+    - `min_pass_rate`: passing decisions / selected;
+    - `min_completed_coverage`: completed evaluations / selected.
+    A gate is decided only for a finished run; a partial snapshot leaves it undecided."""
+
+    gate_id: str = Field(min_length=1, max_length=100)
+    binding: int = Field(ge=0)  # index into the plan's `metrics`
+    min_pass_rate: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    min_completed_coverage: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _has_threshold(self) -> ReleaseGate:
+        if self.min_pass_rate is None and self.min_completed_coverage is None:
+            raise ValueError(f"gate {self.gate_id!r} needs min_pass_rate or min_completed_coverage")
+        return self
+
+
 class ExecutablePlan(FrozenModel):
     schema_version: str = SCHEMA_VERSION
     plan_id: str = Field(min_length=1, max_length=200)
@@ -128,6 +148,7 @@ class ExecutablePlan(FrozenModel):
     budgets: BudgetLimits = Field(default_factory=BudgetLimits)
     evaluation_timeout_seconds: float = Field(default=60.0, gt=0, le=3600)
     plugin_environments: tuple[PluginEnvironmentRef, ...] = ()
+    gates: tuple[ReleaseGate, ...] = ()
 
     @model_validator(mode="after")
     def _backoff_bounds(self) -> ExecutablePlan:
@@ -135,4 +156,13 @@ class ExecutablePlan(FrozenModel):
             raise ValueError("retry.initial_backoff_seconds exceeds retry.max_backoff_seconds")
         if len(set(self.selection.case_ids)) != len(self.selection.case_ids):
             raise ValueError("selection.case_ids contains duplicates")
+        ids = [g.gate_id for g in self.gates]
+        if len(set(ids)) != len(ids):
+            raise ValueError("gates contain duplicate gate_id values")
+        for gate in self.gates:
+            if gate.binding >= len(self.metrics):
+                raise ValueError(
+                    f"gate {gate.gate_id!r} refers to metrics[{gate.binding}], but the plan "
+                    f"has {len(self.metrics)} metric binding(s)"
+                )
         return self

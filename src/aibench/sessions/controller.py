@@ -30,7 +30,6 @@ import asyncio
 import contextlib
 import hashlib
 import json
-import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -61,6 +60,7 @@ from aibench.core.sessions import (
 from aibench.engine.compile import PlanInvalid, PolicyDenied, compile_plan, load_policy
 from aibench.engine.engine import RunController, RunOutcome
 from aibench.planning.planner import PlanningInputs
+from aibench.reporting.aggregation import reason_code
 from aibench.security.policy import ExecutionPolicy
 from aibench.security.redaction import sanitize
 from aibench.services.reports import build_report, export_report, report_dir, report_facts
@@ -141,16 +141,6 @@ def _age(record: Any) -> float:
 
 def _stable_seed(session_id: str) -> int:
     return int(hashlib.sha256(session_id.encode()).hexdigest()[:8], 16) % (2**31)
-
-
-def reason_code(reason: str | None) -> str | None:
-    """The machine code at the start of a result reason (e.g. `not_applicable`), or None.
-    Free text (a judge's explanation, an application's error) may quote case content, so
-    only a code is shown where case content is withheld."""
-    if not reason:
-        return None
-    code = reason.split(":", 1)[0].strip()
-    return code if re.fullmatch(r"[a-z][a-z0-9_]{0,40}", code) else None
 
 
 class SessionController:
@@ -1007,7 +997,8 @@ class SessionController:
         return {
             "run_id": run["run_id"],
             "status": run["status"],
-            "partial": not run["finished"],
+            "provisional": run["provisional"],
+            "partial": run["partial"],
             "as_of_event_sequence": document["as_of_event_sequence"],
             "paths": paths,
             "outcome": document["outcome"],

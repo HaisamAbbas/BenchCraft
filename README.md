@@ -4,6 +4,17 @@ Conversational CLI for AI application benchmarking. See `docs/spec/implementatio
 for the authoritative specification and `docs/engineering/implementation-contract.md` for
 the engineering process this repository follows.
 
+## Quickstart
+
+```bash
+aibench init support-bench && cd support-bench && aibench doctor
+aibench chat --new --objective "answers are correct"     # then /plan, /run, /report
+```
+
+This creates a 10-case local project with a fixture app and opens the benchmark
+conversation. See [docs/quickstart.md](docs/quickstart.md)
+and, for what is and isn't supported, [docs/support.md](docs/support.md).
+
 ## Development setup
 
 ```bash

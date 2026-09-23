@@ -65,6 +65,15 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §14, §16 Redaction | Secrets and terminal control/bidi content removed from history, model input and rendering; emoji codes never substituted in data | 10 | 10-G4 |
 | §14 Session deletion | Deleting a conversation keeps runs, results, artifacts and events | 10 | 10-G5 |
 | §12–14 | Evidence reports, command composition, packaging | 11 | 11-G1..G5 |
+| §3, §13 `report` | Reports rendered from stored facts only (no app, evaluator or plugin loaded); JSON, Markdown, static HTML | 11 | 11-G1 |
+| §12 Aggregation | Per-binding metric profiles (frozen with the run or rescoring pass); selected/eligible/attempted/completed/error/NA/unavailable/pending denominators; fractions shown with percentages; no overall score | 11 | 11-G2 |
+| §12 Latency, cost | Successful-request p50/p95 (nearest rank) with definition, failures/timeouts separate; observed cost with accounting completeness, no total when incomplete | 11 | 11-G2 |
+| §12 Release gates | Predeclared plan gates over selected cases; undecided on partial snapshots; exit code 1 | 11 | 11-G2, 11-G4 |
+| §14, §16 Report safety | Sanitized, escaped HTML/Markdown with CSP; raw evaluator artifacts referenced by ID/digest only; `--no-content` | 11 | 11-G2 |
+| §3, §8 Conversational analysis | `get_report` / `export_report` tools; numeric claims linked to queries and unverified numbers flagged; hypotheses and partial snapshots labelled | 11 | 11-G3 |
+| §3, §13 Commands | `init`, `doctor`, `benchmark` (interactive, `--non-interactive`, `--auto --policy`), `run DIR`, `report`, `plugins list`; `compare` reports unsupported | 11 | 11-G4 |
+| §13 Exit codes | One mapping for `run`, `resume`, `benchmark --auto`, `chat --send` (0/1/2/3/4/130) | 11 | 11-G4 |
+| §17 Quickstart, packaging | 10-case quickstart as package data; quickstart and support docs; secret references only; clean-install smoke | 11 | 11-G3, 11-G5 |
 | §17, §23–24 | MVP acceptance validation | 12 | 12-G1..G5 |
 | §17–18, §22–24 | Release candidate and pilot handoff | 13 | 13-G1..G5 |
 | §9, §18 (Phase 2) | Second evaluator ecosystem, comparisons | 14 (deferred) | 14-G1..G4 |

@@ -1,7 +1,14 @@
-"""`aibench run --plan`, `resume`, `evaluate`, `runs status` (06-T4).
+"""`aibench run`, `resume`, `evaluate`, `runs status` (06-T4, 11-T3).
 
-Exit codes (§13): 0 complete; 2 invalid input or plan; 3 incomplete (failures, unknown
-effects, blocked or cancelled work, evaluation errors); 4 authorization required (policy
+`aibench run --plan FILE` runs that plan. Without `--plan`, the plan comes from the project
+config (`plan_path` in `aibench.json`/`config.yaml`, see `aibench init`): `aibench run DIR`
+uses DIR's config, and `aibench run DATASET` uses the current directory's config and checks
+that its plan is bound to that dataset (a dataset alone cannot identify an application).
+
+Exit codes (§13, shared with the conversation via `services.runs.run_exit_code`):
+0 complete with every release gate satisfied; 1 complete with a failed gate; 2 invalid
+input or plan; 3 incomplete (failures, unknown effects, blocked or cancelled work,
+evaluation errors), which wins over gate failures; 4 authorization required (policy
 denied); 130 interrupted (resumable with `aibench resume RUN_ID`).
 
 Ctrl+C during a run: the first press stops new dispatch, records in-flight outcomes and
@@ -20,24 +27,34 @@ from rich.console import Console
 from rich.markup import escape
 
 from aibench.core.errors import AibenchError
-from aibench.engine.compile import PlanInvalid, PolicyDenied, compile_plan, load_policy
+from aibench.engine.compile import (
+    PlanInvalid,
+    PolicyDenied,
+    compile_plan,
+    load_plan,
+    load_policy,
+)
 from aibench.engine.engine import RunController, RunOutcome, RunState
+from aibench.services.reports import build_report
 from aibench.services.runs import (
+    EXIT_DENIED,
+    EXIT_INTERRUPTED,
+    EXIT_INVALID,
     RunError,
     create_run,
     evaluate_run,
     execute_run,
     outcome_json,
+    run_exit_code,
     run_status,
 )
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
+from aibench.tui.render import safe
 
 console = Console()
 err_console = Console(stderr=True)
-
-EXIT_OK, EXIT_INVALID, EXIT_INCOMPLETE, EXIT_DENIED, EXIT_INTERRUPTED = 0, 2, 3, 4, 130
 
 _WORKSPACE = typer.Option(
     None, "--workspace", help="Project root containing .aibench/ (default: cwd)."
@@ -79,18 +96,6 @@ def _interrupted_before_dispatch(run_id: str | None) -> typer.Exit:
     return _fail(f"interrupted before dispatch; nothing was dispatched{hint}", EXIT_INTERRUPTED)
 
 
-def _exit_code(outcome: RunOutcome) -> int:
-    if outcome.state is RunState.INTERRUPTED:
-        return EXIT_INTERRUPTED
-    counts = outcome.counts
-    unhealthy = {"failed", "blocked", "cancelled", "unknown_effect"}
-    if outcome.state is not RunState.COMPLETED or any(
-        counts.get(kind, {}).get(state) for kind in counts for state in unhealthy
-    ):
-        return EXIT_INCOMPLETE
-    return EXIT_OK
-
-
 async def _execute(run_id: str, storage: Storage, artifacts: ArtifactStore) -> RunOutcome:
     controller = RunController()
     previous = signal.getsignal(signal.SIGINT)
@@ -103,10 +108,36 @@ async def _execute(run_id: str, storage: Storage, artifacts: ArtifactStore) -> R
         signal.signal(signal.SIGINT, previous)
 
 
-def _print_outcome(run_id: str, outcome: RunOutcome, json_output: bool) -> None:
+def _finish(
+    run_id: str, outcome: RunOutcome, storage: Storage, artifacts: ArtifactStore, json_output: bool
+) -> int:
+    """Print the outcome with its gate verdicts (from the stored report) and return the
+    §13 exit code."""
+    report = build_report(storage, artifacts, run_id, include_content=False)
+    code = run_exit_code(outcome.state, report)
     if json_output:
-        console.print_json(data={"run_id": run_id, **outcome_json(outcome)})
-        return
+        console.print_json(
+            data={
+                "run_id": run_id,
+                **outcome_json(outcome),
+                "gates": report["gates"],
+                "outcome": report["outcome"],
+                "exit_code": code,
+            }
+        )
+        return code
+    _print_outcome(run_id, outcome)
+    for gate in report["gates"]:
+        colour = {"pass": "green", "fail": "red"}.get(gate["status"], "yellow")
+        reason = f": {gate['reason']}" if gate.get("reason") else ""
+        console.print(
+            f"  gate {safe(gate['gate_id'])}: [{colour}]{gate['status']}[/{colour}]{safe(reason)}"
+        )
+    console.print(f"  report: aibench report {run_id}")
+    return code
+
+
+def _print_outcome(run_id: str, outcome: RunOutcome) -> None:
     console.print(f"run [bold]{escape(run_id)}[/bold]: {outcome.state.value}")
     for kind, states in sorted(outcome.counts.items()):
         console.print(f"  {kind}: " + ", ".join(f"{s}={n}" for s, n in sorted(states.items())))
@@ -127,8 +158,48 @@ def _print_outcome(run_id: str, outcome: RunOutcome, json_output: bool) -> None:
         console.print(f"  resume with: aibench resume {run_id}")
 
 
+def _resolve_plan(target: Path | None, policy: Path | None) -> tuple[Path, Path | None]:
+    """The plan and policy for `aibench run [TARGET]` without `--plan`."""
+    from aibench.cli.chat import project_settings
+
+    if target is not None and not target.exists():
+        raise _fail(f"{target} does not exist", EXIT_INVALID)
+    dataset = target if target is not None and target.is_file() else None
+    root = target if target is not None and target.is_dir() else Path.cwd()
+    try:
+        settings = project_settings(root.resolve(), None, None, policy)
+    except AibenchError as exc:
+        raise _fail(str(exc), EXIT_INVALID) from exc
+    plan = settings["plan"]
+    if plan is None:
+        where = settings["config"] or root.resolve()
+        raise _fail(
+            f"no plan to run: pass --plan FILE, or set plan_path in the project config "
+            f"({where}); `aibench init` creates one. A dataset alone cannot identify an "
+            "application.",
+            EXIT_INVALID,
+        )
+    if dataset is not None:
+        try:
+            bound = (plan.parent / load_plan(plan).dataset).resolve()
+        except PlanInvalid as exc:
+            raise _report_problems(exc) from exc
+        if bound != dataset.resolve():
+            raise _fail(
+                f"the configured plan {plan} is bound to {bound}, not {dataset.resolve()}; "
+                "run a plan whose dataset is this file (aibench plan --dataset ... --out ...)",
+                EXIT_INVALID,
+            )
+    return plan, settings["policy"]
+
+
 def run_plan(
-    plan: Path = typer.Option(..., "--plan", help="Executable plan file (JSON/YAML)."),  # noqa: B008
+    target: Path | None = typer.Argument(  # noqa: B008
+        None, help="Project directory, or a dataset its configured plan uses (default: cwd)."
+    ),
+    plan: Path | None = typer.Option(  # noqa: B008
+        None, "--plan", help="Executable plan file (JSON/YAML); default: the project config's."
+    ),
     policy: Path | None = _POLICY,
     trust_local_app: bool = typer.Option(
         False, "--trust-local-app", help="Grant trusted-local mode for a CLI application."
@@ -136,7 +207,15 @@ def run_plan(
     workspace: Path | None = _WORKSPACE,
     json_output: bool = _JSON,
 ) -> None:
-    """Execute a manual plan: validate, freeze, run, evaluate."""
+    """Execute a plan: validate, freeze, run, evaluate."""
+    if plan is None:
+        plan, policy = _resolve_plan(target, policy)
+        if workspace is None and target is not None and target.is_dir():
+            workspace = target  # the project's own .aibench/, where its chat and report look
+    elif target is not None:
+        raise _fail(
+            "pass either --plan FILE or a project directory/dataset, not both", EXIT_INVALID
+        )
     try:
         compiled = compile_plan(plan, policy=load_policy(policy), trusted_local=trust_local_app)
     except AibenchError as exc:
@@ -153,14 +232,14 @@ def run_plan(
                 f"run [bold]{run_id}[/bold] created from plan {escape(compiled.plan.plan_id)}"
             )
         outcome = asyncio.run(_execute(run_id, storage, artifacts))
+        code = _finish(run_id, outcome, storage, artifacts, json_output)
     except AibenchError as exc:
         raise _report_problems(exc) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(run_id) from exc
     finally:
         storage.db.close()
-    _print_outcome(run_id, outcome, json_output)
-    raise typer.Exit(code=_exit_code(outcome))
+    raise typer.Exit(code=code)
 
 
 def resume(
@@ -172,14 +251,14 @@ def resume(
     storage, artifacts = _open(workspace)
     try:
         outcome = asyncio.run(_execute(run_id, storage, artifacts))
+        code = _finish(run_id, outcome, storage, artifacts, json_output)
     except AibenchError as exc:  # includes RunError, PolicyDenied and LeaseHeld
         raise _report_problems(exc) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(run_id) from exc
     finally:
         storage.db.close()
-    _print_outcome(run_id, outcome, json_output)
-    raise typer.Exit(code=_exit_code(outcome))
+    raise typer.Exit(code=code)
 
 
 def evaluate(
