@@ -14,3 +14,13 @@ CI (`.github/workflows/ci.yml`) runs the standard checks on the Python versions 
 `ubuntu-latest` and `windows-latest`; macOS is supported per the dependency matrix above but not
 currently run in CI (no macOS runner configured yet) — tracked as a gap, not silently claimed as
 tested.
+
+## Runner process-tree cleanup (Prompt 03)
+
+| Platform | Mechanism | Exercised |
+|---|---|---|
+| Windows | Job Object with `KILL_ON_JOB_CLOSE` (`src/aibench/runners/process_tree.py`) | Yes: Windows 11, Python 3.12.10, `tests/test_cli_runner.py` tree-cleanup tests |
+| Linux / macOS | New session + `killpg(SIGKILL)` | Not locally (no usable Linux environment on the development machine). The CI workflow runs the same tests on `ubuntu-latest`, but no CI result for this change has been observed (changes are uncommitted; `gh` is unavailable here). macOS is not run anywhere |
+
+Known containment gaps: a Windows descendant spawned in the instant between process creation
+and job assignment, and a POSIX descendant that calls `setsid()` itself. See ADR 0002.

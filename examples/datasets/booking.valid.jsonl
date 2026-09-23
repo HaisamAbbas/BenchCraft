@@ -1,0 +1,2 @@
+{"case_id":"book-001","input":"Dubai","expected_output":"Booked trip to Dubai."}
+{"case_id":"book-002","input":"Lisbon","expected_output":"Booked trip to Lisbon."}

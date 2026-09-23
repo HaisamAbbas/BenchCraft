@@ -7,12 +7,21 @@ pydantic and the standard library.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import Enum
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    model_validator,
+)
 
 SCHEMA_VERSION = "1.0.0"
 
@@ -65,6 +74,32 @@ FrozenValue = Annotated[
     Any,
     BeforeValidator(deep_freeze),
     PlainSerializer(deep_unfreeze, return_type=Any, when_used="json"),
+]
+
+# A typed `str -> str` mapping that is read-only after validation (same deep-immutability
+# guarantee as `FrozenValue`, but with a real schema for configuration fields).
+FrozenStrMap = Annotated[
+    dict[str, str],
+    AfterValidator(MappingProxyType),
+    PlainSerializer(dict, return_type=dict[str, str]),
+]
+
+_SECRET_REF_RE = re.compile(r"^[a-z][a-z0-9_]*:\S+$")
+
+
+def _check_secret_ref(value: str) -> str:
+    """Secret references are `source:name` (e.g. `env:APP_TOKEN`), never literal values.
+    Resolution happens at use time in `aibench.security.secrets`."""
+    if not _SECRET_REF_RE.match(value):
+        raise ValueError(f"secret reference must look like 'source:name', got {value!r}")
+    return value
+
+
+SecretRefStr = Annotated[str, AfterValidator(_check_secret_ref)]
+FrozenSecretRefMap = Annotated[
+    dict[str, SecretRefStr],
+    AfterValidator(MappingProxyType),
+    PlainSerializer(dict, return_type=dict[str, str]),
 ]
 
 
@@ -128,6 +163,35 @@ class RedactionClass(str, Enum):
     NONE = "none"
     REDACTED = "redacted"
     RESTRICTED = "restricted"
+
+
+class ErrorKind(str, Enum):
+    """Why an application invocation did not produce a usable output (§7, §15). Separates
+    application/transport failures from evaluator failures and from policy denials."""
+
+    BINDING = "binding"  # input/output binding could not be applied (configuration)
+    REQUEST_LIMIT = "request_limit"  # request exceeded the configured size before sending
+    POLICY_DENIED = "policy_denied"  # endpoint/redirect policy refused the request
+    SPAWN_FAILED = "spawn_failed"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+    OUTPUT_LIMIT = "output_limit"
+    NONZERO_EXIT = "nonzero_exit"
+    HTTP_STATUS = "http_status"
+    REDIRECT_REJECTED = "redirect_rejected"
+    TRANSPORT = "transport"
+    INVALID_OUTPUT = "invalid_output"
+
+
+class EffectState(str, Enum):
+    """What is known about external effects of one invocation (§15: "A timeout does not
+    prove a server-side operation did not occur"). Runners never retry; the engine uses this
+    to decide whether a retry is safe or intervention is required."""
+
+    NONE_DECLARED = "none_declared"  # the application declares no external effects
+    NOT_DISPATCHED = "not_dispatched"  # the request provably never reached the application
+    COMPLETED = "completed"  # the application finished/responded; effects are as it reports
+    UNKNOWN = "unknown"  # dispatched, then timed out/cancelled/lost: effects may have occurred
 
 
 # --------------------------------------------------------------------------- dataset / case
@@ -227,6 +291,79 @@ class DatasetManifest(FrozenModel):
 # --------------------------------------------------------------------------- application
 
 
+# Environment variables a trusted-local child process inherits by default: only what
+# common runtimes need to start. Everything else (notably evaluator/provider credentials)
+# must be passed explicitly via `env` or `secret_env` (§16: "pass only required secrets").
+DEFAULT_INHERITED_ENV: tuple[str, ...] = (
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "HOME",
+    "USERPROFILE",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+)
+
+
+class CliTransport(FrozenModel):
+    """One-shot CLI protocol (§7): a static argv array (never a shell string, never
+    interpolated with case text), JSON on stdin, JSON (or explicit legacy text) on stdout,
+    diagnostics on stderr."""
+
+    kind: Literal["cli"] = "cli"
+    argv: tuple[str, ...] = Field(min_length=1)
+    cwd: str | None = None  # relative to the application config file's directory
+    output_mode: Literal["json", "text"] = "json"
+    timeout_seconds: float = Field(default=60.0, gt=0, le=86_400)
+    max_stdout_bytes: int = Field(default=1_048_576, gt=0)
+    max_stderr_bytes: int = Field(default=65_536, ge=0)
+    env: FrozenStrMap = Field(default_factory=dict)
+    secret_env: FrozenSecretRefMap = Field(default_factory=dict)
+    inherit_env: tuple[str, ...] = DEFAULT_INHERITED_ENV
+    healthcheck_argv: tuple[str, ...] | None = None
+
+
+class HttpSecretHeader(FrozenModel):
+    ref: SecretRefStr
+    prefix: str = ""  # e.g. "Bearer "
+
+
+class HttpTransport(FrozenModel):
+    """JSON request/response protocol (§7). Redirects are refused by default; when enabled,
+    only method-preserving redirects (307/308) to URLs that pass the endpoint policy are
+    followed."""
+
+    kind: Literal["http"] = "http"
+    url: str
+    method: Literal["POST", "PUT"] = "POST"
+    headers: FrozenStrMap = Field(default_factory=dict)
+    secret_headers: Annotated[
+        dict[str, HttpSecretHeader],
+        AfterValidator(MappingProxyType),
+        PlainSerializer(dict, return_type=dict[str, HttpSecretHeader]),
+    ] = Field(default_factory=dict)
+    verify_tls: bool = True
+    ca_bundle: str | None = None  # relative to the application config file's directory
+    allow_plaintext_http: bool = False  # plain http is otherwise loopback-only
+    allowed_endpoints: tuple[str, ...] = ()  # URL prefixes; empty means the origin of `url`
+    follow_redirects: bool = False
+    max_redirects: int = Field(default=3, ge=0, le=10)
+    timeout_seconds: float = Field(default=60.0, gt=0, le=86_400)
+    connect_timeout_seconds: float = Field(default=10.0, gt=0, le=600)
+    max_request_bytes: int = Field(default=1_048_576, gt=0)
+    max_response_bytes: int = Field(default=1_048_576, gt=0)
+    correlation_header: str = "X-Request-ID"
+    healthcheck_url: str | None = None
+    reset_url: str | None = None
+
+
 class ApplicationSpec(FrozenModel):
     application_id: str
     runner: RunnerKind
@@ -237,6 +374,18 @@ class ApplicationSpec(FrozenModel):
     environment_digest: str | None = None
     reset_policy: ResetPolicy = ResetPolicy.PER_CASE
     effects: EffectLevel = EffectLevel.NONE
+    # Optional so application records committed before Prompt 03 still load; a runner
+    # cannot be created without it.
+    transport: Annotated[CliTransport | HttpTransport, Field(discriminator="kind")] | None = None
+
+    @model_validator(mode="after")
+    def _transport_matches_runner(self) -> ApplicationSpec:
+        if self.transport is not None and self.transport.kind != self.runner.value:
+            raise ValueError(
+                f"transport kind {self.transport.kind!r} does not match runner "
+                f"{self.runner.value!r}"
+            )
+        return self
 
 
 class ObservationClaim(FrozenModel):
@@ -284,6 +433,9 @@ class ExecutionResult(FrozenModel):
     cost: float | None = None
     error: str | None = None
     observation_completeness: FrozenValue = Field(default_factory=dict)
+    error_kind: ErrorKind | None = None
+    effect_state: EffectState | None = None
+    correlation_id: str | None = None
 
     @staticmethod
     def build_id(run_id: str, case_id: str, repetition_id: int, attempt_id: int) -> str:
@@ -411,6 +563,9 @@ ALL_MODELS: tuple[type[BaseModel], ...] = (
     Provenance,
     BenchmarkCase,
     DatasetManifest,
+    CliTransport,
+    HttpSecretHeader,
+    HttpTransport,
     ApplicationSpec,
     ObservationClaim,
     EvaluationPlan,

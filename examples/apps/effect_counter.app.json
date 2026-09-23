@@ -1,0 +1,16 @@
+{
+  "application_id": "example-effect-counter",
+  "runner": "http",
+  "target": "http://127.0.0.1:8766/book",
+  "effects": "reversible",
+  "reset_policy": "per_case",
+  "transport": {
+    "kind": "http",
+    "url": "http://127.0.0.1:8766/book",
+    "healthcheck_url": "http://127.0.0.1:8766/health",
+    "reset_url": "http://127.0.0.1:8766/reset",
+    "timeout_seconds": 5
+  },
+  "input_binding": {"fields": {"/destination": "/input"}},
+  "output_binding": {"output": "/output"}
+}

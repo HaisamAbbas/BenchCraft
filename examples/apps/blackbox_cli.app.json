@@ -1,0 +1,11 @@
+{
+  "application_id": "example-blackbox-cli",
+  "runner": "cli",
+  "target": "examples/apps/blackbox_cli.py",
+  "transport": {
+    "kind": "cli",
+    "argv": ["python", "blackbox_cli.py"],
+    "output_mode": "text",
+    "timeout_seconds": 30
+  }
+}

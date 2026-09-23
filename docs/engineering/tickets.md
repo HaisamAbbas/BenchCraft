@@ -51,3 +51,16 @@ renamed to `commit_artifact_unverified` so `commit_verified_artifact` is unambig
 production-intended entry point. New core identity models added to support this phase: `WorkItem`/`WorkItemState`,
 `UsageEvent`/`UsageRole`, `Approval` (`src/aibench/core/models.py`); new `ConflictError`
 (`src/aibench/core/errors.py`).
+
+## Prompt 03 — Application runners and observation capture
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 03-T1 | Runner lifecycle: describe/prepare/healthcheck/invoke/reset/close; cancellation, timeouts, declared effects, observation envelopes; only app-visible fields mapped | DONE | `src/aibench/runners/base.py` (`BaseRunner`, `InvocationContext`, `InvocationOutcome`, `race`), `src/aibench/runners/bindings.py` (`AppInputEnvelope`, JSON Pointer `InputBinding`/`OutputBinding`), `core/models.py` (`CliTransport`, `HttpTransport`, `ErrorKind`, `EffectState`); tests `test_lifecycle_order_is_enforced`, `test_cooperative_cancel_*`, `test_task_cancellation_*`, `tests/test_runner_bindings.py` |
+| 03-T2 | CLI transport: argv/no shell, JSON stdin/stdout, bounded stderr, legacy text mode, output limits, process-tree cleanup | DONE | `src/aibench/runners/cli_runner.py`, `src/aibench/runners/process_tree.py` (Windows Job Object / POSIX process group); `tests/test_cli_runner.py` (21 tests) |
+| 03-T3 | HTTP transport: bindings, secret refs, TLS verification, endpoint policy, size/time limits, correlation IDs, redirect validation | DONE | `src/aibench/runners/http_runner.py`, `src/aibench/security/endpoints.py`, `src/aibench/security/secrets.py`; `tests/test_http_runner.py` (16 tests incl. real TLS handshake), `tests/test_endpoint_policy.py` |
+| 03-T4 | Real local fixtures; persistence via Prompt 02; developer smoke path | DONE | `examples/apps/` (CLI chatbot, HTTP RAG, black-box text app, effect counter + `*.app.json`), `examples/datasets/booking.valid.jsonl`, `src/aibench/services/execution.py`, `src/aibench/cli/app.py` (`aibench app describe`, `aibench app smoke`); `tests/test_execution_service.py`, `tests/test_cli_app.py` |
+
+Gates: 03-G1..G5. See `docs/engineering/reports/03.md`. Decisions: ADR 0002
+(`docs/adr/0002-runner-transports-and-effect-semantics.md`). App-author guide:
+`docs/runner-protocol.md`.

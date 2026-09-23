@@ -31,7 +31,7 @@ class ResolvedConfig:
     sources: dict[str, str]  # field -> "default" | "config_file" | "env" | "cli"
 
 
-def _safe_load_json_or_yaml(path: Path) -> dict[str, Any]:
+def load_mapping_file(path: Path) -> dict[str, Any]:
     """Parse config bytes without executing code. JSON is always supported; YAML is
     supported only via safe_load if PyYAML is installed, never via arbitrary eval/exec."""
     text = path.read_text(encoding="utf-8")
@@ -44,7 +44,10 @@ def _safe_load_json_or_yaml(path: Path) -> dict[str, Any]:
             ) from exc
         loaded = yaml.safe_load(text) or {}
     else:
-        loaded = json.loads(text) if text.strip() else {}
+        try:
+            loaded = json.loads(text) if text.strip() else {}
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"{path} is not valid JSON: {exc}") from exc
     if not isinstance(loaded, dict):
         raise ConfigError(f"{path} must contain a JSON/YAML object at the top level")
     return loaded
@@ -81,7 +84,7 @@ def resolve_config(
         if not config_path.exists():
             raise ConfigError(f"config file not found: {config_path}")
         root = config_path.resolve().parent
-        file_values = _safe_load_json_or_yaml(config_path)
+        file_values = load_mapping_file(config_path)
         for key, value in file_values.items():
             merged[key] = value
             sources[key] = "config_file"

@@ -5,9 +5,15 @@
 #   .venv/Scripts/pip install -r requirements-dev.lock.txt -e . --no-deps
 annotated-doc==0.0.5
 annotated-types==0.8.0
+anyio==4.15.1
 ast_serialize==0.11.2
+certifi==2026.7.22
 colorama==0.4.6
 coverage==7.16.1
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
 iniconfig==2.3.0
 librt==0.15.0
 markdown-it-py==4.2.0

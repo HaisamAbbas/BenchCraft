@@ -1,0 +1,164 @@
+{
+  "$defs": {
+    "HttpSecretHeader": {
+      "additionalProperties": false,
+      "properties": {
+        "prefix": {
+          "default": "",
+          "title": "Prefix",
+          "type": "string"
+        },
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "HttpSecretHeader",
+      "type": "object"
+    }
+  },
+  "$id": "aibench/1.0.0/HttpTransport.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "JSON request/response protocol (\u00a77). Redirects are refused by default; when enabled,\nonly method-preserving redirects (307/308) to URLs that pass the endpoint policy are\nfollowed.",
+  "properties": {
+    "allow_plaintext_http": {
+      "default": false,
+      "title": "Allow Plaintext Http",
+      "type": "boolean"
+    },
+    "allowed_endpoints": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Endpoints",
+      "type": "array"
+    },
+    "ca_bundle": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ca Bundle"
+    },
+    "connect_timeout_seconds": {
+      "default": 10.0,
+      "exclusiveMinimum": 0,
+      "maximum": 600,
+      "title": "Connect Timeout Seconds",
+      "type": "number"
+    },
+    "correlation_header": {
+      "default": "X-Request-ID",
+      "title": "Correlation Header",
+      "type": "string"
+    },
+    "follow_redirects": {
+      "default": false,
+      "title": "Follow Redirects",
+      "type": "boolean"
+    },
+    "headers": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Headers",
+      "type": "object"
+    },
+    "healthcheck_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Healthcheck Url"
+    },
+    "kind": {
+      "const": "http",
+      "default": "http",
+      "title": "Kind",
+      "type": "string"
+    },
+    "max_redirects": {
+      "default": 3,
+      "maximum": 10,
+      "minimum": 0,
+      "title": "Max Redirects",
+      "type": "integer"
+    },
+    "max_request_bytes": {
+      "default": 1048576,
+      "exclusiveMinimum": 0,
+      "title": "Max Request Bytes",
+      "type": "integer"
+    },
+    "max_response_bytes": {
+      "default": 1048576,
+      "exclusiveMinimum": 0,
+      "title": "Max Response Bytes",
+      "type": "integer"
+    },
+    "method": {
+      "default": "POST",
+      "enum": [
+        "POST",
+        "PUT"
+      ],
+      "title": "Method",
+      "type": "string"
+    },
+    "reset_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reset Url"
+    },
+    "secret_headers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/HttpSecretHeader"
+      },
+      "title": "Secret Headers",
+      "type": "object"
+    },
+    "timeout_seconds": {
+      "default": 60.0,
+      "exclusiveMinimum": 0,
+      "maximum": 86400,
+      "title": "Timeout Seconds",
+      "type": "number"
+    },
+    "url": {
+      "title": "Url",
+      "type": "string"
+    },
+    "verify_tls": {
+      "default": true,
+      "title": "Verify Tls",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "url"
+  ],
+  "title": "HttpTransport",
+  "type": "object"
+}

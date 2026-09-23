@@ -1,0 +1,119 @@
+{
+  "$id": "aibench/1.0.0/CliTransport.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "One-shot CLI protocol (\u00a77): a static argv array (never a shell string, never\ninterpolated with case text), JSON on stdin, JSON (or explicit legacy text) on stdout,\ndiagnostics on stderr.",
+  "properties": {
+    "argv": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Argv",
+      "type": "array"
+    },
+    "cwd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cwd"
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Env",
+      "type": "object"
+    },
+    "healthcheck_argv": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Healthcheck Argv"
+    },
+    "inherit_env": {
+      "default": [
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "HOME",
+        "USERPROFILE",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "title": "Inherit Env",
+      "type": "array"
+    },
+    "kind": {
+      "const": "cli",
+      "default": "cli",
+      "title": "Kind",
+      "type": "string"
+    },
+    "max_stderr_bytes": {
+      "default": 65536,
+      "minimum": 0,
+      "title": "Max Stderr Bytes",
+      "type": "integer"
+    },
+    "max_stdout_bytes": {
+      "default": 1048576,
+      "exclusiveMinimum": 0,
+      "title": "Max Stdout Bytes",
+      "type": "integer"
+    },
+    "output_mode": {
+      "default": "json",
+      "enum": [
+        "json",
+        "text"
+      ],
+      "title": "Output Mode",
+      "type": "string"
+    },
+    "secret_env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Secret Env",
+      "type": "object"
+    },
+    "timeout_seconds": {
+      "default": 60.0,
+      "exclusiveMinimum": 0,
+      "maximum": 86400,
+      "title": "Timeout Seconds",
+      "type": "number"
+    }
+  },
+  "required": [
+    "argv"
+  ],
+  "title": "CliTransport",
+  "type": "object"
+}

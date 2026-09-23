@@ -1,5 +1,35 @@
 {
   "$defs": {
+    "EffectState": {
+      "description": "What is known about external effects of one invocation (\u00a715: \"A timeout does not\nprove a server-side operation did not occur\"). Runners never retry; the engine uses this\nto decide whether a retry is safe or intervention is required.",
+      "enum": [
+        "none_declared",
+        "not_dispatched",
+        "completed",
+        "unknown"
+      ],
+      "title": "EffectState",
+      "type": "string"
+    },
+    "ErrorKind": {
+      "description": "Why an application invocation did not produce a usable output (\u00a77, \u00a715). Separates\napplication/transport failures from evaluator failures and from policy denials.",
+      "enum": [
+        "binding",
+        "request_limit",
+        "policy_denied",
+        "spawn_failed",
+        "timeout",
+        "cancelled",
+        "output_limit",
+        "nonzero_exit",
+        "http_status",
+        "redirect_rejected",
+        "transport",
+        "invalid_output"
+      ],
+      "title": "ErrorKind",
+      "type": "string"
+    },
     "ExecutionStatus": {
       "enum": [
         "ok",
@@ -25,6 +55,18 @@
       "title": "Case Id",
       "type": "string"
     },
+    "correlation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Correlation Id"
+    },
     "cost": {
       "anyOf": [
         {
@@ -37,6 +79,17 @@
       "default": null,
       "title": "Cost"
     },
+    "effect_state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EffectState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "error": {
       "anyOf": [
         {
@@ -48,6 +101,17 @@
       ],
       "default": null,
       "title": "Error"
+    },
+    "error_kind": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ErrorKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "execution_id": {
       "title": "Execution Id",

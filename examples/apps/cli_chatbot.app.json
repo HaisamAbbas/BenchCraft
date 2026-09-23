@@ -1,0 +1,11 @@
+{
+  "application_id": "example-cli-chatbot",
+  "runner": "cli",
+  "target": "examples/apps/cli_chatbot.py",
+  "transport": {
+    "kind": "cli",
+    "argv": ["python", "cli_chatbot.py"],
+    "timeout_seconds": 30
+  },
+  "output_binding": {"output": "/output"}
+}
