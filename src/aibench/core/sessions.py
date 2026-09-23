@@ -41,6 +41,11 @@ FrozenConcepts = Annotated[
     AfterValidator(MappingProxyType),
     PlainSerializer(dict, return_type=dict[str, tuple[str, ...]]),
 ]
+FrozenCursors = Annotated[
+    dict[str, int],
+    AfterValidator(MappingProxyType),
+    PlainSerializer(dict, return_type=dict[str, int]),
+]
 FrozenRules = Annotated[
     dict[str, DecisionRule],
     AfterValidator(MappingProxyType),
@@ -209,6 +214,9 @@ class BenchmarkSession(FrozenModel):
     decision_id: str | None = None  # the current draft's decision
     presented_revision: int | None = None  # the latest revision shown to the user
     active_run_id: str | None = None
+    # Per run, the last run-event sequence shown to the user, so a reconnecting client
+    # replays only what it missed (§14) — display state, never an action.
+    event_cursors: FrozenCursors = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

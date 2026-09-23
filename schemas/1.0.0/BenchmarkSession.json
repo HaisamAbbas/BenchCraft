@@ -33,6 +33,13 @@
       "default": null,
       "title": "Decision Id"
     },
+    "event_cursors": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Event Cursors",
+      "type": "object"
+    },
     "plugin_environments": {
       "default": [],
       "items": {},

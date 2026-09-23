@@ -39,6 +39,7 @@ from rich.console import Console
 
 from aibench.conversation.agent import ConversationAgent, TurnEvent, TurnLimits, TurnOutcome
 from aibench.planning.planner import PlannerProvider
+from aibench.security.redaction import sanitize_value
 from aibench.services.runs import RunError
 from aibench.sessions.controller import SessionController
 from aibench.tui import render
@@ -46,6 +47,27 @@ from aibench.tui.commands import COMMANDS, CommandResult, Commands, NewSession
 from aibench.tui.render import safe
 
 _WRAP = 88  # stream a partial line once it grows this long, at a word boundary
+
+
+MAX_REPLAYED = 10  # notable missed events shown on reopening; the rest are counted
+
+
+def notable_event(event: dict[str, Any]) -> str | None:
+    """A replay line for an event worth seeing after being away (10-T1): failures,
+    unknown effects, control requests, session ends and losses, recovery and budget stops.
+    Routine progress is left to the status line."""
+    kind, payload, seq = event["event_type"], event["payload"], event["sequence"]
+    if kind == "item_state" and payload.get("state") in ("failed", "blocked", "unknown_effect"):
+        reason = f": {payload['reason']}" if payload.get("reason") else ""
+        return f"#{seq} {payload['task_key']} {payload['state']}{reason}"[:200]
+    if kind == "control_requested":
+        return f"#{seq} {payload.get('action', 'control')} requested ({payload.get('source')})"
+    if kind in ("run_session_ended", "run_session_aborted", "run_session_lost", "recovered"):
+        state = payload.get("state") or payload.get("stop_reason") or ""
+        return f"#{seq} {kind.replace('_', ' ')} {state}".rstrip()
+    if kind == "budget_exhausted":
+        return f"#{seq} budget exhausted: {payload.get('reason', '')}".rstrip()
+    return None
 
 
 class SlashCompleter(Completer):
@@ -72,26 +94,27 @@ def key_bindings() -> KeyBindings:
 def render_result(console: Console, result: CommandResult) -> None:
     data, kind = result.data, result.kind
     if kind == "error":
-        console.print(f"[red]{safe(data['error'])}[/red]")
+        render.out(console, f"[red]{safe(data['error'])}[/red]")
     elif kind == "help":
         for name, meaning in data["commands"].items():
-            console.print(f"  {name:<10} {safe(meaning)}")
-        console.print(safe(data["messages"]))
+            render.out(console, f"  {name:<10} {safe(meaning)}")
+        render.out(console, safe(data["messages"]))
     elif kind in ("plan", "confirm"):
         render.draft(console, data)
         if kind == "confirm":
-            console.print(f"[bold]{safe(data['note'])}[/bold]")
+            render.out(console, f"[bold]{safe(data['note'])}[/bold]")
     elif kind == "action":
         verb = data["kind"].replace("_", " ")
         if data["state"] == "done":
             run = f" {data['run_id']}" if data.get("run_id") else ""
-            console.print(f"{safe(verb)}: done{safe(run)}")
+            render.out(console, f"{safe(verb)}: done{safe(run)}")
         else:
-            console.print(
-                f"[yellow]{safe(verb)}: {data['state']}[/yellow] {safe(str(data['reason']))}"
+            render.out(
+                console,
+                f"[yellow]{safe(verb)}: {data['state']}[/yellow] {safe(str(data['reason']))}",
             )
             for finding in data.get("findings", [])[:10]:
-                console.print(f"  {safe(finding['kind'])}: {safe(finding['message'])}")
+                render.out(console, f"  {safe(finding['kind'])}: {safe(finding['message'])}")
     elif kind == "status":
         render.status(console, data)
     elif kind == "failures":
@@ -101,16 +124,17 @@ def render_result(console: Console, result: CommandResult) -> None:
     elif kind == "budget":
         render.budget(console, data)
     elif kind == "report":
-        console.print_json(data=data)
+        console.print_json(data=sanitize_value(data))
     elif kind == "sessions":
         for row in data["sessions"]:
             mark = "*" if row["current"] else " "
             run = f" run {row['active_run_id']}" if row["active_run_id"] else ""
-            console.print(
-                f" {mark} {row['session_id']} revision {row['revision']}{run} {row['updated_at']}"
+            render.out(
+                console,
+                f" {mark} {row['session_id']} revision {row['revision']}{run} {row['updated_at']}",
             )
     elif kind == "switched":
-        console.print(f"switched to new session {data['session_id']}")
+        render.out(console, f"switched to new session {data['session_id']}")
     elif kind == "exit":
         pass
 
@@ -162,7 +186,7 @@ class ChatApp:
     # ------------------------------------------------------------------ display
 
     def say(self, text: str) -> None:
-        self.console.print(text)
+        render.out(self.console, text)
 
     def _banner(self) -> None:
         session = self.controller.session
@@ -181,6 +205,14 @@ class ChatApp:
                     f"run {run['run_id']}: {run['missed_events']} event(s) since you last "
                     f"looked; now {run['condition'].replace('_', ' ')}"
                 )
+                missed = self.controller.missed_events(run["run_id"])
+                notable = [line for line in map(notable_event, missed) if line]
+                for line in notable[-MAX_REPLAYED:]:
+                    self.say(f"  {safe(line)}")
+                if len(notable) > MAX_REPLAYED:
+                    self.say(
+                        f"  ({len(notable) - MAX_REPLAYED} earlier notable event(s) not shown)"
+                    )
                 self.controller.acknowledge_events(run["run_id"], run["last_sequence"])
         for note in report["notes"]:
             self.say(f"[yellow]{safe(note)}[/yellow]")

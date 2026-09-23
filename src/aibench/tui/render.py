@@ -9,6 +9,19 @@ from typing import Any
 from rich.console import Console
 from rich.markup import escape
 
+from aibench.security.redaction import sanitize
+
+
+def out(console: Console, *objects: object) -> None:
+    """Print with Rich's emoji codes off: data such as `exec:b:r0` must not render as
+    `exec🅱r0` (a `:name:` in a case ID, output or reason is text, not an emoji)."""
+    console.print(*objects, emoji=False)
+
+
+def safe(value: object) -> str:
+    """Untrusted text made printable: secrets redacted, terminal control sequences removed,
+    Rich markup escaped (10-T3)."""
+    return escape(sanitize(str(value)))
 
 
 def _counts(counts: dict[str, dict[str, int]], kind: str) -> str:
@@ -61,41 +74,43 @@ def status_line(status: dict[str, Any]) -> str:
 
 def draft(console: Console, summary: dict[str, Any]) -> None:
     state = "ready to run" if summary["executable"] else "not executable yet"
-    console.print(f"[bold]Plan, revision {summary['revision']}[/bold] ({state})")
+    out(console, f"[bold]Plan, revision {summary['revision']}[/bold] ({state})")
     for objective in summary.get("objectives", []):
-        console.print(f"  objective: {escape(objective)}")
+        out(console, f"  objective: {safe(objective)}")
     for metric in summary.get("metrics", []):
-        console.print(f"  metric {escape(metric['metric'])}: {escape(metric['rationale'])}")
+        out(console, f"  metric {safe(metric['metric'])}: {safe(metric['rationale'])}")
     for gap in summary.get("gaps", []):
-        console.print(f"  [yellow]gap[/yellow] {escape(gap['subject'])}: {escape(gap['reason'])}")
+        out(console, f"  [yellow]gap[/yellow] {safe(gap['subject'])}: {safe(gap['reason'])}")
     for label, key in (
         ("needs information", "missing_information"),
         ("needs permission", "missing_permission"),
         ("invalid", "invalid"),
     ):
         for message in summary.get(key, []):
-            console.print(f"  [red]{label}:[/red] {escape(message)}")
+            out(console, f"  [red]{label}:[/red] {safe(message)}")
     estimate = summary.get("estimate")
     if estimate:
         cost = estimate["estimated_cost_usd"]
         cost_text = "unknown" if cost is None else f"${cost:g} (estimate)"
-        console.print(
+        out(
+            console,
             f"  {estimate['selected_cases']} case(s) x {estimate['repetitions']} repetition(s): "
             f"up to {estimate['application_calls_upper_bound']} application call(s), "
             f"{estimate['evaluations']} evaluation(s), {estimate['model_evaluations']} by a "
-            f"model judge; cost {cost_text}"
+            f"model judge; cost {cost_text}",
         )
 
 
 def status(console: Console, snapshot: dict[str, Any]) -> None:
-    console.print(escape(status_line(snapshot)) + f" [dim]as of {escape(snapshot['as_of'])}[/dim]")
+    out(console, safe(status_line(snapshot)) + f" [dim]as of {safe(snapshot['as_of'])}[/dim]")
     for item in snapshot.get("needs_attention", [])[:10]:
-        console.print(
-            f"  [yellow]{escape(item['state'])}[/yellow] {escape(item['task_key'])}: "
-            f"{escape(str(item['reason']))}"
+        out(
+            console,
+            f"  [yellow]{safe(item['state'])}[/yellow] {safe(item['task_key'])}: "
+            f"{safe(str(item['reason']))}",
         )
     if snapshot.get("session_error"):
-        console.print(f"  [red]could not run:[/red] {escape(snapshot['session_error'])}")
+        out(console, f"  [red]could not run:[/red] {safe(snapshot['session_error'])}")
 
 
 def failures(console: Console, data: dict[str, Any]) -> None:
@@ -106,48 +121,53 @@ def failures(console: Console, data: dict[str, Any]) -> None:
         if data.get("partial")
         else ""
     )
-    console.print(
-        f"run {escape(data['run_id'])}: {data['total_metric_failures']} metric failure(s), "
-        f"{data['total_application_failures']} application failure(s){label}"
+    out(
+        console,
+        f"run {safe(data['run_id'])}: {data['total_metric_failures']} metric failure(s), "
+        f"{data['total_application_failures']} application failure(s){label}",
     )
     for item in data["metric_failures"]:
-        console.print(
-            f"  {escape(item['case_id'])} r{item['repetition']} {escape(item['metric'])}: "
-            f"{item['decision']} value={escape(str(item['value']))} {escape(str(item['reason'] or ''))}"
+        out(
+            console,
+            f"  {safe(item['case_id'])} r{item['repetition']} {safe(item['metric'])}: "
+            f"{item['decision']} value={safe(str(item['value']))} {safe(str(item['reason'] or ''))}",
         )
     for item in data["application_failures"]:
-        console.print(
-            f"  {escape(item['case_id'])} r{item['repetition']}: application {item['status']} "
-            f"({escape(str(item['error_kind']))}) {escape(str(item['error'] or ''))}"
+        out(
+            console,
+            f"  {safe(item['case_id'])} r{item['repetition']}: application {item['status']} "
+            f"({safe(str(item['error_kind']))}) {safe(str(item['error'] or ''))}",
         )
 
 
 def case(console: Console, data: dict[str, Any]) -> None:
-    console.print(f"[bold]case {escape(data['case_id'])}[/bold] in run {escape(data['run_id'])}")
+    out(console, f"[bold]case {safe(data['case_id'])}[/bold] in run {safe(data['run_id'])}")
     golden = data.get("golden") or {}
     if golden:
-        console.print(f"  input: {escape(str(golden.get('input')))}")
+        out(console, f"  input: {safe(str(golden.get('input')))}")
         reference = golden.get("reference") or {}
         if reference.get("answer") is not None:
-            console.print(f"  reference: {escape(str(reference['answer']))}")
+            out(console, f"  reference: {safe(str(reference['answer']))}")
     for execution in data["executions"]:
-        console.print(
+        out(
+            console,
             f"  r{execution['repetition']} attempt {execution['attempt']}: {execution['status']}"
-            f" output={escape(str(execution.get('output')))}"
+            f" output={safe(str(execution.get('output')))}",
         )
         if execution.get("error"):
-            console.print(f"    error: {escape(execution['error'])}")
+            out(console, f"    error: {safe(execution['error'])}")
     for result in data["results"]:
-        console.print(
-            f"  {escape(result['metric'])} r{result['repetition']}: {result['decision']} "
-            f"value={escape(str(result['value']))} {escape(str(result['reason'] or ''))}"
+        out(
+            console,
+            f"  {safe(result['metric'])} r{result['repetition']}: {result['decision']} "
+            f"value={safe(str(result['value']))} {safe(str(result['reason'] or ''))}",
         )
 
 
 def budget(console: Console, data: dict[str, Any]) -> None:
     hard = data["limits"]["hard"]
     soft = data["limits"]["soft"]
-    console.print(f"[bold]budget[/bold] run {escape(data['run_id'])} ({escape(data['basis'])})")
+    out(console, f"[bold]budget[/bold] run {safe(data['run_id'])} ({safe(data['basis'])})")
     for role in ("application", "evaluator"):
         spend = data[role]
         limit = hard[f"max_{role}_calls"]
@@ -155,20 +175,22 @@ def budget(console: Console, data: dict[str, Any]) -> None:
         cost = f"known ${spend['known_cost_usd']:g}" + (
             f" + {unknown} call(s) of unknown cost" if unknown else ""
         )
-        console.print(f"  {role}: {spend['calls']} call(s) of {limit or 'no limit'}; {cost}")
-    console.print(
+        out(console, f"  {role}: {spend['calls']} call(s) of {limit or 'no limit'}; {cost}")
+    out(
+        console,
         f"  judge tokens limit {hard['max_judge_tokens'] or 'none'}; wall time "
         f"{data['elapsed_seconds']}s of {hard['max_wall_seconds'] or 'no limit'}; "
-        f"cost limit {soft['max_cost_usd'] or 'none'} (soft)"
+        f"cost limit {soft['max_cost_usd'] or 'none'} (soft)",
     )
     for note in data.get("unenforced", []):
-        console.print(f"  [yellow]not enforced:[/yellow] {escape(note)}")
+        out(console, f"  [yellow]not enforced:[/yellow] {safe(note)}")
     usage = data.get("conversation") or {}
     if usage:
-        console.print(
+        out(
+            console,
             f"  conversation model: {usage.get('model_calls', 0)} call(s), "
             f"{usage.get('prompt_tokens', 0) + usage.get('completion_tokens', 0)} token(s) "
-            "(tracked separately from the run)"
+            "(tracked separately from the run)",
         )
 
 
@@ -176,20 +198,20 @@ def tool_call(name: str, args: dict[str, Any]) -> str:
     shown = ", ".join(f"{k}={v}" for k, v in args.items() if k not in ("patch", "user_quote"))
     if "patch" in args:
         shown = ", ".join(f"{k}={v}" for k, v in args["patch"].items())
-    return escape(f"  > {name}({shown})"[:160])
+    return safe(f"  > {name}({shown})"[:160])
 
 
 def tool_result(name: str, data: dict[str, Any]) -> str | None:
     if "error" in data:
-        return escape(f"    error: {data['error']}"[:200])
+        return safe(f"    error: {data['error']}"[:200])
     if name == "propose_plan_patch":
         if data.get("status") == "applied":
             return f"    draft revision {data['revision']}"
-        return escape(f"    {data.get('status')}: {'; '.join(data.get('problems', []))}"[:200])
+        return safe(f"    {data.get('status')}: {'; '.join(data.get('problems', []))}"[:200])
     if name == "request_action":
         reason = f" ({data['reason']})" if data.get("reason") else ""
         run = f" {data['run_id']}" if data.get("run_id") else ""
-        return escape(f"    {data.get('kind')}: {data.get('state')}{run}{reason}"[:200])
+        return safe(f"    {data.get('kind')}: {data.get('state')}{run}{reason}"[:200])
     if data.get("status") == "rejected":
-        return escape(f"    rejected: {'; '.join(data.get('problems', []))}"[:200])
+        return safe(f"    rejected: {'; '.join(data.get('problems', []))}"[:200])
     return None

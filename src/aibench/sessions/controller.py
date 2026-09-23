@@ -29,14 +29,23 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import re
+import shutil
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from aibench.core.errors import AibenchError
-from aibench.core.models import Decision, ExecutionStatus, deep_unfreeze, utcnow
+from aibench.core.errors import AibenchError, ConflictError
+from aibench.core.models import (
+    Decision,
+    ExecutionStatus,
+    WorkItemState,
+    deep_unfreeze,
+    utcnow,
+)
 from aibench.core.plans import PluginEnvironmentRef
 from aibench.core.sessions import (
     ActionKind,
@@ -53,13 +62,15 @@ from aibench.engine.compile import PlanInvalid, PolicyDenied, compile_plan, load
 from aibench.engine.engine import RunController, RunOutcome
 from aibench.planning.planner import PlanningInputs
 from aibench.security.policy import ExecutionPolicy
+from aibench.security.redaction import sanitize
+from aibench.services.reports import build_report, export_report, report_dir, report_facts
 from aibench.services.runs import (
     RESUMABLE_STATES,
     RunError,
     create_run,
     execute_run,
+    lease_state,
     run_budget,
-    run_report,
     run_status,
 )
 from aibench.services.scoring import select_final_executions
@@ -80,6 +91,11 @@ ACTIVE_RUN_STATES = frozenset(
     {"created", "running", "pausing", "paused", "cancelling", "interrupting"}
 )
 
+
+# Conditions in which a run occupies the session's single run slot.
+LIVE_CONDITIONS = frozenset({"running_here", "paused_here", "active_elsewhere", "starting"})
+# A run just created, before its session takes the lease, is starting — not interrupted.
+CREATED_GRACE_SECONDS = 60.0
 
 # The run slot is claimed with this marker while a run is being created, so two processes
 # cannot both start one; a marker older than this belongs to a start that crashed midway.
@@ -116,6 +132,11 @@ class _LiveRun:
     task: asyncio.Task[RunOutcome | None]
     control: RunController
     error: str | None = None
+
+
+def _age(record: Any) -> float:
+    created = datetime.fromisoformat(record.created_at)
+    return (utcnow() - created).total_seconds()
 
 
 def _stable_seed(session_id: str) -> int:
@@ -320,13 +341,24 @@ class SessionController:
                 sequence=1,
                 role="user",
                 kind="command",
-                content=text,
+                content=sanitize(text),
                 message_id=message_id or f"cmd-{uuid.uuid4().hex[:12]}",
                 decision_refs=decision_refs,
                 action_refs=action_refs,
             )
         )
         return turn
+
+    def delete(self) -> dict[str, Any]:
+        """Delete this conversation (§14). Refused while one of its runs is active. The
+        runs it started — manifests, attempts, results, artifacts, events — are kept."""
+        active = self.active_run()
+        if active is not None:
+            raise SessionError(f"run {active} is active; pause, stop or let it finish first")
+        runs = self.session_runs()
+        counts = self.store.delete_session(self.session_id)
+        shutil.rmtree(self.directory, ignore_errors=True)  # draft plan files only
+        return {"session_id": self.session_id, "deleted": counts, "runs_kept": runs}
 
     def mark_presented(self, revision: int) -> None:
         """The terminal showed this revision's draft to the user."""
@@ -500,12 +532,42 @@ class SessionController:
                 return None
             age = (utcnow() - action.created_at).total_seconds()
             return run_id if age < STARTING_TTL_SECONDS else None
+        condition = self.run_condition(run_id)["condition"]
+        return run_id if condition in LIVE_CONDITIONS else None
+
+    def run_condition(self, run_id: str) -> dict[str, Any]:
+        """What a run is really doing, from its stored status and its lease (10-T1). A run
+        stored as `running` whose session died (killed, crashed, disconnected) is not
+        active: it is `interrupted` and resumable. Work left in `unknown_effect` needs the
+        user to reconcile the application's state; it is never repeated automatically."""
         record = self.storage.get_run(run_id)
-        if record is not None and record.status in ACTIVE_RUN_STATES:
-            return run_id
-        if run_id in self._live and not self._live[run_id].task.done():
-            return run_id
-        return None
+        stored = record.status if record else "missing"
+        live = self._live.get(run_id)
+        if live is not None and not live.task.done():
+            condition = "paused_here" if live.control.paused else "running_here"
+        elif stored in ACTIVE_RUN_STATES:
+            lease = lease_state(self.storage, run_id)
+            if lease == "live":
+                condition = "active_elsewhere"
+            elif stored == "created" and lease is None and _age(record) < CREATED_GRACE_SECONDS:
+                condition = "starting"  # its session takes the lease in its next step
+            else:
+                condition = "interrupted"
+        else:
+            condition = stored
+        unknown = [
+            w.task_key
+            for w in self.storage.list_work_items(run_id)
+            if w.state is WorkItemState.UNKNOWN_EFFECT
+        ]
+        return {
+            "run_id": run_id,
+            "stored_status": stored,
+            "condition": condition,
+            "resumable": condition == "interrupted"
+            or (condition == stored and stored in RESUMABLE_STATES),
+            "unknown_effect": unknown,
+        }
 
     async def start_run(
         self,
@@ -527,7 +589,7 @@ class SessionController:
             authorization=authorization,
         )
         if not new:
-            return action  # redelivered: never start a second run
+            return self._redelivered_start(action)  # never a second run
         session = self.session
         if session.revision != expected_revision:
             return self.store.settle_action(
@@ -602,23 +664,79 @@ class SessionController:
                 compiled,
                 storage=self.storage,
                 artifacts=self.artifacts,
-                granted_by=f"session {self.session_id}, action {action_id} ({action.source})",
+                granted_by=self._granted_by(action_id, action.source),
             )
         except Exception as exc:  # noqa: BLE001 - any failure frees the slot and is reported
             self.store.claim_active_run(self.session_id, expected=slot, value=session.active_run_id)
             return self.store.settle_action(
                 action, ActionState.REJECTED, reason=f"the run could not be created: {exc}"
             )
-        self.store.claim_active_run(self.session_id, expected=slot, value=run_id)
+        if not self.store.claim_active_run(self.session_id, expected=slot, value=run_id):
+            holder = self.session.active_run_id
+            if holder != run_id:  # the starting window expired and another start took it
+                return self._settle(
+                    action,
+                    ActionState.REJECTED,
+                    run_id=run_id,
+                    reason=f"run {run_id} was created but not started: the session's run "
+                    f"slot was taken by {holder} meanwhile (/resume {run_id} later)",
+                )
         failure = await self._launch(run_id, RunController())
         if failure is not None:
-            return self.store.settle_action(
+            return self._settle(
                 action,
                 ActionState.REJECTED,
                 run_id=run_id,
                 reason=f"run {run_id} was created but could not start: {failure}",
             )
-        return self.store.settle_action(action, ActionState.DONE, run_id=run_id)
+        return self._settle(action, ActionState.DONE, run_id=run_id)
+
+    def _settle(self, action: ActionRequest, state: ActionState, **fields: Any) -> ActionRequest:
+        """Settle an action, or return how it was already settled: a concurrent
+        redelivery may have recorded the same outcome first (10-G2)."""
+        try:
+            return self.store.settle_action(action, state, **fields)
+        except ConflictError:
+            stored = self.store.get_action(action.action_id)
+            assert stored is not None
+            return stored
+
+    def _granted_by(self, action_id: str, source: str) -> str:
+        return f"session {self.session_id}, action {action_id} ({source})"
+
+    def _redelivered_start(self, action: ActionRequest) -> ActionRequest:
+        """A start_run action delivered again (10-G2). Settled: its stored record. Still
+        `requested` means its first delivery is starting now, or crashed midway: if that
+        crash came after the run was created, the run's approval names this action, and
+        the run is adopted instead of starting another; if no run was created and the start
+        is older than the starting window, the request is closed so the user can start
+        again. Nothing is ever dispatched twice."""
+        if action.state is not ActionState.REQUESTED:
+            return action
+        if self.session.active_run_id in self._live:
+            return action  # its first delivery is starting in this process right now
+        marker = f"{STARTING}{action.action_id}"
+        granted = self._granted_by(action.action_id, action.source)
+        for row in self.storage.conn.execute("SELECT approval_id, data FROM approvals"):
+            if json.loads(row["data"]).get("granted_by") == granted:
+                run_id = str(row["approval_id"]).removesuffix(":approval")
+                self.store.claim_active_run(self.session_id, expected=marker, value=run_id)
+                return self._settle(
+                    action,
+                    ActionState.DONE,
+                    run_id=run_id,
+                    reason="recovered: the run was created before the previous session "
+                    "ended; it was not started again (/resume continues it)",
+                )
+        age = (utcnow() - action.created_at).total_seconds()
+        if age < STARTING_TTL_SECONDS:
+            return action  # possibly still starting in another process
+        self.store.claim_active_run(self.session_id, expected=marker, value=None)
+        return self._settle(
+            action,
+            ActionState.REJECTED,
+            reason="the start was interrupted before a run was created; start it again",
+        )
 
     async def _launch(self, run_id: str, control: RunController) -> str | None:
         """Start executing a run in the background. `execute_run` takes the run's lease and
@@ -776,10 +894,13 @@ class SessionController:
         session_error = self.run_error(target)
         if not share:
             session_error = reason_code(session_error)
+        condition = self.run_condition(target)
         return {
             **status,
+            "condition": condition["condition"],
+            "resumable": condition["resumable"],
             "as_of": utcnow().isoformat(),
-            "provisional": status["status"] in ACTIVE_RUN_STATES,
+            "provisional": condition["condition"] in LIVE_CONDITIONS,
             "partial": status["status"] != "completed",
             "session_error": session_error,
         }
@@ -788,6 +909,67 @@ class SessionController:
         """Committed run events after a sequence number, so a client can replay what it
         missed without running anything twice (§14)."""
         return self.storage.list_run_events(self._run_id(run_id), after=after)
+
+    def missed_events(self, run_id: str | None = None) -> list[dict[str, Any]]:
+        """Events committed since the user last saw this run (the session's cursor).
+        Replaying them only displays history; no action is repeated (10-T1)."""
+        target = self._run_id(run_id)
+        cursor = self.session.event_cursors.get(target, 0)
+        return self.storage.list_run_events(target, after=cursor)
+
+    def acknowledge_events(self, run_id: str, sequence: int) -> None:
+        """Record that the user has seen this run's events up to `sequence`."""
+        self.store.advance_event_cursor(self.session_id, run_id, sequence)
+
+    def reconcile(self, *, recent_turns: int = 6) -> dict[str, Any]:
+        """The authoritative picture on reopening a session (10-T1): conversation, current
+        draft, open questions and each run's real condition from storage — with the events
+        missed since last seen. It reads only: nothing is dispatched or repeated, and an
+        interrupted run stays stopped until a new resume action (10-G1)."""
+        session = self.session
+        runs, notes, attention = [], [], []
+        for run_id in self.session_runs():
+            condition = self.run_condition(run_id)
+            missed = self.missed_events(run_id)
+            condition["missed_events"] = len(missed)
+            condition["last_sequence"] = missed[-1]["sequence"] if missed else None
+            runs.append(condition)
+            if condition["condition"] == "interrupted":
+                if condition["stored_status"] == "cancelling":
+                    notes.append(
+                        f"run {run_id} was being cancelled when its session ended; /stop "
+                        "finishes the cancellation (nothing restarted it)."
+                    )
+                else:
+                    notes.append(
+                        f"run {run_id} was {condition['stored_status']} when its session "
+                        "ended; nothing restarted it. /resume continues it under its frozen "
+                        "plan."
+                    )
+            elif condition["condition"] == "active_elsewhere":
+                notes.append(f"run {run_id} is being executed by another live session")
+            for task_key in condition["unknown_effect"]:
+                attention.append({"run_id": run_id, "task_key": task_key})
+        if attention:
+            notes.append(
+                f"{len(attention)} item(s) may have reached the application before a crash "
+                "(unknown effect); check the application's state before repeating them."
+            )
+        state = self.state()
+        return {
+            "session_id": session.session_id,
+            "revision": session.revision,
+            "draft": state["draft"],
+            "open_questions": state["open_questions"],
+            "active_run": self.active_run(session),
+            "runs": runs,
+            "unknown_effect": attention,
+            "notes": notes,
+            "recent_turns": [
+                {"role": t.role, "kind": t.kind, "content": t.content}
+                for t in self.store.turns(self.session_id, last=recent_turns)
+            ],
+        }
 
     def budget(self, run_id: str | None = None) -> dict[str, Any]:
         """Ceilings and committed spend of one of this session's runs (`/budget`), plus the
@@ -799,9 +981,37 @@ class SessionController:
                 usage[name] = usage.get(name, 0) + int(value)
         return {**run_budget(self.storage, self.artifacts, target), "conversation": usage}
 
-    def report(self, run_id: str | None = None) -> dict[str, Any]:
-        """The machine-readable run summary (`/report`); rendered reports are Prompt 11."""
-        return run_report(self.storage, self.artifacts, self._run_id(run_id))
+    def report(self, run_id: str | None = None, *, for_assistant: bool = False) -> dict[str, Any]:
+        """The run's report document, from stored facts only (services.reports): nothing
+        is rerun. The assistant gets case excerpts only when the policy shares content."""
+        share = not for_assistant or self.policy().share_case_content_with_assistant
+        return build_report(
+            self.storage, self.artifacts, self._run_id(run_id), include_content=share
+        )
+
+    def report_facts(
+        self, run_id: str | None = None, *, for_assistant: bool = False
+    ) -> dict[str, Any]:
+        """The report's aggregates (`/report`, the assistant's `get_report`)."""
+        return report_facts(self.report(run_id, for_assistant=for_assistant))
+
+    def export_report(
+        self, run_id: str | None = None, formats: tuple[str, ...] = ("html", "json")
+    ) -> dict[str, Any]:
+        """Write the report files under `.aibench/reports/RUN_ID/` (sanitized content)."""
+        document = self.report(run_id)
+        run = document["run"]
+        paths = export_report(
+            document, list(formats), report_dir(self.workspace_root, run["run_id"])
+        )
+        return {
+            "run_id": run["run_id"],
+            "status": run["status"],
+            "partial": not run["finished"],
+            "as_of_event_sequence": document["as_of_event_sequence"],
+            "paths": paths,
+            "outcome": document["outcome"],
+        }
 
     def _scoring_id(self, run_id: str) -> str:
         record = self.storage.get_run(run_id)

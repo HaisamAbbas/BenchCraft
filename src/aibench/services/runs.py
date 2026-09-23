@@ -21,6 +21,12 @@
 - `run_status` reads committed state only; it needs no model provider.
 - `evaluate_run` rescores a run's saved executions with a plan's metrics (never invokes the
   application).
+- `run_exit_code` maps a finished session of a run to the §13 exit codes, the same for
+  headless commands and the conversation.
+
+Each run freezes its metric profiles (evaluator manifests, parameters and rules) in the
+manifest, and each rescoring pass records its own in a `scoring_pass` event, so reports are
+rebuilt from storage without loading any evaluator (11-G1).
 """
 
 from __future__ import annotations
@@ -57,6 +63,7 @@ from aibench.engine.engine import (
     RunController,
     RunEngine,
     RunOutcome,
+    RunState,
     evaluation_key,
     execution_key,
     parse_work_item_key,
@@ -64,8 +71,13 @@ from aibench.engine.engine import (
     work_counts,
 )
 from aibench.engine.retry import classify_execution
-from aibench.registry import BindingValidationError, EvaluatorRegistry, RegistryError
-from aibench.reporting.aggregation import summarize
+from aibench.evaluators.protocol import rule_for
+from aibench.registry import (
+    BindingValidationError,
+    EvaluatorRegistry,
+    RegistryError,
+    ResolvedMetric,
+)
 from aibench.runners import LoadedApplication, create_runner
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
 from aibench.services.scoring import ScoringReport, score_recorded_run
@@ -73,8 +85,26 @@ from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.repositories import RunLease, Storage
 
 LEASE_TTL_SECONDS = 60.0  # a lease not heartbeated for this long belongs to a dead session
-RESUMABLE_STATES = {"created", "running", "pausing", "paused", "interrupting", "interrupted"}
+# A run in any of these states can be continued by a new session. A run left
+# `cancelling` by a session that died is continued only to finish its cancellation.
+RESUMABLE_STATES = {
+    "created",
+    "running",
+    "pausing",
+    "paused",
+    "cancelling",
+    "interrupting",
+    "interrupted",
+}
 APPROVED_ACTIONS = ("invoke_application", "run_evaluators")
+EXIT_OK, EXIT_GATES_FAILED, EXIT_INVALID, EXIT_INCOMPLETE, EXIT_DENIED, EXIT_INTERRUPTED = (
+    0,
+    1,
+    2,
+    3,
+    4,
+    130,
+)
 
 
 class RunError(AibenchError):
@@ -91,6 +121,22 @@ def _approval_scope(run_id: str, manifest: RunManifest, policy_hash: str) -> str
             "policy_hash": policy_hash,
         }
     )
+
+
+def metric_profiles(metrics: list[ResolvedMetric]) -> dict[str, dict[str, Any]]:
+    """What reports need to interpret each binding's results, frozen at scoring time:
+    binding hash -> manifest, parameters and decision rule."""
+    profiles: dict[str, dict[str, Any]] = {}
+    for metric in metrics:
+        rule = rule_for(metric.binding, metric.manifest)
+        profiles[metric.binding_hash] = {
+            "metric": metric.binding.metric,
+            "manifest": metric.manifest.model_dump(mode="json"),
+            "params": deep_unfreeze(metric.binding.params) or {},
+            "rule": rule.model_dump(mode="json") if rule else None,
+            "source": "frozen_with_run",
+        }
+    return profiles
 
 
 def create_run(
@@ -137,6 +183,7 @@ def create_run(
             "policy_hash": compiled.policy_hash,
             "scoring_id": f"engine-{run_id}",
             "binding_hashes": [m.binding_hash for m in compiled.metrics],
+            "metric_profiles": metric_profiles(list(compiled.metrics)),
         },
         seed=random.SystemRandom().randrange(2**31),
         environment={"python": platform.python_version(), "platform": sys.platform},
@@ -334,14 +381,18 @@ def _recover_in_flight(
 _SESSION_EVENTS = ("run_session_ended", "run_session_aborted", "run_session_lost")
 
 
-def _replay_prior_spend(storage: Storage, run_id: str, ledger: BudgetLedger) -> None:
+def _replay_prior_spend(
+    storage: Storage, run_id: str, ledger: BudgetLedger, scoring_id: str | None
+) -> None:
     """Replay every committed attempt of earlier sessions into the ledger, so hard limits,
-    tokens and known costs carry across sessions of the same run."""
+    tokens and known costs carry across sessions of the same run. Only the run's own
+    scoring pass counts: a later rescore (`aibench evaluate`) is not spend of this run."""
     for attempt in storage.list_execution_attempts(run_id):
         if was_dispatched(attempt):
             ledger.record_prior_application(attempt.cost)
     for result in storage.list_evaluation_attempts(run_id):
-        ledger.record_prior_evaluation(dict(result.resources))
+        if scoring_id is None or result.scoring_id == scoring_id:
+            ledger.record_prior_evaluation(dict(result.resources))
     for event in storage.list_run_events(run_id):
         payload = event["payload"]
         if event["event_type"] == "recovered":
@@ -380,6 +431,21 @@ def _lease_is_stale(lease: RunLease) -> bool:
     return lease.host == socket.gethostname() and not _pid_alive(lease.pid)
 
 
+def lease_state(storage: Storage, run_id: str) -> str | None:
+    """Whether a session is executing the run right now: "live" (a lease held by a live
+    session), "stale" (its session ended without releasing it: killed, crashed or
+    disconnected) or None (no session holds it). The stored run status alone cannot tell a
+    running run from one whose process died mid-run (10-T1)."""
+    row = storage.conn.execute(
+        "SELECT owner, host, pid, acquired_at, heartbeat_at FROM run_leases WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    lease = RunLease(run_id, row[0], row[1], int(row[2]), row[3], row[4])
+    return "stale" if _lease_is_stale(lease) else "live"
+
+
 async def execute_run(
     run_id: str,
     *,
@@ -399,6 +465,10 @@ async def execute_run(
     if mode != "manual_plan":
         raise RunError(f"run {run_id} was not created from a plan (mode={mode!r})")
 
+    if record.status == "cancelling":
+        # The previous session was cancelling when it ended: finish that, never un-cancel.
+        controller = controller or RunController()
+        controller.request("cancel")
     owner = uuid.uuid4().hex
     started = time.monotonic()
     previous = storage.acquire_run_lease(
@@ -478,7 +548,7 @@ async def _execute_leased(
         raise RunError("stored Goldens are missing for some of this run's cases")
 
     ledger = BudgetLedger(plan.budgets)
-    _replay_prior_spend(storage, run_id, ledger)  # before recovery adds its own event
+    _replay_prior_spend(storage, run_id, ledger, params["scoring_id"])  # before recovery
     notes, uncommitted = _recover_in_flight(storage, run_id, spec, plan, params["scoring_id"])
     if notes:
         storage.append_run_event(
@@ -581,7 +651,7 @@ async def evaluate_run(
     denials = evaluator_denials(policy, [m.manifest for m in metrics])
     if denials:
         raise PolicyDenied(denials)
-    return await score_recorded_run(
+    report = await score_recorded_run(
         storage=storage,
         artifacts=artifacts,
         registry=registry,
@@ -590,6 +660,16 @@ async def evaluate_run(
         timeout_seconds=plan.evaluation_timeout_seconds,
         application=application,
     )
+    storage.append_run_event(
+        run_id,
+        "scoring_pass",
+        {
+            "scoring_id": report.scoring_id,
+            "plan_id": plan.plan_id,
+            "metric_profiles": metric_profiles(metrics),
+        },
+    )
+    return report
 
 
 def outcome_json(outcome: RunOutcome) -> dict[str, Any]:
@@ -614,7 +694,7 @@ def run_budget(storage: Storage, artifacts: ArtifactStore, run_id: str) -> dict[
         raise RunError(f"no run committed with run_id={run_id!r}")
     plan = _frozen_plan(storage, artifacts, record.manifest)
     ledger = BudgetLedger(plan.budgets)
-    _replay_prior_spend(storage, run_id, ledger)
+    _replay_prior_spend(storage, run_id, ledger, record.manifest.parameters.get("scoring_id"))
     return {
         "run_id": run_id,
         "status": record.status,
@@ -624,42 +704,23 @@ def run_budget(storage: Storage, artifacts: ArtifactStore, run_id: str) -> dict[
 
 
 def run_report(storage: Storage, artifacts: ArtifactStore, run_id: str) -> dict[str, Any]:
-    """A machine-readable summary of a run's stored results: status, work counts, budget
-    and one aggregate per metric binding (reporting.aggregation), computed from committed
-    results only. Provisional while the run is still active."""
-    record = storage.get_run(run_id)
-    if record is None:
-        raise RunError(f"no run committed with run_id={run_id!r}")
-    manifest = record.manifest
-    plan = _frozen_plan(storage, artifacts, manifest)
-    spec = _frozen_application(storage, artifacts, manifest)
-    policy = ExecutionPolicy.model_validate(manifest.parameters["policy"])
-    _, metrics = _frozen_registry(plan, manifest, policy, spec)
-    results = storage.list_metric_results(run_id, scoring_id=manifest.parameters["scoring_id"])
-    summaries = []
-    for metric in metrics:
-        bound = [r for r in results if r.binding_hash == metric.binding_hash]
-        summaries.append(
-            summarize(
-                bound,
-                manifest=metric.manifest,
-                binding_hash=metric.binding_hash,
-                params=deep_unfreeze(metric.binding.params) or {},
-            ).as_dict()
-        )
-    status = run_status(storage, run_id)
-    return {
-        "run_id": run_id,
-        "status": record.status,
-        "provisional": record.status not in _FINISHED,
-        "partial": record.status != "completed",
-        "plan_id": plan.plan_id,
-        "plan_hash": manifest.plan_hash,
-        "counts": status["counts"],
-        "needs_attention": status["needs_attention"],
-        "metrics": summaries,
-        "budget": run_budget(storage, artifacts, run_id),
-    }
+    """The run's report document, built from stored facts only (services.reports)."""
+    from aibench.services.reports import build_report  # reports builds on this module
+
+    return build_report(storage, artifacts, run_id)
+
+
+def run_exit_code(state: RunState, report: dict[str, Any]) -> int:
+    """§13 exit codes for a session of a run that has ended in `state`: 130 interrupted
+    (resumable); 3 incomplete (unfinished, or failed, blocked, cancelled or unknown-effect
+    work), which wins over gate failures (both are in the report); 1 finished with a failed
+    release gate; 0 finished with every gate satisfied."""
+    if state is RunState.INTERRUPTED:
+        return EXIT_INTERRUPTED
+    outcome = report["outcome"]
+    if state is not RunState.COMPLETED or not outcome["complete"]:
+        return EXIT_INCOMPLETE
+    return EXIT_GATES_FAILED if outcome["gates_failed"] else EXIT_OK
 
 
 _FINISHED = frozenset({"completed", "cancelled", "budget_exhausted"})

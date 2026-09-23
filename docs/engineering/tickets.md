@@ -134,3 +134,15 @@ Review remediation: `tests/test_session_review_regressions.py`.
 | 09-T4 | Ctrl+C interrupts only the assistant reply; graceful exit interrupts dispatch safely; explicit /stop cancels a run | DONE | `src/aibench/tui/app.py`, `src/aibench/sessions/controller.py`; `tests/test_tui.py`, `tests/test_session_controller.py` |
 
 Gates: 09-G1..G5. See `docs/engineering/reports/09.md`. Decision: ADR 0008.
+
+## Prompt 10 — Conversation recovery and adversarial interaction
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 10-T1 | Reconcile resumed state: persisted conversation plus authoritative engine/plan state; replay missed events by sequence without replaying actions; distinguish active, paused, interrupted and unknown-effect work | DONE | `services/runs.py` (`lease_state`), `SessionController.run_condition` / `reconcile` / `missed_events` / `acknowledge_events`, `BenchmarkSession.event_cursors`, `tui/app.py` (reopen banner, `notable_event`); `test_reopening_after_a_kill_shows_the_real_state_and_restarts_nothing`, `test_a_killed_effectful_run_leaves_unknown_effect_work_for_the_user`, `test_missed_events_replay_by_sequence_without_repeating_actions`, `test_reopening_replays_notable_missed_events_in_order` |
+| 10-T2 | Long conversations: bounded summaries referencing structured decisions/artifacts; unanswered questions and user corrections preserved; summaries never authoritative over run data | DONE | `src/aibench/sessions/summary.py`, `conversation/agent.py` (`_messages`, `max_turn_chars`); `test_long_conversations_keep_corrections_and_open_questions_within_bounds`, `test_the_summary_stays_bounded_whatever_the_session_holds`, `test_corrections_made_in_conversation_are_kept_as_user_corrections` |
+| 10-T3 | Harden boundaries: stale answers after dataset changes, delayed model mutations, tool-output prompt injection; redact secrets and terminal control content from history and rendering | DONE | `src/aibench/security/redaction.py`, `tui/render.py` (`safe`, `out`); `test_a_late_model_response_cannot_revert_a_newer_revision`, `test_tool_output_cannot_authorize_actions_or_supply_plan_values`, `test_terminal_control_and_secrets_never_reach_history_or_the_screen`, `test_split_or_quoted_credentials_are_redacted` |
+| 10-T4 | Graceful and abrupt loss: chat disconnect, model interruption, worker crash, process kill; conversation interruption separate from run cancellation; session deletion vs retained run artifacts | DONE | `SessionController._redelivered_start` / `delete`, `SessionStore.delete_session`, `aibench sessions delete`; `test_retrying_a_start_after_a_kill_never_starts_a_second_run`, `test_a_crash_after_the_run_was_created_but_before_it_was_recorded_is_adopted`, `test_controls_work_during_a_provider_outage_and_stay_separate_from_replies`, `test_deleting_a_session_keeps_its_runs_and_their_results` |
+
+Gates: 10-G1..G5. See `docs/engineering/reports/10.md`. Decisions: ADR 0009.
+Review remediation: `tests/test_recovery_review_regressions.py`.

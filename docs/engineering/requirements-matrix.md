@@ -57,6 +57,13 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §13, §15 | Streamed replies, tool cards, coalesced committed progress, partial metric labels, responsive controls | 09 | 09-G2, 09-G4, 09-G5 |
 | §13, §15 | Deterministic slash controls; provider-independent status/stop; run interruption and graceful exit | 09 | 09-G3..G5 |
 | §8, §13–16 | Conversation recovery, adversarial hardening | 10 | 10-G1..G5 |
+| §8, §14 Resumption | Reopening reconciles conversation with authoritative run state (stored status + lease); interrupted runs stay stopped until a new action; unknown-effect work reported | 10 | 10-G1 |
+| §8, §14 Event replay | Per-session event cursors; missed events replayed by sequence; no action replayed | 10 | 10-G1 |
+| §8 Deduplicated actions under crashes | A redelivered start adopts the run its crashed first delivery created (via its approval) or closes after the starting window; never a second run | 10 | 10-G2 |
+| §8 Expected revisions under races | Late model patches, starts and answers against an older revision (incl. after a dataset change) are rejected | 10 | 10-G3 |
+| §8, §16 Summaries and injected text | Bounded structured summaries labelled non-authoritative; permissions only from policy and the session's grant; tool-output instructions cannot authorize actions or supply values | 10 | 10-G4 |
+| §14, §16 Redaction | Secrets and terminal control/bidi content removed from history, model input and rendering; emoji codes never substituted in data | 10 | 10-G4 |
+| §14 Session deletion | Deleting a conversation keeps runs, results, artifacts and events | 10 | 10-G5 |
 | §12–14 | Evidence reports, command composition, packaging | 11 | 11-G1..G5 |
 | §17, §23–24 | MVP acceptance validation | 12 | 12-G1..G5 |
 | §17–18, §22–24 | Release candidate and pilot handoff | 13 | 13-G1..G5 |

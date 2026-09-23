@@ -15,7 +15,7 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 07 | MVP | Evaluation planning and bounded LLM reasoning | COMPLETE | `docs/engineering/reports/07.md` |
 | 08 | MVP | Persistent two-way conversation and typed actions | COMPLETE | `docs/engineering/reports/08.md` |
 | 09 | MVP | Interactive terminal and live controls | COMPLETE | `docs/engineering/reports/09.md` |
-| 10 | MVP | Conversation recovery and adversarial interaction | NOT_STARTED | — |
+| 10 | MVP | Conversation recovery and adversarial interaction | COMPLETE | `docs/engineering/reports/10.md` |
 | 11 | MVP | Evidence reports, command composition, and packaging | NOT_STARTED | — |
 | 12 | MVP | MVP acceptance and harness validation | NOT_STARTED | — |
 | 13 | MVP | Release candidate and pilot handoff | NOT_STARTED | — |

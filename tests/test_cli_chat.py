@@ -119,3 +119,42 @@ def test_chat_closes_provider_when_command_finishes(tmp_path: Path, monkeypatch)
     )
     assert result.exit_code == 0, result.stdout
     assert provider.closed
+
+
+def test_chat_send_json_sanitizes_command_data(tmp_path: Path, monkeypatch) -> None:
+    from aibench.tui.commands import CommandResult, Commands
+
+    project = tmp_path / "project"
+    application, dataset = _project(project)
+
+    async def hostile_command(self, text):
+        return CommandResult(
+            text,
+            "report",
+            {
+                "credential": "sk-abcdefghijklmnopqrstuvwx",
+                "message": "before\x1b[2Jafter",
+            },
+        )
+
+    monkeypatch.setattr(Commands, "run", hostile_command)
+    result = runner.invoke(
+        app,
+        [
+            "chat",
+            "--project",
+            str(project),
+            "--app",
+            str(application),
+            "--dataset",
+            str(dataset),
+            "--new",
+            "--send",
+            "/report",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["data"]["credential"] == "[redacted]"
+    assert payload["data"]["message"] == "beforeafter"

@@ -133,6 +133,18 @@ class SessionStore:
             )
         return True
 
+    def advance_event_cursor(self, session_id: str, run_id: str, sequence: int) -> None:
+        """Move one run's event cursor forward, atomically: concurrent sessions cannot
+        move it backwards or drop another run's cursor (10-T1)."""
+        with self._transaction() as conn:
+            current = self._locked_session(conn, session_id)
+            if sequence <= current.event_cursors.get(run_id, 0):
+                return
+            cursors = {**current.event_cursors, run_id: sequence}
+            self._update_session(
+                conn, current.model_copy(update={"event_cursors": cursors, "updated_at": utcnow()})
+            )
+
     def _locked_session(self, conn: sqlite3.Connection, session_id: str) -> BenchmarkSession:
         row = conn.execute(
             "SELECT data FROM sessions WHERE session_id = ?", (session_id,)
@@ -407,3 +419,24 @@ class SessionStore:
             (session_id,),
         ).fetchall()
         return [ActionRequest.model_validate_json(r["data"]) for r in rows]
+
+    # ------------------------------------------------------------------ deletion
+
+    def delete_session(self, session_id: str) -> dict[str, int]:
+        """Delete a conversation and everything that belongs only to it: turns, questions,
+        decisions, action requests and the session row (§14). Runs, their work items,
+        attempts, results, artifacts and events are benchmark records, not session data:
+        they are kept, and stay readable with `aibench runs` and `aibench report`."""
+        counts = {}
+        with self._transaction() as conn:
+            for table in (
+                "conversation_turns",
+                "pending_questions",
+                "decision_records",
+                "action_requests",
+            ):
+                cursor = conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))
+                counts[table] = cursor.rowcount
+            cursor = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            counts["sessions"] = cursor.rowcount
+        return counts
