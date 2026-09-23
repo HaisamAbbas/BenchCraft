@@ -45,6 +45,7 @@ from aibench.core.plans import (
     PluginEnvironmentRef,
     RetryPolicy,
 )
+from aibench.core.sessions import PendingQuestion
 from aibench.engine.compile import (
     FindingKind,
     PlanAnalysis,
@@ -87,19 +88,6 @@ class QuestionProposal(FrozenModel):
     required_fields: tuple[str, ...] = ()
     choices: tuple[str, ...] = ()
     blocking_scope: str = "plan"
-
-
-class PendingQuestion(FrozenModel):
-    """§5 PendingQuestion: a structured clarification, tied to the draft revision it was
-    asked against so a later answer cannot silently apply to a newer draft."""
-
-    question_id: str
-    prompt: str
-    required_fields: tuple[str, ...]
-    choices: tuple[str, ...]
-    blocking_scope: str
-    draft_revision: int
-    status: Literal["open", "answered", "stale"] = "open"
 
 
 class DraftProposal(FrozenModel):

@@ -369,6 +369,69 @@ _0006_run_leases = Migration(
     """,
 )
 
+# Benchmark sessions (§14, 08-T1): the conversation, its decisions, questions and typed
+# action requests. Session revisions advance by compare-and-set, and each revision has at
+# most one decision, so a stale patch can never overwrite a newer choice. Action IDs are
+# primary keys, so a redelivered action is recognized instead of carried out twice. Runs
+# are not owned by sessions: deleting a conversation never deletes run results.
+_0007_sessions = Migration(
+    version=7,
+    name="sessions",
+    sql="""
+    CREATE TABLE sessions (
+        session_id          TEXT PRIMARY KEY,
+        revision            INTEGER NOT NULL,
+        active_run_id       TEXT,
+        data                TEXT NOT NULL,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL
+    );
+    CREATE TABLE conversation_turns (
+        turn_id      TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL REFERENCES sessions(session_id),
+        sequence     INTEGER NOT NULL,
+        role         TEXT NOT NULL,
+        message_id   TEXT,
+        replies_to   TEXT,
+        data         TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        UNIQUE (session_id, sequence)
+    );
+    CREATE UNIQUE INDEX idx_turns_delivery
+        ON conversation_turns(session_id, role, message_id) WHERE message_id IS NOT NULL;
+    CREATE UNIQUE INDEX idx_turns_reply
+        ON conversation_turns(replies_to) WHERE replies_to IS NOT NULL;
+    CREATE TABLE decision_records (
+        decision_id  TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL REFERENCES sessions(session_id),
+        revision     INTEGER NOT NULL,
+        data         TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        UNIQUE (session_id, revision)
+    );
+    CREATE TABLE pending_questions (
+        session_id      TEXT NOT NULL REFERENCES sessions(session_id),
+        question_id     TEXT NOT NULL,
+        draft_revision  INTEGER NOT NULL,
+        status          TEXT NOT NULL,
+        data            TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        PRIMARY KEY (session_id, question_id)
+    );
+    CREATE TABLE action_requests (
+        action_id    TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL REFERENCES sessions(session_id),
+        kind         TEXT NOT NULL,
+        state        TEXT NOT NULL,
+        run_id       TEXT,
+        data         TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+    );
+    CREATE INDEX idx_action_requests_session ON action_requests(session_id);
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
@@ -376,6 +439,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _0004_evaluation_attempt_identity,
     _0005_run_events,
     _0006_run_leases,
+    _0007_sessions,
 )
 
 

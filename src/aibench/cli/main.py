@@ -16,6 +16,7 @@ from aibench.cli import plan as plan_cli
 from aibench.cli import run as run_cli
 from aibench.cli import runs as runs_cli
 from aibench.cli import score as score_cli
+from aibench.cli import sessions as sessions_cli
 
 app = typer.Typer(
     name="aibench",
@@ -24,6 +25,7 @@ app = typer.Typer(
 )
 app.add_typer(dataset_cli.app, name="dataset")
 app.add_typer(runs_cli.app, name="runs")
+app.add_typer(sessions_cli.app, name="sessions")
 app.add_typer(app_cli.app, name="app")
 app.add_typer(score_cli.evaluators_app, name="evaluators")
 app.command("score")(score_cli.score)

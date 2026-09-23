@@ -1,0 +1,309 @@
+{
+  "$defs": {
+    "BudgetPatch": {
+      "additionalProperties": false,
+      "description": "Budget limits to set; a field left out keeps its current value.",
+      "properties": {
+        "estimated_cost_per_application_call_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Cost Per Application Call Usd"
+        },
+        "estimated_cost_per_evaluation_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Cost Per Evaluation Usd"
+        },
+        "max_application_calls": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Application Calls"
+        },
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
+        "max_evaluator_calls": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Evaluator Calls"
+        },
+        "max_judge_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Judge Tokens"
+        },
+        "max_wall_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Wall Seconds"
+        }
+      },
+      "title": "BudgetPatch",
+      "type": "object"
+    },
+    "DecisionRule": {
+      "additionalProperties": false,
+      "description": "Harness-owned pass/fail rule using frozen thresholds.",
+      "properties": {
+        "categories": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "comparator": {
+          "enum": [
+            "is_true",
+            ">=",
+            ">",
+            "<=",
+            "<",
+            "==",
+            "in"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "rule_id": {
+          "default": "threshold",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "version": {
+          "default": "1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comparator"
+      ],
+      "title": "DecisionRule",
+      "type": "object"
+    },
+    "SamplePatch": {
+      "additionalProperties": false,
+      "description": "A seeded sample of `size` cases (\u00a73 \"a seeded 20-case pilot\"). Without a seed, the\ncurrent one is kept, or the session's own stable seed is used; either way the sample\nis recorded with its seed and is reproducible.",
+      "properties": {
+        "seed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "size": {
+          "minimum": 1,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size"
+      ],
+      "title": "SamplePatch",
+      "type": "object"
+    }
+  },
+  "$id": "aibench/1.0.0/PlanPatch.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "A typed change to the session's choices. Selection edits are mutually exclusive:\n`sample`, `limit` or `all_cases`.",
+  "properties": {
+    "add_objectives": {
+      "default": [],
+      "items": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Add Objectives",
+      "type": "array"
+    },
+    "all_cases": {
+      "default": false,
+      "title": "All Cases",
+      "type": "boolean"
+    },
+    "answers": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Answers",
+      "type": "array"
+    },
+    "budgets": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BudgetPatch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "dataset": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dataset"
+    },
+    "limit": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Limit"
+    },
+    "objective_concepts": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Objective Concepts",
+      "type": "object"
+    },
+    "params": {
+      "additionalProperties": true,
+      "title": "Params",
+      "type": "object"
+    },
+    "remove_objectives": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Remove Objectives",
+      "type": "array"
+    },
+    "repetitions": {
+      "anyOf": [
+        {
+          "maximum": 10,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Repetitions"
+    },
+    "rules": {
+      "additionalProperties": {
+        "$ref": "#/$defs/DecisionRule"
+      },
+      "title": "Rules",
+      "type": "object"
+    },
+    "sample": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SamplePatch"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "PlanPatch",
+  "type": "object"
+}

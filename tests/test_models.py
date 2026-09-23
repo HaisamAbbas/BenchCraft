@@ -14,6 +14,7 @@ from aibench.core.models import (
     ReferenceAnswer,
 )
 from aibench.core.schema_export import export_schemas
+from aibench.core.sessions import SESSION_MODELS
 
 
 def test_benchmark_case_is_frozen() -> None:
@@ -118,7 +119,8 @@ def test_json_schema_round_trip(model) -> None:
 
 def test_export_schemas_writes_versioned_files(tmp_path) -> None:
     written = export_schemas(tmp_path)
-    assert len(written) == len(ALL_MODELS) + 1  # plus the ExecutablePlan authoring format
+    # plus the ExecutablePlan authoring format and the session records (Prompt 08)
+    assert len(written) == len(ALL_MODELS) + 1 + len(SESSION_MODELS)
     assert tmp_path / "1.0.0" / "ExecutablePlan.json" in written
     for path in written:
         assert path.exists()

@@ -46,6 +46,13 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §17 Manual vs generated plans | Hand-written and generated plans with identical content produce identical deterministic metrics | 07 | 07-G2 |
 | §23 Benchmark the planner | Annotated fixtures, precision/recall/gap scoring, static template baseline | 07 | 07-G3 |
 | §2–5, §8 | Persistent session, decisions, typed actions | 08 | 08-G1..G5 |
+| §2, §5 Session records | `BenchmarkSession`, `ConversationTurn`, `PendingQuestion`, `DecisionRecord`, `ActionRequest` with exported schemas; decisions linked to source turn, revision and plan hash | 08 | 08-G4 |
+| §8 Dialogue and action protocol | Typed turn outputs validated outside the model; patches grounded in the user's words; actions need the user's explicit request; no terminal/file/network tool | 08 | 08-G1, 08-G3 |
+| §8 Expected revisions and action IDs | Compare-and-set revisions reject stale patches and stale answers; action IDs deduplicated; one active run per session | 08 | 08-G3, 08-G4 |
+| §8, §15 Live conversation | Questions and explanations during execution never touch the run; scope changes create a new draft; controls are recorded events | 08 | 08-G2 |
+| §4, §8 Shared services | Session tools call `compile_plan`, `create_run`, `execute_run`, `run_status` and stored results — the headless commands' services | 08 | 08-G1 |
+| §14 Session persistence | Migration 7 tables; turns, decisions, questions and actions survive restart; run events replayable; runs not owned by sessions; credentials redacted from chat | 08 | 08-G4 |
+| §16 Data egress | The assistant never receives reference answers; case content only with `share_case_content_with_assistant` | 08 | 08-G5 |
 | §3, §13 | Interactive terminal, slash controls | 09 | 09-G1..G5 |
 | §8, §13–16 | Conversation recovery, adversarial hardening | 10 | 10-G1..G5 |
 | §12–14 | Evidence reports, command composition, packaging | 11 | 11-G1..G5 |

@@ -1,0 +1,101 @@
+{
+  "$id": "aibench/1.0.0/ConversationTurn.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "\u00a75 ConversationTurn: a user message or command, or the assistant's response. Never\nan executable plan by itself; its effects are the decision and action records it\nreferences.",
+  "properties": {
+    "action_refs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Action Refs",
+      "type": "array"
+    },
+    "content": {
+      "title": "Content",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "decision_refs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Decision Refs",
+      "type": "array"
+    },
+    "kind": {
+      "enum": [
+        "message",
+        "command",
+        "reply"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "message_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Message Id"
+    },
+    "outcome": {
+      "default": null,
+      "title": "Outcome"
+    },
+    "replies_to": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Replies To"
+    },
+    "role": {
+      "enum": [
+        "user",
+        "assistant"
+      ],
+      "title": "Role",
+      "type": "string"
+    },
+    "sequence": {
+      "minimum": 1,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "turn_id": {
+      "title": "Turn Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "turn_id",
+    "session_id",
+    "sequence",
+    "role",
+    "kind",
+    "content"
+  ],
+  "title": "ConversationTurn",
+  "type": "object"
+}

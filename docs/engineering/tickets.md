@@ -111,3 +111,15 @@ Review remediation: `tests/test_engine_review_regressions.py`.
 
 Gates: 07-G1..G5. See `docs/engineering/reports/07.md`. Decisions: ADR 0006.
 Review remediation: `tests/test_planning_review_regressions.py`.
+
+## Prompt 08 — Persistent two-way conversation and typed actions
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 08-T1 | Persist sessions, turns, pending questions, decision records and typed action requests; link source turns to interpreted choices, plan revisions and run IDs | DONE | `src/aibench/core/sessions.py`, migration 7 (`storage/migrations.py`), `src/aibench/sessions/store.py`, `src/aibench/cli/sessions.py`; `tests/test_session_store.py`, `test_sessions_cli_shows_the_conversation_decisions_and_actions` |
+| 08-T2 | Domain conversation loop: explanations, material questions, plan patches, action requests, result queries; reuse prior answers; missing requirements vs authorized actions | DONE | `src/aibench/conversation/agent.py`, `src/aibench/sessions/drafting.py`, `planning/template.py` (`concepts`); `test_dialogue_changes_the_sample_explains_a_metric_and_starts_a_real_run`, `test_answers_are_reused_and_a_dataset_change_invalidates_stale_questions`, `test_missing_information_blocks_and_missing_permission_denies` |
+| 08-T3 | Real services behind every tool: profile, dataset summary, evaluator description, plan patch/validation, start_run, status, pause/resume/cancel, case evidence — the same services as headless commands | DONE | `src/aibench/sessions/controller.py` (`compile_plan`, `create_run`, `execute_run`, `run_status`); `test_a_session_run_is_the_headless_run_of_the_same_reviewed_plan`, `test_pause_resume_and_cancel_go_through_run_control`, `test_failures_and_case_evidence_come_from_committed_results` |
+| 08-T4 | Action boundaries: expected revisions, stable action IDs, stale patches and duplicate actions rejected, runs target a reviewed revision, scope changes create a new draft, questions never interrupt execution | DONE | `SessionStore.commit_decision` / `record_action` / `claim_active_run`, `SessionController.start_run`; `test_user_corrections_persist_and_stale_model_patches_are_rejected`, `test_redelivery_and_retried_turns_cannot_start_a_second_run`, `test_a_run_targets_the_reviewed_revision_and_one_runs_at_a_time`, `test_a_question_during_execution_leaves_the_run_running` |
+
+Gates: 08-G1..G5. See `docs/engineering/reports/08.md`. Decisions: ADR 0007.
+Review remediation: `tests/test_session_review_regressions.py`.

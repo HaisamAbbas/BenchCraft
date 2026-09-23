@@ -1,0 +1,409 @@
+{
+  "$defs": {
+    "BudgetLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "estimated_cost_per_application_call_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Cost Per Application Call Usd"
+        },
+        "estimated_cost_per_evaluation_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimated Cost Per Evaluation Usd"
+        },
+        "max_application_calls": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Application Calls"
+        },
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
+        "max_evaluator_calls": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Evaluator Calls"
+        },
+        "max_judge_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Judge Tokens"
+        },
+        "max_wall_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Wall Seconds"
+        }
+      },
+      "title": "BudgetLimits",
+      "type": "object"
+    },
+    "CasePredicate": {
+      "additionalProperties": false,
+      "description": "A selector over Golden fields only (never execution data): `path` is a `case.*`\nevaluation-view path, e.g. `case.metadata.category` or `case.reference.answer`.\n`exists` means present and non-empty.",
+      "properties": {
+        "op": {
+          "default": "exists",
+          "enum": [
+            "exists",
+            "equals",
+            "in"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^case\\.",
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "default": null,
+          "title": "Value"
+        },
+        "values": {
+          "default": [],
+          "items": {},
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "CasePredicate",
+      "type": "object"
+    },
+    "CaseSelection": {
+      "additionalProperties": false,
+      "description": "Which cases of the dataset the run selects, applied in this order:\n`case_ids` (empty means all), then every `where` predicate, then either a seeded\nrandom `sample_size` (kept in dataset order) or the first `limit` cases.",
+      "properties": {
+        "case_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Case Ids",
+          "type": "array"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "sample_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sample Size"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "where": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CasePredicate"
+          },
+          "title": "Where",
+          "type": "array"
+        }
+      },
+      "title": "CaseSelection",
+      "type": "object"
+    },
+    "DecisionRule": {
+      "additionalProperties": false,
+      "description": "Harness-owned pass/fail rule using frozen thresholds.",
+      "properties": {
+        "categories": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "comparator": {
+          "enum": [
+            "is_true",
+            ">=",
+            ">",
+            "<=",
+            "<",
+            "==",
+            "in"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "rule_id": {
+          "default": "threshold",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "version": {
+          "default": "1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comparator"
+      ],
+      "title": "DecisionRule",
+      "type": "object"
+    },
+    "SessionChoices": {
+      "additionalProperties": false,
+      "description": "The user's benchmark decisions at one session revision.",
+      "properties": {
+        "application": {
+          "title": "Application",
+          "type": "string"
+        },
+        "budgets": {
+          "$ref": "#/$defs/BudgetLimits"
+        },
+        "dataset": {
+          "title": "Dataset",
+          "type": "string"
+        },
+        "objective_concepts": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Objective Concepts",
+          "type": "object"
+        },
+        "objectives": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Objectives",
+          "type": "array"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "repetitions": {
+          "default": 1,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Repetitions",
+          "type": "integer"
+        },
+        "rules": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DecisionRule"
+          },
+          "title": "Rules",
+          "type": "object"
+        },
+        "selection": {
+          "$ref": "#/$defs/CaseSelection"
+        }
+      },
+      "required": [
+        "application",
+        "dataset"
+      ],
+      "title": "SessionChoices",
+      "type": "object"
+    }
+  },
+  "$id": "aibench/1.0.0/DecisionRecord.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "\u00a75 DecisionRecord: one accepted change, linked to its source turn and the exact\ndraft revision it produced.",
+  "properties": {
+    "choices": {
+      "$ref": "#/$defs/SessionChoices"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "draft": {
+      "title": "Draft"
+    },
+    "executable": {
+      "title": "Executable",
+      "type": "boolean"
+    },
+    "plan_file": {
+      "title": "Plan File",
+      "type": "string"
+    },
+    "plan_hash": {
+      "title": "Plan Hash",
+      "type": "string"
+    },
+    "revision": {
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "source": {
+      "enum": [
+        "session",
+        "user",
+        "assistant"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "source_turn_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Source Turn Id"
+    },
+    "structured_change": {
+      "title": "Structured Change"
+    },
+    "supersedes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supersedes"
+    }
+  },
+  "required": [
+    "decision_id",
+    "session_id",
+    "source_turn_id",
+    "source",
+    "revision",
+    "choices",
+    "plan_file",
+    "plan_hash",
+    "executable",
+    "draft"
+  ],
+  "title": "DecisionRecord",
+  "type": "object"
+}

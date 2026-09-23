@@ -1,0 +1,97 @@
+{
+  "$id": "aibench/1.0.0/BenchmarkSession.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "\u00a75 BenchmarkSession.",
+  "properties": {
+    "active_run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Active Run Id"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "decision_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decision Id"
+    },
+    "plugin_environments": {
+      "default": [],
+      "items": {},
+      "title": "Plugin Environments",
+      "type": "array"
+    },
+    "policy_path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Policy Path"
+    },
+    "presented_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Presented Revision"
+    },
+    "project_root": {
+      "title": "Project Root",
+      "type": "string"
+    },
+    "revision": {
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "trusted_local": {
+      "default": false,
+      "title": "Trusted Local",
+      "type": "boolean"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "project_root",
+    "revision"
+  ],
+  "title": "BenchmarkSession",
+  "type": "object"
+}

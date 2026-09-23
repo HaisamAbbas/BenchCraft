@@ -1,0 +1,139 @@
+{
+  "$defs": {
+    "ActionKind": {
+      "enum": [
+        "start_run",
+        "pause_run",
+        "resume_run",
+        "cancel_run"
+      ],
+      "title": "ActionKind",
+      "type": "string"
+    },
+    "ActionState": {
+      "enum": [
+        "requested",
+        "done",
+        "blocked",
+        "denied",
+        "rejected"
+      ],
+      "title": "ActionState",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ActionRequest.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "\u00a75 ActionRequest: a typed, policy-checked request to act on a run.",
+  "properties": {
+    "action_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+      "title": "Action Id",
+      "type": "string"
+    },
+    "authorization": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Authorization"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "expected_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Revision"
+    },
+    "findings": {
+      "default": [],
+      "items": {},
+      "title": "Findings",
+      "type": "array"
+    },
+    "kind": {
+      "$ref": "#/$defs/ActionKind"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "source": {
+      "enum": [
+        "user",
+        "assistant"
+      ],
+      "title": "Source",
+      "type": "string"
+    },
+    "source_turn_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Turn Id"
+    },
+    "state": {
+      "$ref": "#/$defs/ActionState",
+      "default": "requested"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "action_id",
+    "session_id",
+    "source",
+    "kind"
+  ],
+  "title": "ActionRequest",
+  "type": "object"
+}

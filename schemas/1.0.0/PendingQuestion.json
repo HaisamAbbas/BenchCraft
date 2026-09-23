@@ -1,0 +1,58 @@
+{
+  "$id": "aibench/1.0.0/PendingQuestion.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "\u00a75 PendingQuestion: a structured clarification, tied to the draft revision it was\nasked against so a later answer cannot silently apply to a newer draft.",
+  "properties": {
+    "blocking_scope": {
+      "title": "Blocking Scope",
+      "type": "string"
+    },
+    "choices": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Choices",
+      "type": "array"
+    },
+    "draft_revision": {
+      "title": "Draft Revision",
+      "type": "integer"
+    },
+    "prompt": {
+      "title": "Prompt",
+      "type": "string"
+    },
+    "question_id": {
+      "title": "Question Id",
+      "type": "string"
+    },
+    "required_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Required Fields",
+      "type": "array"
+    },
+    "status": {
+      "default": "open",
+      "enum": [
+        "open",
+        "answered",
+        "stale"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "question_id",
+    "prompt",
+    "required_fields",
+    "choices",
+    "blocking_scope",
+    "draft_revision"
+  ],
+  "title": "PendingQuestion",
+  "type": "object"
+}

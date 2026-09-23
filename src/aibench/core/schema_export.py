@@ -9,9 +9,11 @@ from pydantic import BaseModel
 
 from aibench.core.models import ALL_MODELS, SCHEMA_VERSION
 from aibench.core.plans import ExecutablePlan
+from aibench.core.sessions import SESSION_MODELS
 
-# Authoring formats validated at the edge, exported alongside the canonical records.
-EXPORTED_MODELS: tuple[type[BaseModel], ...] = (*ALL_MODELS, ExecutablePlan)
+# Authoring formats validated at the edge, and the session records (§5), exported
+# alongside the canonical records.
+EXPORTED_MODELS: tuple[type[BaseModel], ...] = (*ALL_MODELS, ExecutablePlan, *SESSION_MODELS)
 
 
 def export_schemas(target_dir: Path) -> list[Path]:
