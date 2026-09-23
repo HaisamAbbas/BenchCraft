@@ -8,7 +8,7 @@ explicit error rather than silently resolving to nothing.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 from aibench.core.errors import ConfigError
 
@@ -66,3 +66,37 @@ class Redactor:
                         value = value[:-size] + f"<redacted-partial:{ref}>".encode()
                         break
         return value
+
+    def text_stream(self, emit: Callable[[str], None]) -> TextRedactionStream:
+        """Create a fragment sink that can redact secrets split across chunks."""
+        return TextRedactionStream(self, emit)
+
+
+class TextRedactionStream:
+    """Redact streamed text without emitting a possible partial secret too early."""
+
+    def __init__(self, redactor: Redactor, emit: Callable[[str], None]) -> None:
+        self._redactor = redactor
+        self._emit = emit
+        self._pending = ""
+        self._hold = max((len(secret) for secret, _ in redactor._pairs), default=1) - 1
+
+    def feed(self, text: str, *, final: bool = False) -> None:
+        self._pending += text
+        safe_length = len(self._pending) if final else max(0, len(self._pending) - self._hold)
+        if not final and safe_length:
+            # A complete secret can straddle the nominal boundary. Keep the whole match
+            # buffered so the prefix cannot leak before the next fragment arrives.
+            for secret, _ in self._redactor._pairs:
+                start = self._pending.find(secret)
+                while start >= 0:
+                    end = start + len(secret)
+                    if start < safe_length < end:
+                        safe_length = start
+                    start = self._pending.find(secret, start + 1)
+        if safe_length:
+            ready, self._pending = self._pending[:safe_length], self._pending[safe_length:]
+            self._emit(self._redactor.text(ready))
+        if final and self._pending:
+            ready, self._pending = self._pending, ""
+            self._emit(self._redactor.text(ready))

@@ -123,3 +123,14 @@ Review remediation: `tests/test_planning_review_regressions.py`.
 
 Gates: 08-G1..G5. See `docs/engineering/reports/08.md`. Decisions: ADR 0007.
 Review remediation: `tests/test_session_review_regressions.py`.
+
+## Prompt 09 — Interactive terminal and live controls
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 09-T1 | Bare and explicit chat entry, project/session selection, TTY fallback, multiline input, history and slash completion | DONE | `src/aibench/cli/main.py`, `src/aibench/cli/chat.py`, `src/aibench/tui/app.py`; `tests/test_cli_chat.py`, `tests/test_tui.py`, `tests/test_cli_chat_pty.py` |
+| 09-T2 | Stream replies and tool cards; show session/run identity, coalesced progress and partial metric snapshots while input remains available | DONE | `src/aibench/tui/app.py`, `src/aibench/tui/render.py`, `src/aibench/services/runs.py`; `tests/test_tui.py`, `tests/test_openai_provider_stream.py` |
+| 09-T3 | Deterministic slash controls for plan/run/status/pause/resume/stop/results/budget/report/sessions/new/exit | DONE | `src/aibench/tui/commands.py`; `tests/test_tui.py`, `tests/test_cli_chat.py` |
+| 09-T4 | Ctrl+C interrupts only the assistant reply; graceful exit interrupts dispatch safely; explicit /stop cancels a run | DONE | `src/aibench/tui/app.py`, `src/aibench/sessions/controller.py`; `tests/test_tui.py`, `tests/test_session_controller.py` |
+
+Gates: 09-G1..G5. See `docs/engineering/reports/09.md`. Decision: ADR 0008.

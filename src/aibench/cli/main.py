@@ -1,15 +1,14 @@
-"""aibench CLI entry point. Bare `aibench` opening a chat session is scheduled for
-Prompt 09; until then this exposes only the implemented scriptable commands (no
-placeholder commands claiming unbuilt functionality, per the engineering contract)."""
+"""aibench CLI entry point. Bare `aibench` in an interactive terminal opens the project's
+benchmark conversation (`aibench chat`); without a terminal it prints command guidance
+instead of starting an unusable chat (§13)."""
 
 from __future__ import annotations
-
-import sys
 
 import typer
 
 from aibench import __version__
 from aibench.cli import app as app_cli
+from aibench.cli import chat as chat_cli
 from aibench.cli import dataset as dataset_cli
 from aibench.cli import inspect as inspect_cli
 from aibench.cli import plan as plan_cli
@@ -34,6 +33,7 @@ app.command("inspect")(inspect_cli.inspect)
 app.command("run")(run_cli.run_plan)
 app.command("resume")(run_cli.resume)
 app.command("evaluate")(run_cli.evaluate)
+app.command("chat")(chat_cli.chat)
 runs_cli.app.command("status")(run_cli.status)
 
 
@@ -46,13 +46,29 @@ def main(
         typer.echo(f"aibench {__version__}")
         raise typer.Exit(code=0)
     if ctx.invoked_subcommand is None:
-        if sys.stdin.isatty() and sys.stdout.isatty():
-            typer.echo(
-                "Interactive conversation is not implemented yet (scheduled for Prompt 09). "
-                "Run `aibench --help` for available commands."
+        if chat_cli.interactive_terminal():
+            # `chat` is also registered as a Typer command. Invoking its undecorated
+            # callback through Click would pass Typer's OptionInfo objects as defaults;
+            # supply the actual no-argument values for the bare entry point.
+            ctx.invoke(
+                chat_cli.chat,
+                project=None,
+                resume=None,
+                new=False,
+                app=None,
+                dataset=None,
+                policy=None,
+                trust_local_app=False,
+                provider_config=None,
+                send=None,
+                json_output=False,
             )
-        else:
-            typer.echo(ctx.get_help())
+            return
+        typer.echo(ctx.get_help())
+        typer.echo(
+            "\nNo interactive terminal: `aibench` opens a conversation only in a terminal. "
+            "For scripts, use the commands above or `aibench chat --send TEXT --json`."
+        )
         raise typer.Exit(code=0)
 
 

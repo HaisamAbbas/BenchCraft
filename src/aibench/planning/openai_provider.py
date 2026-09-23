@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -113,7 +113,7 @@ class OpenAICompatibleProvider:
     def close(self) -> None:
         self._client.close()
 
-    def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> ModelReply:
+    def _body(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
@@ -124,6 +124,42 @@ class OpenAICompatibleProvider:
         }
         if self.config.seed is not None:
             body["seed"] = self.config.seed
+        return body
+
+    def complete_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        on_text: Callable[[str], None],
+    ) -> ModelReply:
+        """Like `complete`, streamed (`stream: true`, server-sent events): `on_text` gets
+        each content fragment as it arrives. Chunk shape per the official SDK's
+        `ChatCompletionChunk`: `choices[0].delta.{content, tool_calls[{index, id,
+        function: {name, arguments}}]}`, argument fragments concatenated per `index`;
+        `usage` only in the final chunk with `stream_options.include_usage`; the stream
+        ends with `data: [DONE]`."""
+        body = {**self._body(messages, tools), "stream": True}
+        body["stream_options"] = {"include_usage": True}
+        state = _StreamState(self._redactor, on_text)
+        try:
+            with self._client.stream("POST", "chat/completions", json=body) as response:
+                if response.status_code != 200:
+                    raw = response.read()[:MAX_RESPONSE_BYTES]
+                    text = self._redactor.text(raw.decode("utf-8", errors="replace"))
+                    raise PlannerError(f"HTTP {response.status_code}: {text[:300]}")
+                received = 0
+                for line in response.iter_lines():
+                    received += len(line) + 1
+                    if received > MAX_RESPONSE_BYTES:
+                        raise PlannerError(f"response exceeds {MAX_RESPONSE_BYTES} bytes")
+                    if state.feed(line):
+                        break
+        except httpx.HTTPError as exc:
+            raise PlannerError(self._redactor.text(f"{type(exc).__name__}: {exc}")) from exc
+        return state.reply()
+
+    def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> ModelReply:
+        body = self._body(messages, tools)
         try:
             with self._client.stream("POST", "chat/completions", json=body) as response:
                 raw = bytearray()
@@ -184,3 +220,90 @@ def parse_reply(text: str) -> ModelReply:
         prompt_tokens=count("prompt_tokens"),
         completion_tokens=count("completion_tokens"),
     )
+
+
+class _StreamState:
+    """Accumulates one streamed chat completion (see `complete_stream`)."""
+
+    def __init__(self, redactor: Redactor, on_text: Callable[[str], None]) -> None:
+        self.text: list[str] = []
+        self.calls: dict[int, dict[str, Any]] = {}
+        self.usage: dict[str, Any] = {}
+        self.done = False
+        self.redactor = redactor
+        self.text_emitter = redactor.text_stream(on_text)
+
+    def feed(self, line: str) -> bool:
+        """Consume one SSE line; True once the stream says it is done."""
+        if not line.startswith("data:"):
+            return False  # blank separators, comments and other SSE fields
+        payload = line[len("data:") :].strip()
+        if payload == "[DONE]":
+            self.done = True
+            self.text_emitter.feed("", final=True)
+            return True
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise PlannerError(
+                f"unexpected stream chunk: {self.redactor.text(payload[:300])}"
+            ) from exc
+        if not isinstance(chunk, dict):
+            raise PlannerError(f"unexpected stream chunk: {self.redactor.text(payload[:300])}")
+        if isinstance(chunk.get("usage"), dict):
+            self.usage = chunk["usage"]
+        choices = chunk.get("choices") or []
+        if not isinstance(choices, list):
+            raise PlannerError("malformed stream chunk: choices is not a list")
+        for choice in choices[:1]:
+            delta = choice.get("delta") if isinstance(choice, dict) else None
+            if not isinstance(delta, dict):
+                raise PlannerError(f"malformed stream chunk: {self.redactor.text(payload[:300])}")
+            content = delta.get("content")
+            if isinstance(content, str) and content:
+                self.text.append(content)
+                self.text_emitter.feed(content)
+            for part in delta.get("tool_calls") or []:
+                if not isinstance(part, dict) or not isinstance(part.get("index"), int):
+                    safe_part = self.redactor.text(repr(part))
+                    raise PlannerError(f"malformed tool call chunk: {safe_part[:300]}")
+                call = self.calls.setdefault(part["index"], {"id": "", "name": "", "args": []})
+                if isinstance(part.get("id"), str):
+                    call["id"] = part["id"]
+                function = part.get("function") or {}
+                if isinstance(function.get("name"), str):
+                    call["name"] += function["name"]
+                if isinstance(function.get("arguments"), str):
+                    call["args"].append(function["arguments"])
+        return False
+
+    def reply(self) -> ModelReply:
+        if not self.done:
+            raise PlannerError("the stream ended before [DONE]")
+        calls = []
+        for index in sorted(self.calls):
+            call = self.calls[index]
+            if not call["name"]:
+                raise PlannerError(f"streamed tool call {index} has no name")
+            calls.append(
+                ToolCall(
+                    self.redactor.text(call["id"]),
+                    self.redactor.text(call["name"]),
+                    self.redactor.text("".join(call["args"]) or "{}"),
+                )
+            )
+
+        def count(name: str) -> int | None:
+            value = self.usage.get(name)
+            return (
+                value
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                else None
+            )
+
+        return ModelReply(
+            text=self.redactor.text("".join(self.text)) or None,
+            tool_calls=tuple(calls),
+            prompt_tokens=count("prompt_tokens"),
+            completion_tokens=count("completion_tokens"),
+        )

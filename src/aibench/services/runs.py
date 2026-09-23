@@ -48,6 +48,7 @@ from aibench.core.models import (
     RunManifest,
     WorkItem,
     WorkItemState,
+    deep_unfreeze,
 )
 from aibench.core.plans import ExecutablePlan
 from aibench.engine.budget import BudgetLedger
@@ -64,6 +65,7 @@ from aibench.engine.engine import (
 )
 from aibench.engine.retry import classify_execution
 from aibench.registry import BindingValidationError, EvaluatorRegistry, RegistryError
+from aibench.reporting.aggregation import summarize
 from aibench.runners import LoadedApplication, create_runner
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
 from aibench.services.scoring import ScoringReport, score_recorded_run
@@ -314,10 +316,7 @@ def _recover_in_flight(
                 notes.append(f"{item.task_key}: unknown_effect (effectful, not repeated)")
         else:
             done = any(
-                f[0] == case_id
-                and f[1] == repetition
-                and f[2]
-                and f[2][7:23] == binding_key
+                f[0] == case_id and f[1] == repetition and f[2] and f[2][7:23] == binding_key
                 for f in finals
             )
             storage.transition_work_item(
@@ -474,9 +473,7 @@ async def _execute_leased(
     _, metrics = _frozen_registry(plan, manifest, policy, spec)
 
     cases = {c.case_id: c for c in storage.list_cases(manifest.dataset_hash)}
-    needed = {
-        parse_work_item_key(w.task_key, w.kind)[0] for w in storage.list_work_items(run_id)
-    }
+    needed = {parse_work_item_key(w.task_key, w.kind)[0] for w in storage.list_work_items(run_id)}
     if not needed <= set(cases):
         raise RunError("stored Goldens are missing for some of this run's cases")
 
@@ -606,3 +603,63 @@ def outcome_json(outcome: RunOutcome) -> dict[str, Any]:
             }
         )
     )
+
+
+def run_budget(storage: Storage, artifacts: ArtifactStore, run_id: str) -> dict[str, Any]:
+    """The run's frozen budget ceilings and its committed spend, replayed from stored
+    attempts the same way a resume does. Work in flight and the current session's wall
+    time are not included until committed."""
+    record = storage.get_run(run_id)
+    if record is None:
+        raise RunError(f"no run committed with run_id={run_id!r}")
+    plan = _frozen_plan(storage, artifacts, record.manifest)
+    ledger = BudgetLedger(plan.budgets)
+    _replay_prior_spend(storage, run_id, ledger)
+    return {
+        "run_id": run_id,
+        "status": record.status,
+        "basis": "committed attempts; in-flight work and the live session's time not included",
+        **ledger.summary(),
+    }
+
+
+def run_report(storage: Storage, artifacts: ArtifactStore, run_id: str) -> dict[str, Any]:
+    """A machine-readable summary of a run's stored results: status, work counts, budget
+    and one aggregate per metric binding (reporting.aggregation), computed from committed
+    results only. Provisional while the run is still active."""
+    record = storage.get_run(run_id)
+    if record is None:
+        raise RunError(f"no run committed with run_id={run_id!r}")
+    manifest = record.manifest
+    plan = _frozen_plan(storage, artifacts, manifest)
+    spec = _frozen_application(storage, artifacts, manifest)
+    policy = ExecutionPolicy.model_validate(manifest.parameters["policy"])
+    _, metrics = _frozen_registry(plan, manifest, policy, spec)
+    results = storage.list_metric_results(run_id, scoring_id=manifest.parameters["scoring_id"])
+    summaries = []
+    for metric in metrics:
+        bound = [r for r in results if r.binding_hash == metric.binding_hash]
+        summaries.append(
+            summarize(
+                bound,
+                manifest=metric.manifest,
+                binding_hash=metric.binding_hash,
+                params=deep_unfreeze(metric.binding.params) or {},
+            ).as_dict()
+        )
+    status = run_status(storage, run_id)
+    return {
+        "run_id": run_id,
+        "status": record.status,
+        "provisional": record.status not in _FINISHED,
+        "partial": record.status != "completed",
+        "plan_id": plan.plan_id,
+        "plan_hash": manifest.plan_hash,
+        "counts": status["counts"],
+        "needs_attention": status["needs_attention"],
+        "metrics": summaries,
+        "budget": run_budget(storage, artifacts, run_id),
+    }
+
+
+_FINISHED = frozenset({"completed", "cancelled", "budget_exhausted"})

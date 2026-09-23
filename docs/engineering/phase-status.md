@@ -14,7 +14,7 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 06 | MVP | Deterministic scheduling, policy, budgets, and recovery | COMPLETE | `docs/engineering/reports/06.md` |
 | 07 | MVP | Evaluation planning and bounded LLM reasoning | COMPLETE | `docs/engineering/reports/07.md` |
 | 08 | MVP | Persistent two-way conversation and typed actions | COMPLETE | `docs/engineering/reports/08.md` |
-| 09 | MVP | Interactive terminal and live controls | NOT_STARTED | — |
+| 09 | MVP | Interactive terminal and live controls | COMPLETE | `docs/engineering/reports/09.md` |
 | 10 | MVP | Conversation recovery and adversarial interaction | NOT_STARTED | — |
 | 11 | MVP | Evidence reports, command composition, and packaging | NOT_STARTED | — |
 | 12 | MVP | MVP acceptance and harness validation | NOT_STARTED | — |

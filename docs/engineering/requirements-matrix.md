@@ -53,7 +53,9 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §4, §8 Shared services | Session tools call `compile_plan`, `create_run`, `execute_run`, `run_status` and stored results — the headless commands' services | 08 | 08-G1 |
 | §14 Session persistence | Migration 7 tables; turns, decisions, questions and actions survive restart; run events replayable; runs not owned by sessions; credentials redacted from chat | 08 | 08-G4 |
 | §16 Data egress | The assistant never receives reference answers; case content only with `share_case_content_with_assistant` | 08 | 08-G5 |
-| §3, §13 | Interactive terminal, slash controls | 09 | 09-G1..G5 |
+| §3, §13 | Interactive terminal entry, project/session selection, multiline input, history, completion | 09 | 09-G1, 09-G5 |
+| §13, §15 | Streamed replies, tool cards, coalesced committed progress, partial metric labels, responsive controls | 09 | 09-G2, 09-G4, 09-G5 |
+| §13, §15 | Deterministic slash controls; provider-independent status/stop; run interruption and graceful exit | 09 | 09-G3..G5 |
 | §8, §13–16 | Conversation recovery, adversarial hardening | 10 | 10-G1..G5 |
 | §12–14 | Evidence reports, command composition, packaging | 11 | 11-G1..G5 |
 | §17, §23–24 | MVP acceptance validation | 12 | 12-G1..G5 |
