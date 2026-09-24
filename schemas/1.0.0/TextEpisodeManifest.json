@@ -1,0 +1,167 @@
+{
+  "$defs": {
+    "EpisodeSimulatorProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Identity",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "human",
+            "scripted",
+            "model"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "prompt_hash": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Hash"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        }
+      },
+      "required": [
+        "kind",
+        "identity"
+      ],
+      "title": "EpisodeSimulatorProvenance",
+      "type": "object"
+    },
+    "EpisodeSuccessCriterion": {
+      "additionalProperties": false,
+      "description": "Independent final-state assertions evaluated against captured world state.",
+      "properties": {
+        "assertions": {
+          "items": {},
+          "minItems": 1,
+          "title": "Assertions",
+          "type": "array"
+        },
+        "evaluator_id": {
+          "const": "native.final_state",
+          "default": "native.final_state",
+          "title": "Evaluator Id",
+          "type": "string"
+        },
+        "evidence_field": {
+          "const": "execution.world_state",
+          "default": "execution.world_state",
+          "title": "Evidence Field",
+          "type": "string"
+        }
+      },
+      "required": [
+        "assertions"
+      ],
+      "title": "EpisodeSuccessCriterion",
+      "type": "object"
+    },
+    "MultiTurnTextEpisode": {
+      "additionalProperties": false,
+      "description": "An ordered, resettable application conversation, distinct from harness chat.",
+      "properties": {
+        "case_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "title": "Case Ids",
+          "type": "array"
+        },
+        "episode_id": {
+          "title": "Episode Id",
+          "type": "string"
+        },
+        "simulator": {
+          "$ref": "#/$defs/EpisodeSimulatorProvenance"
+        },
+        "split_id": {
+          "enum": [
+            "development",
+            "validation",
+            "holdout"
+          ],
+          "title": "Split Id",
+          "type": "string"
+        },
+        "success_criterion": {
+          "$ref": "#/$defs/EpisodeSuccessCriterion"
+        },
+        "test_world_id": {
+          "title": "Test World Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "episode_id",
+        "split_id",
+        "case_ids",
+        "simulator",
+        "test_world_id",
+        "success_criterion"
+      ],
+      "title": "MultiTurnTextEpisode",
+      "type": "object"
+    }
+  },
+  "$id": "aibench/1.0.0/TextEpisodeManifest.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "episodes": {
+      "items": {
+        "$ref": "#/$defs/MultiTurnTextEpisode"
+      },
+      "minItems": 1,
+      "title": "Episodes",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "episodes"
+  ],
+  "title": "TextEpisodeManifest",
+  "type": "object"
+}

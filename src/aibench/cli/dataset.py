@@ -7,12 +7,16 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from aibench.cli import candidates as candidates_cli
+from aibench.cli import episodes as episodes_cli
 from aibench.core.errors import ValidationError
 from aibench.datasets.ingest import ingest_dataset
 
 app = typer.Typer(help="Dataset validation and inspection commands.")
 console = Console()
 err_console = Console(stderr=True)
+app.add_typer(candidates_cli.app, name="candidates")
+app.add_typer(episodes_cli.app, name="episodes")
 
 
 @app.command("validate")
@@ -55,7 +59,9 @@ def validate(
         if report.dedup_disk_backed:
             console.print("  [dim]duplicate-ID tracking: on-disk (large file)[/dim]")
         if report.duplicate_case_ids:
-            console.print(f"  [yellow]duplicate case IDs:[/yellow] {sorted(set(report.duplicate_case_ids))}")
+            console.print(
+                f"  [yellow]duplicate case IDs:[/yellow] {sorted(set(report.duplicate_case_ids))}"
+            )
         for warning in report.warnings:
             console.print(f"  [yellow]warning:[/yellow] {warning}")
         if report.warnings_truncated:

@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0.0",
+  "episodes": [
+    {
+      "episode_id": "refund-episode",
+      "split_id": "development",
+      "case_ids": ["refund-turn-1", "refund-turn-2"],
+      "simulator": {"kind": "scripted", "identity": "examples.multi_turn_text/refund-v1", "seed": "refund-flow-1"},
+      "test_world_id": "clean-start",
+      "success_criterion": {
+        "evaluator_id": "native.final_state",
+        "evidence_field": "execution.world_state",
+        "assertions": [
+          {"path": "/active_order", "equals": "A17"},
+          {"path": "/refund_eligible", "equals": true},
+          {"path": "/turn_count", "equals": 2}
+        ]
+      }
+    },
+    {
+      "episode_id": "exchange-episode",
+      "split_id": "development",
+      "case_ids": ["exchange-turn-1", "exchange-turn-2"],
+      "simulator": {"kind": "scripted", "identity": "examples.multi_turn_text/exchange-v1", "seed": "exchange-flow-1"},
+      "test_world_id": "clean-start",
+      "success_criterion": {
+        "evaluator_id": "native.final_state",
+        "evidence_field": "execution.world_state",
+        "assertions": [
+          {"path": "/active_order", "equals": "B55"},
+          {"path": "/exchange_denied", "equals": true},
+          {"path": "/turn_count", "equals": 2}
+        ]
+      }
+    }
+  ]
+}

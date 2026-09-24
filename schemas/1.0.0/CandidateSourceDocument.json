@@ -1,0 +1,47 @@
+{
+  "$id": "aibench/1.0.0/CandidateSourceDocument.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "One bounded, user-selected development source and any exact-content aliases.",
+  "properties": {
+    "character_count": {
+      "minimum": 1,
+      "title": "Character Count",
+      "type": "integer"
+    },
+    "digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Digest",
+      "type": "string"
+    },
+    "duplicate_of": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duplicate Of"
+    },
+    "line_count": {
+      "minimum": 1,
+      "title": "Line Count",
+      "type": "integer"
+    },
+    "source_ref": {
+      "title": "Source Ref",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source_ref",
+    "digest",
+    "character_count",
+    "line_count"
+  ],
+  "title": "CandidateSourceDocument",
+  "type": "object"
+}

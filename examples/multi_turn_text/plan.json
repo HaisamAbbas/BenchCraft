@@ -1,0 +1,9 @@
+{
+  "plan_id": "multi-turn-support-v1",
+  "dataset": "cases.jsonl",
+  "application": "support.app.json",
+  "test_world": "clean-start",
+  "concurrency": {"application": 1, "evaluation": 2},
+  "retry": {"max_attempts": 1},
+  "metrics": [{"metric": "native.final_state"}]
+}

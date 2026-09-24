@@ -5,6 +5,25 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased Phase 3 working tree — Prompt 18
+
+- Added bounded, policy-checked question/answer candidate generation from explicit
+  development text sources. Candidate rows remain separate from runnable datasets and
+  record source hashes/spans, model and prompt identity, exact duplicate source documents,
+  and every review/verification/promotion action.
+- Added human source review, expert review, a strict exact-source-answer oracle, and an
+  explicit promotion command that writes a new ordinary JSONL dataset. Synthetic
+  unreviewed references cannot be promoted.
+- Added a typed multi-turn text episode manifest and a validation command for ordered turns,
+  simulator provenance, resettable test worlds, and independent final-state checks.
+- Added an executable local support-conversation fixture using the existing per-episode
+  engine reset behavior and `native.final_state` evidence.
+
+### Workspace
+
+Schema version 9 adds the candidate-pool, candidate-case, and append-only candidate-event
+tables. Older workspaces migrate forward on first use.
+
 ## Unreleased Phase 2 working tree — Prompt 16
 
 - **Evidence-backed inspection.**

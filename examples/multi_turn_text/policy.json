@@ -1,0 +1,6 @@
+{
+  "allowed_applications": ["example-multi-turn-support"],
+  "allowed_test_worlds": ["example-multi-turn-support:clean-start"],
+  "data_roots": ["."],
+  "max_effects": "none"
+}

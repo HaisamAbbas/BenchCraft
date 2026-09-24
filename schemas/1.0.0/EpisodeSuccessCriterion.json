@@ -1,0 +1,31 @@
+{
+  "$id": "aibench/1.0.0/EpisodeSuccessCriterion.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "Independent final-state assertions evaluated against captured world state.",
+  "properties": {
+    "assertions": {
+      "items": {},
+      "minItems": 1,
+      "title": "Assertions",
+      "type": "array"
+    },
+    "evaluator_id": {
+      "const": "native.final_state",
+      "default": "native.final_state",
+      "title": "Evaluator Id",
+      "type": "string"
+    },
+    "evidence_field": {
+      "const": "execution.world_state",
+      "default": "execution.world_state",
+      "title": "Evidence Field",
+      "type": "string"
+    }
+  },
+  "required": [
+    "assertions"
+  ],
+  "title": "EpisodeSuccessCriterion",
+  "type": "object"
+}

@@ -1,0 +1,21 @@
+{
+  "application_id": "example-multi-turn-support",
+  "runner": "http",
+  "target": "http://127.0.0.1:8769/answer",
+  "effects": "none",
+  "reset_policy": "per_episode",
+  "transport": {
+    "kind": "http",
+    "url": "http://127.0.0.1:8769/answer",
+    "reset_url": "http://127.0.0.1:8769/reset",
+    "timeout_seconds": 10
+  },
+  "input_binding": {"fields": {"/input": "/input"}},
+  "output_binding": {"output": "/output", "world_state": "/world_state"},
+  "test_worlds": {
+    "clean-start": {
+      "seed": {"active_order": null, "refund_eligible": false, "exchange_denied": false},
+      "description": "Empty support conversation state at the start of each episode"
+    }
+  }
+}

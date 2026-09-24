@@ -1,0 +1,48 @@
+{
+  "$id": "aibench/1.0.0/CandidateEvent.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "title": "Actor",
+      "type": "string"
+    },
+    "candidate_id": {
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "details": {
+      "title": "Details"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "generated",
+        "reviewed_source",
+        "reviewed_human",
+        "review_rejected",
+        "executable_check_passed",
+        "executable_check_failed",
+        "promoted"
+      ],
+      "title": "Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_id",
+    "candidate_id",
+    "kind",
+    "actor"
+  ],
+  "title": "CandidateEvent",
+  "type": "object"
+}

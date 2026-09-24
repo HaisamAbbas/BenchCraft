@@ -1,0 +1,66 @@
+{
+  "$id": "aibench/1.0.0/EpisodeSimulatorProvenance.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "identity": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Identity",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "human",
+        "scripted",
+        "model"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
+    "prompt_hash": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prompt Hash"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seed"
+    }
+  },
+  "required": [
+    "kind",
+    "identity"
+  ],
+  "title": "EpisodeSimulatorProvenance",
+  "type": "object"
+}

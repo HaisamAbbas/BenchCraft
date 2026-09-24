@@ -1,0 +1,61 @@
+{
+  "$id": "aibench/1.0.0/CandidateVerification.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Actor"
+    },
+    "detail": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Detail",
+      "type": "string"
+    },
+    "method": {
+      "enum": [
+        "human",
+        "executable"
+      ],
+      "title": "Method",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "passed",
+        "failed"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "recorded_at": {
+      "format": "date-time",
+      "title": "Recorded At",
+      "type": "string"
+    },
+    "verifier_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Verifier Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "method",
+    "outcome",
+    "verifier_id",
+    "detail"
+  ],
+  "title": "CandidateVerification",
+  "type": "object"
+}

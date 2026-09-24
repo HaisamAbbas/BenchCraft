@@ -461,6 +461,43 @@ _0008_traces_and_cache = Migration(
     """,
 )
 
+# Prompt 18: development-only candidate pools and append-only review/verification history.
+_0009_candidate_workflow = Migration(
+    version=9,
+    name="candidate_workflow",
+    sql="""
+    CREATE TABLE candidate_pools (
+        pool_id       TEXT PRIMARY KEY,
+        content_hash  TEXT NOT NULL,
+        data          TEXT NOT NULL, -- canonical JSON of CandidatePoolManifest
+        created_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE candidate_cases (
+        candidate_id  TEXT PRIMARY KEY,
+        pool_id       TEXT NOT NULL REFERENCES candidate_pools(pool_id),
+        split_id      TEXT NOT NULL CHECK (split_id = 'development'),
+        status        TEXT NOT NULL,
+        content_hash  TEXT NOT NULL,
+        data          TEXT NOT NULL, -- canonical JSON of DatasetCandidate
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+    );
+    CREATE INDEX idx_candidate_cases_pool_status
+        ON candidate_cases(pool_id, status, created_at);
+
+    CREATE TABLE candidate_events (
+        event_id      TEXT PRIMARY KEY,
+        candidate_id  TEXT NOT NULL REFERENCES candidate_cases(candidate_id),
+        kind          TEXT NOT NULL,
+        data          TEXT NOT NULL, -- immutable CandidateEvent record
+        created_at    TEXT NOT NULL
+    );
+    CREATE INDEX idx_candidate_events_candidate
+        ON candidate_events(candidate_id, created_at, event_id);
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
@@ -470,6 +507,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _0006_run_leases,
     _0007_sessions,
     _0008_traces_and_cache,
+    _0009_candidate_workflow,
 )
 
 

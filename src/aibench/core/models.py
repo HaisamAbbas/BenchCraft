@@ -136,6 +136,14 @@ class ReferenceStatus(str, Enum):
     HUMAN_AUTHORED = "human_authored"
 
 
+class CandidateStatus(str, Enum):
+    CANDIDATE = "candidate"
+    REVIEWED = "reviewed"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    PROMOTED = "promoted"
+
+
 class ToolMatchMode(str, Enum):
     CONTAINS_ALL = "contains_all"
     EXACT = "exact"
@@ -285,6 +293,207 @@ class DatasetManifest(FrozenModel):
     split: str | None = None
     duplicate_case_ids: tuple[str, ...] = Field(default_factory=tuple)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class CandidateSourceDocument(FrozenModel):
+    """One bounded, user-selected development source and any exact-content aliases."""
+
+    source_ref: str
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    character_count: int = Field(ge=1)
+    line_count: int = Field(ge=1)
+    duplicate_of: str | None = None
+
+
+class CandidateSourceSpan(FrozenModel):
+    """A precise quote location in an unchanged source document.
+
+    Offsets are Unicode code-point offsets, end-exclusive. The source digest makes a stale
+    path fail closed during review or executable verification.
+    """
+
+    source_ref: str
+    source_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    start_offset: int = Field(ge=0)
+    end_offset: int = Field(gt=0)
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _span_is_ordered(self) -> CandidateSourceSpan:
+        if self.end_offset <= self.start_offset:
+            raise ValueError("source span end_offset must be greater than start_offset")
+        if self.end_line < self.start_line:
+            raise ValueError("source span end_line must not precede start_line")
+        return self
+
+
+class CandidateVerification(FrozenModel):
+    method: Literal["human", "executable"]
+    outcome: Literal["passed", "failed"]
+    verifier_id: str = Field(min_length=1, max_length=200)
+    actor: str | None = Field(default=None, max_length=200)
+    detail: str = Field(min_length=1, max_length=2000)
+    recorded_at: datetime = Field(default_factory=utcnow)
+
+
+class CandidatePoolManifest(FrozenModel):
+    """Metadata for a development-only generation job.
+
+    Holdout cases do not have a representable pool type, so a generation service cannot
+    accidentally accept them as prompt context.
+    """
+
+    pool_id: str
+    split_id: Literal["development"] = "development"
+    generator_identity: str = Field(min_length=1, max_length=300)
+    prompt_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    sources: tuple[CandidateSourceDocument, ...] = Field(min_length=1)
+    candidate_ids: tuple[str, ...] = ()
+    created_at: datetime = Field(default_factory=utcnow)
+
+    @model_validator(mode="after")
+    def _candidate_ids_unique(self) -> CandidatePoolManifest:
+        if len(self.candidate_ids) != len(set(self.candidate_ids)):
+            raise ValueError("candidate_ids must be unique")
+        return self
+
+
+class DatasetCandidate(FrozenModel):
+    """A generated case and its review lifecycle, separate from trusted datasets."""
+
+    candidate_id: str
+    pool_id: str
+    split_id: Literal["development"] = "development"
+    case: BenchmarkCase
+    source_spans: tuple[CandidateSourceSpan, ...] = Field(min_length=1)
+    status: CandidateStatus = CandidateStatus.CANDIDATE
+    verifications: tuple[CandidateVerification, ...] = ()
+    created_at: datetime = Field(default_factory=utcnow)
+
+    @model_validator(mode="after")
+    def _lifecycle_matches_reference(self) -> DatasetCandidate:
+        if self.case.reference is None:
+            raise ValueError("a generated candidate must have a judge-only reference")
+        reference_status = self.case.reference.status
+        if self.status is CandidateStatus.CANDIDATE and reference_status is not ReferenceStatus.SYNTHETIC_UNVERIFIED:
+            raise ValueError("an unreviewed candidate must have synthetic_unverified reference status")
+        if self.status is CandidateStatus.REVIEWED and reference_status not in (
+            ReferenceStatus.SOURCE_VERIFIED,
+            ReferenceStatus.HUMAN_REVIEWED,
+        ):
+            raise ValueError("a reviewed candidate needs a recorded trusted human reference status")
+        if self.status is CandidateStatus.VERIFIED and reference_status is not ReferenceStatus.EXECUTABLE_ORACLE:
+            raise ValueError("an executable-verified candidate needs executable_oracle reference status")
+        if self.status is CandidateStatus.PROMOTED and reference_status not in (
+            ReferenceStatus.SOURCE_VERIFIED,
+            ReferenceStatus.HUMAN_REVIEWED,
+            ReferenceStatus.EXECUTABLE_ORACLE,
+        ):
+            raise ValueError("a promoted candidate must have a trusted reference status")
+        if self.status is CandidateStatus.REVIEWED and not any(
+            item.method == "human" and item.outcome == "passed" for item in self.verifications
+        ):
+            raise ValueError("a reviewed candidate needs a passed human verification record")
+        if self.status is CandidateStatus.VERIFIED and not any(
+            item.method == "executable" and item.outcome == "passed"
+            for item in self.verifications
+        ):
+            raise ValueError("an executable-verified candidate needs a passed oracle record")
+        if self.status is CandidateStatus.REJECTED and not any(
+            item.method == "human" and item.outcome == "failed" for item in self.verifications
+        ):
+            raise ValueError("a rejected candidate needs a failed human review record")
+        if self.status is CandidateStatus.PROMOTED and not any(
+            item.outcome == "passed" for item in self.verifications
+        ):
+            raise ValueError("a promoted candidate needs a passed verification record")
+        return self
+
+
+CandidateEventKind = Literal[
+    "generated",
+    "reviewed_source",
+    "reviewed_human",
+    "review_rejected",
+    "executable_check_passed",
+    "executable_check_failed",
+    "promoted",
+]
+
+
+class CandidateEvent(FrozenModel):
+    event_id: str
+    candidate_id: str
+    kind: CandidateEventKind
+    actor: str
+    details: FrozenValue = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class EpisodeSimulatorProvenance(FrozenModel):
+    kind: Literal["human", "scripted", "model"]
+    identity: str = Field(min_length=1, max_length=300)
+    model: str | None = None
+    prompt_hash: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    seed: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _model_simulator_has_provenance(self) -> EpisodeSimulatorProvenance:
+        if self.kind == "model" and (not self.model or not self.prompt_hash):
+            raise ValueError("a model user simulator requires model and prompt_hash")
+        return self
+
+
+class EpisodeSuccessCriterion(FrozenModel):
+    """Independent final-state assertions evaluated against captured world state."""
+
+    evaluator_id: Literal["native.final_state"] = "native.final_state"
+    evidence_field: Literal["execution.world_state"] = "execution.world_state"
+    assertions: tuple[FrozenValue, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _assertions_are_executable(self) -> EpisodeSuccessCriterion:
+        allowed = {"equals", "not_equals", "in", "matches", "min", "max", "length", "present", "absent"}
+        for assertion in self.assertions:
+            assertion = deep_unfreeze(assertion)
+            if not isinstance(assertion, dict) or not isinstance(assertion.get("path"), str):
+                raise ValueError(  # noqa: TRY004 -- Pydantic turns this into a schema validation error.
+                    "each final-state assertion needs a JSON-pointer path"
+                )
+            constraints = set(assertion) - {"path"}
+            if not constraints or constraints - allowed:
+                raise ValueError("each final-state assertion needs supported constraints")
+        return self
+
+
+class MultiTurnTextEpisode(FrozenModel):
+    """An ordered, resettable application conversation, distinct from harness chat."""
+
+    episode_id: str
+    split_id: Literal["development", "validation", "holdout"]
+    case_ids: tuple[str, ...] = Field(min_length=2)
+    simulator: EpisodeSimulatorProvenance
+    test_world_id: str
+    success_criterion: EpisodeSuccessCriterion
+
+    @model_validator(mode="after")
+    def _case_ids_are_unique(self) -> MultiTurnTextEpisode:
+        if len(self.case_ids) != len(set(self.case_ids)):
+            raise ValueError("episode case_ids must be unique and ordered")
+        return self
+
+
+class TextEpisodeManifest(FrozenModel):
+    schema_version: str = SCHEMA_VERSION
+    episodes: tuple[MultiTurnTextEpisode, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _episode_ids_are_unique(self) -> TextEpisodeManifest:
+        ids = [episode.episode_id for episode in self.episodes]
+        if len(ids) != len(set(ids)):
+            raise ValueError("episode IDs must be unique")
+        return self
 
 
 # --------------------------------------------------------------------------- application
@@ -936,6 +1145,16 @@ ALL_MODELS: tuple[type[BaseModel], ...] = (
     Provenance,
     BenchmarkCase,
     DatasetManifest,
+    CandidateSourceDocument,
+    CandidateSourceSpan,
+    CandidateVerification,
+    CandidatePoolManifest,
+    DatasetCandidate,
+    CandidateEvent,
+    EpisodeSimulatorProvenance,
+    EpisodeSuccessCriterion,
+    MultiTurnTextEpisode,
+    TextEpisodeManifest,
     CliTransport,
     HttpSecretHeader,
     HttpTransport,

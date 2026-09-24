@@ -215,3 +215,16 @@ Review remediation: `tests/test_runner_review_regressions.py`.
 | 16-T4 | Provider-aware quotas, backpressure, bounded batching, cancellation; terminal responsiveness independent of worker load | DONE | `engine/quota.py`, plan `quotas`, gates checked before task creation, `backpressure` events, quota summaries; event-loop blocking removed (`http_runner._build_client`, threaded capture writes); `examples/apps/rate_limited_app.py`; `tests/test_parallel_execution.py` |
 
 Gates: 16-G1..G5. See `docs/engineering/reports/16.md`. Decisions: ADR 0015.
+
+## Prompt 18 — Reviewed dataset generation and advanced episodes
+
+Prompt 18 prerequisite subset: `17-P18` is recorded in `phase-status.md` and ADR 0016.
+Prompt 17 remains unstarted outside this dependency slice.
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 18-T1 | Generate bounded development candidates with exact source spans, source/model/prompt provenance, split identity, durable candidate state and exact duplicate-source records; add review/promotion operations | DONE | `src/aibench/datasets/candidates.py`, `src/aibench/services/candidates.py`, migration 9, `src/aibench/cli/candidates.py`, `tests/test_candidate_workflow.py` |
+| 18-T2 | Keep candidates and unreviewed synthetic references outside regular datasets; require recorded human or executable verification and explicit promotion | DONE | `candidate_pools`, `candidate_cases`, append-only `candidate_events`; human/executable review and explicit promotion coverage in `tests/test_candidate_workflow.py` |
+| 18-T3 | Define and execute multi-turn text application episodes with simulator provenance, per-episode reset and independent final-state success checks | DONE | `core/models.py`, `datasets/episodes.py`, `cli/episodes.py`, `examples/multi_turn_text/`, `examples/apps/multi_turn_support.py`, `tests/test_episode_contract.py` |
+
+Gates: 18-G1..G4 PASS. Report: `docs/engineering/reports/18.md`. Decision: ADR 0016.

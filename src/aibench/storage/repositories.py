@@ -21,6 +21,10 @@ from aibench.core.models import (
     Approval,
     ArtifactRef,
     BenchmarkCase,
+    CandidateEvent,
+    CandidatePoolManifest,
+    CandidateStatus,
+    DatasetCandidate,
     DatasetManifest,
     EvaluationPlan,
     EvaluationResult,
@@ -42,6 +46,13 @@ class WorkItemSettlement:
     from_states: frozenset[WorkItemState]
     to_state: WorkItemState
     last_error: str | None = None
+
+
+@dataclass(frozen=True)
+class CandidateTransition:
+    candidate: DatasetCandidate
+    from_status: CandidateStatus
+    event: CandidateEvent
 
 
 def _now() -> str:
@@ -248,6 +259,176 @@ class Storage:
             (dataset_content_hash,),
         ).fetchall()
         return [BenchmarkCase.model_validate_json(row["data"]) for row in rows]
+
+    # ---------------------------------------------------------------- candidate generation / review
+
+    def commit_candidate_pool(
+        self, manifest: CandidatePoolManifest, candidates: Iterable[DatasetCandidate]
+    ) -> bool:
+        """Commit one development-only pool and its generated candidates atomically."""
+        items = tuple(candidates)
+        if tuple(item.candidate_id for item in items) != manifest.candidate_ids:
+            raise ValueError("candidate IDs do not match the pool manifest")
+        if any(
+            item.pool_id != manifest.pool_id
+            or item.split_id != "development"
+            or item.status is not CandidateStatus.CANDIDATE
+            for item in items
+        ):
+            raise ValueError("new candidate pools accept only unreviewed development candidates")
+
+        manifest_data = manifest.model_dump_json()
+        manifest_hash = _hash_of(manifest_data)
+        self.conn.execute("BEGIN")
+        try:
+            existing = self.conn.execute(
+                "SELECT content_hash FROM candidate_pools WHERE pool_id = ?",
+                (manifest.pool_id,),
+            ).fetchone()
+            if existing is not None and existing["content_hash"] != manifest_hash:
+                raise ConflictError(
+                    f"candidate pool {manifest.pool_id!r} already exists with different content"
+                )
+            if existing is None:
+                self.conn.execute(
+                    "INSERT INTO candidate_pools (pool_id, content_hash, data, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (manifest.pool_id, manifest_hash, manifest_data, _now()),
+                )
+            for candidate in items:
+                data = candidate.model_dump_json()
+                digest = _hash_of(data)
+                current = self.conn.execute(
+                    "SELECT content_hash FROM candidate_cases WHERE candidate_id = ?",
+                    (candidate.candidate_id,),
+                ).fetchone()
+                if current is not None:
+                    if current["content_hash"] != digest:
+                        raise ConflictError(
+                            f"candidate {candidate.candidate_id!r} already exists with different content"
+                        )
+                    continue
+                self.conn.execute(
+                    "INSERT INTO candidate_cases "
+                    "(candidate_id, pool_id, split_id, status, content_hash, data, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        candidate.candidate_id,
+                        manifest.pool_id,
+                        candidate.split_id,
+                        candidate.status.value,
+                        digest,
+                        data,
+                        candidate.created_at.isoformat(),
+                        _now(),
+                    ),
+                )
+                event = CandidateEvent(
+                    event_id=content_hash(
+                        {"candidate_id": candidate.candidate_id, "kind": "generated"}
+                    ),
+                    candidate_id=candidate.candidate_id,
+                    kind="generated",
+                    actor=candidate.case.provenance.generator_identity or "unknown generator",
+                    details={"pool_id": manifest.pool_id, "split_id": "development"},
+                    created_at=candidate.created_at,
+                )
+                self.conn.execute(
+                    "INSERT INTO candidate_events (event_id, candidate_id, kind, data, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (event.event_id, event.candidate_id, event.kind, event.model_dump_json(),
+                     event.created_at.isoformat()),
+                )
+            self.conn.execute("COMMIT")
+            return existing is None
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    def get_candidate_pool(self, pool_id: str) -> CandidatePoolManifest | None:
+        row = self.conn.execute(
+            "SELECT data FROM candidate_pools WHERE pool_id = ?", (pool_id,)
+        ).fetchone()
+        return CandidatePoolManifest.model_validate_json(row["data"]) if row else None
+
+    def list_candidate_pools(self) -> list[CandidatePoolManifest]:
+        rows = self.conn.execute(
+            "SELECT data FROM candidate_pools ORDER BY created_at, pool_id"
+        ).fetchall()
+        return [CandidatePoolManifest.model_validate_json(row["data"]) for row in rows]
+
+    def get_candidate(self, candidate_id: str) -> DatasetCandidate | None:
+        row = self.conn.execute(
+            "SELECT data FROM candidate_cases WHERE candidate_id = ?", (candidate_id,)
+        ).fetchone()
+        return DatasetCandidate.model_validate_json(row["data"]) if row else None
+
+    def list_candidates(
+        self, pool_id: str, *, status: CandidateStatus | None = None
+    ) -> list[DatasetCandidate]:
+        if status is None:
+            rows = self.conn.execute(
+                "SELECT data FROM candidate_cases WHERE pool_id = ? ORDER BY created_at, candidate_id",
+                (pool_id,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT data FROM candidate_cases WHERE pool_id = ? AND status = ? "
+                "ORDER BY created_at, candidate_id",
+                (pool_id, status.value),
+            ).fetchall()
+        return [DatasetCandidate.model_validate_json(row["data"]) for row in rows]
+
+    def list_candidate_events(self, candidate_id: str) -> list[CandidateEvent]:
+        rows = self.conn.execute(
+            "SELECT data FROM candidate_events WHERE candidate_id = ? ORDER BY created_at, event_id",
+            (candidate_id,),
+        ).fetchall()
+        return [CandidateEvent.model_validate_json(row["data"]) for row in rows]
+
+    def transition_candidates(self, transitions: Iterable[CandidateTransition]) -> None:
+        """Apply a set of reviewed/promoted states and append their events atomically."""
+        items = tuple(transitions)
+        if not items:
+            raise ValueError("at least one candidate transition is required")
+        if len({item.candidate.candidate_id for item in items}) != len(items):
+            raise ValueError("a candidate can transition at most once per operation")
+        self.conn.execute("BEGIN")
+        try:
+            for transition in items:
+                candidate = transition.candidate
+                if transition.event.candidate_id != candidate.candidate_id:
+                    raise ValueError("candidate event identity does not match its candidate")
+                row = self.conn.execute(
+                    "SELECT status FROM candidate_cases WHERE candidate_id = ?",
+                    (candidate.candidate_id,),
+                ).fetchone()
+                if row is None:
+                    raise ConflictError(f"candidate {candidate.candidate_id!r} does not exist")
+                if row["status"] != transition.from_status.value:
+                    raise ConflictError(
+                        f"candidate {candidate.candidate_id!r} is {row['status']!r}, expected "
+                        f"{transition.from_status.value!r}"
+                    )
+                data = candidate.model_dump_json()
+                digest = _hash_of(data)
+                self.conn.execute(
+                    "UPDATE candidate_cases SET status = ?, content_hash = ?, data = ?, updated_at = ? "
+                    "WHERE candidate_id = ? AND status = ?",
+                    (candidate.status.value, digest, data, _now(), candidate.candidate_id,
+                     transition.from_status.value),
+                )
+                self.conn.execute(
+                    "INSERT INTO candidate_events (event_id, candidate_id, kind, data, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (transition.event.event_id, transition.event.candidate_id,
+                     transition.event.kind, transition.event.model_dump_json(),
+                     transition.event.created_at.isoformat()),
+                )
+            self.conn.execute("COMMIT")
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
 
     # ---------------------------------------------------------------- applications / profiles
 

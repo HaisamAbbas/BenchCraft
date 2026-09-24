@@ -22,4 +22,14 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 14 | Phase 2 | Second evaluator ecosystem and comparisons | COMPLETE | `docs/engineering/reports/14.md` |
 | 15 | Phase 2 | Richer runners and agent outcome contracts | COMPLETE | `docs/engineering/reports/15.md` |
 | 16 | Phase 2 | Inspection, traces, caching, and parallel execution | COMPLETE | `docs/engineering/reports/16.md` |
-| 17–21 | Phase 2/3 | Optional expansion | NOT_STARTED | — |
+| 17 | Phase 2 | OpenAI evaluation bridges and one platform connector | NOT_STARTED | — |
+| 18 | Phase 3 | Reviewed dataset generation and advanced episodes | COMPLETE | `docs/engineering/reports/18.md` |
+| 19–21 | Phase 3 | Optional expansion | NOT_STARTED | — |
+
+## Prompt 18 prerequisite subset
+
+Prompt 17 is not complete. Prompt 18 uses the explicit completed subset `17-P18`, recorded
+under ADR 0016: the policy-checked OpenAI-compatible provider boundary, development-only
+source input contract, and already-tested per-episode reset/final-state runner contracts.
+Prompt 18 does not depend on the OpenAI Evals bridges or a platform connector. `17-P18` does
+not satisfy Prompt 17's general acceptance gates or authorize treating Prompt 17 as complete.

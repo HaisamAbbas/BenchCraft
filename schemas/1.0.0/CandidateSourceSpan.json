@@ -1,0 +1,47 @@
+{
+  "$id": "aibench/1.0.0/CandidateSourceSpan.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "A precise quote location in an unchanged source document.\n\nOffsets are Unicode code-point offsets, end-exclusive. The source digest makes a stale\npath fail closed during review or executable verification.",
+  "properties": {
+    "end_line": {
+      "minimum": 1,
+      "title": "End Line",
+      "type": "integer"
+    },
+    "end_offset": {
+      "exclusiveMinimum": 0,
+      "title": "End Offset",
+      "type": "integer"
+    },
+    "source_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Source Digest",
+      "type": "string"
+    },
+    "source_ref": {
+      "title": "Source Ref",
+      "type": "string"
+    },
+    "start_line": {
+      "minimum": 1,
+      "title": "Start Line",
+      "type": "integer"
+    },
+    "start_offset": {
+      "minimum": 0,
+      "title": "Start Offset",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "source_ref",
+    "source_digest",
+    "start_offset",
+    "end_offset",
+    "start_line",
+    "end_line"
+  ],
+  "title": "CandidateSourceSpan",
+  "type": "object"
+}
