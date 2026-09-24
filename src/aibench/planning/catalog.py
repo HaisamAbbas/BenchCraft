@@ -29,6 +29,8 @@ CONCEPTS: dict[str, str] = {
     "groundedness": "the answer is supported by the passages the application actually retrieved",
     "format": "the output satisfies a declared structure, such as a JSON Schema",
     "tool_use": "the application called the expected tools",
+    "task_outcome": "the application's actions had the intended effect: required tool calls "
+    "succeeded and its test world ended in the expected state",
     "expectations": "the output satisfies per-case domain expectations",
     "latency": "end-to-end response time",
     "reliability": "application errors, timeouts and failed calls",
@@ -51,6 +53,14 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
     "format": (r"json", r"schema", r"output format", r"format(ted|ting)?", r"structured output"),
     "tool_use": (r"tools?", r"tool calls?", r"function calls?", r"agents?"),
+    "task_outcome": (
+        r"final (?:world )?state",
+        r"world state",
+        r"end state",
+        r"task outcomes?",
+        r"side effects?",
+        r"actually (?:booked|done|completed|happened)",
+    ),
     "expectations": (r"expectations?", r"business rules?", r"policy rules?"),
     "latency": (r"latency", r"response times?", r"slow", r"speed"),
     "reliability": (r"errors?", r"reliab\w*", r"crash\w*", r"timeouts?", r"failures?"),
@@ -79,7 +89,10 @@ def concepts_in(text: str) -> tuple[str, ...]:
 
 
 # Evaluators whose concept cannot be read from their requirements alone.
-_DECLARED_CONCEPTS: dict[str, tuple[str, ...]] = {"native.json_schema": ("format",)}
+_DECLARED_CONCEPTS: dict[str, tuple[str, ...]] = {
+    "native.json_schema": ("format",),
+    "native.tool_outcomes": ("task_outcome",),
+}
 
 
 def concepts_for(
@@ -94,6 +107,8 @@ def concepts_for(
             found.append("groundedness")
         elif path in ("execution.tool_events", "case.reference.tools"):
             found.append("tool_use")
+        elif path == "execution.world_state":
+            found.append("task_outcome")
         elif path.startswith("case.expectations."):
             found.append("expectations")
     return tuple(dict.fromkeys(found))

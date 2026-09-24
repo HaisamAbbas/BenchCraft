@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aibench-ragas"
+# The single source of the version is `aibench_ragas._version.__version__`.
+dynamic = ["version"]
+description = "Ragas faithfulness metrics for aibench, run in an isolated plugin environment"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "Apache-2.0"
+dependencies = [
+    "aibench>=0.1.0rc1,<0.2",
+    # Exact pin: the adapter's field and response-model contract was checked against
+    # this release (see aibench_ragas.faithfulness.PINNED_RAGAS).
+    "ragas==0.4.3",
+    # Ragas 0.4.3 imports the pre-0.4 community layout.  Keep the transitive
+    # API surface tested with the pinned Ragas release from drifting into an
+    # incompatible major release.
+    "langchain-community>=0.3.27,<0.4",
+    "instructor>=1.3.2,<1.4",
+    "langchain-openai>=1.1.9,<1.2",
+    "openai>=1.109.1,<2",
+]
+
+[project.entry-points."aibench.evaluators"]
+ragas = "aibench_ragas:EVALUATORS"
+
+[tool.setuptools.dynamic]
+version = {attr = "aibench_ragas._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

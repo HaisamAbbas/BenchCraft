@@ -124,8 +124,12 @@ def render_result(console: Console, result: CommandResult) -> None:
         render.case(console, data)
     elif kind == "budget":
         render.budget(console, data)
+    elif kind == "application":
+        render.application(console, data)
     elif kind == "report":
         render.report(console, data)
+    elif kind == "comparison":
+        render.comparison(console, data)
     elif kind == "sessions":
         for row in data["sessions"]:
             mark = "*" if row["current"] else " "

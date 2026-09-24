@@ -40,6 +40,19 @@ The 3.11 and 3.12 artifact builds have different archive checksums, as expected 
 
 Prompt 14 Ragas files appeared in the shared worktree during Prompt 13 verification. They were left untouched and are excluded from the Prompt 13 artifact evidence. The Prompt 13 wheels and checks were produced before the Ragas addition to `scripts/release_check.py`; the saved wheel payloads are the ones validated above. Review the concurrent files as separate work and build a fresh candidate after that review before treating the combined worktree as release-ready.
 
+## Phase 2 implementation status: Prompts 14 and 15
+
+Prompts 14 and 15 are implemented locally. Prompt 14's real Ragas 0.4.3 worker contract,
+same-stored-execution DeepEval/Ragas diagnostic and read-only paired comparison are recorded
+in `reports/14.md`. Prompt 15's callable, OpenAI-compatible and container runners, state
+reset/episode behavior and separate agent outcome checks are recorded in `reports/15.md`.
+These additions do not change the Prompt 13 release decision: the artifacts above predate
+Prompts 14 and 15 and need a fresh build/review before release. Linux/macOS, live providers,
+Python 3.11 Ragas, a patched Ragas release, and the Phase 2 time-saved study remain
+unobserved. No package was published and no pilot user was contacted.
+
 ## Next action
 
-Stop at the MVP review checkpoint. Do not start Prompt 14 automatically. External pilot validation and any cross-platform release claim require their own observed evidence.
+Review the combined Prompts 14 and 15 implementation and build a fresh candidate before
+making a release decision. External pilot validation, live-provider checks, and any
+cross-platform release claim require their own observed evidence.

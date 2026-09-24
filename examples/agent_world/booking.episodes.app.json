@@ -1,0 +1,34 @@
+{
+  "application_id": "example-booking-agent-episodes",
+  "runner": "http",
+  "target": "http://127.0.0.1:8768/agent",
+  "effects": "reversible",
+  "reset_policy": "per_episode",
+  "transport": {
+    "kind": "http",
+    "url": "http://127.0.0.1:8768/agent",
+    "healthcheck_url": "http://127.0.0.1:8768/health",
+    "reset_url": "http://127.0.0.1:8768/reset",
+    "timeout_seconds": 10
+  },
+  "input_binding": {
+    "fields": {
+      "/input": "/input"
+    }
+  },
+  "output_binding": {
+    "output": "/output",
+    "tool_events": "/tool_events",
+    "world_state": "/world_state"
+  },
+  "test_worlds": {
+    "two-seats": {
+      "seed_file": "worlds/two-seats.json",
+      "description": "BA117 to London with 2 seats, AF22 to Paris sold out, email not allowed"
+    },
+    "email-allowed": {
+      "seed_file": "worlds/email-allowed.json",
+      "description": "As two-seats, but the world lets the agent send email"
+    }
+  }
+}

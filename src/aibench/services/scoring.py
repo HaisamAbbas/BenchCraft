@@ -23,14 +23,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from aibench.core.errors import AibenchError
+from aibench.core.hashes import content_hash
 from aibench.core.models import (
+    SCHEMA_VERSION,
     ApplicationSpec,
     BenchmarkCase,
     Decision,
     DecisionRule,
+    EvaluationCompatibilityIdentity,
     EvaluationResult,
     ExecutionResult,
     ExecutionStatus,
+    IdentityComponent,
     MetricBinding,
     MetricValue,
     RedactionClass,
@@ -89,17 +93,144 @@ class ScoringReport:
     warnings: list[str] = field(default_factory=list)
 
 
-def metric_profiles(metrics: Sequence[ResolvedMetric]) -> dict[str, dict[str, Any]]:
-    """What reports need to interpret each binding's results, frozen at scoring time:
-    binding hash -> manifest, parameters and decision rule."""
+_JUDGE_CONFIG_KEYS = ("judge", "model", "llm", "provider", "factory")
+_RUBRIC_CONFIG_KEYS = ("rubric", "rubric_hash", "prompt", "prompt_hash", "criteria")
+
+
+def _configured_component(
+    params: dict[str, Any], keys: tuple[str, ...], *, uses_models: bool
+) -> IdentityComponent:
+    selected = {key: deep_unfreeze(params[key]) for key in keys if key in params}
+    if not uses_models:
+        return IdentityComponent(kind="not_used", verified=True)
+    if selected:
+        return IdentityComponent(
+            kind="configured", digest=content_hash(selected), verified=True
+        )
+    return IdentityComponent(kind="unknown", verified=False)
+
+
+def _rubric_component(
+    params: dict[str, Any], manifest: ResolvedMetric
+) -> IdentityComponent:
+    selected = {key: params[key] for key in _RUBRIC_CONFIG_KEYS if key in params}
+    if selected:
+        return IdentityComponent(
+            kind="configured", digest=content_hash(selected), verified=True
+        )
+    return IdentityComponent(
+        kind="framework_internal",
+        digest=content_hash(
+            {
+                "plugin_id": manifest.manifest.plugin_id,
+                "plugin_version": manifest.manifest.plugin_version,
+                "metric_id": manifest.manifest.evaluator_id,
+                "metric_version": manifest.manifest.version,
+            }
+        ),
+        verified=True,
+    )
+
+
+def _instrumentation_component(
+    metric: ResolvedMetric, application: ApplicationSpec | None
+) -> IdentityComponent:
+    requirements = sorted(requirement.path for requirement in metric.requirements)
+    if application is None:
+        return IdentityComponent(
+            kind="unknown",
+            digest=content_hash({"requirements": requirements, "schema_version": SCHEMA_VERSION}),
+            verified=False,
+        )
+    execution_fields = sorted(
+        path.split(".", 1)[1] for path in requirements if path.startswith("execution.")
+    )
+    output_binding = deep_unfreeze(application.output_binding) or {}
+    return IdentityComponent(
+        kind="observation_contract",
+        digest=content_hash(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "runner": application.runner.value,
+                "requirements": requirements,
+                "input_binding": deep_unfreeze(application.input_binding) or {},
+                "output_binding": {
+                    field: output_binding.get(field) for field in execution_fields
+                },
+                "reset_policy": application.reset_policy.value,
+                "environment_digest": application.environment_digest,
+            }
+        ),
+        verified=True,
+    )
+
+
+def evaluation_compatibility_identity(
+    metric: ResolvedMetric,
+    *,
+    application: ApplicationSpec | None = None,
+    dependency_lock_hash: str | None = None,
+) -> EvaluationCompatibilityIdentity:
+    """Build the strict-comparison identity frozen with one scoring pass.
+
+    Parameters are represented by a digest, not copied into chat. Explicit judge/rubric
+    configuration is recognized; a model-backed binding with no recognizable judge identity
+    is deliberately marked unverified. Instrumentation is the extraction contract, not the
+    application target or implementation hash, so an intended application change remains
+    comparable when it reports the same observations.
+    """
+    manifest = metric.manifest
+    params = deep_unfreeze(metric.binding.params) or {}
+    rule = rule_for(metric.binding, manifest)
+    identity: dict[str, Any] = {
+        "metric_id": manifest.evaluator_id,
+        "metric_version": manifest.version,
+        "value_kind": manifest.value_kind,
+        "direction": manifest.direction.value,
+        "scope": manifest.scope.value,
+        "aggregation": manifest.aggregation,
+        "binding_hash": metric.binding_hash,
+        "parameters_hash": content_hash(params),
+        "rule": rule.model_dump(mode="json") if rule else None,
+        "plugin_id": manifest.plugin_id,
+        "plugin_version": manifest.plugin_version,
+        "package_name": manifest.package_name,
+        "package_version": manifest.package_version,
+        "dependency_lock_hash": dependency_lock_hash,
+        "judge": _configured_component(
+            params, _JUDGE_CONFIG_KEYS, uses_models=manifest.uses_models
+        ).model_dump(mode="json"),
+        "rubric": _rubric_component(params, metric).model_dump(mode="json"),
+        "instrumentation": _instrumentation_component(metric, application).model_dump(mode="json"),
+        "required_fields": sorted(requirement.path for requirement in metric.requirements),
+        "final_attempt_rule": FINAL_ATTEMPT_RULE,
+    }
+    return EvaluationCompatibilityIdentity(
+        **identity, compatibility_hash=content_hash(identity)
+    )
+
+
+def metric_profiles(
+    metrics: Sequence[ResolvedMetric],
+    *,
+    application: ApplicationSpec | None = None,
+    dependency_lock_hash: str | None = None,
+) -> dict[str, dict[str, Any]]:
+    """What reports/comparison need to interpret each binding, frozen at scoring time."""
     profiles: dict[str, dict[str, Any]] = {}
     for metric in metrics:
         rule = rule_for(metric.binding, metric.manifest)
+        compatibility = evaluation_compatibility_identity(
+            metric,
+            application=application,
+            dependency_lock_hash=dependency_lock_hash,
+        )
         profiles[metric.binding_hash] = {
             "metric": metric.binding.metric,
             "manifest": metric.manifest.model_dump(mode="json"),
             "params": deep_unfreeze(metric.binding.params) or {},
             "rule": rule.model_dump(mode="json") if rule else None,
+            "compatibility": compatibility.model_dump(mode="json"),
             "source": "frozen_with_run",
         }
     return profiles
@@ -174,7 +305,16 @@ async def score_recorded_run(
     storage.append_run_event(
         run_id,
         "scoring_pass",
-        {"scoring_id": report.scoring_id, "metric_profiles": metric_profiles(resolved)},
+        {
+            "scoring_id": report.scoring_id,
+            "metric_profiles": metric_profiles(
+                resolved,
+                application=application,
+                dependency_lock_hash=record.manifest.dependency_lock_hash,
+            ),
+            "repeat_reason": "explicit_stored_output_rescore",
+            "independent_judge_repeat": "not_proven",
+        },
     )
     for metric in resolved:
         scorer = BindingScorer(
@@ -185,6 +325,8 @@ async def score_recorded_run(
             timeout_seconds,
             cancel,
             prepare_timeout_seconds=prepare_timeout_seconds,
+            application=application,
+            dependency_lock_hash=record.manifest.dependency_lock_hash,
         )
         metric_results = await scorer.score_all(executions, cases, report.warnings)
         report.results.extend(metric_results)
@@ -196,6 +338,18 @@ async def score_recorded_run(
                 params=deep_unfreeze(metric.binding.params) or {},
             )
         )
+    # A pass is complete only after every resolved binding has returned.  The
+    # marker lets a later comparison distinguish a finished rescore from a
+    # process that crashed after writing the opening scoring_pass event.
+    storage.append_run_event(
+        run_id,
+        "scoring_pass_completed",
+        {
+            "scoring_id": report.scoring_id,
+            "result_count": len(report.results),
+            "status": "completed",
+        },
+    )
     return report
 
 
@@ -227,6 +381,8 @@ class BindingScorer:
         cancel: asyncio.Event | None,
         *,
         prepare_timeout_seconds: float = DEFAULT_PREPARE_TIMEOUT_SECONDS,
+        application: ApplicationSpec | None = None,
+        dependency_lock_hash: str | None = None,
     ) -> None:
         self.storage = storage
         self.artifacts = artifacts
@@ -234,6 +390,11 @@ class BindingScorer:
         self.metric = metric
         self.manifest = metric.manifest
         self.rule = rule_for(metric.binding, metric.manifest)
+        self.compatibility = evaluation_compatibility_identity(
+            metric,
+            application=application,
+            dependency_lock_hash=dependency_lock_hash,
+        )
         self.timeout_seconds = timeout_seconds
         self.prepare_timeout_seconds = prepare_timeout_seconds
         self.cancel = cancel or asyncio.Event()
@@ -506,6 +667,7 @@ class BindingScorer:
                 "plugin_id": manifest.plugin_id,
                 "plugin_version": manifest.plugin_version,
                 "binding": self.metric.binding.model_dump(mode="json"),
+                "compatibility": self.compatibility.model_dump(mode="json"),
                 "final_attempt_rule": FINAL_ATTEMPT_RULE,
             },
             resources=self._resources(ctx, latency_ms),

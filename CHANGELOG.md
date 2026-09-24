@@ -5,6 +5,39 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased Phase 2 working tree — Prompt 15
+
+- **New application transports** behind the same runner contract:
+  - `python`: a callable, run in a fresh interpreter through a standard-library shim;
+  - `openai_compatible`: a chat-completions endpoint. Usage is observed; tool calls are
+    recorded as requests, not effects;
+  - `container`: an image pinned by digest, non-root, read-only, capability-free,
+    resource-limited and offline by default. The container is removed on timeout, and
+    nothing is pulled (including between preflight and run). App config cannot select a
+    host executable or set host-sensitive environment variables on the engine client. The
+    policy approves images and network.
+- **State between cases.** The engine now honours `reset_policy`:
+  - it resets through the application's hook (`reset_url`, `reset_argv`,
+    `reset_callable`) before every case, or before each episode (cases sharing a
+    `group_id`);
+  - a failed reset blocks the case;
+  - a failed or interrupted episode turn blocks the rest of that episode.
+  - **Behaviour change:** an application whose config declared `reset_url` is now actually
+    reset, and its plans need `concurrency.application: 1`.
+- **Test worlds.** Named seeds declared by the application, selected by a plan
+  (`test_world`) or in chat (`/world`), approved by the policy (`allowed_test_worlds`),
+  and frozen with the run. A new `world_state` observation. Reports record the reset mode,
+  the world and its seed hash, and the reset counts.
+- **Agent outcome metrics:** `native.tool_calls@1.0.0` (names), `native.tool_outcomes@1.0.0`
+  (arguments, success, authorization) and `native.final_state@1.0.0` (assertions on the
+  world state). They are separate, so a correct tool name never masks a failed outcome.
+- **Chat.** `/app` and the assistant's `describe_application` explain what the runner
+  observes, what evidence is missing, and how state is reset.
+- **Known limits.**
+  - Containers were exercised with Docker Engine 29.7.2 (Docker Desktop, Windows) only, and
+    are not a hostile multi-tenant sandbox.
+  - The OpenAI-compatible transport was exercised against a local stub only.
+
 ## Unreleased Phase 2 working tree — Prompt 14
 
 - Added the separately packaged `ragas.faithfulness@1` adapter, pinned to `ragas==0.4.3`

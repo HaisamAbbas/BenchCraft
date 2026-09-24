@@ -79,6 +79,8 @@ class SessionChoices(FrozenModel):
     budgets: BudgetLimits = Field(default_factory=BudgetLimits)
     params: FrozenParams = Field(default_factory=dict)  # evaluator_id -> parameters
     rules: FrozenRules = Field(default_factory=dict)  # evaluator_id -> pass/fail rule
+    # A test world the application declares (15-T3); the policy must approve it.
+    test_world: str | None = None
 
 
 class SamplePatch(FrozenModel):
@@ -119,6 +121,9 @@ class PlanPatch(FrozenModel):
     params: FrozenParams = Field(default_factory=dict)  # evaluator_id -> parameters
     rules: FrozenRules = Field(default_factory=dict)  # evaluator_id -> pass/fail rule
     dataset: str | None = Field(default=None, min_length=1)  # relative to the project root
+    # Select one of the application's declared test worlds, or clear the selection.
+    test_world: str | None = Field(default=None, min_length=1, max_length=200)
+    clear_test_world: bool = False
     answers: tuple[str, ...] = ()  # question IDs this patch answers
 
     @model_validator(mode="after")
@@ -126,6 +131,8 @@ class PlanPatch(FrozenModel):
         edits = [self.sample is not None, self.limit is not None, self.all_cases]
         if sum(edits) > 1:
             raise ValueError("use one of sample, limit or all_cases")
+        if self.test_world is not None and self.clear_test_world:
+            raise ValueError("use one of test_world or clear_test_world")
         return self
 
     def is_empty(self) -> bool:
@@ -147,6 +154,8 @@ class PlanPatch(FrozenModel):
         fields.update(f"rule.{key}" for key in self.rules)
         if self.dataset is not None:
             fields.add("dataset")
+        if self.test_world is not None or self.clear_test_world:
+            fields.add("test_world")
         return fields
 
 

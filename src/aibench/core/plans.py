@@ -149,6 +149,8 @@ class ExecutablePlan(FrozenModel):
     evaluation_timeout_seconds: float = Field(default=60.0, gt=0, le=3600)
     plugin_environments: tuple[PluginEnvironmentRef, ...] = ()
     gates: tuple[ReleaseGate, ...] = ()
+    # A test world the application declares; its seed is loaded before each case/episode.
+    test_world: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def _backoff_bounds(self) -> ExecutablePlan:

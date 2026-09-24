@@ -178,6 +178,12 @@ def ungrounded(patch: PlanPatch, message: str) -> list[str]:
             )
     if patch.dataset is not None:
         need(patch.dataset, "dataset")
+    if patch.test_world is not None:
+        need(patch.test_world, "test world")
+    if patch.clear_test_world and not re.search(
+        r"\b(no|without|clear|remove|drop)\b.*\bworld\b", message, re.IGNORECASE
+    ):
+        problems.append("clearing the test world: the user's message does not ask for it")
     return problems
 
 
@@ -388,6 +394,11 @@ Rules:
   and name the case IDs it rests on. Never state a cause, or a share of failures with some
   cause, that no result contains; a few examples are not a statistic about all failures.
 - Label results from an unfinished run as a partial snapshot.
+- A run comparison is qualified for a quality claim only when compare_runs returns
+  claim_qualified=true (identity_qualified=true, its coverage gate passes, and at least
+  one complete pair exists). A blocked, exploratory, or coverage-failed comparison is
+  diagnostic; never describe it as a regression or improvement. Different evaluator
+  ecosystems are never averaged into one quality score.
 - export_report writes report files; call it only when the user's latest message asks
   for a report to be exported or saved, with user_quote set to those words.
 - To change the draft, call propose_plan_patch with expected_revision set to the current
@@ -441,6 +452,13 @@ def tool_specs() -> list[dict[str, Any]]:
             _NO_ARGS,
         ),
         _tool("read_profile", "The application's evidence profile.", _NO_ARGS),
+        _tool(
+            "describe_application",
+            "The application's runner: what it observes, what evidence is missing and what "
+            "that means, how its state is reset, and its test worlds with policy approval. "
+            "Select a world with propose_plan_patch (patch.test_world).",
+            _NO_ARGS,
+        ),
         _tool("summarize_dataset", "Dataset field coverage counts (no values).", _NO_ARGS),
         _tool("list_evaluators", "Installed evaluators with eligibility.", _NO_ARGS),
         _tool(
@@ -488,6 +506,26 @@ def tool_specs() -> list[dict[str, Any]]:
             "A run's report aggregates from stored facts: gates, per-metric counts with "
             "denominators, application failures, latency, cost completeness.",
             _object({"run_id": _RUN_ID}, []),
+        ),
+        _tool(
+            "compare_runs",
+            "Compare two of this session's stored runs with pairing, coverage and compatibility "
+            "checks. Strict mode blocks unqualified incompatible comparisons.",
+            _object(
+                {
+                    "baseline_run_id": {"type": "string"},
+                    "current_run_id": {"type": "string"},
+                    "baseline_scoring_id": {"type": "string"},
+                    "current_scoring_id": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["strict", "exploratory"]},
+                    "min_paired_coverage": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                    },
+                },
+                ["baseline_run_id", "current_run_id"],
+            ),
         ),
         _tool(
             "export_report",
@@ -682,6 +720,7 @@ class _Turn:
             "get_session_state": self._state,
             "show_plan": self._show_plan,
             "read_profile": self._read(lambda i: json.loads(i.profile.model_dump_json())),
+            "describe_application": self._describe_application,
             "summarize_dataset": self._read(lambda i: json.loads(i.dataset.model_dump_json())),
             "list_evaluators": self._read(lambda i: [o.as_dict() for o in i.catalog]),
             "describe_evaluator": self._describe,
@@ -692,6 +731,7 @@ class _Turn:
             "list_failures": self._failures,
             "get_case_evidence": self._case,
             "get_report": self._report,
+            "compare_runs": self._compare,
             "export_report": self._export,
             "request_action": self._action,
         }
@@ -735,6 +775,10 @@ class _Turn:
             return pick(self.controller.inputs())
 
         return handler
+
+    async def _describe_application(self, _: dict[str, Any]) -> Any:
+        self.outcome.explained.append({"tool": "describe_application", "subject": "application"})
+        return self.controller.describe_application()
 
     async def _describe(self, args: dict[str, Any]) -> Any:
         wanted = str(args.get("metric", ""))
@@ -785,6 +829,28 @@ class _Turn:
             }
         )
         return facts
+
+    async def _compare(self, args: dict[str, Any]) -> Any:
+        report = self.controller.compare_runs(
+            str(args.get("baseline_run_id", "")),
+            str(args.get("current_run_id", "")),
+            baseline_scoring_id=args.get("baseline_scoring_id"),
+            current_scoring_id=args.get("current_scoring_id"),
+            mode=str(args.get("mode", "strict")),
+            min_paired_coverage=float(args.get("min_paired_coverage", 0.95)),
+            for_assistant=True,
+        )
+        self.outcome.results.append(
+            {
+                "tool": "compare_runs",
+                "baseline_run_id": (report.get("runs", {}).get("baseline") or {}).get("run_id"),
+                "current_run_id": (report.get("runs", {}).get("current") or {}).get("run_id"),
+                "status": report.get("status"),
+                "qualified": report.get("qualified"),
+                "gate_status": (report.get("overall_coverage_gate") or {}).get("status"),
+            }
+        )
+        return report
 
     async def _export(self, args: dict[str, Any]) -> Any:
         quote = str(args.get("user_quote", ""))

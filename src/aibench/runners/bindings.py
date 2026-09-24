@@ -169,7 +169,7 @@ class InputBinding(BaseModel):
 
 # --------------------------------------------------------------------------- output
 
-OPTIONAL_CAPABILITIES = ("retrieved_context", "tool_events", "usage", "cost")
+OPTIONAL_CAPABILITIES = ("retrieved_context", "tool_events", "usage", "cost", "world_state")
 
 
 class OutputBinding(BaseModel):
@@ -181,6 +181,7 @@ class OutputBinding(BaseModel):
     tool_events: str | None = None
     usage: str | None = None
     cost: str | None = None
+    world_state: str | None = None  # the test world's state after the invocation
 
     @classmethod
     def from_spec(cls, raw: Any) -> OutputBinding:
@@ -216,6 +217,7 @@ class ExtractedObservations:
     tool_events: tuple[Any, ...] = ()
     usage: Any = None
     cost: float | None = None
+    world_state: Any = None
     completeness: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -271,6 +273,10 @@ def _coerce(name: str, raw: Any, binding: OutputBinding) -> tuple[Any, bool]:
         if not isinstance(raw, list):
             raise BindingError("tool_events must be a list")
         return tuple(raw), not raw
+    if name == "world_state":
+        if not isinstance(raw, (dict, list)):
+            raise BindingError("world_state must be an object or a list")
+        return raw, not raw
     if name == "cost":
         if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
             raise BindingError("cost must be a non-negative number")

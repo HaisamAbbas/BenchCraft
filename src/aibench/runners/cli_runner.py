@@ -131,14 +131,18 @@ class CliRunner(BaseRunner):
         trusted_local: bool,
         environ: Mapping[str, str] | None = None,
         lifecycle_timeout_seconds: float | None = None,
+        transport: CliTransport | None = None,
     ) -> None:
-        if not isinstance(spec.transport, CliTransport):
+        """`transport` lets a derived runner (Python callable, container) describe its own
+        process as a CLI protocol invocation."""
+        chosen = transport if transport is not None else spec.transport
+        if not isinstance(chosen, CliTransport):
             raise ConfigError("CliRunner requires an ApplicationSpec with a cli transport")
         kwargs = {}
         if lifecycle_timeout_seconds is not None:
             kwargs["lifecycle_timeout_seconds"] = lifecycle_timeout_seconds
         super().__init__(spec, **kwargs)
-        self.transport: CliTransport = spec.transport
+        self.transport: CliTransport = chosen
         self.base_dir = base_dir
         self.trusted_local = trusted_local
         self._environ = dict(os.environ if environ is None else environ)
@@ -232,10 +236,39 @@ class CliRunner(BaseRunner):
             return HealthReport("healthy", "healthcheck_argv exited 0")
         return HealthReport("unhealthy", f"healthcheck_argv exited {code}")
 
-    async def _reset(self) -> ResetReport:
-        return ResetReport(
-            "not_needed", "each invocation runs in a fresh process; no in-process state"
+    @property
+    def resettable(self) -> bool:
+        return self.transport.reset_argv is not None
+
+    async def _reset(self, seed: Any) -> ResetReport:
+        argv = self.transport.reset_argv
+        if argv is None:
+            return ResetReport(
+                "not_needed", "each invocation runs in a fresh process; no reset_argv configured"
+            )
+        return await self._run_reset([self._resolve_executable(argv[0]), *argv[1:]], seed)
+
+    async def _run_reset(self, argv: list[str], seed: Any) -> ResetReport:
+        """Run a one-shot reset process with the seed as JSON on stdin; exit 0 is success.
+        Bounded by the lifecycle timeout; the process tree never outlives it."""
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=self._cwd,
+            env=self._child_env,
+            **spawn_kwargs(),
         )
+        tree = ProcessTree(proc.pid)
+        try:
+            _, stderr = await proc.communicate(json.dumps(seed).encode("utf-8"))
+        finally:
+            _terminate(proc, tree)
+        if proc.returncode == 0:
+            return ResetReport("reset", "reset process exited 0")
+        detail = self.redactor.text(stderr.decode("utf-8", "replace").strip()[-300:])
+        return ResetReport("failed", f"reset process exited {proc.returncode}: {detail}")
 
     async def _close(self) -> None:
         return None  # every invocation cleans up its own process tree
@@ -268,7 +301,7 @@ class CliRunner(BaseRunner):
         env[CORRELATION_ENV_VAR] = ctx.correlation_id
         try:
             proc = await asyncio.create_subprocess_exec(
-                *self._argv,
+                *self._argv_for(ctx),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -393,6 +426,10 @@ class CliRunner(BaseRunner):
                 extra=base_completeness,
             )
         return self._parse_output(clock, ctx, stdout_bytes, captures, base_completeness)
+
+    def _argv_for(self, ctx: InvocationContext) -> list[str]:
+        """The command for one invocation (a derived runner may name its process)."""
+        return self._argv
 
     def _stdout_mime(self) -> str:
         return "application/json" if self.transport.output_mode == "json" else "text/plain"

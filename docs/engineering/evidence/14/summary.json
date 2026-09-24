@@ -1,0 +1,78 @@
+{
+  "phase": 14,
+  "status": "complete_local",
+  "environment": {
+    "os": "Windows 11 Pro",
+    "python": "3.12.10",
+    "core_venv": ".venv",
+    "plugin_environments": [
+      "plugins/deepeval/.venv",
+      "plugins/ragas/.venv"
+    ]
+  },
+  "packages": {
+    "aibench": "0.1.0rc1",
+    "deepeval": "4.2.5",
+    "aibench-deepeval": "0.1.0rc1",
+    "ragas": "0.4.3",
+    "aibench-ragas": "0.1.0rc1"
+  },
+  "observed_checks": [
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_comparison_statistics.py tests/test_comparison_service.py tests/test_scoring_service.py tests/test_registry.py tests/test_models.py",
+      "result": "102 passed in 19.94s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_cross_ecosystem.py",
+      "result": "1 passed in 349.92s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_ragas_adapter.py",
+      "result": "9 passed in 351.77s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_cli_project.py tests/test_tui.py tests/test_conversation.py tests/test_session_controller.py",
+      "result": "53 passed in 198.20s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_worker_evaluator.py",
+      "result": "13 passed in 202.43s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_deepeval_adapter.py -k 'not blocking_judge'",
+      "result": "17 passed, 1 skipped (live provider), 1 deselected in 798.33s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_deepeval_adapter.py::test_blocking_judge_is_killed_and_the_next_case_runs_in_a_fresh_worker",
+      "result": "1 passed in 259.85s"
+    },
+    {
+      "command": ".venv/Scripts/python -m build --outdir .worktmp/prompt14-dist .; .venv/Scripts/python -m build --outdir .worktmp/prompt14-dist plugins/deepeval; .venv/Scripts/python -m build --outdir .worktmp/prompt14-dist plugins/ragas",
+      "result": "all three sdist/wheel builds succeeded"
+    },
+    {
+      "command": ".venv/Scripts/python -m ruff check src tests plugins",
+      "result": "All checks passed"
+    },
+    {
+      "command": ".venv/Scripts/python -m mypy src",
+      "result": "Success: no issues found in 102 source files"
+    },
+    {
+      "command": "plugins/ragas/.venv/Scripts/python -m pip check",
+      "result": "No broken requirements found"
+    }
+  ],
+  "pending_or_unobserved": [
+    "Live DeepEval or Ragas provider calls",
+    "Ragas on Python 3.11, Linux, or macOS",
+    "A patched Ragas release for GHSA-95ww-475f-pr4f / CVE-2026-6587",
+    "Phase 2 real-team time-saved study",
+    "A combined full-suite run including every optional plugin test"
+  ],
+  "security": {
+    "advisory": "GHSA-95ww-475f-pr4f / CVE-2026-6587",
+    "compensating_control": "text-only validated Faithfulness adapter in an isolated worker; no multi-modal URL/file entry point is selected or called",
+    "claim": "The pinned package remains a third-party executable dependency and is not declared vulnerability-free."
+  }
+}

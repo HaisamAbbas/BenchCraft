@@ -312,11 +312,13 @@ async def _send(
     from aibench.tui.commands import Commands
 
     live_before = set(controller.live_runs())
+    command_code: int | None = None
     try:
         if text.strip().startswith("/"):
             result = await Commands(controller, new_session).run(text)
             payload: dict[str, Any] = {"session_id": controller.session_id, **result.as_dict()}
             ok = result.ok
+            command_code = result.exit_code
             actions = [result.data] if result.kind == "action" else []
             if result.kind == "confirm":  # /run showed the plan first: nothing was started
                 actions = [{"state": "confirmation_required"}]
@@ -354,6 +356,8 @@ async def _send(
     states = {a.get("state") for a in actions}
     if run_codes:
         code = max(run_codes, key=_EXIT_SEVERITY.index)
+    elif command_code is not None:
+        code = command_code
     elif states & {"denied", "confirmation_required"}:
         code = EXIT_DENIED  # authorization required: nothing ran
     elif not ok or states & {"rejected", "blocked"}:

@@ -39,17 +39,20 @@ supported Python version.
 
 To build every release artifact and prove it works from a clean install:
 `python scripts/release_check.py --out DIR [--python PATH ...] [--plugin]`. It builds the
-core plus the separately packaged DeepEval adapter with `SHA256SUMS`, installs
+core plus the separately packaged DeepEval and Ragas adapters with `SHA256SUMS`, installs
 the core wheel into a fresh venv per interpreter, and runs the documented quickstart and
-100-case acceptance workflow. `--plugin` checks the DeepEval plugin in its own clean
+100-case acceptance workflow. `--plugin` checks each evaluator package in its own clean
 environment. It publishes nothing.
 
 ## Status
 
-**MVP release candidate:** `0.1.0rc1` is a local candidate, ready for MVP review and not
-broad external release. Linux/macOS, live-provider, human fixture review and real-team pilot
-checks remain open. See [release readiness](docs/engineering/release-readiness.md).
+**Phase 2 working tree:** a real Ragas adapter and stored-run comparison workflow are
+implemented on top of the MVP release candidate. The candidate itself is not published and
+has not yet been piloted by a real team.
 
+- **Phase 2 comparison:** `aibench compare BASELINE CURRENT`, plus the session-owned
+  `compare_runs` tool and `/compare`; see [ADR 0013](docs/adr/0013-ragas-adapter-and-comparison-compatibility.md).
+- **What was verified, and what is still open:** [docs/engineering/release-readiness.md](docs/engineering/release-readiness.md).
 - **Changes:** [CHANGELOG.md](CHANGELOG.md).
 - **Upgrading and recovering interrupted runs:** [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 - **Pilot recipes and feedback form:** [docs/pilot/](docs/pilot/README.md).

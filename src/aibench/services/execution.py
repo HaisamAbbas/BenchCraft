@@ -102,6 +102,7 @@ def _to_result(
         output=outcome.output,
         retrieved_context=obs.retrieved_context,
         tool_events=obs.tool_events,
+        world_state=obs.world_state,
         trace_refs=trace_refs,
         timing=outcome.timing,
         usage=obs.usage,

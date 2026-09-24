@@ -99,7 +99,7 @@ class HealthReport:
 
 @dataclass(frozen=True)
 class ResetReport:
-    status: Literal["reset", "not_needed", "unsupported", "failed"]
+    status: Literal["reset", "not_needed", "unsupported", "failed", "aborted"]
     detail: str
 
 
@@ -162,7 +162,7 @@ class BaseRunner(abc.ABC):
     ) -> None:
         self.spec = spec
         self.input_binding = InputBinding.from_spec(spec.input_binding)
-        self.output_binding = OutputBinding.from_spec(spec.output_binding)
+        self.output_binding = OutputBinding.from_spec(spec.effective_output_binding())
         self.lifecycle_timeout_seconds = lifecycle_timeout_seconds
         self.redactor = Redactor()  # replaced in `_prepare` once secrets are resolved
         self._state: Literal["new", "prepared", "closed"] = "new"
@@ -204,12 +204,20 @@ class BaseRunner(abc.ABC):
         self._require_prepared()
         return await self._invoke(envelope, ctx)
 
-    async def reset(self) -> ResetReport:
+    async def reset(self, seed: Any = None) -> ResetReport:
+        """Return the application to a known state: the selected test world's `seed`, or
+        its own initial state when `seed` is None."""
         self._require_prepared()
         try:
-            return await self._bounded(self._reset())
+            return await self._bounded(self._reset(seed))
         except TimeoutError:
             return ResetReport("failed", "reset timed out")
+
+    @property
+    def resettable(self) -> bool:
+        """Whether this runner has a reset hook that restores state the application keeps
+        between invocations (not merely a fresh process)."""
+        return False
 
     async def close(self) -> None:
         if self._state == "closed":
@@ -347,7 +355,7 @@ class BaseRunner(abc.ABC):
     ) -> InvocationOutcome: ...
 
     @abc.abstractmethod
-    async def _reset(self) -> ResetReport: ...
+    async def _reset(self, seed: Any) -> ResetReport: ...
 
     @abc.abstractmethod
     async def _close(self) -> None: ...

@@ -19,4 +19,6 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 11 | MVP | Evidence reports, command composition, and packaging | COMPLETE | `docs/engineering/reports/11.md` |
 | 12 | MVP | MVP acceptance and harness validation | COMPLETE | `docs/engineering/reports/12.md` |
 | 13 | MVP | Release candidate and pilot handoff | COMPLETE | `docs/engineering/reports/13.md` |
-| 14–21 | Phase 2/3 | Optional expansion | NOT_STARTED | — |
+| 14 | Phase 2 | Second evaluator ecosystem and comparisons | COMPLETE | `docs/engineering/reports/14.md` |
+| 15 | Phase 2 | Richer runners and agent outcome contracts | COMPLETE | `docs/engineering/reports/15.md` |
+| 16–21 | Phase 2/3 | Optional expansion | NOT_STARTED | — |

@@ -21,6 +21,11 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+# Starting a fresh interpreter, opening the workspace and drafting the first plan took
+# 13.6 s on the development machine at 100% CPU (other agents' work), past a 12 s wait.
+STARTUP_SECONDS = 45.0
+
+
 class _Terminal:
     """Bare `aibench` in a real pseudo-console, read on a background thread."""
 
@@ -94,7 +99,7 @@ def _project(tmp_path: Path) -> Path:
 def test_bare_aibench_opens_chat_and_accepts_terminal_controls(tmp_path: Path) -> None:
     terminal = _Terminal(_project(tmp_path))
     try:
-        terminal.expect("Type /help for commands")
+        terminal.expect("Type /help for commands", timeout=STARTUP_SECONDS)
         terminal.send("/help")
         terminal.expect("Anything else is a message")
         terminal.exit()
@@ -108,7 +113,7 @@ def test_resizing_the_terminal_keeps_the_chat_working(tmp_path: Path) -> None:
     crashes."""
     terminal = _Terminal(_project(tmp_path))
     try:
-        terminal.expect("Type /help for commands")
+        terminal.expect("Type /help for commands", timeout=STARTUP_SECONDS)
         terminal.process.setwinsize(12, 40)
         assert terminal.process.getwinsize() == (12, 40)
         terminal.send("/resized" + "x" * 70)  # wraps at 40 columns

@@ -89,7 +89,7 @@ class BlockingJudge(TokenJudge):
     """Blocks the worker thread, like a stuck synchronous SDK call."""
 
     async def a_generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
-        time.sleep(120)  # noqa: ASYNC251 - deliberately blocks, like a stuck sync SDK call
+        time.sleep(180)  # noqa: ASYNC251 - deliberately blocks, like a stuck sync SDK call
         raise AssertionError("unreachable")
 
 

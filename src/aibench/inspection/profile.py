@@ -54,6 +54,10 @@ _RECIPES = {
         "output_binding.tool_events"
     ),
     "usage": "return token usage in the response and map it with output_binding.usage",
+    "world_state": (
+        "return the final application state or state assertion in the response and map it "
+        "with output_binding.world_state"
+    ),
     "cost": "return the request's cost in the response and map it with output_binding.cost",
 }
 _MAX_EVIDENCE_REFS = 5

@@ -2,7 +2,7 @@
 
 Maps specification requirements to the owning numbered prompt and its observable acceptance
 gate. Source: `docs/spec/implementation-plan.md` v1.1. Phase 2/3 requirements are marked
-deferred; they are owned by prompts 14–21 and are out of scope until explicitly requested.
+deferred unless the owning prompt has been explicitly implemented and evidenced.
 
 | Spec section | Requirement | Owning prompt | Gate(s) | Status | Evidence |
 |---|---|---|---|---|---|
@@ -71,7 +71,7 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §12 Release gates | Predeclared plan gates over selected cases; undecided on partial snapshots; exit code 1 | 11 | 11-G2, 11-G4 | Verified | reports/11 |
 | §14, §16 Report safety | Sanitized, escaped HTML/Markdown with CSP; raw evaluator artifacts referenced by ID/digest only; `--no-content` | 11 | 11-G2 | Verified | reports/11 |
 | §3, §8 Conversational analysis | `get_report` / `export_report` tools; numeric claims linked to queries and unverified numbers flagged; hypotheses and partial snapshots labelled | 11 | 11-G3 | Verified | reports/11 |
-| §3, §13 Commands | `init`, `doctor`, `benchmark` (interactive, `--non-interactive`, `--auto --policy`), `run DIR`, `report`, `plugins list`; `compare` reports unsupported | 11 | 11-G4 | Verified | reports/11; tests/test_cli_project.py |
+| §3, §13 Commands | `init`, `doctor`, `benchmark` (interactive, `--non-interactive`, `--auto --policy`), `run DIR`, `report`, `plugins list`; `compare` reads compatible stored runs with strict/exploratory modes | 11, 14 | 11-G4, 14-G2 | Verified | reports/11, reports/14; tests/test_cli_project.py |
 | §13 Exit codes | One mapping for `run`, `resume`, `benchmark --auto`, `chat --send` (0/1/2/3/4/130) | 11 | 11-G4 | Verified | reports/11 |
 | §17 Quickstart, packaging | 10-case quickstart as package data; quickstart and support docs; secret references only; clean-install smoke | 11 | 11-G3, 11-G5 | Verified (manual, Windows) | reports/11, 12: clean-install smoke from the built wheel |
 | §17, §23–24 | MVP acceptance validation | 12 | 12-G1..G5 | Verified (validation done; release items open) | reports/12; docs/engineering/mvp-acceptance.md lists the open release items |
@@ -87,8 +87,15 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §17 Distribution and recovery | Versioned core/plugin artifacts, clean install demo, migration and recovery instructions, compatibility matrix | 13 | 13-G1, 13-G3 | Verified (Windows, Python 3.11/3.12) | `reports/13`; `evidence/13/` |
 | §22 Pilot trials | Two executable integration recipes and feedback form; local runs observed, real-team validation kept distinct | 13 | 13-G3 | Partial (local trials complete; real-team trials pending) | `tests/test_pilot_recipes.py`; `docs/pilot/`; `reports/13` |
 | §17–18, §22–24 | Release candidate and pilot handoff; readiness, residual risks and stopping point | 13 | 13-G1..G5 | Complete (technical candidate for review; external pilot/platform checks remain open) | `reports/13`; `release-readiness.md`; ADR 0012 |
-| §9, §18 (Phase 2) | Second evaluator ecosystem, comparisons | 14 (deferred) | 14-G1..G4 | Deferred | Phase 2/3 scope |
-| §7, §18 (Phase 2) | Richer runners, agent outcome contracts | 15 (deferred) | 15-G1..G4 | Deferred | Phase 2/3 scope |
+| §9, §12, §18, §23 (Phase 2) | Second evaluator ecosystem, stored-output paired comparisons, grouped uncertainty, judge stability, cross-framework disagreement, and no-reexecution evidence | 14 | 14-G1..G4 | Verified (local deterministic/real-package; live provider and time-saved study pending) | reports/14; ADR 0013; tests/test_ragas_adapter.py; tests/test_cross_ecosystem.py; tests/test_comparison_statistics.py |
+| §7, §18 (Phase 2) | Richer runners, agent outcome contracts | 15 | 15-G1..G4 | Verified (Windows; containers via Docker Desktop) | reports/15; ADR 0014 |
+| §7 Python callable | Callable in a fresh interpreter through a stdlib shim; CLI-protocol bounds; trusted-local | 15 | 15-G4 | Verified | tests/test_runner_transports.py (end to end through `app smoke`); test_runner_review_regressions.py (UTF-8, prints) |
+| §7 OpenAI-compatible endpoint | Chat-completions application transport; usage observed; tool calls as requests; origin/secret policy | 15 | 15-G4 | Verified (local stub only) | test_openai_compatible_endpoint_runs_end_to_end_through_the_cli; no live provider |
+| §7, §16 Container | Digest-pinned image, non-root uid/gid, read-only root and mounts, tmpfs, no capabilities, limits, network none unless approved, no engine socket, removed on timeout | 15 | 15-G1 | Verified (Docker Engine 29.7.2, Docker Desktop, Windows 11) | test_a_real_container_fixture_runs_end_to_end_through_the_cli, test_the_container_runs_non_root_read_only_and_offline, test_a_container_timeout_kills_and_removes_the_container; hardening regressions. Not a hostile multi-tenant sandbox |
+| §7 State and episodes | Reset hooks; per_case / per_episode / shared; failed reset blocks; broken or interrupted episodes block; concurrency 1 for stateful apps | 15 | 15-G2 | Verified | tests/test_agent_worlds.py (state reset between cases, kept within an episode, reset between episodes; contrast with shared) |
+| §7 Test worlds | Declared seeds, policy approval, frozen with the run, reported | 15 | 15-G2 | Verified | test_test_world_rules_are_enforced_before_anything_runs, test_the_seed_is_frozen_with_the_run |
+| §7 Tool outcome contracts | tool_calls (names) separate from tool_outcomes (arguments, success, authorization) and final_state (world state) | 15 | 15-G3 | Verified | test_correct_tool_names_never_mask_a_failed_outcome; tests/test_agent_evaluators.py |
+| §8, §7 Chat: runner capabilities and test worlds | `/app`, `describe_application` tool, `/world`, grounded `propose_plan_patch(test_world)` | 15 | 15-G4 | Verified (scripted model) | tests/test_chat_test_worlds.py |
 | §16, §18 (Phase 2) | Inspection, traces, caching, parallel execution | 16 (deferred) | — | Deferred | Phase 2/3 scope |
 | §11, §18 (Phase 2) | OpenAI evaluation bridges, one platform connector | 17 (deferred) | — | Deferred | Phase 2/3 scope |
 | §19 (Phase 3) | Reviewed dataset generation, advanced episodes | 18 (deferred) | — | Deferred | Phase 2/3 scope |

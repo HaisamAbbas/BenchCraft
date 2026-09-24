@@ -33,7 +33,7 @@ from aibench.core.models import (
 MISSING: Any = object()
 FieldState = Literal["present", "empty", "missing"]
 
-_EXECUTION_FIELDS = ("output", "retrieved_context", "tool_events", "usage", "cost")
+_EXECUTION_FIELDS = ("output", "retrieved_context", "tool_events", "usage", "cost", "world_state")
 _REFERENCE_FIELDS = ("answer", "context", "tools")
 
 
@@ -42,7 +42,7 @@ class EvaluationView:
     """Read-only view of one case and its recorded execution. Field paths:
     `case.input`, `case.case_id`, `case.reference.<answer|context|tools>`,
     `case.expectations.<key>...`, `case.metadata.<key>...`, `case.fixtures.<name>`,
-    `execution.<output|retrieved_context|tool_events|usage|cost>`."""
+    `execution.<output|retrieved_context|tool_events|usage|cost|world_state>`."""
 
     case: BenchmarkCase
     execution: ExecutionResult

@@ -20,7 +20,9 @@ from rich.markup import escape
 from aibench.core.errors import AibenchError
 from aibench.core.models import BenchmarkCase, ExecutionResult, ExecutionStatus
 from aibench.datasets.ingest import ingest_dataset
+from aibench.engine.compile import load_policy
 from aibench.runners import create_runner, load_application
+from aibench.services.applications import describe_application
 from aibench.services.execution import SmokeReport, run_developer_smoke
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
@@ -52,29 +54,47 @@ def _fail(message: str, code: int = 2) -> typer.Exit:
 @app.command("describe")
 def describe(
     app_file: Path = typer.Argument(..., help="Application config file (JSON/YAML)."),  # noqa: B008
+    policy: Path | None = typer.Option(  # noqa: B008
+        None, "--policy", help="Policy file, to show which test worlds it approves."
+    ),
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
-    """Show what the harness can honestly observe for this application, without running
-    it (an observability-gap report)."""
+    """Show what the harness can honestly observe for this application, how its state is
+    reset, and which test worlds it declares, without running it (an observability-gap
+    report)."""
     try:
         loaded = load_application(app_file)
-        description = create_runner(loaded).describe()
+        data = describe_application(loaded, load_policy(policy) if policy else None)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
 
     if json_output:
-        console.print_json(data=description.__dict__)
+        console.print_json(data=data)
         return
-    console.print(f"[bold]{escape(loaded.spec.application_id)}[/bold] ({description.kind})")
-    console.print(f"  target: {escape(description.target)}")
-    console.print(f"  effects: {description.effects}")
-    console.print(f"  isolation: {escape(description.isolation)}")
+    console.print(f"[bold]{escape(data['application_id'])}[/bold] ({data['kind']})")
+    console.print(f"  target: {escape(data['target'])}")
+    console.print(f"  effects: {data['effects']}")
+    console.print(f"  isolation: {escape(data['isolation'])}")
+    console.print(f"  reset: {escape(data['reset']['summary'])}")
     console.print("  observable:")
-    for capability, state in description.observable.items():
+    for capability, state in data["observable"].items():
         style = "green" if state == "observed" else ("yellow" if state == "declared" else "dim")
         console.print(f"    [{style}]{capability}: {state}[/{style}]")
+    if data["missing_evidence"]:
+        console.print("  missing evidence:")
+        for gap in data["missing_evidence"]:
+            console.print(f"    - {gap['capability']}: {escape(gap['consequence'])}")
+    if data["test_worlds"]:
+        console.print("  test worlds:")
+        for world in data["test_worlds"]:
+            approval = "approved" if world["approved"] else "not approved by this policy"
+            if policy is None:
+                approval = "approval: pass --policy to check"
+            console.print(
+                f"    - {escape(world['world_id'])}: {escape(world['description'])} ({approval})"
+            )
     console.print("  limitations:")
-    for note in description.limitations:
+    for note in data["limitations"]:
         console.print(f"    - {escape(note)}")
 
 

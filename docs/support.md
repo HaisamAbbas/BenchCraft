@@ -44,7 +44,40 @@ The judge model is a paid external call. The adapter's behaviour is described in
 actually retrieved (`output_binding.retrieved_context`). The quickstart app does, so its
 dataset works with faithfulness once a judge is configured.
 
-Other frameworks (Ragas, OpenAI Evals, promptfoo) are not integrated yet.
+**Ragas faithfulness** (`ragas.faithfulness@1`, pinned to `ragas==0.4.3`) is the
+independent second ecosystem used by the Phase 2 comparison workflow. Install it separately:
+
+```bash
+python -m venv plugins/ragas/.venv
+plugins/ragas/.venv/Scripts/pip install -e . -e plugins/ragas    # Windows
+plugins/ragas/.venv/bin/pip install -e . -e plugins/ragas        # Linux/macOS
+```
+
+A plan names that interpreter in `plugin_environments`, allows `ragas.*` and model-backed
+evaluators in policy, and supplies any provider key through `secret_env`. Only text
+faithfulness is exposed, and it scores the application's recorded output and observed
+retrieved text. It never substitutes the Golden's reference context. Ragas 0.4.3 has an
+open multi-modal SSRF advisory; the adapter does not expose the affected metric and runs in
+an isolated worker. See ADR 0013 and `plugins/ragas/README.md`.
+
+OpenAI Evals and Promptfoo are not integrated.
+
+## Run comparison
+
+`aibench compare BASELINE CURRENT` reads stored executions and metric results only. It never
+calls the application, evaluator or judge. Strict mode pairs `(case_id, repetition_id)`,
+checks dataset/case, repetition, metric/plugin, judge/rubric and instrumentation identities,
+and blocks an unqualified claim when they differ. `--mode exploratory` is visibly
+non-qualified. `--baseline-scoring` and `--current-scoring` select explicit stored scoring
+passes, which is how two passes over the same run are compared.
+
+Complete-pair coverage must pass the predeclared threshold before a result supports a
+quality claim (`claim_qualified=true`). Numeric differences are case-level macro averages
+with a seeded grouped bootstrap interval. DeepEval and Ragas results are shown as separate
+frameworks; their scores are never averaged or treated as equivalent. Conversation exposes
+the same service through `compare_runs` and `/compare BASELINE CURRENT`, restricted to runs
+started by that session. Ragas' cold catalogue import is bounded by worker preparation; use
+an explicit startup-timeout override on unusually slow hosts.
 
 ## Credentials
 
@@ -60,7 +93,7 @@ used. It must also be listed in the policy's `allowed_secret_refs`:
 | Assistant model | `api_key: "env:OPENAI_API_KEY"` in the provider config |
 
 Set the variables in your shell or your CI's secret store. Don't commit a `.env` file: aibench
-doesn't read one; the DeepEval adapter disables its own `.env` loading.
+doesn't read one; the isolated DeepEval and Ragas adapters do not load project `.env` files.
 `aibench doctor` reports whether each reference is set, without printing its value. Secrets
 are redacted from captured output, stored conversation turns and reports.
 
@@ -72,23 +105,31 @@ are redacted from captured output, stored conversation turns and reports.
   - `dataset validate`, `inspect`;
   - `plan`, `plan validate`, `plan benchmark` (planner fixture set);
   - `run`, `resume`, `evaluate` (rescore stored outputs);
-  - `runs list/show/status`, `report`, `benchmark`;
+  - `runs list/show/status`, `report`, `compare`, `benchmark`;
   - `sessions list/show/delete`, `evaluators list/describe/plugin/calibrate`, `plugins list`, `score`, `app describe/smoke`.
 - **Reports:** JSON, Markdown and static HTML, from stored facts. They include typed metric profiles, full denominators, release gates, latency definitions, cost completeness and case evidence.
 - **Release gates** in plans (`gates`): a minimum pass rate or minimum completed coverage for one metric binding, always over selected cases.
+- **Application transports** (Phase 2, Prompt 15): CLI, HTTP, Python callable (`python`), container (`container`) and OpenAI-compatible endpoint (`openai_compatible`). See `docs/runner-protocol.md`.
+- **Stateful applications and agents** (Prompt 15):
+  - reset hooks, with `per_case`, `per_episode` (cases sharing a `group_id`) and `shared` state;
+  - named test worlds whose seeds are frozen with the run;
+  - `world_state` observations;
+  - three separate outcome metrics: `native.tool_calls` (names), `native.tool_outcomes` (arguments, success, authorization) and `native.final_state` (world state).
+
+  In chat, `/app` explains what the runner observes and what evidence is missing, and `/world NAME` selects an approved test world.
 
 ## Not available yet
 
 | Feature | Status |
 |---|---|
-| `aibench compare BASELINE CURRENT` | Not implemented. It says so and exits 2. Planned: paired, uncertainty-aware comparison (Prompt 14) |
+| Phase 2 time-saved study | Not measured. The repeatable comparison workflow exists; §18's demonstrated time saved over direct framework configuration still needs real trials |
 | Dashboard or web app | Not planned for the MVP. Reports are static files |
 | Release gates in conversation drafts | Gates are authored in plan files. A session's draft can't declare them yet |
 | Planning and conversation cost per run | Tracked per session (`/budget`), not attributed to a run's report |
 | Source-code inspection | `inspect` reads declared configuration and static metadata only |
 | Execution caching, distributed workers, detached runs | Not in the MVP. A run stops dispatching when its terminal exits and resumes on request |
 | Session export | Not available. Sessions can be deleted (`aibench sessions delete`), and deletion keeps run records |
-| Live model checks | The conversation and the DeepEval adapter are tested against scripted or offline providers. No live provider run is part of this release's evidence |
+| Live model checks | The conversation, DeepEval adapter and Ragas adapter are tested against scripted or deterministic local judges. No live provider run is part of this evidence |
 
 ## Known limits
 
@@ -97,4 +138,8 @@ are redacted from captured output, stored conversation turns and reports.
 - **Claim checking** links every number in an assistant reply to a result queried in that turn, and flags numbers it can't trace. It shows where a number could have come from, not that the sentence around it is right. An explanation of why cases failed is a hypothesis unless a stored result states it.
 - **Redaction** of credentials is pattern-based, as a safety net. Use secret references rather than relying on it.
 - **Latency** is runner-measured wall time per request under the plan's concurrency. It is not a load test.
+- **Containers** run non-root, read-only, capability-free, resource-limited and offline by default, but they are not a hostile multi-tenant sandbox: they share the host kernel. Only Linux images were exercised, with Docker Engine 29.7.2 through Docker Desktop on Windows 11. The host `docker` client is fixed, engine-sensitive environment overrides are refused, and image pulls are disabled for each invocation. Per-episode state is not supported for containers.
+- **OpenAI-compatible endpoints** were exercised against a local stub only. Tool calls from a model are recorded as requests, never as executed effects, and cost stays unknown.
+- **Stateful applications** with a reset hook run one case at a time (`concurrency.application: 1`). Episode turns are never retried. After a failure or an interruption, the rest of that episode is blocked rather than replayed into unknown state.
+- **Tool events and world state** are as the application or its test double reports them. The evaluators check what is reported, not what happened elsewhere.
 - **A full disk or failing workspace** (disk full, quota, I/O error, read-only filesystem, database full) stops the run's dispatching and leaves it resumable (exit code 130), with the reason in the output and in `aibench runs status`. No case is marked failed for it. This is tested by making the real write path fail, not on a real full volume. Recovery steps: `docs/release/upgrade-and-recovery.md`.

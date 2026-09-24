@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from aibench.core.errors import AibenchError
-from aibench.core.sessions import ActionKind
+from aibench.core.sessions import ActionKind, PlanPatch
+from aibench.services.comparison import comparison_exit_code
 from aibench.services.reports import FORMATS
 from aibench.sessions.controller import SessionController
 
@@ -32,7 +33,10 @@ COMMANDS: dict[str, str] = {
     "/failures": "failed and errored results of the current run",
     "/case": "/case CASE_ID - one case's evidence",
     "/budget": "ceilings, committed spend and unknown accounting",
+    "/app": "the application's runner: what it observes, missing evidence, resets, test worlds",
+    "/world": "/world NAME|none - select one of the application's test worlds (a new draft)",
     "/report": "/report [html|markdown|json] - the current run's report, from stored facts",
+    "/compare": "/compare BASELINE CURRENT - paired stored-run comparison (no model)",
     "/sessions": "sessions of this project",
     "/new": "start a fresh session in this project",
     "/exit": "leave; an active run stops dispatching and stays resumable",
@@ -47,9 +51,16 @@ class CommandResult:
     ok: bool = True
     exit: bool = False
     switch_to: SessionController | None = None
+    exit_code: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {"command": self.command, "kind": self.kind, "ok": self.ok, "data": self.data}
+        return {
+            "command": self.command,
+            "kind": self.kind,
+            "ok": self.ok,
+            "data": self.data,
+            "exit_code": self.exit_code,
+        }
 
 
 NewSession = Callable[[], SessionController]
@@ -158,6 +169,31 @@ class Commands:
     async def _budget(self, _: str) -> CommandResult:
         return CommandResult("/budget", "budget", self.controller.budget())
 
+    async def _app(self, _: str) -> CommandResult:
+        return CommandResult("/app", "application", self.controller.describe_application())
+
+    async def _world(self, argument: str) -> CommandResult:
+        """Select a test world through the same validated plan change the assistant uses:
+        a new draft revision, which the execution gate checks against the policy."""
+        name = argument.strip()
+        if not name:
+            return CommandResult(
+                "/world", "error", {"error": "usage: /world NAME (or /world none)"}, ok=False
+            )
+        patch = (
+            PlanPatch(clear_test_world=True)
+            if name.lower() == "none"
+            else PlanPatch(test_world=name)
+        )
+        result = self.controller.apply_patch(
+            patch, expected_revision=self.controller.session.revision, source="user"
+        )
+        if result.status != "applied":
+            return CommandResult(
+                "/world", "error", {"error": "; ".join(result.problems) or result.status}, ok=False
+            )
+        return CommandResult("/world", "plan", self.controller.state()["draft"])
+
     async def _report(self, argument: str) -> CommandResult:
         """Render the current run's report from stored facts: a terminal summary, and the
         report files (HTML and JSON by default; `/report markdown` etc. to choose)."""
@@ -173,6 +209,26 @@ class Commands:
         exported = self.controller.export_report(formats=formats)
         facts = self.controller.report_facts(exported["run_id"])
         return CommandResult("/report", "report", {**facts, "exported": exported["paths"]})
+
+    async def _compare(self, argument: str) -> CommandResult:
+        parts = argument.split()
+        if len(parts) != 2:
+            return CommandResult(
+                "/compare",
+                "error",
+                {"error": "usage: /compare BASELINE_RUN_ID CURRENT_RUN_ID"},
+                ok=False,
+                exit_code=2,
+            )
+        report = self.controller.compare_runs(parts[0], parts[1])
+        code = comparison_exit_code(report)
+        return CommandResult(
+            "/compare",
+            "comparison",
+            report,
+            ok=code == 0,
+            exit_code=code,
+        )
 
     async def _sessions(self, _: str) -> CommandResult:
         root = self.controller.session.project_root

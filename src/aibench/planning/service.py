@@ -23,8 +23,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from aibench.core.errors import AibenchError
-from aibench.core.models import DecisionRule, ExecutionResult
-from aibench.core.plans import BudgetLimits, CaseSelection, PluginEnvironmentRef
+from aibench.core.models import DecisionRule, ExecutionResult, ResetPolicy
+from aibench.core.plans import (
+    BudgetLimits,
+    CaseSelection,
+    ConcurrencyLimits,
+    PluginEnvironmentRef,
+    RetryPolicy,
+)
 from aibench.engine.compile import freeze_plan, load_plan
 from aibench.inspection.dataset_summary import summarize_dataset
 from aibench.inspection.profile import inspect_application
@@ -32,6 +38,7 @@ from aibench.planning.catalog import build_catalog
 from aibench.planning.drafts import DraftContext, PlanDraft, draft_document
 from aibench.planning.planner import PlanningInputs, PlanningOutcome
 from aibench.registry import EvaluatorRegistry, RegistryError
+from aibench.runners import load_application, reset_hook
 from aibench.security.policy import ExecutionPolicy, plugin_denials
 
 
@@ -142,6 +149,21 @@ class GatheredInputs:
     notes: list[str]
 
 
+def state_limits(application: Path) -> tuple[ConcurrencyLimits, RetryPolicy]:
+    """Execution limits a stateful application needs (§7): one case at a time when a reset
+    hook restores state its cases share, and no retried episode turn."""
+    try:
+        spec = load_application(application).spec
+    except AibenchError:
+        return ConcurrencyLimits(), RetryPolicy()
+    concurrency, retry = ConcurrencyLimits(), RetryPolicy()
+    if reset_hook(spec) is not None and spec.reset_policy is not ResetPolicy.SHARED:
+        concurrency = concurrency.model_copy(update={"application": 1})
+    if spec.reset_policy is ResetPolicy.PER_EPISODE:
+        retry = retry.model_copy(update={"max_attempts": 1})
+    return concurrency, retry
+
+
 def gather_inputs(
     *,
     application: Path,
@@ -158,10 +180,12 @@ def gather_inputs(
     rules: dict[str, DecisionRule] | None = None,
     executions: Iterable[ExecutionResult] = (),
     run_ids: Iterable[str] = (),
+    test_world: str | None = None,
 ) -> GatheredInputs:
     effective = policy.with_trusted_local(trusted_local)
     out_dir = out.resolve().parent
     revision, _ = next_revision(out)
+    concurrency, retry = state_limits(application)
     context = DraftContext(
         plan_id=plan_id or out.stem,
         out_dir=out_dir,
@@ -176,6 +200,9 @@ def gather_inputs(
         user_objectives=tuple(objectives),
         user_params=dict(params or {}),
         user_rules=dict(rules or {}),
+        concurrency=concurrency,
+        retry=retry,
+        test_world=test_world,
     )
     profile = inspect_application(application, executions=executions, run_ids=run_ids)
     summary = summarize_dataset(dataset)

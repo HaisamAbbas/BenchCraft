@@ -35,7 +35,12 @@ from pydantic import ValidationError as PydanticValidationError
 from aibench.config.resolve import load_mapping_file
 from aibench.core.errors import AibenchError
 from aibench.core.hashes import bytes_hash, content_hash
-from aibench.core.models import BenchmarkCase, DatasetManifest, deep_unfreeze
+from aibench.core.models import (
+    BenchmarkCase,
+    DatasetManifest,
+    ResetPolicy,
+    deep_unfreeze,
+)
 from aibench.core.plans import CasePredicate, ExecutablePlan
 from aibench.datasets.ingest import ingest_dataset
 from aibench.evaluators.protocol import EvaluationView, case_field
@@ -46,13 +51,14 @@ from aibench.registry import (
     ResolvedMetric,
     applicability_problems,
 )
-from aibench.runners import LoadedApplication, load_application
+from aibench.runners import LoadedApplication, load_application, reset_hook
 from aibench.security.policy import (
     ExecutionPolicy,
     application_denials,
     evaluator_denials,
     plan_denials,
     plugin_denials,
+    policy_matches,
 )
 
 FindingKind = Literal["invalid", "missing_information", "missing_permission"]
@@ -100,6 +106,16 @@ class MetricCoverage:
     fields: dict[str, int]  # case.* path -> selected cases where it is usable
 
 
+@dataclass(frozen=True)
+class SelectedWorld:
+    """The test world a plan selected, with its seed as loaded at compile time."""
+
+    world_id: str
+    seed: object
+    seed_bytes: bytes  # canonical JSON, frozen with the run
+    seed_hash: str
+
+
 @dataclass
 class PlanAnalysis:
     plan: ExecutablePlan
@@ -113,6 +129,7 @@ class PlanAnalysis:
     metrics: list[ResolvedMetric] = field(default_factory=list)
     coverage: list[MetricCoverage] = field(default_factory=list)
     findings: list[PlanFinding] = field(default_factory=list)
+    world: SelectedWorld | None = None
 
     def add(
         self, kind: FindingKind, message: str, subject: str = "plan", *, blocking: bool = True
@@ -140,6 +157,7 @@ class CompiledRun:
     metrics: list[ResolvedMetric]
     policy: ExecutionPolicy  # effective policy, including explicit grants
     policy_hash: str
+    world: SelectedWorld | None = None
 
 
 def load_policy(path: Path | None) -> ExecutionPolicy:
@@ -294,6 +312,116 @@ def _resolve_metrics(analysis: PlanAnalysis, *, plugins_not_loaded: str | None) 
             for issue in applicability_problems(metric.requirements, analysis.application.spec):
                 analysis.add("missing_information", f"{binding.metric}: {issue}", subject)
         _check_aggregation(analysis, metric, subject)
+
+
+def _check_state(analysis: PlanAnalysis) -> None:
+    """State between cases (§7 "State and observability"). A selected test world must be
+    declared, approved and loadable through a reset hook. Episodes need a reset hook and
+    cannot retry a turn. An application with a reset hook keeps state its cases share, so
+    they cannot run concurrently: resetting for one case would disturb another."""
+    app, plan = analysis.application, analysis.plan
+    if app is None:
+        return
+    spec, hook = app.spec, reset_hook(app.spec)
+    if plan.test_world is not None:
+        world = spec.test_worlds.get(plan.test_world)
+        declared = ", ".join(sorted(spec.test_worlds)) or "none"
+        if world is None:
+            analysis.add(
+                "invalid",
+                f"test world {plan.test_world!r} is not declared by application "
+                f"{spec.application_id!r} (declared: {declared})",
+                "test_world",
+            )
+        else:
+            qualified = f"{spec.application_id}:{plan.test_world}"
+            if not policy_matches(qualified, analysis.policy.allowed_test_worlds):
+                analysis.add(
+                    "missing_permission",
+                    f"test world {qualified} is not approved (allowed_test_worlds in the policy)",
+                    "test_world",
+                )
+            if hook is None:
+                analysis.add(
+                    "invalid",
+                    "a test world is loaded through a reset hook (reset_url, reset_argv or "
+                    f"reset_callable); application {spec.application_id!r} has none",
+                    "test_world",
+                )
+            if spec.reset_policy is ResetPolicy.SHARED:
+                analysis.add(
+                    "invalid",
+                    f"application {spec.application_id!r} declares shared state and is never "
+                    "reset, so a test world could not be loaded",
+                    "test_world",
+                )
+            try:
+                seed = world.seed
+                if world.seed_file is not None:
+                    base = app.base_dir.resolve()
+                    path = Path(world.seed_file)
+                    path = (path if path.is_absolute() else base / path).resolve()
+                    if not path.is_relative_to(base):
+                        raise ValueError(
+                            f"seed_file {world.seed_file!r} is outside the application's directory"
+                        )
+                    seed = json.loads(path.read_text(encoding="utf-8"))
+                seed = deep_unfreeze(seed)
+                if not isinstance(seed, dict | list):
+                    raise TypeError("a seed must be a JSON object or list")
+                seed_bytes = json.dumps(seed, sort_keys=True).encode("utf-8")
+                analysis.world = SelectedWorld(
+                    plan.test_world, seed, seed_bytes, bytes_hash(seed_bytes)
+                )
+            except (OSError, ValueError, TypeError) as exc:
+                analysis.add("invalid", f"test world {qualified}: seed unusable: {exc}")
+    if spec.reset_policy is ResetPolicy.PER_EPISODE:
+        if hook is None:
+            analysis.add(
+                "invalid",
+                "reset_policy per_episode needs a reset hook (reset_url, reset_argv or "
+                f"reset_callable) to reset between episodes; application "
+                f"{spec.application_id!r} has none",
+                "application",
+            )
+        if plan.retry.max_attempts > 1:
+            analysis.add(
+                "invalid",
+                "an episode turn cannot be retried: the earlier attempt changed the "
+                "application's state. Set retry.max_attempts to 1",
+                "plan",
+            )
+    shared_state = hook is not None and spec.reset_policy is not ResetPolicy.SHARED
+    if shared_state and plan.concurrency.application > 1:
+        analysis.add(
+            "invalid",
+            f"application {spec.application_id!r} keeps state its cases share (it has a "
+            f"{hook}); resetting it for one case would disturb another. Set "
+            "concurrency.application to 1",
+            "plan",
+        )
+
+
+def _check_episodes(analysis: PlanAnalysis, all_cases: list[BenchmarkCase]) -> None:
+    """A selection must keep episodes whole from their first turn: a later turn run without
+    the turns before it would start from the seed instead of the state they build."""
+    app = analysis.application
+    if app is None or app.spec.reset_policy is not ResetPolicy.PER_EPISODE:
+        return
+    selected = {c.case_id for c in analysis.cases}
+    turns: dict[str, list[str]] = {}
+    for case in all_cases:
+        turns.setdefault(case.group_id or case.case_id, []).append(case.case_id)
+    for episode, ids in turns.items():
+        kept = [i for i in ids if i in selected]
+        if kept and kept != ids[: len(kept)]:
+            missing = [i for i in ids[: ids.index(kept[-1])] if i not in selected]
+            analysis.add(
+                "invalid",
+                f"the selection splits episode {episode!r}: {', '.join(missing)} would be "
+                "skipped before later turns that depend on its state",
+                "selection",
+            )
 
 
 def _check_gates(analysis: PlanAnalysis) -> None:
@@ -484,6 +612,7 @@ def analyze_plan(
             analysis.add("missing_permission", denial, "application")
     except AibenchError as exc:
         analysis.add("invalid", str(exc), "application")
+    _check_state(analysis)
 
     try:
         report = ingest_dataset(analysis.plan_dir / plan.dataset)
@@ -493,6 +622,7 @@ def analyze_plan(
             analysis.dataset = report.manifest
             analysis.dataset_case_count = len(report.cases)
             analysis.cases = _select(analysis, report.cases)
+            _check_episodes(analysis, report.cases)
     except AibenchError as exc:
         analysis.add("invalid", f"dataset: {exc}", "dataset")
 
@@ -556,6 +686,7 @@ def compiled_from(analysis: PlanAnalysis) -> CompiledRun:
         metrics=analysis.metrics,
         policy=analysis.policy,
         policy_hash=content_hash(analysis.policy.model_dump(mode="json")),
+        world=analysis.world,
     )
 
 

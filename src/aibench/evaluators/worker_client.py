@@ -70,7 +70,7 @@ class WorkerSpec:
     target: str  # entry point "module:attribute" inside the plugin environment
     extra_paths: tuple[Path, ...] = ()
     secret_env: Mapping[str, str] = field(default_factory=dict)  # name -> secret ref
-    startup_timeout_seconds: float = 120.0
+    startup_timeout_seconds: float = 180.0
 
 
 def make_worker_factory(manifest: EvaluatorManifest, spec: WorkerSpec) -> type[Evaluator]:

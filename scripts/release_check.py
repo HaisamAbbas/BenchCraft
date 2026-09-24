@@ -1,8 +1,8 @@
-"""Build the release artifacts and prove they work when installed (13-T2, 13-G1).
+"""Build the release artifacts and prove they work when installed (13-T2, 13-G1; 14-G1).
 
     python scripts/release_check.py --out DIR [--python PATH ...] [--plugin]
 
-1. Builds the aibench and aibench-deepeval sdists and wheels into DIR/dist
+1. Builds the aibench, aibench-deepeval and aibench-ragas sdists and wheels into DIR/dist
    (each wheel is built from its sdist, so stale files in the working tree can't leak into it)
    and writes DIR/dist/SHA256SUMS.
 2. For each interpreter (default: the one running this script), creates a clean venv,
@@ -11,8 +11,9 @@
    without calling the application, and the conversation through `chat --send`. Then it
    runs the 100-case acceptance workflow (kill, resume, report, rescore) against the
    installed package.
-3. With --plugin, creates a clean environment for the DeepEval package and runs the
-   real-package adapter contract tests against deterministic local judges (no paid calls).
+3. With --plugin, creates a separate clean environment for each evaluator package and runs
+   its real-package contract tests (deterministic local judges, no paid calls). DeepEval and
+   Ragas are not co-installed because they own separate dependency environments.
 
 Every step's command, exit code and expectation are written to DIR/release-check.json. The
 script exits 1 if any step did not behave as documented. It publishes nothing.
@@ -41,6 +42,10 @@ EXE = ".exe" if sys.platform == "win32" else ""
 DEEPEVAL_VERSIONS = (
     "import importlib.metadata as m; "
     "print(m.version('aibench'), m.version('aibench-deepeval'), m.version('deepeval'))"
+)
+RAGAS_VERSIONS = (
+    "import importlib.metadata as m; "
+    "print(m.version('aibench'), m.version('aibench-ragas'), m.version('ragas'))"
 )
 
 
@@ -105,7 +110,7 @@ class Checker:
 
 def build(checker: Checker, dist: Path) -> dict[str, str]:
     dist.mkdir(parents=True, exist_ok=True)
-    for project in (REPO, REPO / "plugins" / "deepeval"):
+    for project in (REPO, REPO / "plugins" / "deepeval", REPO / "plugins" / "ragas"):
         checker.run(
             f"build {project.name}",
             [sys.executable, "-m", "build", "--outdir", str(dist), str(project)],
@@ -291,7 +296,16 @@ def plugins(checker: Checker, dist: Path, out: Path) -> None:
         python_env="AIBENCH_DEEPEVAL_PYTHON",
         tests=["tests/test_deepeval_adapter.py", "tests/test_worker_evaluator.py"],
     )
-
+    _plugin_environment(
+        checker,
+        dist,
+        out,
+        name="ragas",
+        wheel_name="aibench_ragas",
+        version_probe=RAGAS_VERSIONS,
+        python_env="AIBENCH_RAGAS_PYTHON",
+        tests=["tests/test_ragas_adapter.py", "tests/test_worker_evaluator.py"],
+    )
 
 
 def main() -> int:
@@ -301,7 +315,7 @@ def main() -> int:
         "--python", action="append", default=None, help="Interpreter to install into (repeat)."
     )
     parser.add_argument(
-        "--plugin", action="store_true", help="Also check the DeepEval plugin."
+        "--plugin", action="store_true", help="Also check the DeepEval and Ragas plugins."
     )
     parser.add_argument(
         "--no-acceptance", action="store_true", help="Skip the 100-case acceptance workflow."

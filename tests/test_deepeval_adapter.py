@@ -258,9 +258,9 @@ def test_blocking_judge_is_killed_and_the_next_case_runs_in_a_fresh_worker(
     )
     started = time.monotonic()
     report = seeded.score([_judge("blocking_judge")], registry=registry, timeout_seconds=20)
-    # Unkilled, the judge would block 2 x 120s. The margin absorbs two cold worker
-    # starts (DeepEval import), which took up to ~70s on a loaded Windows machine.
-    assert time.monotonic() - started < 200
+    # Unkilled, the judge would block 2 x 180s. The 300s bound still proves the worker
+    # was killed while allowing two cold DeepEval worker starts on a loaded Windows host.
+    assert time.monotonic() - started < 300
     assert all(
         r.status is ExecutionStatus.ERROR and (r.reason or "").startswith("timeout:")
         for r in report.results

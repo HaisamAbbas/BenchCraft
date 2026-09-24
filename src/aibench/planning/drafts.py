@@ -183,6 +183,7 @@ class DraftContext:
     user_objectives: tuple[str, ...] = ()
     user_params: dict[str, dict[str, object]] = field(default_factory=dict)
     user_rules: dict[str, DecisionRule] = field(default_factory=dict)
+    test_world: str | None = None  # the user's selection; validated by the execution gate
 
 
 @dataclass
@@ -222,6 +223,7 @@ def build_plan(proposal: DraftProposal, ctx: DraftContext) -> ExecutablePlan:
         retry=ctx.retry,
         budgets=ctx.budgets,
         plugin_environments=ctx.plugin_environments,
+        test_world=ctx.test_world,
     )
 
 

@@ -1,0 +1,16 @@
+{
+  "flights": {
+    "BA117": {
+      "destination": "London",
+      "seats": 2
+    },
+    "AF22": {
+      "destination": "Paris",
+      "seats": 0
+    }
+  },
+  "bookings": [],
+  "outbox": [],
+  "allow_email": true,
+  "next_booking": 1
+}

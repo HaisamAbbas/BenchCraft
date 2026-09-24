@@ -14,10 +14,12 @@ from typing import Any
 import pytest
 
 from aibench.core.models import (
+    ApplicationSpec,
     Decision,
     EvaluatorManifest,
     ExecutionStatus,
     FieldRequirement,
+    MetricBinding,
     MetricDirection,
 )
 from aibench.evaluators.protocol import (
@@ -28,7 +30,7 @@ from aibench.evaluators.protocol import (
 )
 from aibench.registry import BindingValidationError, EvaluatorRegistry
 from aibench.reporting.aggregation import summarize
-from aibench.services.scoring import select_final_executions
+from aibench.services.scoring import evaluation_compatibility_identity, select_final_executions
 from tests.scoring_support import Seeded, case, execution
 
 OK, NA, ERR, SKIP = (
@@ -275,6 +277,59 @@ def test_final_attempt_is_scored_and_rescoring_adds_new_attempts(tmp_path: Path)
     assert first.summaries[0].as_dict() | {"binding_hash": ""} == second.summaries[0].as_dict() | {
         "binding_hash": ""
     }
+
+
+def test_scoring_pass_freezes_separate_compatibility_identities(tmp_path: Path) -> None:
+    seeded = Seeded(tmp_path)
+    seeded.seed([case("c1", "yes")], [execution("c1", "yes")])
+    report = seeded.score(
+        [{"metric": "tests.length", "rule": {"comparator": ">=", "threshold": 0.4}}],
+        registry=_registry(),
+    )
+    event = next(
+        item
+        for item in seeded.storage.list_run_events("run-1")
+        if item["event_type"] == "scoring_pass" and item["payload"]["scoring_id"] == report.scoring_id
+    )
+    identity = next(iter(event["payload"]["metric_profiles"].values()))["compatibility"]
+    [result] = report.results
+    assert identity == json.loads(result.model_dump_json())["provenance"]["compatibility"]
+    assert identity["binding_hash"] == result.binding_hash
+    assert identity["judge"] == {"kind": "not_used", "digest": None, "verified": True}
+    assert identity["rubric"]["verified"] is True
+    assert identity["instrumentation"]["verified"] is False  # this direct fixture has no app spec
+    assert identity["compatibility_hash"].startswith("sha256:")
+
+    changed = seeded.score(
+        [{"metric": "tests.length", "rule": {"comparator": ">=", "threshold": 0.5}}],
+        registry=_registry(),
+    )
+    [changed_result] = changed.results
+    assert (
+        changed_result.provenance["compatibility"]["compatibility_hash"]
+        != identity["compatibility_hash"]
+    )
+
+
+def test_application_revision_can_change_without_changing_instrumentation_identity() -> None:
+    metric = _registry().resolve_binding(MetricBinding(metric="tests.length"))
+    base = ApplicationSpec(
+        application_id="app",
+        runner="cli",
+        target="old-binary",
+        revision="r1",
+        output_binding={"output": "/answer"},
+        input_binding={"input": "/question"},
+    )
+    revised = base.model_copy(update={"target": "new-binary", "revision": "r2"})
+    changed_observation = base.model_copy(
+        update={"output_binding": {"output": "/payload.answer"}}
+    )
+    before = evaluation_compatibility_identity(metric, application=base)
+    after = evaluation_compatibility_identity(metric, application=revised)
+    incompatible = evaluation_compatibility_identity(metric, application=changed_observation)
+    assert after.compatibility_hash == before.compatibility_hash
+    assert incompatible.compatibility_hash != before.compatibility_hash
 
 
 def test_aggregation_is_deterministic_and_never_crosses_metrics(tmp_path: Path) -> None:

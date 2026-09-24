@@ -34,6 +34,7 @@ from aibench.planning.drafts import PlanDraft, PlannerProvenance, draft_document
 from aibench.planning.planner import PlanningInputs, PlanningOutcome
 from aibench.planning.service import gather_inputs
 from aibench.planning.template import template_proposal
+from aibench.runners import load_application
 
 
 class PatchRejected(AibenchError):
@@ -116,6 +117,17 @@ def apply_patch(
             problems.append(f"dataset {patch.dataset!r} does not exist")
         dataset = str(resolved)
 
+    test_world = None if patch.clear_test_world else choices.test_world
+    if patch.test_world is not None:
+        declared = _declared_worlds(Path(choices.application))
+        if patch.test_world in declared:
+            test_world = patch.test_world
+        else:
+            problems.append(
+                f"test world {patch.test_world!r} is not declared by the application "
+                f"(declared: {', '.join(declared) or 'none'})"
+            )
+
     if problems:
         raise PatchRejected(problems)
     try:
@@ -129,9 +141,17 @@ def apply_patch(
             budgets=budgets,
             params=params,
             rules=rules,
+            test_world=test_world,
         )
     except PydanticValidationError as exc:
         raise PatchRejected(_validation_problems(exc)) from exc
+
+
+def _declared_worlds(application: Path) -> list[str]:
+    try:
+        return sorted(load_application(application).spec.test_worlds)
+    except AibenchError:
+        return []
 
 
 @dataclass
@@ -196,6 +216,7 @@ def planning_inputs(
         plugin_environments=plan_environments(session),
         params={k: deep_unfreeze(v) for k, v in choices.params.items()},
         rules=dict(choices.rules),
+        test_world=choices.test_world,
     )
     inputs = gathered.inputs
     inputs.context = replace(inputs.context, revision=revision)
@@ -248,7 +269,7 @@ def build_draft(
     return SessionDraft(choices, inputs, outcome, document, plan_file, plan_hash)
 
 
-def draft_summary(document: dict[str, Any]) -> dict[str, Any]:
+def draft_summary(document: dict[str, Any], test_world: str | None = None) -> dict[str, Any]:
     """What a person reviews before running (§3 step 4): metrics with rationale, gaps,
     open questions, findings split into missing information and missing permission,
     coverage and the spend estimate."""
@@ -272,4 +293,5 @@ def draft_summary(document: dict[str, Any]) -> dict[str, Any]:
         "warnings": [f["message"] for f in findings if not f.get("blocking")],
         "coverage": document.get("coverage", []),
         "estimate": document.get("estimate"),
+        "test_world": test_world,
     }

@@ -107,15 +107,17 @@ def test_plugins_list_names_installed_kinds() -> None:
     result = cli.invoke(app, ["plugins", "list", "--json"])
     assert result.exit_code == 0, result.output
     data = _json(result.output)
-    assert data["runners"] == ["cli", "http"]
+    assert data["runners"] == ["cli", "http", "python", "container", "openai_compatible"]
     assert "native.exact_match@1.0.0" in data["evaluators"]
 
 
-def test_compare_reports_that_it_is_not_available() -> None:
-    result = cli.invoke(app, ["compare", "run-a", "run-b", "--json"])
+def test_compare_requires_a_real_workspace_before_reading_runs(tmp_path: Path) -> None:
+    result = cli.invoke(
+        app,
+        ["compare", "run-a", "run-b", "--workspace", str(tmp_path / "missing"), "--json"],
+    )
     assert result.exit_code == 2
-    data = _json(result.output)
-    assert data["status"] == "unsupported" and "nothing was compared" in data["message"]
+    assert _json(result.output)["status"] == "error"
 
 
 # --------------------------------------------------------------------------- run, report
@@ -207,6 +209,62 @@ def test_report_command_errors_and_options(project: Path) -> None:
     data = json.loads(withheld.output)
     assert data["evidence"]["content"] == "withheld"
     assert all(i["execution"]["output_excerpt"] is None for i in data["evidence"]["items"])
+
+
+def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> None:
+    runs = []
+    for _ in range(2):
+        result = cli.invoke(
+            app,
+            [
+                "run",
+                "--workspace",
+                str(project),
+                "--plan",
+                str(project / "plan.json"),
+                "--trust-local-app",
+                "--json",
+            ],
+        )
+        assert result.exit_code in {0, 1, 3}, result.output
+        runs.append(_json(result.output)["run_id"])
+    before = _execution_attempt_count(project)
+    compared = cli.invoke(
+        app,
+        [
+            "compare",
+            runs[0],
+            runs[1],
+            "--workspace",
+            str(project),
+            "--min-paired-coverage",
+            "0.85",
+            "--json",
+        ],
+    )
+    assert compared.exit_code == 0, compared.output
+    report = _json(compared.output)
+    assert report["status"] == "qualified" and report["qualified"] is True
+    assert report["execution_identity"]["classification"] == "fresh_or_unknown_execution_identity"
+    assert report["invocation_basis"]["zero_invocations"] is True
+    assert _execution_attempt_count(project) == before
+
+
+def _execution_attempt_count(project: Path) -> int:
+    from aibench.storage.db import Database, Workspace
+    from aibench.storage.repositories import Storage
+
+    storage = Storage(Database.open_workspace(Workspace.at(project)))
+    try:
+        return len(
+            [
+                result
+                for run in storage.list_runs()
+                for result in storage.list_execution_attempts(run.manifest.run_id)
+            ]
+        )
+    finally:
+        storage.db.close()
 
 
 # --------------------------------------------------------------------------- benchmark

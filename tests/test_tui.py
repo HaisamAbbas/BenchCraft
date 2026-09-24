@@ -142,6 +142,34 @@ def test_slash_commands_use_real_session_services_and_cover_the_contract(tmp_pat
             controller.storage.db.close()
 
 
+def test_compare_slash_command_uses_session_owned_stored_runs(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(
+        {case: "hi" for case in ("a", "b", "c", "d")},
+        objectives=("catch wrong answers",),
+    )
+    commands = Commands(ctl)
+
+    async def scenario() -> tuple[str, str]:
+        first = await ctl.start_run(action_id="compare-first", expected_revision=1)
+        assert await ctl.wait_for_run(first.run_id) is not None
+        second = await ctl.start_run(action_id="compare-second", expected_revision=1)
+        assert await ctl.wait_for_run(second.run_id) is not None
+        return str(first.run_id), str(second.run_id)
+
+    try:
+        baseline, current = asyncio.run(scenario())
+        calls_before = h.count()
+        result = asyncio.run(commands.run(f"/compare {baseline} {current}"))
+        assert result.kind == "comparison" and result.ok
+        assert result.exit_code == 0
+        assert result.data["status"] == "qualified"
+        assert result.data["qualified"] is True
+        assert h.count() == calls_before
+    finally:
+        ctl.storage.db.close()
+
+
 def test_status_line_labels_spend_completeness() -> None:
     snapshot = {
         "run_id": "run-1",

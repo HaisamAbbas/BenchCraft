@@ -4,8 +4,11 @@ The policy is independent of any plan author, human or LLM: a plan asks, the pol
 decides. Every denial is collected, and a run with any denial dispatches nothing (06-G2).
 Defaults deny everything a run could need special trust for:
 
-- no trusted-local (subprocess) execution, unless the user grants it explicitly;
-- only HTTP targets on loopback, unless origins are allowed;
+- no trusted-local (subprocess) execution, unless the user grants it explicitly; this
+  covers CLI applications and Python callables;
+- no container image, unless listed; no container network, unless allowed;
+- only HTTP and OpenAI-compatible targets on loopback, unless origins are allowed;
+- no test world, unless listed;
 - no application with declared external effects;
 - only built-in `native.*` evaluators, and no model-backed evaluator — those send case data
   to a judge provider (data egress);
@@ -31,10 +34,13 @@ from pydantic import Field
 from aibench.core.models import (
     ApplicationSpec,
     CliTransport,
+    ContainerTransport,
     EffectLevel,
     EvaluatorManifest,
     FrozenModel,
     HttpTransport,
+    OpenAICompatibleTransport,
+    PythonTransport,
 )
 from aibench.core.plans import BudgetLimits, ExecutablePlan, PluginEnvironmentRef
 from aibench.security.endpoints import is_loopback, origin_of
@@ -60,6 +66,14 @@ class ExecutionPolicy(FrozenModel):
     allowed_plugin_paths: tuple[str, ...] = ()
     data_roots: tuple[str, ...] = ()  # directories the plan's data may come from
     allowed_secret_refs: tuple[str, ...] = ()  # e.g. "env:RAG_TOKEN"
+    # Container images a run may start, as glob patterns over the pinned reference
+    # ("python@sha256:*" approves any digest of that image).
+    allowed_container_images: tuple[str, ...] = ()
+    allow_container_network: bool = False  # `network: bridge` gives unrestricted egress
+    # Test worlds a plan may select, as "application_id:world" glob patterns.
+    allowed_test_worlds: tuple[str, ...] = ()
+    # Source trees `aibench inspect --source` may read (manifests and imports only).
+    inspection_roots: tuple[str, ...] = ()
     ceilings: BudgetLimits = Field(default_factory=BudgetLimits)
 
     def with_trusted_local(self, granted: bool) -> ExecutionPolicy:
@@ -76,6 +90,7 @@ class ExecutionPolicy(FrozenModel):
             update={
                 "allowed_plugin_environments": absolute(self.allowed_plugin_environments),
                 "allowed_plugin_paths": absolute(self.allowed_plugin_paths),
+                "inspection_roots": absolute(self.inspection_roots),
                 "data_roots": absolute(self.data_roots),
             }
         )
@@ -83,6 +98,11 @@ class ExecutionPolicy(FrozenModel):
 
 def _matches(value: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatchcase(value, pattern) for pattern in patterns)
+
+
+def policy_matches(value: str, patterns: Iterable[str]) -> bool:
+    """Whether `value` is allowed by any of the policy's glob `patterns`."""
+    return _matches(value, patterns)
 
 
 def _same_path(a: str, b: str) -> bool:
@@ -108,27 +128,44 @@ def application_denials(policy: ExecutionPolicy, spec: ApplicationSpec) -> list[
         )
     transport = spec.transport
     secret_refs: list[str] = []
-    if isinstance(transport, CliTransport):
+    if isinstance(transport, CliTransport | PythonTransport):
         if not policy.allow_trusted_local:
             denials.append(
                 "executing a local application requires trusted-local mode "
                 "(--trust-local-app or allow_trusted_local in the policy)"
             )
         secret_refs = list(transport.secret_env.values())
-    elif isinstance(transport, HttpTransport):
+    elif isinstance(transport, ContainerTransport):
+        if not _matches(transport.image, policy.allowed_container_images):
+            denials.append(
+                f"container image {transport.image} is not approved "
+                "(allowed_container_images in the policy)"
+            )
+        if transport.network != "none" and not policy.allow_container_network:
+            denials.append(
+                f"container network {transport.network!r} gives the application network "
+                "access; the policy does not allow it (allow_container_network)"
+            )
+        secret_refs = list(transport.secret_env.values())
+    elif isinstance(transport, HttpTransport | OpenAICompatibleTransport):
         allowed = {origin_of(o) for o in policy.allowed_http_origins}
-        for url in (
-            transport.url,
-            transport.healthcheck_url,
-            transport.reset_url,
-            *transport.allowed_endpoints,
-        ):
+        if isinstance(transport, HttpTransport):
+            urls = (
+                transport.url,
+                transport.healthcheck_url,
+                transport.reset_url,
+                *transport.allowed_endpoints,
+            )
+            secret_refs = [header.ref for header in transport.secret_headers.values()]
+        else:
+            urls = (transport.base_url,)
+            secret_refs = [transport.api_key] if transport.api_key else []
+        for url in urls:
             if url is None:
                 continue
             origin = origin_of(url)
             if not is_loopback(urlsplit(url).hostname or "") and origin not in allowed:
                 denials.append(f"HTTP origin {origin} is not an approved target")
-        secret_refs = [header.ref for header in transport.secret_headers.values()]
     denials.extend(
         f"secret {ref} is not allowed by the policy"
         for ref in secret_refs

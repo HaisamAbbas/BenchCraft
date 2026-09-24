@@ -43,6 +43,20 @@ def fraction(numerator: int | None, denominator: int | None) -> str:
     return f"{numerator}/{denominator} = {100 * numerator / denominator:.1f}%"
 
 
+def _state_text(state: dict[str, Any]) -> str:
+    mode = state.get("reset_mode", "none")
+    text = {
+        "per_case": f"reset before every case ({state.get('reset_hook')})",
+        "per_episode": f"reset before each episode ({state.get('reset_hook')})",
+    }.get(mode, "shared" if state.get("reset_policy") == "shared" else "not reset")
+    world = state.get("test_world")
+    if world:
+        text += f"; test world {world['world_id']} (seed {world['seed_hash'][:19]})"
+    if state.get("resets"):
+        text += "; resets: " + ", ".join(f"{k} {v}" for k, v in state["resets"].items())
+    return text
+
+
 def _number(value: Any, unit: str = "") -> str:
     if value is None:
         return "unknown"
@@ -245,6 +259,7 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
             ),
         ),
         ("Latency definition", latency["definition"]),
+        ("State between cases", _state_text(app.get("state") or {})),
     ]
     cost = report["cost"]
     costs = [

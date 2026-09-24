@@ -27,10 +27,12 @@ from aibench.core.models import (
     MetricBinding,
     deep_unfreeze,
 )
+from aibench.evaluators.agent import AGENT_EVALUATORS
 from aibench.evaluators.native import NATIVE_EVALUATORS, NATIVE_PLUGIN_ID
 from aibench.evaluators.protocol import EvaluationView, Evaluator, rule_for
 from aibench.evaluators.worker_client import WorkerSpec, make_worker_factory
 from aibench.registry.discovery import (
+    WORKER_TIMEOUT_SECONDS,
     ManifestLoad,
     discover_plugins,
     environment_site_paths,
@@ -43,7 +45,7 @@ _SPEC = re.compile(
     r"^(?P<id>[a-z][a-z0-9_]*\.[a-z][a-z0-9_.]*?)(?:@(?P<version>\d+(?:\.\d+){0,2}))?$"
 )
 # Execution fields that exist only when the application exposes them (§7).
-_OBSERVATION_FIELDS = ("retrieved_context", "tool_events", "usage", "cost")
+_OBSERVATION_FIELDS = ("retrieved_context", "tool_events", "usage", "cost", "world_state")
 
 
 class RegistryError(AibenchError):
@@ -108,7 +110,7 @@ class EvaluatorRegistry:
     @classmethod
     def with_native(cls) -> EvaluatorRegistry:
         registry = cls()
-        for factory in NATIVE_EVALUATORS:
+        for factory in (*NATIVE_EVALUATORS, *AGENT_EVALUATORS):
             registry._add(factory, allow_native=True)
         return registry
 
@@ -156,6 +158,7 @@ class EvaluatorRegistry:
         *,
         secret_env: Mapping[str, str] | None = None,
         extra_paths: Sequence[Path] = (),
+        startup_timeout_seconds: float = WORKER_TIMEOUT_SECONDS,
     ) -> list[ManifestLoad]:
         """Discover evaluator plugins installed in another Python environment and make
         them runnable through workers that use that environment's interpreter. Nothing
@@ -172,18 +175,24 @@ class EvaluatorRegistry:
             except ConfigError as exc:
                 raise RegistryError(f"plugin secret {name}: {exc}") from exc
         try:
-            site_paths = environment_site_paths(python)
+            site_paths = environment_site_paths(python, timeout=startup_timeout_seconds)
         except OSError as exc:
             raise RegistryError(str(exc)) from exc
         loads = []
         for plugin in discover_plugins(paths=site_paths):
-            loaded = load_manifests(plugin, python=python, extra_paths=extra_paths)
+            loaded = load_manifests(
+                plugin,
+                python=python,
+                extra_paths=extra_paths,
+                timeout=startup_timeout_seconds,
+            )
             loads.append(loaded)
             spec = WorkerSpec(
                 python=python,
                 target=plugin.target,
                 extra_paths=tuple(extra_paths),
                 secret_env=dict(secret_env or {}),
+                startup_timeout_seconds=startup_timeout_seconds,
             )
             for manifest in loaded.manifests:
                 self.register_external(manifest, worker=spec)
@@ -341,7 +350,7 @@ def applicability_problems(
     not_applicable for every case; refuse it up front instead of producing empty coverage."""
     if application is None:
         return []
-    declared = deep_unfreeze(application.output_binding) or {}
+    declared = application.effective_output_binding()
     problems = []
     for requirement in requirements:
         head, _, name = requirement.path.partition(".")

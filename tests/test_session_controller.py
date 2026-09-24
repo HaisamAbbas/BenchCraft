@@ -189,6 +189,12 @@ def test_runs_outside_the_session_cannot_be_controlled_or_queried(tmp_path: Path
         assert "not started in this session" in str(exc)
     else:
         raise AssertionError("a foreign run was readable through the session")
+    try:
+        ctl.compare_runs(other, other)
+    except Exception as exc:  # noqa: BLE001
+        assert "not started in this session" in str(exc)
+    else:
+        raise AssertionError("a foreign run was comparable through the session")
     ctl.storage.db.close()
 
 

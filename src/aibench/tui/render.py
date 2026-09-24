@@ -4,6 +4,7 @@ page; everything interpolated from data is escaped."""
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 from rich.console import Console
@@ -77,6 +78,8 @@ def draft(console: Console, summary: dict[str, Any]) -> None:
     out(console, f"[bold]Plan, revision {summary['revision']}[/bold] ({state})")
     for objective in summary.get("objectives", []):
         out(console, f"  objective: {safe(objective)}")
+    if summary.get("test_world"):
+        out(console, f"  test world: {safe(summary['test_world'])} (loaded before each case)")
     for metric in summary.get("metrics", []):
         out(console, f"  metric {safe(metric['metric'])}: {safe(metric['rationale'])}")
     for gap in summary.get("gaps", []):
@@ -98,6 +101,27 @@ def draft(console: Console, summary: dict[str, Any]) -> None:
             f"up to {estimate['application_calls_upper_bound']} application call(s), "
             f"{estimate['evaluations']} evaluation(s), {estimate['model_evaluations']} by a "
             f"model judge; cost {cost_text}",
+        )
+
+
+def application(console: Console, data: dict[str, Any]) -> None:
+    out(console, f"[bold]{safe(data['application_id'])}[/bold] ({safe(data['kind'])})")
+    out(console, f"  isolation: {safe(data['isolation'])}")
+    out(console, f"  reset: {safe(data['reset']['summary'])}")
+    seen = [c for c, s in data["observable"].items() if s != "unknown"]
+    out(console, f"  observable: {safe(', '.join(seen))}")
+    for gap in data["missing_evidence"]:
+        out(
+            console,
+            f"  [yellow]missing {safe(gap['capability'])}:[/yellow] {safe(gap['consequence'])}",
+        )
+    selected = data.get("selected_test_world")
+    for world in data["test_worlds"]:
+        mark = "*" if world["world_id"] == selected else " "
+        approval = "approved" if world["approved"] else "not approved by the policy"
+        out(
+            console,
+            f"  {mark} world {safe(world['world_id'])}: {safe(world['description'])} ({approval})",
         )
 
 
@@ -266,6 +290,85 @@ def report(console: Console, data: dict[str, Any]) -> None:
         )
     for fmt, path in data.get("exported", {}).items():
         out(console, f"  wrote {safe(fmt)}: {safe(path)}")
+
+
+def comparison(console: Console, data: dict[str, Any]) -> None:
+    """Compact paired-comparison card; no per-case ledger or raw judge content."""
+    status = str(data.get("status", "unknown"))
+    colour = {"qualified": "green", "comparable": "green", "blocked": "red", "exploratory": "yellow"}.get(
+        status, "yellow"
+    )
+    out(
+        console,
+        f"[bold]comparison[/bold] [{colour}]{safe(status)}[/colour]"
+        f" (identity_qualified={str(bool(data.get('identity_qualified', data.get('qualified')))).lower()},"
+        f" claim_qualified={str(bool(data.get('claim_qualified', data.get('qualified')))).lower()})",
+    )
+    baseline = (data.get("runs") or {}).get("baseline") or {}
+    current = (data.get("runs") or {}).get("current") or {}
+    out(
+        console,
+        f"  {safe(baseline.get('run_id', '?'))} -> {safe(current.get('run_id', '?'))}; "
+        f"{safe(data.get('basis', 'stored facts only'))}",
+    )
+    gate: dict[str, Any] = data.get("overall_coverage_gate") or data.get("gate") or {}
+    if gate:
+        gate_status = str(gate.get("status", "unknown"))
+        gate_colour = {"pass": "green", "fail": "red"}.get(gate_status, "yellow")
+        out(
+            console,
+            f"  coverage gate: [{gate_colour}]{safe(gate_status)}[/{gate_colour}]"
+            f" {safe(str(gate.get('reason') or ''))}",
+        )
+    for metric in data.get("metrics", []):
+        detail = metric.get("comparison") or metric.get("diagnostic_comparison")
+        if not isinstance(detail, dict):
+            out(console, f"  {safe(metric.get('label', 'metric'))}: no numeric comparison")
+            continue
+        denominators = detail.get("denominators") or {}
+        complete = denominators.get("complete_numeric_pairs")
+        selected = denominators.get("paired_selected")
+        macro = detail.get("case_macro") or {}
+        mean = macro.get("mean_current_minus_baseline")
+        interval = detail.get("uncertainty") or {}
+        estimate = f", mean delta {_number(mean)}" if mean is not None else ""
+        if interval.get("lower") is not None and interval.get("upper") is not None:
+            estimate += f" (95% CI {_number(interval['lower'])}..{_number(interval['upper'])})"
+        out(
+            console,
+            f"  {safe(metric.get('label', 'metric'))}: {complete}/{selected} complete pairs"
+            f"{estimate}",
+        )
+    for warning in data.get("warnings", [])[:10]:
+        out(console, f"  [yellow]warning:[/yellow] {safe(warning)}")
+    disagreement = data.get("ecosystem_disagreement") or data.get("cross_framework") or []
+    if isinstance(disagreement, list):
+        matrix_counts: Counter[str] = Counter()
+        for item in disagreement:
+            if isinstance(item, dict) and isinstance(item.get("decision_matrix"), dict):
+                matrix_counts.update(item["decision_matrix"])
+        disagreement = {
+            "decision_matrix": dict(matrix_counts),
+            "paired_count": sum(
+                int(item.get("paired_count", 0))
+                for item in disagreement
+                if isinstance(item, dict)
+            ),
+        }
+    if disagreement.get("paired_count") or disagreement.get("total"):
+        matrix: dict[str, Any] = disagreement.get("decision_matrix") or {}
+        out(
+            console,
+            "  ecosystem decisions (diagnostic, scales not equivalent): "
+            f"both pass {matrix.get('pass_pass', 0)}, "
+            f"baseline only {matrix.get('pass_fail', 0)}, "
+            f"current only {matrix.get('fail_pass', 0)}, "
+            f"both fail {matrix.get('fail_fail', 0)}",
+        )
+
+
+def _number(value: object) -> str:
+    return f"{float(value):.6g}" if isinstance(value, (int, float)) else "unknown"
 
 
 def tool_call(name: str, args: dict[str, Any]) -> str:

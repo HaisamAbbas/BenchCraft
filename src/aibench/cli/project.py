@@ -13,7 +13,8 @@
   plan; 3 a missing prerequisite (interpreter, executable, secret, unsupported Python).
 - `plugins list` lists installed plugin kinds: built-in runners and planners, native
   evaluators, and evaluator plugins found in package metadata (listed, not imported).
-- `compare` is not implemented in this version; it says so and exits 2 (Prompt 14).
+- `compare` uses the shared stored-run comparison service with strict identity, coverage and
+  grouped-uncertainty checks; it never invokes the application, evaluator or judge.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import typer
 from rich.console import Console
@@ -388,23 +389,79 @@ def list_plugins(json_output: bool = _JSON) -> None:
 def compare(
     baseline: str = typer.Argument(..., help="Baseline run ID."),
     current: str = typer.Argument(..., help="Current run ID."),
+    baseline_scoring: str | None = typer.Option(
+        None, "--baseline-scoring", help="Explicit baseline scoring-pass ID."
+    ),
+    current_scoring: str | None = typer.Option(
+        None, "--current-scoring", help="Explicit current scoring-pass ID."
+    ),
+    mode: str = typer.Option(
+        "strict", "--mode", help="strict (qualified only) or exploratory (diagnostic)."
+    ),
+    min_paired_coverage: float = typer.Option(
+        0.95,
+        "--min-paired-coverage",
+        min=0.0,
+        max=1.0,
+        help="Required complete numeric pairs / selected paired items.",
+    ),
+    bootstrap_replicates: int = typer.Option(
+        2_000, "--bootstrap-replicates", min=100, help="Seeded cluster-bootstrap replicates."
+    ),
+    bootstrap_seed: int = typer.Option(0, "--bootstrap-seed"),
+    workspace: Path | None = typer.Option(  # noqa: B008
+        None, "--workspace", help="Project root containing .aibench/ (default: cwd)."
+    ),
     json_output: bool = _JSON,
 ) -> None:
-    """Not available in this version (planned: paired comparison, Prompt 14)."""
-    message = (
-        "run comparison is not implemented in this version; nothing was compared. It is "
-        "planned (paired, uncertainty-aware comparison of compatible runs). Until then, "
-        "render each run with `aibench report RUN_ID` and compare their stated denominators."
-    )
-    if json_output:
-        console.print_json(
-            data={
-                "status": "unsupported",
-                "baseline": baseline,
-                "current": current,
-                "message": message,
-            }
+    """Compare stored runs; no application, evaluator or judge is invoked."""
+    from aibench.services.comparison import ComparisonError, compare_runs, comparison_exit_code
+    from aibench.storage.artifacts import ArtifactStore
+    from aibench.storage.db import Database, Workspace
+    from aibench.storage.repositories import Storage
+    from aibench.tui import render as terminal_render
+
+    if mode not in {"strict", "exploratory"}:
+        message = "--mode must be strict or exploratory"
+        if json_output:
+            console.print_json(data={"status": "error", "message": message})
+        else:
+            err_console.print(f"[red]{message}[/red]")
+        raise typer.Exit(code=EXIT_INVALID)
+    ws = Workspace.at(workspace or Path.cwd())
+    if not ws.db_path.is_file():
+        message = f"no aibench workspace at {ws.root}"
+        if json_output:
+            console.print_json(data={"status": "error", "message": message})
+        else:
+            err_console.print(f"[red]{safe(message)}[/red]")
+        raise typer.Exit(code=EXIT_INVALID)
+    storage = Storage(Database.open_workspace(ws))
+    try:
+        report = compare_runs(
+            storage,
+            ArtifactStore(ws.artifacts_dir),
+            baseline,
+            current,
+            baseline_scoring_id=baseline_scoring,
+            current_scoring_id=current_scoring,
+            mode=cast(Literal["strict", "exploratory"], mode),
+            min_paired_coverage=min_paired_coverage,
+            bootstrap_seed=bootstrap_seed,
+            bootstrap_replicates=bootstrap_replicates,
         )
+    except ComparisonError as exc:
+        if json_output:
+            console.print_json(
+                data={"status": "error", "baseline": baseline, "current": current, "message": str(exc)}
+            )
+        else:
+            err_console.print(f"[red]{safe(str(exc))}[/red]")
+        raise typer.Exit(code=EXIT_INVALID) from exc
+    finally:
+        storage.db.close()
+    if json_output:
+        console.print_json(data=report)
     else:
-        err_console.print(f"[yellow]{safe(message)}[/yellow]")
-    raise typer.Exit(code=EXIT_INVALID)
+        terminal_render.comparison(console, report)
+    raise typer.Exit(code=comparison_exit_code(report))

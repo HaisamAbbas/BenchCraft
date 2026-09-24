@@ -344,6 +344,7 @@ def test_the_assistant_has_no_terminal_file_or_network_tool(tmp_path: Path) -> N
         "get_session_state",
         "show_plan",
         "read_profile",
+        "describe_application",
         "summarize_dataset",
         "list_evaluators",
         "describe_evaluator",
@@ -354,6 +355,7 @@ def test_the_assistant_has_no_terminal_file_or_network_tool(tmp_path: Path) -> N
         "list_failures",
         "get_case_evidence",
         "get_report",
+        "compare_runs",
         # Writes only the run's own report under .aibench/reports/; it takes no path.
         "export_report",
         "request_action",
@@ -433,6 +435,42 @@ def test_turn_limits_and_provider_failures_end_the_turn_not_the_session(tmp_path
     outcome = asyncio.run(failing.handle_message("hello again"))
     assert outcome.stopped == "assistant model failed: RuntimeError: provider down"
     assert len(ctl.store.turns(ctl.session_id)) == 4  # both turns and replies stored
+    ctl.storage.db.close()
+
+
+def test_conversation_compare_tool_uses_the_shared_stored_service(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+
+    async def start_two() -> tuple[str, str]:
+        first = await ctl.start_run(action_id="conversation-compare-1", expected_revision=1)
+        assert await ctl.wait_for_run(first.run_id) is not None
+        second = await ctl.start_run(action_id="conversation-compare-2", expected_revision=1)
+        assert await ctl.wait_for_run(second.run_id) is not None
+        return str(first.run_id), str(second.run_id)
+
+    baseline, current = asyncio.run(start_two())
+    provider = ScriptedProvider(
+        [
+            call("compare_runs", baseline_run_id=baseline, current_run_id=current),
+            say("The stored runs are compatible; the paired result is qualified."),
+        ]
+    )
+    outcome = asyncio.run(ConversationAgent(ctl, provider).handle_message("Compare those runs."))
+    assert outcome.rejected == []
+    assert outcome.results[0]["tool"] == "compare_runs"
+    assert outcome.results[0]["status"] == "qualified"
+    tool_result = next(
+        message
+        for message in reversed(provider.calls[-1])
+        if message["role"] == "tool"
+    )
+    assert "application_invocations" in tool_result["content"]
+    assistant_report = ctl.compare_runs(baseline, current, for_assistant=True)
+    serialized = json.dumps(assistant_report)
+    assert "case_id" not in serialized
+    assert "group_id" not in serialized
+    assert "sha256:" not in serialized
     ctl.storage.db.close()
 
 

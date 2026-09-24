@@ -184,6 +184,30 @@
       "title": "Network Destinations",
       "type": "array"
     },
+    "package_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Package Name"
+    },
+    "package_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Package Version"
+    },
     "parameters_schema": {
       "title": "Parameters Schema"
     },

@@ -1,0 +1,29 @@
+{
+  "service": "aibench.services.comparison.compare_runs",
+  "basis": "committed storage reads only",
+  "pairing": ["case_id", "case_content_digest", "repetition_id"],
+  "strict_identity_components": [
+    "dataset and case content",
+    "frozen repetition/selection policy",
+    "metric binding and semantics",
+    "plugin and package version",
+    "judge",
+    "rubric",
+    "dependency identity",
+    "observation instrumentation",
+    "scoring-pass completion",
+    "execution lineage"
+  ],
+  "statistics": {
+    "point_estimate": "case-level macro mean of current minus baseline",
+    "uncertainty": "seeded grouped cluster-bootstrap percentile interval",
+    "coverage": "complete numeric pairs over selected paired items; missing/error/NA remain visible",
+    "cross_framework": "decision matrix and side-only summaries; no combined score or scale equivalence"
+  },
+  "privacy": "assistant projection removes case/group IDs, hashes, raw ledgers, and judge/rubric configuration",
+  "evidence_tests": [
+    "tests/test_comparison_service.py",
+    "tests/test_comparison_statistics.py",
+    "tests/test_cross_ecosystem.py"
+  ]
+}

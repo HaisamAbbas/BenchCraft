@@ -1,0 +1,34 @@
+{
+  "$id": "aibench/1.0.0/IdentityComponent.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "One compatibility component without exposing its configuration to chat.\n\n`verified=False` means the historical record did not contain enough evidence for a\nstrict comparison. The digest is for equality checks, not as a substitute for the\nunderlying frozen manifest/profile.",
+  "properties": {
+    "digest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Digest"
+    },
+    "kind": {
+      "title": "Kind",
+      "type": "string"
+    },
+    "verified": {
+      "title": "Verified",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "kind",
+    "verified"
+  ],
+  "title": "IdentityComponent",
+  "type": "object"
+}

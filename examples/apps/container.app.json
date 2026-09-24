@@ -1,0 +1,17 @@
+{
+  "application_id": "example-container-app",
+  "runner": "container",
+  "target": "python@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9",
+  "effects": "none",
+  "transport": {
+    "kind": "container",
+    "image": "python@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9",
+    "argv": ["python", "/app/app.py"],
+    "mounts": [{"source": "container_app", "target": "/app"}],
+    "memory_mb": 256,
+    "cpus": 1,
+    "pids_limit": 64,
+    "timeout_seconds": 60
+  },
+  "output_binding": {"output": "/output"}
+}

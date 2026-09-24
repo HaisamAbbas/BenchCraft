@@ -51,6 +51,7 @@ from aibench.core.models import (
     EffectLevel,
     ExecutionResult,
     RedactionClass,
+    ResetPolicy,
     RunManifest,
     WorkItem,
     WorkItemState,
@@ -75,7 +76,7 @@ from aibench.registry import (
     EvaluatorRegistry,
     RegistryError,
 )
-from aibench.runners import LoadedApplication, create_runner
+from aibench.runners import LoadedApplication, create_runner, reset_hook
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
 from aibench.services.scoring import ScoringReport, metric_profiles, score_recorded_run
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
@@ -120,6 +121,29 @@ def _approval_scope(run_id: str, manifest: RunManifest, policy_hash: str) -> str
     )
 
 
+def _declared_dependency_identity(metrics: list[Any]) -> str | None:
+    """Freeze the installed adapter/package identities used by model-backed metrics.
+
+    The core does not import plugin packages.  This is a declared dependency
+    identity (direct package and adapter versions), not a claim that transitive
+    wheels are reproducible; a future lockfile can replace it without changing
+    the comparison contract.
+    """
+
+    entries = [
+        {
+            "metric_id": metric.manifest.evaluator_id,
+            "plugin_id": metric.manifest.plugin_id,
+            "plugin_version": metric.manifest.plugin_version,
+            "package_name": metric.manifest.package_name,
+            "package_version": metric.manifest.package_version,
+        }
+        for metric in metrics
+        if metric.manifest.uses_models
+    ]
+    return content_hash(sorted(entries, key=lambda item: item["metric_id"])) if entries else None
+
+
 def create_run(
     compiled: CompiledRun, *, storage: Storage, artifacts: ArtifactStore, granted_by: str
 ) -> str:
@@ -142,18 +166,43 @@ def create_run(
         compiled.plan_bytes, mime_type="application/json", redaction=RedactionClass.NONE
     )
     commit_verified_artifact(artifacts, storage, plan_ref)
+    world = compiled.world
+    world_params: dict[str, Any] | None = None
+    if world is not None:
+        seed_ref = artifacts.write_bytes(
+            world.seed_bytes, mime_type="application/json", redaction=RedactionClass.NONE
+        )
+        commit_verified_artifact(artifacts, storage, seed_ref)
+        world_params = {
+            "world_id": world.world_id,
+            "seed_hash": world.seed_hash,
+            "seed_artifact_id": seed_ref.artifact_id,
+        }
 
     run_id = f"run-{uuid.uuid4().hex[:12]}"
+    dependency_lock_hash = _declared_dependency_identity(compiled.metrics)
+    profiles = metric_profiles(
+        list(compiled.metrics),
+        application=spec,
+        dependency_lock_hash=dependency_lock_hash,
+    )
+    model_identifiers = {
+        metric.manifest.evaluator_id: profile["compatibility"]["judge"]["digest"]
+        for metric, profile in zip(compiled.metrics, profiles.values(), strict=True)
+        if profile["compatibility"]["judge"]["digest"] is not None
+    }
     manifest = RunManifest(
         run_id=run_id,
         dataset_hash=compiled.dataset.content_hash,
         application_hash=content_hash(spec.model_dump(mode="json")),
         plan_hash=compiled.plan_hash,
         application_id=spec.application_id,
+        dependency_lock_hash=dependency_lock_hash,
         plugin_hashes={
             m.manifest.evaluator_id: f"{m.manifest.plugin_id}=={m.manifest.plugin_version}"
             for m in compiled.metrics
         },
+        model_identifiers=model_identifiers,
         parameters={
             "mode": "manual_plan",
             "plan_artifact_id": plan_ref.artifact_id,
@@ -164,7 +213,14 @@ def create_run(
             "policy_hash": compiled.policy_hash,
             "scoring_id": f"engine-{run_id}",
             "binding_hashes": [m.binding_hash for m in compiled.metrics],
-            "metric_profiles": metric_profiles(list(compiled.metrics)),
+            # State between cases (§7): how and when the application is reset.
+            "reset": {
+                "policy": spec.reset_policy.value,
+                "hook": reset_hook(spec),
+                "mode": reset_mode(spec, world is not None),
+            },
+            "test_world": world_params,
+            "metric_profiles": profiles,
         },
         seed=random.SystemRandom().randrange(2**31),
         environment={"python": platform.python_version(), "platform": sys.platform},
@@ -233,6 +289,36 @@ def _frozen_plan(
         return ExecutablePlan.model_validate_json(raw)
     except ValueError as exc:
         raise RunError(f"the run's frozen plan no longer validates: {exc}") from exc
+
+
+def reset_mode(spec: ApplicationSpec, world_selected: bool) -> str:
+    """When the engine resets the application: before every case, before each episode, or
+    never. A shared application, or one without a reset hook and without a selected world,
+    is never reset (a fresh process per case isolates only in-process state)."""
+    if spec.reset_policy is ResetPolicy.SHARED:
+        return "none"
+    if spec.reset_policy is ResetPolicy.PER_EPISODE:
+        return "per_episode"
+    return "per_case" if reset_hook(spec) is not None or world_selected else "none"
+
+
+def _frozen_world_seed(
+    storage: Storage, artifacts: ArtifactStore, manifest: RunManifest
+) -> tuple[str | None, Any]:
+    """The selected test world and its frozen seed, verified against the manifest."""
+    world = manifest.parameters.get("test_world")
+    if not world:
+        return None, None
+    ref = storage.get_artifact(world["seed_artifact_id"])
+    if ref is None:
+        raise RunError("the run's frozen test world seed is missing")
+    try:
+        raw = artifacts.read_bytes(ref)
+    except AibenchError as exc:
+        raise RunError(f"the run's frozen test world seed failed verification: {exc}") from exc
+    if bytes_hash(raw) != world["seed_hash"]:
+        raise RunError("the frozen test world seed does not match the run manifest")
+    return str(world["world_id"]), json.loads(raw)
 
 
 def _frozen_application(
@@ -552,12 +638,18 @@ async def _execute_leased(
             trusted_local=policy.allow_trusted_local,
             environ=environ if environ is not None else dict(os.environ),
         )
+    world_id, seed = _frozen_world_seed(storage, artifacts, manifest)
+    reset = params.get("reset") or {"mode": "none"}
     engine = RunEngine(
         storage=storage,
         artifacts=artifacts,
         run_id=run_id,
         plan=plan,
+        application=spec,
         runner=runner,
+        reset_mode=reset["mode"],
+        world_id=world_id,
+        world_seed=seed,
         cases={cid: case for cid, case in cases.items() if cid in needed},  # dataset order
         metrics=metrics,
         scoring_id=params["scoring_id"],

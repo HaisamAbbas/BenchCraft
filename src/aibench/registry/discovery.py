@@ -34,7 +34,11 @@ from aibench.core.models import EvaluatorManifest
 from aibench.runners.process_tree import run_contained
 
 ENTRY_POINT_GROUP = "aibench.evaluators"
-WORKER_TIMEOUT_SECONDS = 30.0
+# Ragas' adapter imports a large metric catalogue during manifest discovery on
+# Windows.  A bounded two-minute ceiling keeps discovery reliable without making a
+# hung plugin unbounded; callers with a measured cold-start budget may pass a
+# larger value explicitly.
+WORKER_TIMEOUT_SECONDS = 120.0
 MAX_WORKER_OUTPUT_BYTES = 1_048_576
 _WORKER_ENV_KEEP = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "TMPDIR", "HOME")
 

@@ -1,0 +1,39 @@
+{
+  "plan_id": "booking-agent-v1",
+  "dataset": "cases.jsonl",
+  "application": "booking.app.json",
+  "repetitions": 1,
+  "concurrency": {
+    "application": 1,
+    "evaluation": 2
+  },
+  "retry": {
+    "max_attempts": 1,
+    "initial_backoff_seconds": 0.2,
+    "max_backoff_seconds": 1
+  },
+  "budgets": {
+    "max_application_calls": 30,
+    "max_evaluator_calls": 60,
+    "max_wall_seconds": 600
+  },
+  "metrics": [
+    {
+      "metric": "native.tool_calls"
+    },
+    {
+      "metric": "native.tool_outcomes"
+    },
+    {
+      "metric": "native.final_state"
+    }
+  ],
+  "test_world": "two-seats",
+  "gates": [
+    {
+      "gate_id": "bookings-land",
+      "binding": 2,
+      "min_pass_rate": 0.9
+    }
+  ]
+}

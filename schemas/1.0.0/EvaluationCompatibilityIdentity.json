@@ -1,0 +1,258 @@
+{
+  "$defs": {
+    "DecisionRule": {
+      "additionalProperties": false,
+      "description": "Harness-owned pass/fail rule using frozen thresholds.",
+      "properties": {
+        "categories": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "comparator": {
+          "enum": [
+            "is_true",
+            ">=",
+            ">",
+            "<=",
+            "<",
+            "==",
+            "in"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "rule_id": {
+          "default": "threshold",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "version": {
+          "default": "1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "comparator"
+      ],
+      "title": "DecisionRule",
+      "type": "object"
+    },
+    "IdentityComponent": {
+      "additionalProperties": false,
+      "description": "One compatibility component without exposing its configuration to chat.\n\n`verified=False` means the historical record did not contain enough evidence for a\nstrict comparison. The digest is for equality checks, not as a substitute for the\nunderlying frozen manifest/profile.",
+      "properties": {
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "verified": {
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "verified"
+      ],
+      "title": "IdentityComponent",
+      "type": "object"
+    },
+    "MetricDirection": {
+      "enum": [
+        "higher",
+        "lower",
+        "target",
+        "none"
+      ],
+      "title": "MetricDirection",
+      "type": "string"
+    },
+    "MetricScope": {
+      "enum": [
+        "case",
+        "episode",
+        "component",
+        "slice",
+        "run"
+      ],
+      "title": "MetricScope",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/EvaluationCompatibilityIdentity.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "Canonical identity frozen with a scoring pass and copied into each result (\u00a712).\n\nThis is additive metadata, not a replacement for `binding_hash`: that hash identifies\nmetric semantics, while this record also separates judge, rubric, plugin implementation,\ndependency and instrumentation identities. Unknown required components fail closed in\nstrict comparison but remain available to explicitly exploratory diagnostics.",
+  "properties": {
+    "aggregation": {
+      "title": "Aggregation",
+      "type": "string"
+    },
+    "binding_hash": {
+      "title": "Binding Hash",
+      "type": "string"
+    },
+    "compatibility_hash": {
+      "title": "Compatibility Hash",
+      "type": "string"
+    },
+    "dependency_lock_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dependency Lock Hash"
+    },
+    "direction": {
+      "$ref": "#/$defs/MetricDirection"
+    },
+    "final_attempt_rule": {
+      "title": "Final Attempt Rule",
+      "type": "string"
+    },
+    "instrumentation": {
+      "$ref": "#/$defs/IdentityComponent"
+    },
+    "judge": {
+      "$ref": "#/$defs/IdentityComponent"
+    },
+    "metric_id": {
+      "title": "Metric Id",
+      "type": "string"
+    },
+    "metric_version": {
+      "title": "Metric Version",
+      "type": "string"
+    },
+    "package_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Package Name"
+    },
+    "package_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Package Version"
+    },
+    "parameters_hash": {
+      "title": "Parameters Hash",
+      "type": "string"
+    },
+    "plugin_id": {
+      "title": "Plugin Id",
+      "type": "string"
+    },
+    "plugin_version": {
+      "title": "Plugin Version",
+      "type": "string"
+    },
+    "required_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Required Fields",
+      "type": "array"
+    },
+    "rubric": {
+      "$ref": "#/$defs/IdentityComponent"
+    },
+    "rule": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DecisionRule"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema_version": {
+      "default": "aibench.evaluation-identity/1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/MetricScope"
+    },
+    "value_kind": {
+      "enum": [
+        "scalar",
+        "boolean",
+        "category",
+        "vector",
+        "distribution",
+        "structured"
+      ],
+      "title": "Value Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "metric_id",
+    "metric_version",
+    "value_kind",
+    "direction",
+    "scope",
+    "aggregation",
+    "binding_hash",
+    "parameters_hash",
+    "plugin_id",
+    "plugin_version",
+    "judge",
+    "rubric",
+    "instrumentation",
+    "final_attempt_rule",
+    "compatibility_hash"
+  ],
+  "title": "EvaluationCompatibilityIdentity",
+  "type": "object"
+}

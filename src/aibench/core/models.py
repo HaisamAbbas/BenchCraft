@@ -145,6 +145,9 @@ class ToolMatchMode(str, Enum):
 class RunnerKind(str, Enum):
     CLI = "cli"
     HTTP = "http"
+    PYTHON = "python"
+    CONTAINER = "container"
+    OPENAI_COMPATIBLE = "openai_compatible"
 
 
 class ResetPolicy(str, Enum):
@@ -224,9 +227,7 @@ class RepositoryFixture(FrozenModel):
 
     @property
     def is_execution_ready(self) -> bool:
-        return all(
-            [self.commit, self.setup_recipe, self.hidden_tests_ref, self.success_criteria]
-        )
+        return all([self.commit, self.setup_recipe, self.hidden_tests_ref, self.success_criteria])
 
 
 class Fixture(FrozenModel):
@@ -271,9 +272,7 @@ class BenchmarkCase(FrozenModel):
         return {
             "case_id": self.case_id,
             "input": deep_unfreeze(self.input),
-            "fixtures": {
-                f.name: deep_unfreeze(f.content) for f in self.fixtures if f.app_visible
-            },
+            "fixtures": {f.name: deep_unfreeze(f.content) for f in self.fixtures if f.app_visible},
         }
 
 
@@ -328,6 +327,166 @@ class CliTransport(FrozenModel):
     secret_env: FrozenSecretRefMap = Field(default_factory=dict)
     inherit_env: tuple[str, ...] = DEFAULT_INHERITED_ENV
     healthcheck_argv: tuple[str, ...] | None = None
+    # Resets state the application keeps outside its process (files, a local database):
+    # run with the selected test world's seed as JSON on stdin (null when none is selected).
+    reset_argv: tuple[str, ...] | None = None
+
+
+class PythonTransport(FrozenModel):
+    """A Python callable (§7 "Python callable"), `module:function` or `path/file.py:function`.
+    It runs in a fresh interpreter process per invocation through a small standard-library
+    shim, so timeouts, cancellation and process-tree cleanup are those of the CLI protocol.
+    The function receives the bound input and returns a JSON document (an object is used as
+    the response document; any other value becomes `{"output": value}`)."""
+
+    kind: Literal["python"] = "python"
+    callable: str = Field(pattern=r"^.+:[A-Za-z_][A-Za-z0-9_]*$")
+    python: str = "python"  # interpreter of the application's environment
+    paths: tuple[str, ...] = ()  # extra import paths, relative to the config file's directory
+    cwd: str | None = None
+    timeout_seconds: float = Field(default=60.0, gt=0, le=86_400)
+    max_stdout_bytes: int = Field(default=1_048_576, gt=0)
+    max_stderr_bytes: int = Field(default=65_536, ge=0)
+    env: FrozenStrMap = Field(default_factory=dict)
+    secret_env: FrozenSecretRefMap = Field(default_factory=dict)
+    inherit_env: tuple[str, ...] = DEFAULT_INHERITED_ENV
+    reset_callable: str | None = Field(default=None, pattern=r"^.+:[A-Za-z_][A-Za-z0-9_]*$")
+
+
+_IMAGE_DIGEST = r"^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$"
+# Container-side paths: absolute, plain characters only (no ',' '=' or quotes that could
+# add fields to the engine's `--mount` value), no `.` or `..` segments.
+_CONTAINER_PATH = r"^/(?:[A-Za-z0-9_.-]+/?)*$"
+_CONTAINER_ENGINE_ENV_NAMES = frozenset(
+    {
+        "PATH",
+        "PATHEXT",
+        "COMSPEC",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "XDG_RUNTIME_DIR",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "NODE_OPTIONS",
+        "RUBYOPT",
+        "PERL5OPT",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "BASH_ENV",
+        "ENV",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    }
+)
+
+
+def _container_engine_env_problem(name: str) -> str | None:
+    normalized = name.upper()
+    if not name.isascii() or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return "environment variable names must use letters, digits and underscores"
+    if normalized in _CONTAINER_ENGINE_ENV_NAMES or normalized.startswith(
+        ("DOCKER_", "PODMAN_", "CONTAINER_", "CONTAINERS_")
+    ):
+        return (
+            f"{name} can change or execute code in the host container-engine client; "
+            "use a different name"
+        )
+    return None
+
+
+def _engine_socket_path(path: str) -> bool:
+    """Whether a host path is, or is a directory holding, a container engine socket, after
+    normalizing separators, repeated slashes and `.`/`..` segments."""
+    import posixpath
+
+    normalized = posixpath.normpath(path.replace("\\", "/")).lower()
+    name = posixpath.basename(normalized)
+    return (
+        name in ("docker.sock", "docker_engine", "podman.sock", "containerd.sock")
+        or normalized in ("/var/run", "/run", "/var/run/docker", "/run/docker")
+        or "pipe/docker_engine" in normalized
+    )
+
+
+class ContainerMount(FrozenModel):
+    """A read-only bind mount. Writable bind mounts are not offered (§16: read-only source
+    mounts; writable space is tmpfs only)."""
+
+    source: str  # host path, relative to the config file's directory
+    target: str = Field(pattern=_CONTAINER_PATH)
+
+    @model_validator(mode="after")
+    def _not_the_engine_socket(self) -> ContainerMount:
+        if _engine_socket_path(self.source):
+            raise ValueError("mounting the container engine socket is not allowed")
+        if any(part in ("..", ".") for part in self.target.split("/")):
+            raise ValueError("a mount target cannot contain '.' or '..' segments")
+        return self
+
+
+class ContainerTransport(FrozenModel):
+    """One container per invocation (§7 "Container", §16): an image pinned by digest, a
+    non-root user, a read-only root filesystem, read-only bind mounts, tmpfs for scratch
+    space, no Linux capabilities, resource limits, and no network unless the policy allows
+    it. JSON on stdin and stdout, as in the CLI protocol. Not a hostile multi-tenant
+    sandbox."""
+
+    kind: Literal["container"] = "container"
+    image: str = Field(pattern=_IMAGE_DIGEST)
+    argv: tuple[str, ...] = Field(min_length=1)
+    workdir: str | None = Field(default=None, pattern=_CONTAINER_PATH)
+    mounts: tuple[ContainerMount, ...] = ()
+    tmpfs: tuple[Annotated[str, Field(pattern=_CONTAINER_PATH)], ...] = ("/tmp",)
+    tmpfs_size_mb: int = Field(default=64, gt=0, le=4096)
+    user: str = Field(default="65534:65534", pattern=r"^[0-9]+(:[0-9]+)?$")
+    network: Literal["none", "bridge"] = "none"
+    memory_mb: int = Field(default=512, ge=16, le=65_536)
+    cpus: float = Field(default=1.0, gt=0, le=64)
+    pids_limit: int = Field(default=128, ge=8, le=65_536)
+    output_mode: Literal["json", "text"] = "json"
+    timeout_seconds: float = Field(default=120.0, gt=0, le=86_400)
+    max_stdout_bytes: int = Field(default=1_048_576, gt=0)
+    max_stderr_bytes: int = Field(default=65_536, ge=0)
+    env: FrozenStrMap = Field(default_factory=dict)
+    secret_env: FrozenSecretRefMap = Field(default_factory=dict)
+    # This is a fixed, host-installed client, never an executable path from the app config.
+    engine: Literal["docker"] = "docker"
+
+    @model_validator(mode="after")
+    def _container_process_is_safe(self) -> ContainerTransport:
+        ids = [int(part) for part in self.user.split(":")]  # "00" is uid 0 too
+        if 0 in ids:
+            raise ValueError("containers run as a non-root user and group; id 0 is not allowed")
+        names = set(self.env) | set(self.secret_env)
+        overlap = set(self.env) & set(self.secret_env)
+        if overlap:
+            raise ValueError(
+                "container environment variables cannot be both plain and secret: "
+                + ", ".join(sorted(overlap))
+            )
+        for name in sorted(names):
+            problem = _container_engine_env_problem(name)
+            if problem:
+                raise ValueError(problem)
+        return self
 
 
 class HttpSecretHeader(FrozenModel):
@@ -361,7 +520,54 @@ class HttpTransport(FrozenModel):
     max_response_bytes: int = Field(default=1_048_576, gt=0)
     correlation_header: str = "X-Request-ID"
     healthcheck_url: str | None = None
+    # POSTed with the selected test world's seed as the JSON body ({} when none is selected).
     reset_url: str | None = None
+
+
+class OpenAICompatibleTransport(FrozenModel):
+    """An OpenAI-compatible chat-completions endpoint as the application (§7). Observes the
+    model response and the usage the endpoint reports, never hidden application internals.
+    Tool calls in a response are requests by the model, not executed effects. Unrelated to
+    any OpenAI evaluator plugin."""
+
+    kind: Literal["openai_compatible"] = "openai_compatible"
+    base_url: str  # e.g. "https://api.openai.com/v1"; requests go to {base_url}/chat/completions
+    model: str = Field(min_length=1)
+    api_key: SecretRefStr | None = None
+    system_prompt: str | None = None
+    parameters: FrozenValue = Field(default_factory=dict)  # temperature, max_tokens, seed, ...
+    tools: tuple[FrozenValue, ...] = ()  # tool schemas offered to the model
+    headers: FrozenStrMap = Field(default_factory=dict)
+    verify_tls: bool = True
+    allow_plaintext_http: bool = False
+    timeout_seconds: float = Field(default=120.0, gt=0, le=86_400)
+    connect_timeout_seconds: float = Field(default=10.0, gt=0, le=600)
+    max_request_bytes: int = Field(default=1_048_576, gt=0)
+    max_response_bytes: int = Field(default=4_194_304, gt=0)
+
+
+class TestWorldSpec(FrozenModel):
+    """A named, versioned starting state for a stateful application (§7 "State"): the seed
+    is sent to the application's reset hook before each case or episode. Seeds describe a
+    test double or an ephemeral environment, never production."""
+
+    __test__ = False  # not a pytest test class
+
+    seed_file: str | None = None  # JSON, relative to the config file's directory
+    seed: FrozenValue = None
+    description: str = ""
+
+    @model_validator(mode="after")
+    def _one_seed(self) -> TestWorldSpec:
+        if (self.seed_file is None) == (self.seed is None):
+            raise ValueError("a test world needs exactly one of seed_file or seed")
+        return self
+
+
+ApplicationTransport = Annotated[
+    CliTransport | HttpTransport | PythonTransport | ContainerTransport | OpenAICompatibleTransport,
+    Field(discriminator="kind"),
+]
 
 
 class ApplicationSpec(FrozenModel):
@@ -376,7 +582,13 @@ class ApplicationSpec(FrozenModel):
     effects: EffectLevel = EffectLevel.NONE
     # Optional so application records committed before Prompt 03 still load; a runner
     # cannot be created without it.
-    transport: Annotated[CliTransport | HttpTransport, Field(discriminator="kind")] | None = None
+    transport: ApplicationTransport | None = None
+    # Starting states the application's reset hook accepts; a plan selects one by name.
+    test_worlds: Annotated[
+        dict[str, TestWorldSpec],
+        AfterValidator(MappingProxyType),
+        PlainSerializer(dict, return_type=dict[str, TestWorldSpec]),
+    ] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _transport_matches_runner(self) -> ApplicationSpec:
@@ -386,6 +598,22 @@ class ApplicationSpec(FrozenModel):
                 f"{self.runner.value!r}"
             )
         return self
+
+    def effective_output_binding(self) -> dict[str, Any]:
+        """The output binding in force: the transport's defaults (an OpenAI-compatible
+        endpoint's documented response fields) overlaid by what the config declares."""
+        declared = deep_unfreeze(self.output_binding) or {}
+        if isinstance(self.transport, OpenAICompatibleTransport):
+            return {**OPENAI_COMPATIBLE_OUTPUT_BINDING, **declared}
+        return dict(declared)
+
+
+# The chat-completions response fields an OpenAI-compatible endpoint documents.
+OPENAI_COMPATIBLE_OUTPUT_BINDING: dict[str, str] = {
+    "output": "/choices/0/message/content",
+    "usage": "/usage",
+    "tool_events": "/choices/0/message/tool_calls",
+}
 
 
 class ObservationClaim(FrozenModel):
@@ -427,6 +655,8 @@ class ExecutionResult(FrozenModel):
     output: FrozenValue = None
     retrieved_context: tuple[str, ...] | None = None
     tool_events: tuple[FrozenValue, ...] = Field(default_factory=tuple)
+    # The test world's state after the invocation, when the application reports it.
+    world_state: FrozenValue = None
     trace_refs: tuple[str, ...] = Field(default_factory=tuple)
     timing: FrozenValue = Field(default_factory=dict)
     usage: FrozenValue = None
@@ -501,6 +731,10 @@ class EvaluatorManifest(FrozenModel):
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
     plugin_id: str
     plugin_version: str
+    # Installed distribution identity when the adapter can declare it. These fields were
+    # added in Prompt 14; older manifests remain loadable and report them as unknown.
+    package_name: str | None = None
+    package_version: str | None = None
     core_schema: str = ">=1.0.0,<2.0.0"
     description: str
     limitations: tuple[str, ...] = ()
@@ -527,6 +761,51 @@ class MetricBinding(FrozenModel):
     metric: str
     params: FrozenValue = Field(default_factory=dict)
     rule: DecisionRule | None = None
+
+
+class IdentityComponent(FrozenModel):
+    """One compatibility component without exposing its configuration to chat.
+
+    `verified=False` means the historical record did not contain enough evidence for a
+    strict comparison. The digest is for equality checks, not as a substitute for the
+    underlying frozen manifest/profile.
+    """
+
+    kind: str
+    digest: str | None = None
+    verified: bool
+
+
+class EvaluationCompatibilityIdentity(FrozenModel):
+    """Canonical identity frozen with a scoring pass and copied into each result (§12).
+
+    This is additive metadata, not a replacement for `binding_hash`: that hash identifies
+    metric semantics, while this record also separates judge, rubric, plugin implementation,
+    dependency and instrumentation identities. Unknown required components fail closed in
+    strict comparison but remain available to explicitly exploratory diagnostics.
+    """
+
+    schema_version: str = "aibench.evaluation-identity/1"
+    metric_id: str
+    metric_version: str
+    value_kind: ValueKind
+    direction: MetricDirection
+    scope: MetricScope
+    aggregation: str
+    binding_hash: str
+    parameters_hash: str
+    rule: DecisionRule | None = None
+    plugin_id: str
+    plugin_version: str
+    package_name: str | None = None
+    package_version: str | None = None
+    dependency_lock_hash: str | None = None
+    judge: IdentityComponent
+    rubric: IdentityComponent
+    instrumentation: IdentityComponent
+    required_fields: tuple[str, ...] = Field(default_factory=tuple)
+    final_attempt_rule: str
+    compatibility_hash: str
 
 
 class EvaluationResult(FrozenModel):
@@ -667,6 +946,8 @@ ALL_MODELS: tuple[type[BaseModel], ...] = (
     FieldRequirement,
     EvaluatorManifest,
     MetricBinding,
+    IdentityComponent,
+    EvaluationCompatibilityIdentity,
     EvaluationResult,
     RunManifest,
     ArtifactRef,

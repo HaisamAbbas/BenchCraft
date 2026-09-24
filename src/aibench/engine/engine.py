@@ -39,6 +39,7 @@ from enum import Enum
 from typing import Any
 
 from aibench.core.models import (
+    ApplicationSpec,
     BenchmarkCase,
     EffectState,
     ErrorKind,
@@ -52,7 +53,7 @@ from aibench.core.plans import ExecutablePlan
 from aibench.engine.budget import BudgetLedger
 from aibench.engine.retry import backoff_delay, classify_evaluation, classify_execution
 from aibench.registry import ResolvedMetric
-from aibench.runners.base import BaseRunner
+from aibench.runners.base import BaseRunner, ResetReport, race
 from aibench.services.execution import invoke_and_record
 from aibench.services.scoring import BindingScorer, MissingExecution
 from aibench.storage.artifacts import ArtifactStore
@@ -68,6 +69,8 @@ TERMINAL = frozenset(
     }
 )
 _POLL_SECONDS = 0.1
+# The runner bounds a reset by its lifecycle timeout; this only waits for an abort.
+_RESET_WAIT_SECONDS = 3600.0
 _HEARTBEAT_SECONDS = 2.0
 
 
@@ -194,6 +197,15 @@ class _Item:
     binding_hash: str | None = None
 
 
+class ResetFailed(Exception):
+    """The application could not be reset to the state a case needs (or the run was
+    aborted while it was being reset)."""
+
+    def __init__(self, detail: str, *, cancelled: bool = False) -> None:
+        super().__init__(detail)
+        self.cancelled = cancelled
+
+
 @dataclass
 class RunOutcome:
     state: RunState
@@ -209,6 +221,7 @@ class RunEngine:
     artifacts: ArtifactStore
     run_id: str
     plan: ExecutablePlan
+    application: ApplicationSpec
     runner: BaseRunner | None  # None when no execution work remains (e.g. resume)
     cases: dict[str, BenchmarkCase]
     metrics: list[ResolvedMetric]
@@ -217,6 +230,15 @@ class RunEngine:
     controller: RunController
     rng: random.Random
     heartbeat: Callable[[], bool] = lambda: True  # refresh the run lease; False if lost
+    # State between cases (§7): "none", "per_case" (reset before every attempt) or
+    # "per_episode" (reset before an episode's first turn; turns run in order and share
+    # state). The engine resets with the selected test world's seed.
+    reset_mode: str = "none"
+    world_id: str | None = None
+    world_seed: Any = None
+    _episodes: dict[str, list[str]] = field(default_factory=dict)  # episode -> turn case IDs
+    _episode_of: dict[str, str] = field(default_factory=dict)
+    _succeeded_here: set[str] = field(default_factory=set)  # execution keys, this session
     _exec_queue: deque[_Item] = field(default_factory=deque)
     _eval_queue: deque[_Item] = field(default_factory=deque)
     _delayed: list[tuple[float, int, _Item]] = field(default_factory=list)
@@ -292,9 +314,28 @@ class RunEngine:
                     self._exec_queue.append(item)
             elif w.state is WorkItemState.PENDING:
                 pending_evals.append(item)
-        self._exec_queue = deque(
-            sorted(self._exec_queue, key=lambda i: (order.get(i.case_id, 0), i.repetition))
-        )
+        if self.reset_mode == "per_episode":
+            # An episode is the cases sharing a group_id, in dataset order; a case without
+            # one is an episode of its own. Each (episode, repetition) runs contiguously.
+            for case_id, case in self.cases.items():
+                episode = case.group_id or case_id
+                self._episode_of[case_id] = episode
+                self._episodes.setdefault(episode, []).append(case_id)
+            first = {ep: order.get(turns[0], 0) for ep, turns in self._episodes.items()}
+            self._exec_queue = deque(
+                sorted(
+                    self._exec_queue,
+                    key=lambda i: (
+                        first[self._episode_of[i.case_id]],
+                        i.repetition,
+                        order.get(i.case_id, 0),
+                    ),
+                )
+            )
+        else:
+            self._exec_queue = deque(
+                sorted(self._exec_queue, key=lambda i: (order.get(i.case_id, 0), i.repetition))
+            )
         for item in sorted(
             pending_evals, key=lambda i: (order.get(i.case_id, 0), i.repetition, i.task_key)
         ):
@@ -340,6 +381,7 @@ class RunEngine:
                     metric,
                     self.plan.evaluation_timeout_seconds,
                     self.controller.abort_event,
+                    application=self.application,
                 )
                 await scorer.open()
                 self._scorers[metric.binding_hash] = scorer
@@ -423,6 +465,11 @@ class RunEngine:
                 self._stop_reason = denial
                 self._event("budget_exhausted", reason=denial)
                 return
+            gate = self._episode_gate(self._exec_queue[0])
+            if gate is not None:
+                self.ledger.settle_application(dispatched=False, cost=None)
+                self._block_undispatched(self._exec_queue.popleft(), gate)
+                continue
             item = self._exec_queue.popleft()
             item.attempt += 1
             if not self._transition(
@@ -430,20 +477,81 @@ class RunEngine:
             ):
                 self.ledger.settle_application(dispatched=False, cost=None)
                 continue
-            assert self.runner is not None
-            task = asyncio.ensure_future(
-                invoke_and_record(
-                    self.runner,
-                    self.cases[item.case_id],
-                    storage=self.storage,
-                    artifacts=self.artifacts,
-                    run_id=self.run_id,
-                    repetition_id=item.repetition,
-                    attempt_id=item.attempt,
-                    cancel=self.controller.abort_event,
-                )
-            )
+            task = asyncio.ensure_future(self._reset_then_invoke(item))
             self._in_flight[task] = item
+
+    def _is_first_turn(self, item: _Item) -> bool:
+        return self._episodes[self._episode_of[item.case_id]][0] == item.case_id
+
+    def _episode_gate(self, item: _Item) -> str | None:
+        """Why a later episode turn must not run: the turn before it did not succeed in
+        this session, so the application's state is not what the episode built."""
+        if self.reset_mode != "per_episode" or self._is_first_turn(item):
+            return None
+        episode = self._episode_of[item.case_id]
+        turns = self._episodes[episode]
+        previous = execution_key(turns[turns.index(item.case_id) - 1], item.repetition)
+        if previous in self._succeeded_here:
+            return None
+        state = self._exec_states.get(previous)
+        if state is WorkItemState.SUCCEEDED:
+            return (
+                f"episode_interrupted: episode {episode!r} stopped before this turn; the state "
+                "its earlier turns built cannot be restored"
+            )
+        return (
+            f"episode_broken: an earlier turn of episode {episode!r} did not succeed "
+            f"({state.value if state else 'not run'})"
+        )
+
+    async def _reset_or_abort(self) -> ResetReport:
+        """The runner's reset, abandoned (and its process cleaned up) as soon as the run is
+        aborted, like an invocation."""
+        assert self.runner is not None
+        reset = asyncio.ensure_future(self.runner.reset(self.world_seed))
+        if await race(reset, timeout=_RESET_WAIT_SECONDS, cancel=self.controller.abort_event) != (
+            "cancelled"
+        ):
+            return await reset
+        reset.cancel()
+        await asyncio.gather(reset, return_exceptions=True)
+        return ResetReport("aborted", "the run was aborted during the reset")
+
+    def _block_undispatched(self, item: _Item, reason: str) -> None:
+        if self._transition(item, {WorkItemState.PENDING}, WorkItemState.BLOCKED, error=reason):
+            self._exec_states[item.task_key] = WorkItemState.BLOCKED
+            self._eval_queue.extend(self._waiting_evals.pop(item.task_key, []))
+
+    async def _reset_then_invoke(self, item: _Item) -> ExecutionResult:
+        """Reset the application first when this attempt needs a known state, then invoke.
+        A reset that fails raises ResetFailed: the case is not run on unknown state."""
+        assert self.runner is not None
+        if self.reset_mode == "per_case" or (
+            self.reset_mode == "per_episode" and self._is_first_turn(item)
+        ):
+            report = await self._reset_or_abort()
+            self._event(
+                "app_reset",
+                task_key=item.task_key,
+                episode=self._episode_of.get(item.case_id),
+                world=self.world_id,
+                status=report.status,
+                detail=report.detail,
+            )
+            if report.status == "aborted":
+                raise ResetFailed(report.detail, cancelled=True)
+            if report.status not in ("reset", "not_needed"):
+                raise ResetFailed(report.detail)
+        return await invoke_and_record(
+            self.runner,
+            self.cases[item.case_id],
+            storage=self.storage,
+            artifacts=self.artifacts,
+            run_id=self.run_id,
+            repetition_id=item.repetition,
+            attempt_id=item.attempt,
+            cancel=self.controller.abort_event,
+        )
 
     async def _dispatch_evaluations(self, stopping: bool) -> None:
         if stopping and not self.controller.cancelled:
@@ -542,6 +650,18 @@ class RunEngine:
     async def _complete_execution(self, task: asyncio.Task[Any], item: _Item) -> None:
         try:
             result: ExecutionResult = task.result()
+        except ResetFailed as exc:
+            # Never invoked: the application was not in the state the case needs.
+            self.ledger.settle_application(dispatched=False, cost=None)
+            if exc.cancelled:
+                self._final_execution(
+                    item, WorkItemState.CANCELLED, "cancelled before the case ran", None
+                )
+            else:
+                self._final_execution(
+                    item, WorkItemState.BLOCKED, f"reset_failed: {exc}"[:500], None
+                )
+            return
         except Exception as exc:  # noqa: BLE001 - an engine-side failure, recorded not raised
             self.ledger.settle_application(dispatched=True, cost=None)
             if is_storage_failure(exc):
@@ -611,6 +731,8 @@ class RunEngine:
         self, item: _Item, state: WorkItemState, reason: str | None, result: ExecutionResult | None
     ) -> None:
         self._transition(item, {WorkItemState.RUNNING}, state, error=reason)
+        if state is WorkItemState.SUCCEEDED:
+            self._succeeded_here.add(item.task_key)
         self._exec_states[item.task_key] = state
         self._executions[item.task_key] = result
         self._eval_queue.extend(self._waiting_evals.pop(item.task_key, []))

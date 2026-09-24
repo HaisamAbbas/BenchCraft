@@ -134,6 +134,7 @@ def _derived_profile(results: list[EvaluationResult]) -> dict[str, Any]:
         },
         "params": (provenance.get("binding") or {}).get("params") or {},
         "rule": first.rule.model_dump(mode="json") if first.rule else None,
+        "compatibility": provenance.get("compatibility"),
         "source": "derived_from_results",
     }
 
@@ -178,6 +179,7 @@ def _metric_section(
             "uses_models": manifest.uses_models,
             "rule": profile.get("rule"),
             "params": profile.get("params") or {},
+            "compatibility": profile.get("compatibility"),
             "source": profile.get("source", "frozen_with_run"),
         },
         "summary": summary.as_dict(),
@@ -303,11 +305,29 @@ def _application_section(
             "excluded_failures": failed - timeouts,
             "excluded_timeouts": timeouts,
             "concurrency": concurrency,
-            "cache": "no execution caching; every latency is a fresh invocation",
         },
         "cost": _cost_block(len(dispatched) + uncommitted, known, unknown),
     }
     return section, finals
+
+
+def _state_section(params: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
+    """How the application's state was reset between cases (§7), from the frozen manifest
+    and the recorded resets: part of what makes the run reproducible."""
+    reset = params.get("reset") or {}
+    world = params.get("test_world") or None
+    resets = Counter(
+        str(e["payload"].get("status")) for e in events if e["event_type"] == "app_reset"
+    )
+    return {
+        "reset_policy": reset.get("policy"),
+        "reset_hook": reset.get("hook"),
+        "reset_mode": reset.get("mode", "none"),
+        "test_world": (
+            {"world_id": world["world_id"], "seed_hash": world["seed_hash"]} if world else None
+        ),
+        "resets": dict(sorted(resets.items())),
+    }
 
 
 def _gate_results(
@@ -480,6 +500,7 @@ def build_report(
     application, finals = _application_section(
         storage, run_id, planned_exec, plan.concurrency.application if plan else None, events
     )
+    application["state"] = _state_section(params, events)
 
     all_results = storage.list_metric_results(run_id)
     all_attempts = storage.list_evaluation_attempts(run_id)

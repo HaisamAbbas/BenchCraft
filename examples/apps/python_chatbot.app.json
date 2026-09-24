@@ -1,0 +1,12 @@
+{
+  "application_id": "example-python-chatbot",
+  "runner": "python",
+  "target": "python_chatbot.py:respond",
+  "effects": "none",
+  "transport": {
+    "kind": "python",
+    "callable": "python_chatbot.py:respond",
+    "timeout_seconds": 30
+  },
+  "output_binding": {"output": "/output"}
+}

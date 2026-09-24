@@ -1,4 +1,4 @@
-# Compatibility matrix (00-T2, updated for 0.1.0rc1 / 13-T2)
+# Compatibility matrix (00-T2, updated for 0.1.0rc1 / 14-G1)
 
 "Supported" is what the release declares. "Exercised" is what has actually run, and
 where. Anything not exercised is a claim that nobody has checked yet, and is labelled
@@ -25,7 +25,17 @@ that way.
 | Native (`native.exact_match@1.0.0`, `native.json_schema@1.0.0`) | Ships with aibench 0.1.0rc1 | — | Everywhere above | — |
 | `aibench-deepeval` (`deepeval.faithfulness@1.0.0`) | 0.1.0rc1 | `aibench>=0.1.0rc1,<0.2`, `deepeval==4.2.5` (exact pin, enforced at run time), Python 3.11–3.12 | Built wheel installed into a clean Python 3.12 venv on Windows: adapter and worker contract tests against the real `deepeval` 4.2.5 package, with a deterministic local judge (29 passed) | A live judge model (paid, no key authorized); plugin not exercised on Python 3.11 or Linux/macOS |
 | Custom Python evaluators | Protocol of aibench 0.1.0rc1 | Explicit `--trust-local-code` | `examples/evaluators/refund_window.py` (pilot recipe B trial) | — |
+| `aibench-ragas` (`ragas.faithfulness@1.0.0`) | 0.1.0rc1 working tree | `aibench>=0.1.0rc1,<0.2`, `ragas==0.4.3` (exact pin, enforced at run time), Python 3.11–3.12; text-only worker adapter | Windows 11, Python 3.12.10: real Ragas worker contract, raw/NaN policy, and same-stored-output DeepEval/Ragas cross-ecosystem test; separate plugin environment and `pip check` passed | Live provider; Python 3.11/Linux/macOS; full transitive lock; patched upstream advisory release |
 | Promptfoo, OpenAI Evals | Not integrated | — | — | — |
+
+## Application transports (Prompt 15)
+
+| Transport | Exercised | Not exercised |
+|---|---|---|
+| `cli`, `http` | Windows 11, Python 3.12 and 3.11 (see Release 0.1.0rc1) | Linux/macOS (CI configured, no result observed) |
+| `python` (callable in a fresh interpreter) | Windows 11, Python 3.12: end to end through `aibench app smoke`, timeout kill, exception capture, reset callable (`tests/test_runner_transports.py`) | Other interpreters as the application's environment |
+| `openai_compatible` | Windows 11, against the local stub `examples/apps/openai_stub.py`: request shape, bearer secret redaction, usage, tool-call requests | Any live hosted endpoint |
+| `container` | Docker Engine 29.7.2 via Docker Desktop (linux/amd64 VM) on Windows 11, image `python@sha256:2f17fc04...06a9`: non-root uid 65534, read-only root and mount, tmpfs `/tmp`, no network, timeout removal, missing-image refusal | Linux or macOS hosts, rootless engines, Podman, Windows containers |
 
 ## Model providers (assistant model, model planner, judges)
 

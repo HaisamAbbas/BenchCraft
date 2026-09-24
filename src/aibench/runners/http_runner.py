@@ -113,14 +113,18 @@ class HttpRunner(BaseRunner):
         base_dir: Path,
         environ: Mapping[str, str] | None = None,
         lifecycle_timeout_seconds: float | None = None,
+        transport: HttpTransport | None = None,
     ) -> None:
-        if not isinstance(spec.transport, HttpTransport):
+        """`transport` lets a derived runner (an OpenAI-compatible endpoint) describe its
+        requests as the HTTP protocol."""
+        chosen = transport if transport is not None else spec.transport
+        if not isinstance(chosen, HttpTransport):
             raise ConfigError("HttpRunner requires an ApplicationSpec with an http transport")
         kwargs = {}
         if lifecycle_timeout_seconds is not None:
             kwargs["lifecycle_timeout_seconds"] = lifecycle_timeout_seconds
         super().__init__(spec, **kwargs)
-        self.transport: HttpTransport = spec.transport
+        self.transport: HttpTransport = chosen
         self.base_dir = base_dir
         self._environ = dict(os.environ if environ is None else environ)
         self._policy: EndpointPolicy | None = None
@@ -213,12 +217,17 @@ class HttpRunner(BaseRunner):
             return HealthReport("healthy", f"healthcheck_url returned {response.status_code}")
         return HealthReport("unhealthy", f"healthcheck_url returned {response.status_code}")
 
-    async def _reset(self) -> ResetReport:
+    @property
+    def resettable(self) -> bool:
+        return self.transport.reset_url is not None
+
+    async def _reset(self, seed: Any) -> ResetReport:
         url = self.transport.reset_url
         if url is None:
             return ResetReport("unsupported", "no reset_url configured; server state is not reset")
+        body = {} if seed is None else seed
         try:
-            response = await self._require_client().post(url, headers=self._headers, json={})
+            response = await self._require_client().post(url, headers=self._headers, json=body)
         except httpx.HTTPError as exc:
             return ResetReport("failed", f"reset request failed: {type(exc).__name__}")
         if response.is_success:

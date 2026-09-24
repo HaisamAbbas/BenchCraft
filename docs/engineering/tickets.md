@@ -182,3 +182,25 @@ Closeout: the time bound in the Prompt 10 blocking-judge test went from 110 s to
 | 13-T4 | Honest readiness decision: executable acceptance, external validation, residual risks, next actions; local artifacts only | DONE | `docs/engineering/release-readiness.md`; nothing published, deployed or sent; no pilot user contacted |
 
 Gates: 13-G1..G5. See `docs/engineering/reports/13.md`. Decisions: ADR 0012.
+
+## Prompt 14 — Second evaluator ecosystem and comparisons
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 14-T1 | Add one independent ecosystem, pin and verify its official API, and score stored outputs without re-running the application | DONE | Chosen Ragas over Promptfoo in `docs/adr/0013-ragas-adapter-and-comparison-compatibility.md`; `plugins/ragas/` pins `ragas==0.4.3`; real-package mapping, applicability, raw-artifact, version-drift and worker tests in `tests/test_ragas_adapter.py`; `tests/test_cross_ecosystem.py` uses both real adapters over one stored execution set |
+| 14-T2 | Implement comparable run accounting: pair case/content/repetition, freeze metric/judge/rubric/plugin/instrumentation/dependency identity, distinguish rescore from execution, and refuse incompatible strict comparisons | DONE | `src/aibench/services/comparison.py`; `EvaluationCompatibilityIdentity` and frozen profiles in `core/models.py`/`services/scoring.py`; lineage, plan, pass-completion, compatibility and coverage checks in `tests/test_comparison_service.py` |
+| 14-T3 | Add coverage gates, paired/grouped uncertainty, repeated-judge stability, and one shared CLI/chat/TUI comparison service | DONE | `src/aibench/reporting/statistics.py`; `aibench compare`, `/compare`, session `compare_runs`; constructed interval/denominator tests and CLI/TUI/conversation integration tests |
+| 14-T4 | Check independence/calibration against the same outputs, preserve framework semantics, and report disagreement without averaging | DONE (local deterministic judges) | Real DeepEval-versus-Ragas same-output test (`tests/test_cross_ecosystem.py`); cross-framework matrix and no-combined-score assertions; live provider/calibration and time-saved pilot remain explicitly pending |
+
+Gates: 14-G1..G4. See `docs/engineering/reports/14.md`. Decision: ADR 0013. Ragas 0.4.3's open multi-modal SSRF advisory is tracked as a residual risk; the adapter exposes only validated text Faithfulness and runs in an isolated worker.
+
+## Prompt 15 — Richer runners and agent outcome contracts
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 15-T1 | Python callable and OpenAI-compatible endpoint runners behind existing contracts; container execution with pinned images, non-root/read-only mounts, resource limits and explicit network policy | DONE | `runners/python_runner.py` + `python_shim.py`, `runners/openai_runner.py`, `runners/container_runner.py`; policy `allowed_container_images`, `allow_container_network`; `tests/test_runner_transports.py` (real container, real interpreter, local OpenAI-compatible stub); `tests/test_runner_review_regressions.py` |
+| 15-T2 | Session reset fixtures, tool attempts/results, argument constraints, final-world-state assertions; tool names separate from successful authorized effects | DONE | Engine reset modes and episodes (`engine.py`), `reset_argv`/`reset_callable`/`reset_url` with seeds, `test_worlds` + plan `test_world` + policy `allowed_test_worlds`, `world_state` observation, `evaluators/agent.py` (`native.tool_calls`, `native.tool_outcomes`, `native.final_state`); `examples/agent_world/`, `examples/apps/booking_world.py`; `tests/test_agent_worlds.py`, `tests/test_agent_evaluators.py` |
+| 15-T3 | Chat explains runner capabilities and missing evidence; approved test worlds chosen through validated plan changes | DONE | `services/applications.py`, `/app`, `/world`, assistant `describe_application`, `PlanPatch.test_world` with grounding; `tests/test_chat_test_worlds.py` |
+
+Gates: 15-G1..G4. See `docs/engineering/reports/15.md`. Decisions: ADR 0014.
+Review remediation: `tests/test_runner_review_regressions.py`.
