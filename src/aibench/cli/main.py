@@ -13,6 +13,10 @@ from aibench.cli import cache as cache_cli
 from aibench.cli import chat as chat_cli
 from aibench.cli import dataset as dataset_cli
 from aibench.cli import inspect as inspect_cli
+from aibench.cli import integrations as integrations_cli
+from aibench.cli import langfuse as langfuse_cli
+from aibench.cli import openai_evals_api as openai_evals_api_cli
+from aibench.cli import openai_evals_oss as openai_evals_oss_cli
 from aibench.cli import plan as plan_cli
 from aibench.cli import project as project_cli
 from aibench.cli import report as report_cli
@@ -33,6 +37,10 @@ app.add_typer(runs_cli.app, name="runs")
 app.add_typer(sessions_cli.app, name="sessions")
 app.add_typer(traces_cli.app, name="traces")
 app.add_typer(cache_cli.app, name="cache")
+app.add_typer(openai_evals_oss_cli.app, name="openai-evals-oss")
+app.add_typer(openai_evals_api_cli.app, name="openai-evals-api")
+app.add_typer(langfuse_cli.app, name="langfuse")
+app.add_typer(integrations_cli.app, name="integrations")
 app.add_typer(app_cli.app, name="app")
 app.add_typer(score_cli.evaluators_app, name="evaluators")
 app.command("score")(score_cli.score)

@@ -130,6 +130,10 @@ class MetricOption:
     eligible: bool
     reasons: list[str] = field(default_factory=list)  # why not eligible
     usable_cases: int | None = None  # dataset cases with every case.* field it reads
+    # How results arise (17-T4): recorded_outputs, owns_execution or remote_job, and where
+    # data goes when it runs (empty: nothing leaves the machine).
+    consumes: str = "recorded_outputs"
+    network_destinations: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -145,6 +149,8 @@ class MetricOption:
             "eligible": self.eligible,
             "reasons": self.reasons,
             "usable_cases": self.usable_cases,
+            "consumes": self.consumes,
+            "network_destinations": list(self.network_destinations),
         }
 
 
@@ -190,6 +196,11 @@ def build_catalog(
         # checked again when the plan is validated. No evaluator is instantiated here.
         requires = manifest.requires
         reasons = list(evaluator_denials(policy, [manifest]))
+        if manifest.consumes == "remote_job":
+            reasons.append(
+                "runs as a remote job with its own submit/fetch commands (data leaves the "
+                "machine), not as a plan metric"
+            )
         usable: int | None = None
         for requirement in requires:
             head, _, name = requirement.path.partition(".")
@@ -225,6 +236,8 @@ def build_catalog(
                 eligible=not reasons,
                 reasons=reasons,
                 usable_cases=usable if usable is not None else dataset.case_count,
+                consumes=manifest.consumes,
+                network_destinations=tuple(manifest.network_destinations),
             )
         )
     return sorted(options, key=lambda o: (not o.evaluator_id.startswith("native."), o.metric))

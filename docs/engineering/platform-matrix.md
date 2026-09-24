@@ -26,7 +26,10 @@ that way.
 | `aibench-deepeval` (`deepeval.faithfulness@1.0.0`) | 0.1.0rc1 | `aibench>=0.1.0rc1,<0.2`, `deepeval==4.2.5` (exact pin, enforced at run time), Python 3.11–3.12 | Built wheel installed into a clean Python 3.12 venv on Windows: adapter and worker contract tests against the real `deepeval` 4.2.5 package, with a deterministic local judge (29 passed) | A live judge model (paid, no key authorized); plugin not exercised on Python 3.11 or Linux/macOS |
 | Custom Python evaluators | Protocol of aibench 0.1.0rc1 | Explicit `--trust-local-code` | `examples/evaluators/refund_window.py` (pilot recipe B trial) | — |
 | `aibench-ragas` (`ragas.faithfulness@1.0.0`) | 0.1.0rc1 working tree | `aibench>=0.1.0rc1,<0.2`, `ragas==0.4.3` (exact pin, enforced at run time), Python 3.11–3.12; text-only worker adapter | Windows 11, Python 3.12.10: real Ragas worker contract, raw/NaN policy, and same-stored-output DeepEval/Ragas cross-ecosystem test; separate plugin environment and `pip check` passed | Live provider; Python 3.11/Linux/macOS; full transitive lock; patched upstream advisory release |
-| Promptfoo, OpenAI Evals | Not integrated | — | — | — |
+| `aibench-openai-evals-oss` (`openai_evals_oss.{match,includes,fuzzy_match,json_match}@1.0.0`) | 0.1.0rc1 working tree | `evals==3.0.1.post1` installed without its declared dependencies plus `requirements-lock.txt`; Python 3.12 | Windows 11, Python 3.12: real upstream eval classes in recorded replay and the live completion-function bridge (`tests/test_openai_evals_oss.py`) | Other eval types; Python 3.11/Linux/macOS |
+| `aibench-openai-evals-api` (`openai_evals_api.criterion@1.0.0`, remote job) | 0.1.0rc1 working tree | `openai==3.19.2` (exact pin, enforced by the worker); Python 3.12 | Windows 11: real SDK against a local stand-in of the Evals API contract, with failure injection (`tests/test_openai_evals_api.py`) | The live hosted service (no authorized key) |
+| Langfuse connector (core) | 0.1.0rc1 working tree | Langfuse public API v4 endpoints (shapes from `langfuse==4.15.6`) | Local stand-in, full dataset → run → traces → scores round trip (`tests/test_langfuse_connector.py`) | A live Langfuse deployment |
+| Promptfoo | Not integrated | — | — | — |
 
 ## Application transports (Prompt 15)
 

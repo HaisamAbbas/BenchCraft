@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field
 
+from aibench.core.errors import AibenchError
 from aibench.core.models import (
     ApplicationSpec,
     CliTransport,
@@ -74,6 +75,10 @@ class ExecutionPolicy(FrozenModel):
     allowed_test_worlds: tuple[str, ...] = ()
     # Source trees `aibench inspect --source` may read (manifests and imports only).
     inspection_roots: tuple[str, ...] = ()
+    # Remote services that may receive benchmark data: case content, application outputs or
+    # results (hosted evaluation jobs, platform connectors). Always explicit, loopback
+    # included; plain http only on loopback (17-T4).
+    allowed_egress_origins: tuple[str, ...] = ()
     ceilings: BudgetLimits = Field(default_factory=BudgetLimits)
 
     def with_trusted_local(self, granted: bool) -> ExecutionPolicy:
@@ -115,6 +120,38 @@ def _inside(path: Path, root: str) -> bool:
 
 def _plan_path(plan_dir: Path, value: str) -> Path:
     return Path(value) if Path(value).is_absolute() else plan_dir / value
+
+
+def egress_denials(
+    policy: ExecutionPolicy, url: str, *, sends: str, secret_ref: str | None = None
+) -> list[str]:
+    """Whether benchmark data (`sends`, for the message) may go to `url`. Nothing is sent
+    anywhere the policy does not name (17-T4)."""
+    try:
+        parts = urlsplit(url)
+        if parts.username or parts.password:
+            return [f"{url!r} must not contain credentials; use a secret reference"]
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return [f"{url!r} is not an http(s) URL"]
+        origin = origin_of(url)
+    except (ValueError, AibenchError) as exc:
+        return [f"{url!r} is not a valid URL: {exc}"]
+    denials = []
+    if parts.scheme != "https" and not is_loopback(parts.hostname):
+        denials.append(f"{origin} uses plain http; {sends} would travel in cleartext")
+    allowed = set()
+    for entry in policy.allowed_egress_origins:
+        try:
+            allowed.add(origin_of(entry))
+        except (ValueError, AibenchError):
+            continue
+    if origin not in allowed:
+        denials.append(
+            f"sending {sends} to {origin} is not approved; add it to allowed_egress_origins"
+        )
+    if secret_ref is not None and secret_ref not in policy.allowed_secret_refs:
+        denials.append(f"secret {secret_ref} is not allowed by the policy")
+    return denials
 
 
 def application_denials(policy: ExecutionPolicy, spec: ApplicationSpec) -> list[str]:

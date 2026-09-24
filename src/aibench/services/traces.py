@@ -135,7 +135,15 @@ def traces_summary(storage: Storage, run_id: str) -> dict[str, Any] | None:
     for o in observations:
         for reason in o["partial_reasons"]:
             reasons[reason.split(":", 1)[0]] += 1
-    with_usage = [o for o in observations if o.get("usage")]
+    # One trace per execution: the same call imported from two sources (an OTLP export and
+    # Langfuse) is counted once, preferring a complete trace.
+    with_usage, seen, duplicates = [], set(), 0
+    for o in sorted((o for o in observations if o.get("usage")), key=lambda o: not o["complete"]):
+        if o["execution_id"] and o["execution_id"] in seen:
+            duplicates += 1
+            continue
+        seen.add(o["execution_id"])
+        with_usage.append(o)
     usage = {
         key: sum(o["usage"][key] for o in with_usage)
         for key in ("input_tokens", "output_tokens", "total_tokens")
@@ -151,12 +159,14 @@ def traces_summary(storage: Storage, run_id: str) -> dict[str, Any] | None:
         "usage": {
             **usage,
             "traces_with_usage": len(with_usage),
+            "duplicate_traces_excluded": duplicates,
             "aggregate_spans_excluded": sum(
                 len(o["usage"]["aggregate_spans_excluded"]) for o in with_usage
             ),
             "bound": ("lower_bound" if any(not o["complete"] for o in with_usage) else "complete"),
-            "source": "imported traces (normalization otel-gen-ai/1); separate from usage the "
-            "application reported in its responses",
+            "source": "imported traces (OpenTelemetry normalization otel-gen-ai/1, or "
+            "Langfuse observations); separate from usage the application reported in its "
+            "responses",
         },
         "tool_spans": len(tools),
         "tool_errors": sum(1 for t in tools if t["status"] == "error"),

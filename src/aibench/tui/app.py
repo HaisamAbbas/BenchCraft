@@ -126,6 +126,8 @@ def render_result(console: Console, result: CommandResult) -> None:
         render.budget(console, data)
     elif kind == "application":
         render.application(console, data)
+    elif kind == "integrations":
+        render.integrations(console, data)
     elif kind == "report":
         render.report(console, data)
     elif kind == "comparison":

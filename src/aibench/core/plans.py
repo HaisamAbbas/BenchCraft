@@ -113,6 +113,7 @@ class PluginEnvironmentRef(FrozenModel):
     python: str
     paths: tuple[str, ...] = ()
     secret_env: FrozenSecretRefMap = Field(default_factory=dict)
+    startup_timeout_seconds: float = Field(default=120.0, gt=0, le=3_600)
 
 
 class ReleaseGate(FrozenModel):

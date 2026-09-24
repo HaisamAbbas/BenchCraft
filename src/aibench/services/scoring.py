@@ -480,6 +480,18 @@ class BindingScorer:
         self.storage.commit_evaluation_attempt(result, attempt_number=result.attempt_number)
         return result
 
+    def record_outcome(
+        self, execution: ExecutionResult | MissingExecution, outcome: EvaluationOutcome
+    ) -> EvaluationResult:
+        """Record an outcome produced outside this process (a remote job's result, 17-T2):
+        the same attempt, provenance and final-result path as an evaluated one, without
+        calling any evaluator."""
+        raw = self._serialize_raw(outcome) if outcome.status is not ExecutionStatus.SKIPPED else None
+        result = self._result(execution, outcome, raw=raw)
+        self.storage.commit_evaluation_attempt(result, attempt_number=result.attempt_number)
+        self.finalize(result)
+        return result
+
     def finalize(self, result: EvaluationResult) -> None:
         """Commit the attempt chosen as this item's result (metric_results), and make a
         fresh successful result the cache source for its key."""

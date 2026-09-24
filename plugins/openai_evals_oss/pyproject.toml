@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aibench-openai-evals-oss"
+# The single source of the version is `aibench_openai_evals_oss._version.__version__`.
+dynamic = ["version"]
+description = "openai/evals (open-source framework) bridge for aibench: recorded replay and a live completion-function bridge"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "Apache-2.0"
+dependencies = [
+    "aibench>=0.1.0rc1,<0.2",
+    # Exact pin: the allowlisted eval classes were checked against this release
+    # (aibench_openai_evals_oss.upstream.PINNED_EVALS).
+    "evals==3.0.1.post1",
+]
+
+# The full `evals` dependency list pulls in dozens of packages (TensorFlow, Playwright,
+# Snowflake, ...) that the allowlisted evals never import. Install it without them and
+# add only what the allowlisted modules import; the tested set is `requirements-lock.txt`:
+#   pip install -e . --no-deps && pip install -r requirements-lock.txt
+
+[project.entry-points."aibench.evaluators"]
+openai_evals_oss = "aibench_openai_evals_oss:EVALUATORS"
+
+[tool.setuptools.dynamic]
+version = {attr = "aibench_openai_evals_oss._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

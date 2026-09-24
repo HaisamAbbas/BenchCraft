@@ -1,0 +1,4 @@
+{"id": "arith", "input": [{"role": "system", "content": "Answer briefly."}, {"role": "user", "content": "What is 2+2?"}], "ideal": "4"}
+{"id": "capital", "input": [{"role": "system", "content": "Answer briefly."}, {"role": "user", "content": "What is the capital of France?"}], "ideal": "Paris"}
+{"id": "planet", "input": [{"role": "system", "content": "Answer briefly."}, {"role": "user", "content": "What is the largest planet?"}], "ideal": "Jupiter"}
+{"id": "water", "input": [{"role": "system", "content": "Answer briefly."}, {"role": "user", "content": "What is the chemical symbol for water?"}], "ideal": "H2O"}

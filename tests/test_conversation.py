@@ -347,6 +347,8 @@ def test_the_assistant_has_no_terminal_file_or_network_tool(tmp_path: Path) -> N
         "describe_application",
         "summarize_dataset",
         "list_evaluators",
+        # Read-only: modes, destinations and availability; starts and contacts nothing.
+        "list_integrations",
         "describe_evaluator",
         "explain_metric",
         "propose_plan_patch",

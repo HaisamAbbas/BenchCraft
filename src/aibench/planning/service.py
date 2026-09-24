@@ -135,6 +135,7 @@ def _registry(
                 python,
                 secret_env=dict(env.secret_env),
                 extra_paths=[Path(p) if Path(p).is_absolute() else plan_dir / p for p in env.paths],
+                startup_timeout_seconds=env.startup_timeout_seconds,
             ):
                 if load.error:
                     notes.append(f"plugin {load.plugin.name}: {load.error}")

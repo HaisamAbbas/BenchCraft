@@ -956,7 +956,11 @@ class EvaluatorManifest(FrozenModel):
     requires: tuple[FieldRequirement, ...] = ()
     default_rule: DecisionRule | None = None
     parameters_schema: FrozenValue = Field(default_factory=dict)
-    consumes: Literal["recorded_outputs", "owns_execution"] = "recorded_outputs"
+    # recorded_outputs: scores stored executions per case (the default).
+    # owns_execution: runs the application itself (a delegated suite).
+    # remote_job: results arrive from an external job (submit/poll/fetch), never from a
+    # per-case evaluate call; a plan cannot bind it (17-T2).
+    consumes: Literal["recorded_outputs", "owns_execution", "remote_job"] = "recorded_outputs"
     uses_models: bool = False
     credentials: tuple[str, ...] = ()
     network_destinations: tuple[str, ...] = ()

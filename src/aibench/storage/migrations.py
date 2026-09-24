@@ -498,6 +498,26 @@ _0009_candidate_workflow = Migration(
     """,
 )
 
+# Prompt 17: remote evaluation jobs (17-T2). The request fingerprint and the request itself
+# are stored before anything is sent; remote identifiers as soon as they are known.
+_0010_remote_jobs = Migration(
+    version=10,
+    name="remote_jobs",
+    sql="""
+    CREATE TABLE remote_jobs (
+        job_id       TEXT PRIMARY KEY,
+        run_id       TEXT NOT NULL REFERENCES runs(run_id),
+        plugin_id    TEXT NOT NULL,
+        state        TEXT NOT NULL,
+        fingerprint  TEXT NOT NULL,
+        data         TEXT NOT NULL, -- JSON: remote IDs, request artifact, counts, history
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+    );
+    CREATE INDEX idx_remote_jobs_run ON remote_jobs(run_id);
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
@@ -508,6 +528,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _0007_sessions,
     _0008_traces_and_cache,
     _0009_candidate_workflow,
+    _0010_remote_jobs,
 )
 
 

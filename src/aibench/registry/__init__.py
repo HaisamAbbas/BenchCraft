@@ -286,6 +286,14 @@ class EvaluatorRegistry:
                 BindingProblem(binding.metric, issue)
                 for issue in applicability_problems(metric.requirements, application)
             )
+            if metric.manifest.consumes == "remote_job":
+                problems.append(
+                    BindingProblem(
+                        binding.metric,
+                        "its results come from a remote job, not a per-case evaluation; "
+                        "submit it with its plugin's remote-job commands",
+                    )
+                )
             if metric.binding_hash in seen:
                 problems.append(BindingProblem(binding.metric, "duplicate binding"))
                 continue

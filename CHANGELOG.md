@@ -24,6 +24,33 @@ Workspace schema changes are listed under "Workspace". Upgrade steps are in
 Schema version 9 adds the candidate-pool, candidate-case, and append-only candidate-event
 tables. Older workspaces migrate forward on first use.
 
+## Unreleased Phase 2 working tree — Prompt 17
+
+- **openai/evals bridge** (plugin `aibench-openai-evals-oss`, `evals==3.0.1.post1`):
+  - the `match`, `includes`, `fuzzy_match` and `json_match` evals, run by the upstream code;
+  - recorded replay needs the eval's request to equal the recorded input exactly, once;
+  - `aibench openai-evals-oss run` bridges the upstream completion function to the
+    application's runner as a recorded `delegated_suite` run.
+- **Hosted OpenAI Evals API bridge** (plugin `aibench-openai-evals-api`, `openai==3.19.2`):
+  - `aibench openai-evals-api submit/status/resume/cancel/fetch/jobs` grade recorded
+    outputs as remote jobs;
+  - requests are stored before sending;
+  - ambiguous submissions are reconciled, never resent without `--resend`;
+  - results map one-to-one to cases;
+  - generating data sources and `{{sample.*}}` templates are refused.
+- **Langfuse connector:** `aibench langfuse import-dataset/import-traces/export-scores/status`
+  import datasets and traces, and export recorded results as scores, with provenance on
+  both sides.
+- **Integrations:** `aibench integrations list`, `/integrations` in chat and the
+  assistant's `list_integrations` tool show modes, data destinations and availability.
+- **Policy:** new `allowed_egress_origins`. Every destination that receives benchmark
+  data or credentials must be listed, loopback included.
+- **Behaviour change:** a `remote_job` metric cannot be bound in plans or rescoring.
+
+### Workspace
+
+Schema version 10 adds `remote_jobs` (after Prompt 18's migration 9).
+
 ## Unreleased Phase 2 working tree — Prompt 16
 
 - **Evidence-backed inspection.**

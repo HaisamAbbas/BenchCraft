@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aibench-openai-evals-api"
+# The single source of the version is `aibench_openai_evals_api._version.__version__`.
+dynamic = ["version"]
+description = "Hosted OpenAI Evals API bridge for aibench: stored-output grading as remote jobs"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "Apache-2.0"
+dependencies = [
+    "aibench>=0.1.0rc1,<0.2",
+    # Exact pin: the Evals API request/response contract was checked against this SDK
+    # release (aibench_openai_evals_api.contract.PINNED_OPENAI).
+    "openai==3.19.2",
+]
+
+[project.entry-points."aibench.evaluators"]
+openai_evals_api = "aibench_openai_evals_api:EVALUATORS"
+
+[tool.setuptools.dynamic]
+version = {attr = "aibench_openai_evals_api._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -274,6 +274,7 @@ def _load_registry(analysis: PlanAnalysis) -> EvaluatorRegistry:
                 python,
                 secret_env=dict(env.secret_env),
                 extra_paths=[Path(p) if Path(p).is_absolute() else plan_dir / p for p in env.paths],
+                startup_timeout_seconds=env.startup_timeout_seconds,
             ):
                 if load.error:
                     analysis.add("invalid", f"plugin {load.plugin.name}: {load.error}", "plugins")
@@ -304,6 +305,14 @@ def _resolve_metrics(analysis: PlanAnalysis, *, plugins_not_loaded: str | None) 
             else:
                 for problem in exc.problems:
                     analysis.add("invalid", str(problem), subject)
+            continue
+        if metric.manifest.consumes == "remote_job":
+            analysis.add(
+                "invalid",
+                f"{binding.metric}: its results come from a remote job, not a per-case "
+                "evaluation; submit it with its plugin's remote-job commands",
+                subject,
+            )
             continue
         if metric.binding_hash in seen:
             analysis.add("invalid", f"{binding.metric}: duplicate binding", subject)

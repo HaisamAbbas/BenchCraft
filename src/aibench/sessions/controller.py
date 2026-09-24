@@ -347,6 +347,13 @@ class SessionController:
         data["selected_test_world"] = choices.test_world
         return data
 
+    def integrations(self) -> list[dict[str, Any]]:
+        """External integrations: supported modes, data destinations and whether the
+        session policy lets them run now (17-T4). Starts nothing, contacts nothing."""
+        from aibench.services.integrations import integrations
+
+        return integrations(self.policy())
+
     def inputs(self) -> PlanningInputs:
         """Evidence for the current revision (profile, dataset counts, catalog), cached."""
         decision = self.current_decision()

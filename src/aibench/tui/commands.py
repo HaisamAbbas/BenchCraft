@@ -37,6 +37,7 @@ COMMANDS: dict[str, str] = {
     "/world": "/world NAME|none - select one of the application's test worlds (a new draft)",
     "/report": "/report [html|markdown|json] - the current run's report, from stored facts",
     "/compare": "/compare BASELINE CURRENT - paired stored-run comparison (no model)",
+    "/integrations": "external integrations: modes, data destinations, availability",
     "/sessions": "sessions of this project",
     "/new": "start a fresh session in this project",
     "/exit": "leave; an active run stops dispatching and stays resumable",
@@ -168,6 +169,11 @@ class Commands:
 
     async def _budget(self, _: str) -> CommandResult:
         return CommandResult("/budget", "budget", self.controller.budget())
+
+    async def _integrations(self, _: str) -> CommandResult:
+        return CommandResult(
+            "/integrations", "integrations", {"integrations": self.controller.integrations()}
+        )
 
     async def _app(self, _: str) -> CommandResult:
         return CommandResult("/app", "application", self.controller.describe_application())

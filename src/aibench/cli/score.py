@@ -60,6 +60,13 @@ _PLUGIN_SECRET_OPTION = typer.Option(
     "--plugin-secret",
     help="NAME=source:name secret passed to plugin workers, e.g. OPENAI_API_KEY=env:OPENAI_API_KEY.",
 )
+_PLUGIN_STARTUP_TIMEOUT_OPTION = typer.Option(
+    120.0,
+    "--plugin-startup-timeout",
+    min=1.0,
+    max=3_600.0,
+    help="Bound for plugin discovery and worker startup in seconds.",
+)
 
 
 def _registry(
@@ -68,6 +75,7 @@ def _registry(
     plugin_env: Path | None = None,
     plugin_secrets: list[str] | None = None,
     plugin_paths: list[Path] | None = None,
+    startup_timeout_seconds: float = 120.0,
 ) -> EvaluatorRegistry:
     registry = EvaluatorRegistry.with_native()
     if custom is not None:
@@ -80,7 +88,10 @@ def _registry(
                 raise AibenchError(f"--plugin-secret must look like NAME=source:name, got {item!r}")
             secrets[name] = ref
         loads = registry.load_plugin_environment(
-            plugin_env, secret_env=secrets, extra_paths=[p.resolve() for p in plugin_paths or []]
+            plugin_env,
+            secret_env=secrets,
+            extra_paths=[p.resolve() for p in plugin_paths or []],
+            startup_timeout_seconds=startup_timeout_seconds,
         )
         for load in loads:
             if load.error:
@@ -99,12 +110,15 @@ def list_evaluators(
     plugin_env: Path | None = _PLUGIN_ENV_OPTION,
     plugin_secret: list[str] = _PLUGIN_SECRET_OPTION,
     plugin_path: list[Path] = _PLUGIN_PATH_OPTION,
+    plugin_startup_timeout: float = _PLUGIN_STARTUP_TIMEOUT_OPTION,
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
     """Built-in and trusted local evaluators, plus installed plugins found by metadata
     (plugins are listed, not imported)."""
     try:
-        registry = _registry(custom, trust_local_code, plugin_env, plugin_secret, plugin_path)
+        registry = _registry(
+            custom, trust_local_code, plugin_env, plugin_secret, plugin_path, plugin_startup_timeout
+        )
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
     plugins = discover_plugins()
@@ -137,11 +151,17 @@ def describe_evaluator(
     plugin_env: Path | None = _PLUGIN_ENV_OPTION,
     plugin_secret: list[str] = _PLUGIN_SECRET_OPTION,
     plugin_path: list[Path] = _PLUGIN_PATH_OPTION,
+    plugin_startup_timeout: float = _PLUGIN_STARTUP_TIMEOUT_OPTION,
 ) -> None:
     """Full manifest of one evaluator."""
     try:
         manifest, _ = _registry(
-            custom, trust_local_code, plugin_env, plugin_secret, plugin_path
+            custom,
+            trust_local_code,
+            plugin_env,
+            plugin_secret,
+            plugin_path,
+            plugin_startup_timeout,
         ).resolve(reference)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
@@ -209,11 +229,14 @@ def score(
     plugin_env: Path | None = _PLUGIN_ENV_OPTION,
     plugin_secret: list[str] = _PLUGIN_SECRET_OPTION,
     plugin_path: list[Path] = _PLUGIN_PATH_OPTION,
+    plugin_startup_timeout: float = _PLUGIN_STARTUP_TIMEOUT_OPTION,
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
     """Score a run's recorded outputs. Never invokes the application."""
     try:
-        registry = _registry(custom, trust_local_code, plugin_env, plugin_secret, plugin_path)
+        registry = _registry(
+            custom, trust_local_code, plugin_env, plugin_secret, plugin_path, plugin_startup_timeout
+        )
         bindings = _load_bindings(metrics)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc

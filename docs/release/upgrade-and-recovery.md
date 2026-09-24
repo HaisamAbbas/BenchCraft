@@ -74,6 +74,7 @@ A project's workspace is its `.aibench/` directory:
 
 - **Newer aibench, older workspace.** The workspace database is migrated forward the first time a command opens it. Each migration is one transaction: a crash mid-migration leaves the previous schema intact, and the next open retries it. Nothing is migrated backwards. (`tests/test_storage_migrations.py`)
 - **Prompt 18 workspace schema 9.** The migration adds candidate pools, candidate cases, and append-only candidate review/verification events. Candidate records are kept separately from ordinary datasets. Existing workspace contents remain available after the forward migration.
+- **Prompt 17 workspace schema 10.** The migration adds durable remote evaluation job state for the hosted Evals API bridge.
 - **Older aibench, newer workspace.** Refused with exit code 2: "this workspace was upgraded by a newer aibench (schema version N; this aibench knows up to M)". Nothing is written. Install the newer version again to use it. (`tests/test_release_candidate.py`)
 
 0.1.0rc1 is the first release, so there is nothing to migrate from yet. A workspace created

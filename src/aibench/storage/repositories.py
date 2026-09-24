@@ -819,6 +819,59 @@ class Storage:
             for row in rows
         ]
 
+    # ---------------------------------------------------------------- remote jobs (17-T2)
+
+    def commit_remote_job(
+        self, job_id: str, run_id: str, plugin_id: str, state: str, fingerprint: str,
+        data: dict[str, Any],
+    ) -> None:  # fmt: skip
+        """Record a remote job before anything is sent. Refuses a second job with the same
+        ID (a resubmission is a new job, never an overwrite)."""
+        now = _now()
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO remote_jobs (job_id, run_id, plugin_id, state, fingerprint, data, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (job_id, run_id, plugin_id, state, fingerprint, json.dumps(data), now, now),
+            )
+
+    def update_remote_job(self, job_id: str, state: str, data: dict[str, Any]) -> None:
+        with self.conn:
+            cursor = self.conn.execute(
+                "UPDATE remote_jobs SET state = ?, data = ?, updated_at = ? WHERE job_id = ?",
+                (state, json.dumps(data), _now(), job_id),
+            )
+        if cursor.rowcount != 1:
+            raise ConflictError(f"no remote job {job_id!r}")
+
+    def get_remote_job(self, job_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM remote_jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        return self._remote_job(row) if row else None
+
+    def list_remote_jobs(self, run_id: str | None = None) -> list[dict[str, Any]]:
+        if run_id is None:
+            rows = self.conn.execute("SELECT * FROM remote_jobs ORDER BY created_at").fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM remote_jobs WHERE run_id = ? ORDER BY created_at", (run_id,)
+            ).fetchall()
+        return [self._remote_job(row) for row in rows]
+
+    @staticmethod
+    def _remote_job(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "job_id": row["job_id"],
+            "run_id": row["run_id"],
+            "plugin_id": row["plugin_id"],
+            "state": row["state"],
+            "fingerprint": row["fingerprint"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            **json.loads(row["data"]),
+        }
+
     # ---------------------------------------------------------------- traces (16-T2)
 
     def commit_trace_observations(

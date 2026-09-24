@@ -216,10 +216,32 @@ Review remediation: `tests/test_runner_review_regressions.py`.
 
 Gates: 16-G1..G5. See `docs/engineering/reports/16.md`. Decisions: ADR 0015.
 
+## Prompt 17 — OpenAI evaluation bridges and one platform connector
+
+Status: COMPLETE (report `docs/engineering/reports/17.md`, ADR 0017). The earlier Prompt 18
+prerequisite subset `17-P18` is kept below as it was recorded.
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 17-T1 | Pin and bridge supported OpenAI Evals OSS completion functions with exact replay matching | DONE | `plugins/openai_evals_oss` (`evals==3.0.1.post1`, allowlist match/includes/fuzzy_match/json_match, `replay.py`, `bridge.py`), `services/delegated.py`, `aibench openai-evals-oss run`; `examples/openai_evals/`; `tests/test_openai_evals_oss.py` |
+| 17-T2 | Implement hosted Evals submit/poll/fetch/cancel with explicit egress and persisted remote identities | DONE | `plugins/openai_evals_api` (`openai==3.19.2`, `contract.py`, `worker.py`), `services/remote_jobs.py`, migration 10 `remote_jobs`, `aibench openai-evals-api ...`, policy `allowed_egress_origins`; `examples/openai_evals/evals_api_stub.py`; `tests/test_openai_evals_api.py` |
+| 17-T3 | Implement one demand-selected Langfuse, Phoenix, or Braintrust import connector | DONE | Langfuse (default; reversible choice, ADR 0017): `connectors/langfuse.py`, `aibench langfuse import-dataset/import-traces/export-scores/status`; `examples/langfuse/`; `tests/test_langfuse_connector.py` |
+| 17-T4 | Expose exact supported integration modes and data destinations to planning/chat | DONE | `services/integrations.py`, `aibench integrations list`, `/integrations`, assistant `list_integrations`, catalog `consumes`/`network_destinations`, `remote_job` refused in plans; `tests/test_integrations.py` |
+
+Gates: 17-G1..G5. See `docs/engineering/reports/17.md`. Decisions: ADR 0017.
+
+**Completed dependency subset `17-P18`:** The bounded generation call reuses the existing
+policy-checked OpenAI-compatible provider and explicitly selected development source input;
+episode runs reuse the Prompt 15 reset/world-state contracts. Evidence: `tests/test_candidate_workflow.py`,
+`tests/test_episode_contract.py`, ADR 0016. No Prompt 17 OSS/API bridge or connector capability
+is claimed.
+
 ## Prompt 18 — Reviewed dataset generation and advanced episodes
 
 Prompt 18 prerequisite subset: `17-P18` is recorded in `phase-status.md` and ADR 0016.
-Prompt 17 remains unstarted outside this dependency slice.
+That note records the dependency available when Prompt 18 ran. Prompt 17 was completed
+afterwards under its separate tickets, gates and report (`docs/engineering/reports/17.md`,
+ADR 0017).
 
 | Ticket | Description | Status | Evidence |
 |---|---|---|---|

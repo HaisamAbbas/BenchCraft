@@ -91,6 +91,8 @@ def test_evaluator_framework_imports_stay_inside_their_adapter_packages() -> Non
             repo / "plugins" / "ragas" / "src",
             repo / "tests" / "fixtures" / "ragas_judges",
         ),
+        # openai/evals (the open-source framework) only in its own plugin (17-G1).
+        "evals": (repo / "plugins" / "openai_evals_oss" / "src",),
     }
     offenders = []
     for path in list((repo / "src").rglob("*.py")) + list((repo / "plugins").rglob("*.py")):

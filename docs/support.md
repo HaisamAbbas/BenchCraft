@@ -60,7 +60,8 @@ retrieved text. It never substitutes the Golden's reference context. Ragas 0.4.3
 open multi-modal SSRF advisory; the adapter does not expose the affected metric and runs in
 an isolated worker. See ADR 0013 and `plugins/ragas/README.md`.
 
-OpenAI Evals and Promptfoo are not integrated.
+Promptfoo is not integrated. OpenAI Evals (open-source and hosted) and Langfuse are: see
+[docs/integrations.md](integrations.md).
 
 ## Run comparison
 

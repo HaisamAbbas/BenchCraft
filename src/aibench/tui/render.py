@@ -125,6 +125,30 @@ def application(console: Console, data: dict[str, Any]) -> None:
         )
 
 
+def integrations(console: Console, data: dict[str, Any]) -> None:
+    for entry in data["integrations"]:
+        state = (
+            "[green]available[/green]"
+            if entry["status"]["available"]
+            else "[yellow]unavailable[/yellow]"
+        )
+        out(console, f"[bold]{safe(entry['name'])}[/bold]: {state}")
+        for reason in entry["status"]["reasons"]:
+            out(console, f"  [yellow]-[/yellow] {safe(reason)}")
+        for mode in entry["modes"]:
+            support = "" if mode["supported"] else " [dim](not supported)[/dim]"
+            out(console, f"  mode {safe(mode['mode'])}{support}")
+        destinations = entry["data_destinations"]
+        if not destinations:
+            out(console, "  sends data: nowhere (local only)")
+        for destination in destinations:
+            out(
+                console,
+                f"  sends {safe(destination['sends'])} to {safe(str(destination['url']))}",
+            )
+        out(console, f"  [dim]{safe(entry['live_verification'])}[/dim]")
+
+
 def status(console: Console, snapshot: dict[str, Any]) -> None:
     out(console, safe(status_line(snapshot)) + f" [dim]as of {safe(snapshot['as_of'])}[/dim]")
     for item in snapshot.get("needs_attention", [])[:10]:

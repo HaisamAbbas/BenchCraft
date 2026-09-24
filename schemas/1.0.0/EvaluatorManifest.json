@@ -115,7 +115,8 @@
       "default": "recorded_outputs",
       "enum": [
         "recorded_outputs",
-        "owns_execution"
+        "owns_execution",
+        "remote_job"
       ],
       "title": "Consumes",
       "type": "string"

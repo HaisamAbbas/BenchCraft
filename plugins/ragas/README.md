@@ -40,7 +40,7 @@ uses. The plugin worker receives a minimal environment, a private working direct
 HOME, and only credentials explicitly passed with `--plugin-secret`.
 
 Ragas 0.4.3 eagerly imports its full metric catalogue. On a cold, loaded Windows host that
-import can take longer than aibench's default 180-second worker-startup bound; the adapter
+import can take longer than aibench's default 120-second worker-startup bound; the adapter
 starts the import during worker preparation, but deployment should measure that startup and
 pass a bounded `startup_timeout_seconds` override appropriate for the host. The real-package
 contract tests use a bounded 600-second startup allowance for that measurement.
@@ -71,6 +71,7 @@ Score it with the plugin interpreter and pass the provider credential explicitly
 ```text
 aibench score RUN_ID --metrics metrics.json \
   --plugin-env plugins/ragas/.venv/Scripts/python.exe \
+  --plugin-startup-timeout 600 \
   --plugin-secret OPENAI_API_KEY=env:OPENAI_API_KEY
 ```
 

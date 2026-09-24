@@ -462,6 +462,13 @@ def tool_specs() -> list[dict[str, Any]]:
         _tool("summarize_dataset", "Dataset field coverage counts (no values).", _NO_ARGS),
         _tool("list_evaluators", "Installed evaluators with eligibility.", _NO_ARGS),
         _tool(
+            "list_integrations",
+            "External integrations (openai/evals, the OpenAI Evals API, Langfuse): supported "
+            "and unsupported modes, where each sends data, and whether the policy lets it run "
+            "now. Never claim an unavailable integration works.",
+            _NO_ARGS,
+        ),
+        _tool(
             "describe_evaluator",
             "One evaluator's catalog entry.",
             _object({"metric": {"type": "string"}}, ["metric"]),
@@ -723,6 +730,7 @@ class _Turn:
             "describe_application": self._describe_application,
             "summarize_dataset": self._read(lambda i: json.loads(i.dataset.model_dump_json())),
             "list_evaluators": self._read(lambda i: [o.as_dict() for o in i.catalog]),
+            "list_integrations": self._integrations,
             "describe_evaluator": self._describe,
             "explain_metric": self._explain,
             "propose_plan_patch": self._patch,
@@ -775,6 +783,10 @@ class _Turn:
             return pick(self.controller.inputs())
 
         return handler
+
+    async def _integrations(self, _: dict[str, Any]) -> Any:
+        self.outcome.explained.append({"tool": "list_integrations", "subject": "integrations"})
+        return self.controller.integrations()
 
     async def _describe_application(self, _: dict[str, Any]) -> Any:
         self.outcome.explained.append({"tool": "describe_application", "subject": "application"})
