@@ -20,7 +20,7 @@
   "observed_checks": [
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_comparison_statistics.py tests/test_comparison_service.py tests/test_scoring_service.py tests/test_registry.py tests/test_models.py",
-      "result": "102 passed in 19.94s"
+      "result": "102 passed in 31.72s"
     },
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_cross_ecosystem.py",
@@ -39,6 +39,18 @@
       "result": "13 passed in 202.43s"
     },
     {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider --ignore=tests/test_ragas_adapter.py --ignore=tests/test_cross_ecosystem.py --ignore=tests/test_deepeval_adapter.py",
+      "result": "809 passed, 2 skipped, 8 failed in 1486.54s under concurrent load; all 8 failed tests were rerun in isolation and passed after the comparison fixture fix"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_mvp_acceptance.py::test_the_100_case_workflow_survives_a_kill_finds_the_injected_failures_and_rescores_offline tests/test_quickstart_pty.py::test_the_quickstart_runs_and_reports_in_a_real_terminal",
+      "result": "2 passed in 91.40s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_session_recovery.py::test_reopening_after_a_kill_shows_the_real_state_and_restarts_nothing tests/test_session_recovery.py::test_a_killed_effectful_run_leaves_unknown_effect_work_for_the_user tests/test_session_recovery.py::test_retrying_a_start_after_a_kill_never_starts_a_second_run",
+      "result": "3 passed in 75.47s"
+    },
+    {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_deepeval_adapter.py -k 'not blocking_judge'",
       "result": "17 passed, 1 skipped (live provider), 1 deselected in 798.33s"
     },
@@ -47,8 +59,8 @@
       "result": "1 passed in 259.85s"
     },
     {
-      "command": ".venv/Scripts/python -m build --outdir .worktmp/prompt14-dist .; .venv/Scripts/python -m build --outdir .worktmp/prompt14-dist plugins/deepeval; .venv/Scripts/python -m build --outdir .worktmp/prompt14-dist plugins/ragas",
-      "result": "all three sdist/wheel builds succeeded"
+      "command": ".venv/Scripts/python -m build --outdir .worktmp/prompt14-dist-final .; .venv/Scripts/python -m build --outdir .worktmp/prompt14-dist-final plugins/deepeval; .venv/Scripts/python -m build --outdir .worktmp/prompt14-dist-final plugins/ragas",
+      "result": "all three sdist/wheel artifacts produced; the Windows DeepEval build emitted non-fatal temporary-directory cleanup lock warnings"
     },
     {
       "command": ".venv/Scripts/python -m ruff check src tests plugins",
@@ -56,12 +68,23 @@
     },
     {
       "command": ".venv/Scripts/python -m mypy src",
-      "result": "Success: no issues found in 102 source files"
+      "result": "Success: no issues found in 110 source files"
     },
     {
       "command": "plugins/ragas/.venv/Scripts/python -m pip check",
       "result": "No broken requirements found"
+    },
+    {
+      "command": ".worktmp/ragas-wheel-venv-final/Scripts/python -m pip install -q .worktmp/prompt14-dist-final/aibench-0.1.0rc1-py3-none-any.whl .worktmp/prompt14-dist-final/aibench_ragas-0.1.0rc1-py3-none-any.whl; .worktmp/ragas-wheel-venv-final/Scripts/python -m pip check",
+      "result": "installed core and Ragas wheels; versions 0.1.0rc1 / 0.1.0rc1 / ragas 0.4.3; no broken requirements"
+    },
+    {
+      "command": "AIBENCH_RAGAS_PYTHON=.worktmp/ragas-wheel-venv-final/Scripts/python.exe .venv/Scripts/python -m pytest -q -rs -p no:cacheprovider tests/test_ragas_adapter.py",
+      "result": "9 passed in 406.41s using the final built wheels"
     }
+  ],
+  "build_notes": [
+    "An initial wheel test used an artifact built before the final core schema changes and failed with an ExecutionResult extra-field validation error; that stale artifact was discarded. The final wheel build/install/test result is recorded separately and is the only built-artifact result claimed."
   ],
   "pending_or_unobserved": [
     "Live DeepEval or Ragas provider calls",
