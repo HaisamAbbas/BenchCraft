@@ -1,0 +1,190 @@
+{
+  "$defs": {
+    "ExperimentBudget": {
+      "additionalProperties": false,
+      "description": "Search budget; each individual run also obeys the frozen plan's BudgetLimits.",
+      "properties": {
+        "bootstrap_replicates": {
+          "default": 2000,
+          "maximum": 20000,
+          "minimum": 100,
+          "title": "Bootstrap Replicates",
+          "type": "integer"
+        },
+        "max_trials": {
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Max Trials",
+          "type": "integer"
+        },
+        "min_metric_coverage": {
+          "default": 0.95,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Min Metric Coverage",
+          "type": "number"
+        },
+        "min_paired_coverage": {
+          "default": 0.95,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Min Paired Coverage",
+          "type": "number"
+        },
+        "seed": {
+          "default": 0,
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_trials"
+      ],
+      "title": "ExperimentBudget",
+      "type": "object"
+    },
+    "ExperimentConstraint": {
+      "additionalProperties": false,
+      "description": "A frozen threshold over a numeric or binary-rate metric binding.",
+      "properties": {
+        "binding_index": {
+          "minimum": 0,
+          "title": "Binding Index",
+          "type": "integer"
+        },
+        "comparator": {
+          "enum": [
+            ">=",
+            ">",
+            "<=",
+            "<"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "threshold": {
+          "title": "Threshold",
+          "type": "number"
+        }
+      },
+      "required": [
+        "binding_index",
+        "comparator",
+        "threshold"
+      ],
+      "title": "ExperimentConstraint",
+      "type": "object"
+    },
+    "ExperimentObjective": {
+      "additionalProperties": false,
+      "description": "One fixed case-scoped metric binding to maximize or minimize.",
+      "properties": {
+        "binding_index": {
+          "minimum": 0,
+          "title": "Binding Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "binding_index"
+      ],
+      "title": "ExperimentObjective",
+      "type": "object"
+    },
+    "ExperimentParameterValues": {
+      "additionalProperties": false,
+      "description": "The finite values selected for one application-exposed parameter.",
+      "properties": {
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 2,
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "values"
+      ],
+      "title": "ExperimentParameterValues",
+      "type": "object"
+    }
+  },
+  "$id": "aibench/1.0.0/ExperimentDefinition.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "A controlled finite-grid experiment over a development dataset and fixed plan.",
+  "properties": {
+    "budget": {
+      "$ref": "#/$defs/ExperimentBudget"
+    },
+    "constraints": {
+      "items": {
+        "$ref": "#/$defs/ExperimentConstraint"
+      },
+      "maxItems": 16,
+      "title": "Constraints",
+      "type": "array"
+    },
+    "development_dataset": {
+      "minLength": 1,
+      "title": "Development Dataset",
+      "type": "string"
+    },
+    "experiment_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$",
+      "title": "Experiment Id",
+      "type": "string"
+    },
+    "holdout_dataset": {
+      "minLength": 1,
+      "title": "Holdout Dataset",
+      "type": "string"
+    },
+    "intended_change": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Intended Change",
+      "type": "string"
+    },
+    "objective": {
+      "$ref": "#/$defs/ExperimentObjective"
+    },
+    "parameters": {
+      "items": {
+        "$ref": "#/$defs/ExperimentParameterValues"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "title": "Parameters",
+      "type": "array"
+    },
+    "plan": {
+      "minLength": 1,
+      "title": "Plan",
+      "type": "string"
+    }
+  },
+  "required": [
+    "experiment_id",
+    "plan",
+    "development_dataset",
+    "holdout_dataset",
+    "intended_change",
+    "parameters",
+    "objective",
+    "budget"
+  ],
+  "title": "ExperimentDefinition",
+  "type": "object"
+}

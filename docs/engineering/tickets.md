@@ -250,3 +250,13 @@ ADR 0017).
 | 18-T3 | Define and execute multi-turn text application episodes with simulator provenance, per-episode reset and independent final-state success checks | DONE | `core/models.py`, `datasets/episodes.py`, `cli/episodes.py`, `examples/multi_turn_text/`, `examples/apps/multi_turn_support.py`, `tests/test_episode_contract.py` |
 
 Gates: 18-G1..G4 PASS. Report: `docs/engineering/reports/18.md`. Decision: ADR 0016.
+
+## Prompt 19 — Controlled optimization experiments
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 19-T1 | Define a finite experiment over application-exposed settings, objective, constraints and development data; preserve intended change, exact parameters, budgets and trial lineage | DONE | `core/models.py`, `experiments/service.py`, migration 11; `tests/test_experiments.py::test_known_objective_budget_resume_and_protected_holdout`; 135-test final batch |
+| 19-T2 | Reuse frozen run/evaluator contracts, deterministic manifests and uncertainty-aware comparisons; lock development selection before paired baseline/candidate holdout evaluation | DONE | `services/runs.py`, `services/comparison.py`, `experiments/service.py`; `test_frozen_rubric_and_exposed_parameter_space_reject_changes`, `test_interrupted_holdout_resumes_same_frozen_plan_and_run_ids`, comparison regressions |
+| 19-T3 | Expose experiment state, tradeoffs and a non-applying adoption proposal in CLI and conversation; require separate authorization for source/deployment/production changes | DONE | `cli/experiments.py`, `conversation/agent.py`, `docs/experiments/controlled-experiments.md`; `tests/test_experiments.py::test_experiment_conversation_tools_are_read_only_proposals` |
+
+Gates: 19-G1..G4 PASS. Report: `docs/engineering/reports/19.md`. Decision: ADR 0018.

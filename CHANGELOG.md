@@ -5,6 +5,26 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased Phase 3 working tree — Prompt 19
+
+- Added optional controlled parameter experiments over finite, app-exposed environment
+  settings. Trial contracts freeze the development plan, evaluator identities, budget, seed,
+  constraints, exact parameter values and run lineage.
+- Added a durable budgeted grid runner with explicit resume, coverage/constraint checks and
+  paired uncertainty comparisons. A development candidate is selected only when its
+  95% paired interval supports an improvement over baseline.
+- Added a protected final evaluation that locks development selection first, then compares
+  baseline and selected settings on all holdout cases under one frozen evaluator plan.
+  Reports separate selection and final holdout results; adoption is proposed for review and
+  never applied automatically.
+- Added the synthetic known-objective app, CLI experiment commands and conversation report
+  and adoption tools.
+
+### Workspace
+
+Schema version 11 adds experiment contracts, trial lineage, append-only events and reserved
+holdout digests. Existing workspaces migrate forward on first use.
+
 ## Unreleased Phase 3 working tree — Prompt 18
 
 - Added bounded, policy-checked question/answer candidate generation from explicit

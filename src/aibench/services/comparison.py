@@ -336,13 +336,17 @@ def _decision_name(decision: Any) -> str:
 
 
 def _numeric_value(result: EvaluationResult) -> tuple[float | None, str | None]:
-    """Return a finite scalar value or a stable malformed-result code."""
+    """Return a finite scalar or binary-rate observation, or a stable error code."""
 
     if result.status is not ExecutionStatus.OK:
         return None, None
-    if result.value is None or result.value.kind != "scalar":
+    if result.value is None:
         return None, "non_numeric_result"
     value = deep_unfreeze(result.value.value)
+    if result.value.kind == "boolean":
+        return (float(value), None) if isinstance(value, bool) else (None, "non_numeric_result")
+    if result.value.kind != "scalar":
+        return None, "non_numeric_result"
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None, "non_numeric_result"
     number = float(value)
@@ -1883,7 +1887,7 @@ def _side(
         metric_version=spec.metric_version,
         binding_hash=spec.binding_hash,
         direction=cast(Any, spec.direction),
-        value_kind="scalar",
+        value_kind=cast(Any, spec.value_kind),
     )
     return (
         ComparisonSide(
@@ -1963,7 +1967,12 @@ def _numeric_comparison(
             "passed": False,
             "reason_code": "metric_scope_not_case",
         }, []
-    if left.value_kind != "scalar" or right.value_kind != "scalar" or left.aggregation == "none" or right.aggregation == "none":
+    if (
+        left.value_kind not in {"scalar", "boolean"}
+        or right.value_kind not in {"scalar", "boolean"}
+        or left.aggregation == "none"
+        or right.aggregation == "none"
+    ):
         return None, {
             "status": "not_applicable",
             "passed": True,
@@ -1983,6 +1992,9 @@ def _numeric_comparison(
             bootstrap_replicates=replicates,
             seed=seed,
         )
+        if left.value_kind == "boolean" and right.value_kind == "boolean":
+            stats["measurement"] = "paired_binary_rate_difference"
+            stats["unit"] = "proportion"
     except (TypeError, ValueError, RuntimeError) as exc:
         # Do not return exception text: historical records may contain sensitive
         # values in a validation message.

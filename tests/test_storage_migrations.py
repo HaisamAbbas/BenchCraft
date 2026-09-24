@@ -82,6 +82,10 @@ def test_expected_tables_exist_after_migration() -> None:
         "candidate_pools",
         "candidate_cases",
         "candidate_events",
+        "experiments",
+        "experiment_trials",
+        "experiment_events",
+        "protected_dataset_digests",
         "schema_migrations",
     }
     assert expected.issubset(tables)

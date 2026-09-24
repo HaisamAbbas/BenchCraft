@@ -56,6 +56,7 @@ from aibench.core.sessions import (
     PendingQuestion,
     PlanPatch,
 )
+from aibench.experiments.service import experiment_report, propose_adoption
 from aibench.planning.planner import ModelReply, PlannerProvider, ToolCall
 from aibench.security.redaction import sanitize
 from aibench.services.runs import RunError
@@ -399,6 +400,10 @@ Rules:
   one complete pair exists). A blocked, exploratory, or coverage-failed comparison is
   diagnostic; never describe it as a regression or improvement. Different evaluator
   ecosystems are never averaged into one quality score.
+- For controlled experiments, inspect experiment reports before explaining tradeoffs.
+  Development data selects the candidate; a protected holdout is a separate final check
+  after selection is locked. Explain uncertainty and coverage, and distinguish a proposal
+  from an applied change. Never edit source files, deploy, or change production settings.
 - export_report writes report files; call it only when the user's latest message asks
   for a report to be exported or saved, with user_quote set to those words.
 - To change the draft, call propose_plan_patch with expected_revision set to the current
@@ -513,6 +518,21 @@ def tool_specs() -> list[dict[str, Any]]:
             "A run's report aggregates from stored facts: gates, per-metric counts with "
             "denominators, application failures, latency, cost completeness.",
             _object({"run_id": _RUN_ID}, []),
+        ),
+        _tool(
+            "list_experiments",
+            "List controlled experiments, lifecycle state, selected trial and split digests.",
+            _NO_ARGS,
+        ),
+        _tool(
+            "get_experiment_report",
+            "Show development trial lineage and a separately labeled protected holdout report.",
+            _object({"experiment_id": {"type": "string"}}, ["experiment_id"]),
+        ),
+        _tool(
+            "propose_experiment_adoption",
+            "Explain development and protected holdout tradeoffs and propose whether to review a configuration. Requires completed holdout; never applies changes.",
+            _object({"experiment_id": {"type": "string"}}, ["experiment_id"]),
         ),
         _tool(
             "compare_runs",
@@ -739,6 +759,9 @@ class _Turn:
             "list_failures": self._failures,
             "get_case_evidence": self._case,
             "get_report": self._report,
+            "list_experiments": self._list_experiments,
+            "get_experiment_report": self._experiment_report,
+            "propose_experiment_adoption": self._experiment_adoption,
             "compare_runs": self._compare,
             "export_report": self._export,
             "request_action": self._action,
@@ -841,6 +864,60 @@ class _Turn:
             }
         )
         return facts
+
+    async def _list_experiments(self, args: dict[str, Any]) -> Any:
+        del args
+        records = self.controller.storage.list_experiments()
+        result = [
+            {
+                "experiment_id": record.experiment_id,
+                "status": record.status.value,
+                "selected_trial_id": record.selected_trial_id,
+                "intended_change": record.definition.intended_change,
+                "development_dataset_hash": record.development_dataset_hash,
+                "holdout_dataset_hash": record.holdout_dataset_hash,
+                "selection_locked": record.selection_locked_at is not None,
+            }
+            for record in records
+        ]
+        self.outcome.results.append({"tool": "list_experiments", "count": len(result)})
+        return result
+
+    async def _experiment_report(self, args: dict[str, Any]) -> Any:
+        experiment_id = str(args.get("experiment_id", ""))
+        report = experiment_report(
+            experiment_id,
+            storage=self.controller.storage,
+            artifacts=self.controller.artifacts,
+        )
+        self.outcome.results.append(
+            {
+                "tool": "get_experiment_report",
+                "experiment_id": experiment_id,
+                "status": report["status"],
+                "selected_trial_id": report["development_selection"]["selected_trial_id"],
+                "holdout_status": report["protected_holdout_evaluation"]["status"],
+            }
+        )
+        return report
+
+    async def _experiment_adoption(self, args: dict[str, Any]) -> Any:
+        experiment_id = str(args.get("experiment_id", ""))
+        proposal = propose_adoption(
+            experiment_id,
+            storage=self.controller.storage,
+            artifacts=self.controller.artifacts,
+            actor=f"conversation:{self.controller.session_id}",
+        )
+        self.outcome.results.append(
+            {
+                "tool": "propose_experiment_adoption",
+                "experiment_id": experiment_id,
+                "recommendation": proposal["recommendation"],
+                "applied": False,
+            }
+        )
+        return proposal
 
     async def _compare(self, args: dict[str, Any]) -> Any:
         report = self.controller.compare_runs(

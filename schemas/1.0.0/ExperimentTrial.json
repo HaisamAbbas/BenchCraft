@@ -1,0 +1,112 @@
+{
+  "$defs": {
+    "ExperimentTrialStatus": {
+      "enum": [
+        "pending",
+        "starting",
+        "running",
+        "completed",
+        "failed"
+      ],
+      "title": "ExperimentTrialStatus",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ExperimentTrial.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "comparison_to_baseline": {
+      "default": null,
+      "title": "Comparison To Baseline"
+    },
+    "constraints_passed": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Constraints Passed"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "experiment_id": {
+      "title": "Experiment Id",
+      "type": "string"
+    },
+    "failure": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failure"
+    },
+    "metrics": {
+      "title": "Metrics"
+    },
+    "objective_value": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Objective Value"
+    },
+    "ordinal": {
+      "maximum": 127,
+      "minimum": 0,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "parameter_hash": {
+      "title": "Parameter Hash",
+      "type": "string"
+    },
+    "parameters": {
+      "title": "Parameters"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ExperimentTrialStatus",
+      "default": "pending"
+    },
+    "trial_id": {
+      "title": "Trial Id",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "experiment_id",
+    "trial_id",
+    "ordinal",
+    "run_id",
+    "parameters",
+    "parameter_hash"
+  ],
+  "title": "ExperimentTrial",
+  "type": "object"
+}

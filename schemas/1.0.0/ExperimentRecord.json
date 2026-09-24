@@ -1,0 +1,396 @@
+{
+  "$defs": {
+    "ExperimentBudget": {
+      "additionalProperties": false,
+      "description": "Search budget; each individual run also obeys the frozen plan's BudgetLimits.",
+      "properties": {
+        "bootstrap_replicates": {
+          "default": 2000,
+          "maximum": 20000,
+          "minimum": 100,
+          "title": "Bootstrap Replicates",
+          "type": "integer"
+        },
+        "max_trials": {
+          "maximum": 128,
+          "minimum": 1,
+          "title": "Max Trials",
+          "type": "integer"
+        },
+        "min_metric_coverage": {
+          "default": 0.95,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Min Metric Coverage",
+          "type": "number"
+        },
+        "min_paired_coverage": {
+          "default": 0.95,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Min Paired Coverage",
+          "type": "number"
+        },
+        "seed": {
+          "default": 0,
+          "maximum": 2147483647,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_trials"
+      ],
+      "title": "ExperimentBudget",
+      "type": "object"
+    },
+    "ExperimentConstraint": {
+      "additionalProperties": false,
+      "description": "A frozen threshold over a numeric or binary-rate metric binding.",
+      "properties": {
+        "binding_index": {
+          "minimum": 0,
+          "title": "Binding Index",
+          "type": "integer"
+        },
+        "comparator": {
+          "enum": [
+            ">=",
+            ">",
+            "<=",
+            "<"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "threshold": {
+          "title": "Threshold",
+          "type": "number"
+        }
+      },
+      "required": [
+        "binding_index",
+        "comparator",
+        "threshold"
+      ],
+      "title": "ExperimentConstraint",
+      "type": "object"
+    },
+    "ExperimentDefinition": {
+      "additionalProperties": false,
+      "description": "A controlled finite-grid experiment over a development dataset and fixed plan.",
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/ExperimentBudget"
+        },
+        "constraints": {
+          "items": {
+            "$ref": "#/$defs/ExperimentConstraint"
+          },
+          "maxItems": 16,
+          "title": "Constraints",
+          "type": "array"
+        },
+        "development_dataset": {
+          "minLength": 1,
+          "title": "Development Dataset",
+          "type": "string"
+        },
+        "experiment_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$",
+          "title": "Experiment Id",
+          "type": "string"
+        },
+        "holdout_dataset": {
+          "minLength": 1,
+          "title": "Holdout Dataset",
+          "type": "string"
+        },
+        "intended_change": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Intended Change",
+          "type": "string"
+        },
+        "objective": {
+          "$ref": "#/$defs/ExperimentObjective"
+        },
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/ExperimentParameterValues"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Parameters",
+          "type": "array"
+        },
+        "plan": {
+          "minLength": 1,
+          "title": "Plan",
+          "type": "string"
+        }
+      },
+      "required": [
+        "experiment_id",
+        "plan",
+        "development_dataset",
+        "holdout_dataset",
+        "intended_change",
+        "parameters",
+        "objective",
+        "budget"
+      ],
+      "title": "ExperimentDefinition",
+      "type": "object"
+    },
+    "ExperimentObjective": {
+      "additionalProperties": false,
+      "description": "One fixed case-scoped metric binding to maximize or minimize.",
+      "properties": {
+        "binding_index": {
+          "minimum": 0,
+          "title": "Binding Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "binding_index"
+      ],
+      "title": "ExperimentObjective",
+      "type": "object"
+    },
+    "ExperimentParameterValues": {
+      "additionalProperties": false,
+      "description": "The finite values selected for one application-exposed parameter.",
+      "properties": {
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 2,
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "values"
+      ],
+      "title": "ExperimentParameterValues",
+      "type": "object"
+    },
+    "ExperimentStatus": {
+      "enum": [
+        "ready",
+        "running",
+        "budget_exhausted",
+        "selected",
+        "no_feasible_trial",
+        "holdout_running",
+        "completed",
+        "failed"
+      ],
+      "title": "ExperimentStatus",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ExperimentRecord.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "Durable frozen experiment contract and its separately managed phase transitions.",
+  "properties": {
+    "application_code_hash": {
+      "title": "Application Code Hash",
+      "type": "string"
+    },
+    "application_hash": {
+      "title": "Application Hash",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "definition": {
+      "$ref": "#/$defs/ExperimentDefinition"
+    },
+    "definition_artifact_id": {
+      "title": "Definition Artifact Id",
+      "type": "string"
+    },
+    "definition_hash": {
+      "title": "Definition Hash",
+      "type": "string"
+    },
+    "development_dataset_hash": {
+      "title": "Development Dataset Hash",
+      "type": "string"
+    },
+    "effective_policy": {
+      "title": "Effective Policy"
+    },
+    "evaluator_contract_hash": {
+      "title": "Evaluator Contract Hash",
+      "type": "string"
+    },
+    "experiment_id": {
+      "title": "Experiment Id",
+      "type": "string"
+    },
+    "holdout_baseline_run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Holdout Baseline Run Id"
+    },
+    "holdout_dataset_hash": {
+      "title": "Holdout Dataset Hash",
+      "type": "string"
+    },
+    "holdout_plan_artifact_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Holdout Plan Artifact Id"
+    },
+    "holdout_plan_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Holdout Plan Hash"
+    },
+    "holdout_run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Holdout Run Id"
+    },
+    "objective_binding_hash": {
+      "title": "Objective Binding Hash",
+      "type": "string"
+    },
+    "objective_direction": {
+      "title": "Objective Direction",
+      "type": "string"
+    },
+    "objective_metric_id": {
+      "title": "Objective Metric Id",
+      "type": "string"
+    },
+    "plan_artifact_id": {
+      "title": "Plan Artifact Id",
+      "type": "string"
+    },
+    "plan_hash": {
+      "title": "Plan Hash",
+      "type": "string"
+    },
+    "policy_hash": {
+      "title": "Policy Hash",
+      "type": "string"
+    },
+    "selected_trial_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selected Trial Id"
+    },
+    "selection_locked_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selection Locked At"
+    },
+    "spec_path": {
+      "title": "Spec Path",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ExperimentStatus",
+      "default": "ready"
+    },
+    "trial_limit": {
+      "maximum": 128,
+      "minimum": 1,
+      "title": "Trial Limit",
+      "type": "integer"
+    },
+    "trusted_local": {
+      "default": false,
+      "title": "Trusted Local",
+      "type": "boolean"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "experiment_id",
+    "definition",
+    "definition_hash",
+    "definition_artifact_id",
+    "plan_hash",
+    "plan_artifact_id",
+    "application_hash",
+    "application_code_hash",
+    "evaluator_contract_hash",
+    "objective_metric_id",
+    "objective_direction",
+    "objective_binding_hash",
+    "policy_hash",
+    "effective_policy",
+    "development_dataset_hash",
+    "holdout_dataset_hash",
+    "spec_path",
+    "trial_limit"
+  ],
+  "title": "ExperimentRecord",
+  "type": "object"
+}

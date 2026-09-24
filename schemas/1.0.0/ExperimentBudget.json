@@ -1,0 +1,47 @@
+{
+  "$id": "aibench/1.0.0/ExperimentBudget.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "Search budget; each individual run also obeys the frozen plan's BudgetLimits.",
+  "properties": {
+    "bootstrap_replicates": {
+      "default": 2000,
+      "maximum": 20000,
+      "minimum": 100,
+      "title": "Bootstrap Replicates",
+      "type": "integer"
+    },
+    "max_trials": {
+      "maximum": 128,
+      "minimum": 1,
+      "title": "Max Trials",
+      "type": "integer"
+    },
+    "min_metric_coverage": {
+      "default": 0.95,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Min Metric Coverage",
+      "type": "number"
+    },
+    "min_paired_coverage": {
+      "default": 0.95,
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Min Paired Coverage",
+      "type": "number"
+    },
+    "seed": {
+      "default": 0,
+      "maximum": 2147483647,
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "max_trials"
+  ],
+  "title": "ExperimentBudget",
+  "type": "object"
+}

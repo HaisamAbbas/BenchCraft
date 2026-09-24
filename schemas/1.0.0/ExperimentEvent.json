@@ -1,0 +1,58 @@
+{
+  "$defs": {
+    "ExperimentEventKind": {
+      "enum": [
+        "created",
+        "started",
+        "budget_extended",
+        "budget_exhausted",
+        "trial_started",
+        "trial_completed",
+        "trial_failed",
+        "selected",
+        "no_feasible_trial",
+        "holdout_started",
+        "holdout_completed",
+        "adoption_proposed"
+      ],
+      "title": "ExperimentEventKind",
+      "type": "string"
+    }
+  },
+  "$id": "aibench/1.0.0/ExperimentEvent.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "title": "Actor",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "details": {
+      "title": "Details"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "experiment_id": {
+      "title": "Experiment Id",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/ExperimentEventKind"
+    }
+  },
+  "required": [
+    "event_id",
+    "experiment_id",
+    "kind",
+    "actor"
+  ],
+  "title": "ExperimentEvent",
+  "type": "object"
+}

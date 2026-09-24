@@ -150,7 +150,7 @@ class MetricIdentity:
     metric_version: str
     binding_hash: str
     direction: MetricDirection = "none"
-    value_kind: Literal["scalar"] = "scalar"
+    value_kind: Literal["scalar", "boolean"] = "scalar"
 
     def __post_init__(self) -> None:
         _nonempty_string(self.metric_id, "metric_id")
@@ -158,8 +158,8 @@ class MetricIdentity:
         _nonempty_string(self.binding_hash, "binding_hash")
         if self.direction not in _DIRECTIONS:
             raise ValueError(f"direction must be one of {_DIRECTIONS}, got {self.direction!r}")
-        if self.value_kind != "scalar":
-            raise ValueError("only scalar numeric metric identities can be compared")
+        if self.value_kind not in {"scalar", "boolean"}:
+            raise ValueError("only scalar or boolean numeric metric identities can be compared")
 
     def as_dict(self) -> dict[str, str]:
         return {

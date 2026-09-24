@@ -79,7 +79,12 @@ from aibench.registry import (
 )
 from aibench.runners import LoadedApplication, create_runner, reset_hook
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
-from aibench.services.scoring import ScoringReport, metric_profiles, score_recorded_run
+from aibench.services.scoring import (
+    ScoringReport,
+    declared_dependency_identity,
+    metric_profiles,
+    score_recorded_run,
+)
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.repositories import RunLease, Storage, WorkItemSettlement
 
@@ -122,33 +127,62 @@ def _approval_scope(run_id: str, manifest: RunManifest, policy_hash: str) -> str
     )
 
 
-def _declared_dependency_identity(metrics: list[Any]) -> str | None:
-    """Freeze the installed adapter/package identities used by model-backed metrics.
-
-    The core does not import plugin packages.  This is a declared dependency
-    identity (direct package and adapter versions), not a claim that transitive
-    wheels are reproducible; a future lockfile can replace it without changing
-    the comparison contract.
-    """
-
-    entries = [
-        {
-            "metric_id": metric.manifest.evaluator_id,
-            "plugin_id": metric.manifest.plugin_id,
-            "plugin_version": metric.manifest.plugin_version,
-            "package_name": metric.manifest.package_name,
-            "package_version": metric.manifest.package_version,
-        }
-        for metric in metrics
-        if metric.manifest.uses_models
-    ]
-    return content_hash(sorted(entries, key=lambda item: item["metric_id"])) if entries else None
-
-
 def create_run(
-    compiled: CompiledRun, *, storage: Storage, artifacts: ArtifactStore, granted_by: str
+    compiled: CompiledRun,
+    *,
+    storage: Storage,
+    artifacts: ArtifactStore,
+    granted_by: str,
+    run_id: str | None = None,
+    run_seed: int | None = None,
+    experiment_context: dict[str, Any] | None = None,
 ) -> str:
     spec = compiled.application.spec
+    run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
+    if not run_id or len(run_id) > 120:
+        raise RunError("run_id must be a non-empty value of at most 120 characters")
+    if run_seed is not None and (
+        isinstance(run_seed, bool) or not isinstance(run_seed, int) or not 0 <= run_seed < 2**31
+    ):
+        raise RunError("run_seed must be an integer between 0 and 2^31-1")
+    existing_run = storage.get_run(run_id)
+    if existing_run is not None:
+        expected_app_hash = content_hash(spec.model_dump(mode="json"))
+        parameters = existing_run.manifest.parameters
+        if (
+            existing_run.manifest.dataset_hash != compiled.dataset.content_hash
+            or existing_run.manifest.application_hash != expected_app_hash
+            or existing_run.manifest.plan_hash != compiled.plan_hash
+            or (run_seed is not None and existing_run.manifest.seed != run_seed)
+            or parameters.get("experiment_context") != experiment_context
+        ):
+            raise RunError(f"run id {run_id!r} already belongs to different frozen content")
+        _ensure_run_work_items(compiled, storage, run_id)
+        approval_id = f"{run_id}:approval"
+        if storage.get_approval(approval_id) is None:
+            storage.commit_approval(
+                Approval(
+                    approval_id=approval_id,
+                    scope_hash=_approval_scope(run_id, existing_run.manifest, compiled.policy_hash),
+                    allowed_actions=APPROVED_ACTIONS,
+                    granted_by=granted_by,
+                )
+            )
+        if not any(
+            event["event_type"] == "run_created" for event in storage.list_run_events(run_id)
+        ):
+            storage.append_run_event(
+                run_id,
+                "run_created",
+                {
+                    "plan_id": compiled.plan.plan_id,
+                    "cases": len(compiled.cases),
+                    "repetitions": compiled.plan.repetitions,
+                    "metrics": len(compiled.metrics),
+                },
+            )
+        return run_id
+
     if storage.get_dataset(compiled.dataset.content_hash) is None:
         storage.commit_dataset(compiled.dataset)
     storage.commit_cases(compiled.dataset.content_hash, compiled.cases)
@@ -180,8 +214,7 @@ def create_run(
             "seed_artifact_id": seed_ref.artifact_id,
         }
 
-    run_id = f"run-{uuid.uuid4().hex[:12]}"
-    dependency_lock_hash = _declared_dependency_identity(compiled.metrics)
+    dependency_lock_hash = declared_dependency_identity(compiled.metrics)
     profiles = metric_profiles(
         list(compiled.metrics),
         application=spec,
@@ -222,8 +255,9 @@ def create_run(
             },
             "test_world": world_params,
             "metric_profiles": profiles,
+            **({"experiment_context": experiment_context} if experiment_context is not None else {}),
         },
-        seed=random.SystemRandom().randrange(2**31),
+        seed=(run_seed if run_seed is not None else random.SystemRandom().randrange(2**31)),
         environment={"python": platform.python_version(), "platform": sys.platform},
     )
     storage.commit_run(manifest, status="created")
@@ -235,6 +269,22 @@ def create_run(
             granted_by=granted_by,
         )
     )
+    _ensure_run_work_items(compiled, storage, run_id)
+    storage.append_run_event(
+        run_id,
+        "run_created",
+        {
+            "plan_id": compiled.plan.plan_id,
+            "cases": len(compiled.cases),
+            "repetitions": compiled.plan.repetitions,
+            "metrics": len(compiled.metrics),
+        },
+    )
+    return run_id
+
+
+def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str) -> None:
+    """Idempotently materialize a plan's work graph, including after interrupted creation."""
     for case in compiled.cases:
         for repetition in range(compiled.plan.repetitions):
             exec_key = execution_key(case.case_id, repetition)
@@ -257,17 +307,6 @@ def create_run(
                         dependency_keys=(exec_key,),
                     )
                 )
-    storage.append_run_event(
-        run_id,
-        "run_created",
-        {
-            "plan_id": compiled.plan.plan_id,
-            "cases": len(compiled.cases),
-            "repetitions": compiled.plan.repetitions,
-            "metrics": len(compiled.metrics),
-        },
-    )
-    return run_id
 
 
 # --------------------------------------------------------------------------- execute / resume

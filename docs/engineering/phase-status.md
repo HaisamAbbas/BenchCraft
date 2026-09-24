@@ -24,7 +24,8 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 16 | Phase 2 | Inspection, traces, caching, and parallel execution | COMPLETE | `docs/engineering/reports/16.md` |
 | 17 | Phase 2 | OpenAI evaluation bridges and one platform connector | COMPLETE | `docs/engineering/reports/17.md` |
 | 18 | Phase 3 | Reviewed dataset generation and advanced episodes | COMPLETE | `docs/engineering/reports/18.md` |
-| 19–21 | Phase 3 | Optional expansion | NOT_STARTED | — |
+| 19 | Phase 3 | Controlled optimization experiments | COMPLETE | `docs/engineering/reports/19.md` |
+| 20–21 | Phase 3 | Optional expansion | NOT_STARTED | — |
 
 ## Prompt 18 prerequisite subset
 

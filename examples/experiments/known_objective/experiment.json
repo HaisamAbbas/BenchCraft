@@ -1,0 +1,24 @@
+{
+  "experiment_id": "known-objective",
+  "plan": "plan.json",
+  "development_dataset": "development.jsonl",
+  "holdout_dataset": "holdout.jsonl",
+  "intended_change": "Compare the accurate fixed-answer mode with the baseline mode.",
+  "parameters": [
+    {
+      "name": "answer_mode",
+      "values": ["baseline", "accurate"]
+    }
+  ],
+  "objective": {
+    "binding_index": 0
+  },
+  "constraints": [],
+  "budget": {
+    "max_trials": 1,
+    "seed": 41,
+    "bootstrap_replicates": 500,
+    "min_metric_coverage": 1.0,
+    "min_paired_coverage": 1.0
+  }
+}

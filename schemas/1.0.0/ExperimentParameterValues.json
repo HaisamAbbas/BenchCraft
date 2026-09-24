@@ -1,0 +1,28 @@
+{
+  "$id": "aibench/1.0.0/ExperimentParameterValues.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "The finite values selected for one application-exposed parameter.",
+  "properties": {
+    "name": {
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "title": "Name",
+      "type": "string"
+    },
+    "values": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 16,
+      "minItems": 2,
+      "title": "Values",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "values"
+  ],
+  "title": "ExperimentParameterValues",
+  "type": "object"
+}

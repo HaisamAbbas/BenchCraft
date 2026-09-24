@@ -1,0 +1,18 @@
+{
+  "$id": "aibench/1.0.0/ExperimentObjective.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "One fixed case-scoped metric binding to maximize or minimize.",
+  "properties": {
+    "binding_index": {
+      "minimum": 0,
+      "title": "Binding Index",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "binding_index"
+  ],
+  "title": "ExperimentObjective",
+  "type": "object"
+}

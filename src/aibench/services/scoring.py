@@ -211,6 +211,41 @@ def evaluation_compatibility_identity(
     )
 
 
+def declared_dependency_identity(metrics: Sequence[ResolvedMetric]) -> str | None:
+    """Freeze the declared plugin/package and worker-environment identity.
+
+    This is deliberately a direct-dependency identity, not a claim that transitive wheels
+    are reproducible.  Scoring passes recompute it from the metrics/worker specs they
+    actually resolved; a rescore therefore cannot inherit a stale lock from the original
+    run manifest or silently use a different declared interpreter/target.
+    """
+
+    entries = []
+    for metric in metrics:
+        if not metric.manifest.uses_models:
+            continue
+        worker_spec = getattr(metric.factory, "spec", None)
+        environment = None
+        if worker_spec is not None:
+            environment = {
+                "python": str(worker_spec.python),
+                "target": worker_spec.target,
+                "extra_paths": [str(path) for path in worker_spec.extra_paths],
+                "startup_timeout_seconds": worker_spec.startup_timeout_seconds,
+            }
+        entries.append(
+            {
+                "metric_id": metric.manifest.evaluator_id,
+                "plugin_id": metric.manifest.plugin_id,
+                "plugin_version": metric.manifest.plugin_version,
+                "package_name": metric.manifest.package_name,
+                "package_version": metric.manifest.package_version,
+                "environment": environment,
+            }
+        )
+    return content_hash(sorted(entries, key=lambda item: item["metric_id"])) if entries else None
+
+
 def metric_profiles(
     metrics: Sequence[ResolvedMetric],
     *,

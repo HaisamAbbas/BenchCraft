@@ -1,0 +1,47 @@
+{
+  "$id": "aibench/1.0.0/ExposedApplicationParameter.json",
+  "$schemaVersion": "1.0.0",
+  "additionalProperties": false,
+  "description": "An application-owned, finite environment setting safe to vary in an experiment.\n\nOnly names under the dedicated AIBENCH_TUNABLE_ prefix can be exposed. Secret and\nhost/runtime variables are never accepted as experiment parameters.",
+  "properties": {
+    "allowed_values": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 16,
+      "minItems": 2,
+      "title": "Allowed Values",
+      "type": "array"
+    },
+    "default_value": {
+      "maxLength": 256,
+      "title": "Default Value",
+      "type": "string"
+    },
+    "description": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "environment_key": {
+      "pattern": "^AIBENCH_TUNABLE_[A-Z0-9_]{1,80}$",
+      "title": "Environment Key",
+      "type": "string"
+    },
+    "name": {
+      "pattern": "^[a-z][a-z0-9_]{0,63}$",
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "environment_key",
+    "default_value",
+    "allowed_values",
+    "description"
+  ],
+  "title": "ExposedApplicationParameter",
+  "type": "object"
+}

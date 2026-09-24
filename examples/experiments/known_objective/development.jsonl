@@ -1,0 +1,4 @@
+{"case_id":"dev-01","input":"answer amber","expected_output":"amber"}
+{"case_id":"dev-02","input":"answer birch","expected_output":"birch"}
+{"case_id":"dev-03","input":"answer cobalt","expected_output":"cobalt"}
+{"case_id":"dev-04","input":"answer dahlia","expected_output":"dahlia"}

@@ -1,0 +1,26 @@
+{
+  "application_id": "known-objective-example",
+  "runner": "python",
+  "target": "app.py:respond",
+  "effects": "none",
+  "transport": {
+    "kind": "python",
+    "callable": "app.py:respond",
+    "timeout_seconds": 10,
+    "env": {
+      "AIBENCH_TUNABLE_ANSWER_MODE": "baseline"
+    }
+  },
+  "output_binding": {
+    "output": "/output"
+  },
+  "exposed_parameters": [
+    {
+      "name": "answer_mode",
+      "environment_key": "AIBENCH_TUNABLE_ANSWER_MODE",
+      "default_value": "baseline",
+      "allowed_values": ["baseline", "accurate"],
+      "description": "Choose the fixed baseline or accurate synthetic answer behavior."
+    }
+  ]
+}

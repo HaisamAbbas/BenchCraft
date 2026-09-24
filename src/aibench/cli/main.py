@@ -12,6 +12,7 @@ from aibench.cli import benchmark as benchmark_cli
 from aibench.cli import cache as cache_cli
 from aibench.cli import chat as chat_cli
 from aibench.cli import dataset as dataset_cli
+from aibench.cli import experiments as experiments_cli
 from aibench.cli import inspect as inspect_cli
 from aibench.cli import integrations as integrations_cli
 from aibench.cli import langfuse as langfuse_cli
@@ -33,6 +34,7 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 app.add_typer(dataset_cli.app, name="dataset")
+app.add_typer(experiments_cli.app, name="experiments")
 app.add_typer(runs_cli.app, name="runs")
 app.add_typer(sessions_cli.app, name="sessions")
 app.add_typer(traces_cli.app, name="traces")

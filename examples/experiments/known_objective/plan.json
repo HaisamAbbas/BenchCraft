@@ -1,0 +1,24 @@
+{
+  "plan_id": "known-objective-v1",
+  "dataset": "development.jsonl",
+  "application": "application.json",
+  "metrics": [
+    {
+      "metric": "native.exact_match",
+      "params": {
+        "case_sensitive": true,
+        "collapse_whitespace": true
+      }
+    }
+  ],
+  "repetitions": 1,
+  "budgets": {
+    "max_application_calls": 4,
+    "max_evaluator_calls": 4,
+    "max_wall_seconds": 120
+  },
+  "cache": {
+    "executions": false,
+    "evaluations": false
+  }
+}

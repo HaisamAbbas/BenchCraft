@@ -1,0 +1,4 @@
+{"case_id":"holdout-01","input":"answer elm","expected_output":"elm"}
+{"case_id":"holdout-02","input":"answer fennel","expected_output":"fennel"}
+{"case_id":"holdout-03","input":"answer glacier","expected_output":"glacier"}
+{"case_id":"holdout-04","input":"answer harbor","expected_output":"harbor"}

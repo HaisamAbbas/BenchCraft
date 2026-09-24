@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from enum import Enum
+from math import prod
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
@@ -292,6 +293,182 @@ class DatasetManifest(FrozenModel):
     source_refs: tuple[str, ...] = Field(default_factory=tuple)
     split: str | None = None
     duplicate_case_ids: tuple[str, ...] = Field(default_factory=tuple)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ExposedApplicationParameter(FrozenModel):
+    """An application-owned, finite environment setting safe to vary in an experiment.
+
+    Only names under the dedicated AIBENCH_TUNABLE_ prefix can be exposed. Secret and
+    host/runtime variables are never accepted as experiment parameters.
+    """
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    environment_key: str = Field(pattern=r"^AIBENCH_TUNABLE_[A-Z0-9_]{1,80}$")
+    default_value: str = Field(max_length=256)
+    allowed_values: tuple[str, ...] = Field(min_length=2, max_length=16)
+    description: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _finite_domain(self) -> ExposedApplicationParameter:
+        if len(set(self.allowed_values)) != len(self.allowed_values):
+            raise ValueError("exposed parameter allowed_values must be unique")
+        if self.default_value not in self.allowed_values:
+            raise ValueError("exposed parameter default_value must be in allowed_values")
+        return self
+
+
+class ExperimentParameterValues(FrozenModel):
+    """The finite values selected for one application-exposed parameter."""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    values: tuple[str, ...] = Field(min_length=2, max_length=16)
+
+    @model_validator(mode="after")
+    def _unique_values(self) -> ExperimentParameterValues:
+        if len(set(self.values)) != len(self.values):
+            raise ValueError(f"parameter {self.name!r} contains duplicate values")
+        return self
+
+
+class ExperimentObjective(FrozenModel):
+    """One fixed case-scoped metric binding to maximize or minimize."""
+
+    binding_index: int = Field(ge=0)
+
+
+class ExperimentConstraint(FrozenModel):
+    """A frozen threshold over a numeric or binary-rate metric binding."""
+
+    binding_index: int = Field(ge=0)
+    comparator: Literal[">=", ">", "<=", "<"]
+    threshold: float = Field(allow_inf_nan=False)
+
+
+class ExperimentBudget(FrozenModel):
+    """Search budget; each individual run also obeys the frozen plan's BudgetLimits."""
+
+    max_trials: int = Field(ge=1, le=128)
+    seed: int = Field(default=0, ge=0, le=2**31 - 1)
+    bootstrap_replicates: int = Field(default=2_000, ge=100, le=20_000)
+    min_metric_coverage: float = Field(default=0.95, ge=0, le=1, allow_inf_nan=False)
+    min_paired_coverage: float = Field(default=0.95, ge=0, le=1, allow_inf_nan=False)
+
+
+class ExperimentDefinition(FrozenModel):
+    """A controlled finite-grid experiment over a development dataset and fixed plan."""
+
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
+    plan: str = Field(min_length=1)
+    development_dataset: str = Field(min_length=1)
+    holdout_dataset: str = Field(min_length=1)
+    intended_change: str = Field(min_length=1, max_length=2_000)
+    parameters: tuple[ExperimentParameterValues, ...] = Field(min_length=1, max_length=5)
+    objective: ExperimentObjective
+    constraints: tuple[ExperimentConstraint, ...] = Field(default_factory=tuple, max_length=16)
+    budget: ExperimentBudget
+
+    @model_validator(mode="after")
+    def _bounded_unique_space(self) -> ExperimentDefinition:
+        names = [parameter.name for parameter in self.parameters]
+        if len(set(names)) != len(names):
+            raise ValueError("experiment parameters must have unique names")
+        combinations = prod(len(parameter.values) for parameter in self.parameters)
+        if combinations > 128:
+            raise ValueError("experiment parameter space exceeds 128 combinations")
+        return self
+
+
+class ExperimentStatus(str, Enum):
+    READY = "ready"
+    RUNNING = "running"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    SELECTED = "selected"
+    NO_FEASIBLE_TRIAL = "no_feasible_trial"
+    HOLDOUT_RUNNING = "holdout_running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ExperimentTrialStatus(str, Enum):
+    PENDING = "pending"
+    STARTING = "starting"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ExperimentEventKind(str, Enum):
+    CREATED = "created"
+    STARTED = "started"
+    BUDGET_EXTENDED = "budget_extended"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    TRIAL_STARTED = "trial_started"
+    TRIAL_COMPLETED = "trial_completed"
+    TRIAL_FAILED = "trial_failed"
+    SELECTED = "selected"
+    NO_FEASIBLE_TRIAL = "no_feasible_trial"
+    HOLDOUT_STARTED = "holdout_started"
+    HOLDOUT_COMPLETED = "holdout_completed"
+    ADOPTION_PROPOSED = "adoption_proposed"
+
+
+class ExperimentRecord(FrozenModel):
+    """Durable frozen experiment contract and its separately managed phase transitions."""
+
+    experiment_id: str
+    definition: ExperimentDefinition
+    definition_hash: str
+    definition_artifact_id: str
+    plan_hash: str
+    plan_artifact_id: str
+    application_hash: str
+    application_code_hash: str
+    evaluator_contract_hash: str
+    objective_metric_id: str
+    objective_direction: str
+    objective_binding_hash: str
+    policy_hash: str
+    effective_policy: FrozenValue
+    trusted_local: bool = False
+    development_dataset_hash: str
+    holdout_dataset_hash: str
+    spec_path: str
+    trial_limit: int = Field(ge=1, le=128)
+    status: ExperimentStatus = ExperimentStatus.READY
+    selected_trial_id: str | None = None
+    selection_locked_at: datetime | None = None
+    holdout_plan_hash: str | None = None
+    holdout_plan_artifact_id: str | None = None
+    holdout_baseline_run_id: str | None = None
+    holdout_run_id: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ExperimentTrial(FrozenModel):
+    experiment_id: str
+    trial_id: str
+    ordinal: int = Field(ge=0, le=127)
+    run_id: str
+    parameters: FrozenValue
+    parameter_hash: str
+    status: ExperimentTrialStatus = ExperimentTrialStatus.PENDING
+    objective_value: float | None = Field(default=None, allow_inf_nan=False)
+    metrics: FrozenValue = Field(default_factory=dict)
+    constraints_passed: bool | None = None
+    comparison_to_baseline: FrozenValue = None
+    failure: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ExperimentEvent(FrozenModel):
+    event_id: str
+    experiment_id: str
+    kind: ExperimentEventKind
+    actor: str
+    details: FrozenValue = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -798,6 +975,9 @@ class ApplicationSpec(FrozenModel):
         AfterValidator(MappingProxyType),
         PlainSerializer(dict, return_type=dict[str, TestWorldSpec]),
     ] = Field(default_factory=dict)
+    # The application owner explicitly selects a finite set of environment values that a
+    # controlled experiment may vary. No arbitrary config paths or source files are tunable.
+    exposed_parameters: tuple[ExposedApplicationParameter, ...] = ()
 
     @model_validator(mode="after")
     def _transport_matches_runner(self) -> ApplicationSpec:
@@ -806,6 +986,24 @@ class ApplicationSpec(FrozenModel):
                 f"transport kind {self.transport.kind!r} does not match runner "
                 f"{self.runner.value!r}"
             )
+        parameter_names = [parameter.name for parameter in self.exposed_parameters]
+        environment_keys = [parameter.environment_key for parameter in self.exposed_parameters]
+        if len(set(parameter_names)) != len(parameter_names):
+            raise ValueError("application exposed_parameters have duplicate names")
+        if len(set(environment_keys)) != len(environment_keys):
+            raise ValueError("application exposed_parameters have duplicate environment keys")
+        if self.exposed_parameters:
+            environment = getattr(self.transport, "env", None)
+            if environment is None:
+                raise ValueError(
+                    "exposed_parameters require a runner transport with a configured env mapping"
+                )
+            for parameter in self.exposed_parameters:
+                if environment.get(parameter.environment_key) != parameter.default_value:
+                    raise ValueError(
+                        f"exposed parameter {parameter.name!r} must match its transport env "
+                        "default_value"
+                    )
         return self
 
     def effective_output_binding(self) -> dict[str, Any]:
@@ -1149,6 +1347,15 @@ ALL_MODELS: tuple[type[BaseModel], ...] = (
     Provenance,
     BenchmarkCase,
     DatasetManifest,
+    ExposedApplicationParameter,
+    ExperimentParameterValues,
+    ExperimentObjective,
+    ExperimentConstraint,
+    ExperimentBudget,
+    ExperimentDefinition,
+    ExperimentRecord,
+    ExperimentTrial,
+    ExperimentEvent,
     CandidateSourceDocument,
     CandidateSourceSpan,
     CandidateVerification,

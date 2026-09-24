@@ -518,6 +518,53 @@ _0010_remote_jobs = Migration(
     """,
 )
 
+# Prompt 19: frozen experiment contracts, reproducible trials and protected holdout digests.
+_0011_experiments = Migration(
+    version=11,
+    name="controlled_experiments",
+    sql="""
+    CREATE TABLE experiments (
+        experiment_id  TEXT PRIMARY KEY,
+        status         TEXT NOT NULL,
+        content_hash   TEXT NOT NULL,
+        data           TEXT NOT NULL, -- frozen ExperimentRecord plus current phase state
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    );
+    CREATE TABLE experiment_trials (
+        trial_id        TEXT PRIMARY KEY,
+        experiment_id   TEXT NOT NULL REFERENCES experiments(experiment_id),
+        ordinal         INTEGER NOT NULL,
+        run_id          TEXT NOT NULL UNIQUE,
+        status          TEXT NOT NULL,
+        parameter_hash  TEXT NOT NULL,
+        data            TEXT NOT NULL, -- ExperimentTrial; immutable parameters and lineage
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        UNIQUE (experiment_id, ordinal)
+    );
+    CREATE INDEX idx_experiment_trials_status
+        ON experiment_trials(experiment_id, status, ordinal);
+
+    CREATE TABLE experiment_events (
+        event_id       TEXT PRIMARY KEY,
+        experiment_id  TEXT NOT NULL REFERENCES experiments(experiment_id),
+        kind           TEXT NOT NULL,
+        data           TEXT NOT NULL, -- append-only ExperimentEvent
+        created_at     TEXT NOT NULL
+    );
+    CREATE INDEX idx_experiment_events_experiment
+        ON experiment_events(experiment_id, created_at, event_id);
+
+    CREATE TABLE protected_dataset_digests (
+        digest         TEXT PRIMARY KEY,
+        experiment_id  TEXT NOT NULL REFERENCES experiments(experiment_id),
+        split_id       TEXT NOT NULL CHECK (split_id = 'holdout'),
+        registered_at  TEXT NOT NULL
+    );
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
@@ -529,6 +576,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _0008_traces_and_cache,
     _0009_candidate_workflow,
     _0010_remote_jobs,
+    _0011_experiments,
 )
 
 

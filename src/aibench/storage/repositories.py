@@ -29,6 +29,11 @@ from aibench.core.models import (
     EvaluationPlan,
     EvaluationResult,
     ExecutionResult,
+    ExperimentEvent,
+    ExperimentRecord,
+    ExperimentStatus,
+    ExperimentTrial,
+    ExperimentTrialStatus,
     ObservationClaim,
     RunManifest,
     UsageEvent,
@@ -429,6 +434,261 @@ class Storage:
         except BaseException:
             self.conn.execute("ROLLBACK")
             raise
+
+    # ---------------------------------------------------------------- controlled experiments
+
+    def commit_experiment(
+        self,
+        experiment: ExperimentRecord,
+        trials: Iterable[ExperimentTrial],
+        created_event: ExperimentEvent,
+    ) -> bool:
+        """Commit a frozen experiment, its full deterministic grid and protected holdout.
+
+        The holdout digest is reserved in the same transaction, before any trial executes.
+        Its case labels are not loaded or copied into the optimizer's trial records.
+        """
+        items = tuple(trials)
+        if created_event.experiment_id != experiment.experiment_id:
+            raise ValueError("experiment creation event identity does not match")
+        if tuple(item.experiment_id for item in items) != (experiment.experiment_id,) * len(items):
+            raise ValueError("experiment trial identities do not match their experiment")
+        if tuple(item.ordinal for item in items) != tuple(range(len(items))):
+            raise ValueError("experiment trials must be supplied in ordinal order")
+        if any(item.status is not ExperimentTrialStatus.PENDING for item in items):
+            raise ValueError("new experiment trials must be pending")
+
+        data = experiment.model_dump_json()
+        digest = _hash_of(data)
+        self.conn.execute("BEGIN")
+        try:
+            existing = self.conn.execute(
+                "SELECT content_hash FROM experiments WHERE experiment_id = ?",
+                (experiment.experiment_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["content_hash"] != digest:
+                    raise ConflictError(
+                        f"experiment {experiment.experiment_id!r} already exists with different content"
+                    )
+                self.conn.execute("ROLLBACK")
+                return False
+
+            protected = self.conn.execute(
+                "SELECT experiment_id FROM protected_dataset_digests WHERE digest = ?",
+                (experiment.holdout_dataset_hash,),
+            ).fetchone()
+            if protected is not None:
+                raise ConflictError(
+                    "this holdout dataset is already protected by experiment "
+                    f"{protected['experiment_id']!r}"
+                )
+            self.conn.execute(
+                "INSERT INTO experiments "
+                "(experiment_id, status, content_hash, data, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    experiment.experiment_id,
+                    experiment.status.value,
+                    digest,
+                    data,
+                    experiment.created_at.isoformat(),
+                    experiment.updated_at.isoformat(),
+                ),
+            )
+            self.conn.execute(
+                "INSERT INTO protected_dataset_digests "
+                "(digest, experiment_id, split_id, registered_at) VALUES (?, ?, 'holdout', ?)",
+                (
+                    experiment.holdout_dataset_hash,
+                    experiment.experiment_id,
+                    experiment.created_at.isoformat(),
+                ),
+            )
+            for trial in items:
+                trial_data = trial.model_dump_json()
+                self.conn.execute(
+                    "INSERT INTO experiment_trials "
+                    "(trial_id, experiment_id, ordinal, run_id, status, parameter_hash, "
+                    "data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        trial.trial_id,
+                        trial.experiment_id,
+                        trial.ordinal,
+                        trial.run_id,
+                        trial.status.value,
+                        trial.parameter_hash,
+                        trial_data,
+                        trial.created_at.isoformat(),
+                        trial.updated_at.isoformat(),
+                    ),
+                )
+            self._insert_experiment_event(created_event)
+            self.conn.execute("COMMIT")
+            return True
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    def get_experiment(self, experiment_id: str) -> ExperimentRecord | None:
+        row = self.conn.execute(
+            "SELECT data FROM experiments WHERE experiment_id = ?", (experiment_id,)
+        ).fetchone()
+        return ExperimentRecord.model_validate_json(row["data"]) if row else None
+
+    def list_experiments(self) -> list[ExperimentRecord]:
+        rows = self.conn.execute(
+            "SELECT data FROM experiments ORDER BY created_at, experiment_id"
+        ).fetchall()
+        return [ExperimentRecord.model_validate_json(row["data"]) for row in rows]
+
+    def transition_experiment(
+        self,
+        experiment: ExperimentRecord,
+        *,
+        from_status: ExperimentStatus,
+        event: ExperimentEvent,
+    ) -> None:
+        if event.experiment_id != experiment.experiment_id:
+            raise ValueError("experiment event identity does not match")
+        data = experiment.model_dump_json()
+        digest = _hash_of(data)
+        self.conn.execute("BEGIN")
+        try:
+            row = self.conn.execute(
+                "SELECT status FROM experiments WHERE experiment_id = ?",
+                (experiment.experiment_id,),
+            ).fetchone()
+            if row is None:
+                raise ConflictError(f"experiment {experiment.experiment_id!r} does not exist")
+            if row["status"] != from_status.value:
+                raise ConflictError(
+                    f"experiment {experiment.experiment_id!r} is {row['status']!r}, expected "
+                    f"{from_status.value!r}"
+                )
+            self.conn.execute(
+                "UPDATE experiments SET status = ?, content_hash = ?, data = ?, updated_at = ? "
+                "WHERE experiment_id = ? AND status = ?",
+                (
+                    experiment.status.value,
+                    digest,
+                    data,
+                    experiment.updated_at.isoformat(),
+                    experiment.experiment_id,
+                    from_status.value,
+                ),
+            )
+            if self.conn.execute("SELECT changes()").fetchone()[0] != 1:
+                raise ConflictError("experiment state changed concurrently")
+            self._insert_experiment_event(event)
+            self.conn.execute("COMMIT")
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    def get_experiment_trial(self, trial_id: str) -> ExperimentTrial | None:
+        row = self.conn.execute(
+            "SELECT data FROM experiment_trials WHERE trial_id = ?", (trial_id,)
+        ).fetchone()
+        return ExperimentTrial.model_validate_json(row["data"]) if row else None
+
+    def list_experiment_trials(self, experiment_id: str) -> list[ExperimentTrial]:
+        rows = self.conn.execute(
+            "SELECT data FROM experiment_trials WHERE experiment_id = ? ORDER BY ordinal",
+            (experiment_id,),
+        ).fetchall()
+        return [ExperimentTrial.model_validate_json(row["data"]) for row in rows]
+
+    def transition_experiment_trial(
+        self,
+        trial: ExperimentTrial,
+        *,
+        from_status: ExperimentTrialStatus,
+        event: ExperimentEvent,
+    ) -> None:
+        if event.experiment_id != trial.experiment_id:
+            raise ValueError("experiment trial event identity does not match")
+        data = trial.model_dump_json()
+        self.conn.execute("BEGIN")
+        try:
+            row = self.conn.execute(
+                "SELECT status, experiment_id FROM experiment_trials WHERE trial_id = ?",
+                (trial.trial_id,),
+            ).fetchone()
+            if row is None or row["experiment_id"] != trial.experiment_id:
+                raise ConflictError(f"experiment trial {trial.trial_id!r} does not exist")
+            if row["status"] != from_status.value:
+                raise ConflictError(
+                    f"experiment trial {trial.trial_id!r} is {row['status']!r}, expected "
+                    f"{from_status.value!r}"
+                )
+            self.conn.execute(
+                "UPDATE experiment_trials SET status = ?, parameter_hash = ?, data = ?, updated_at = ? "
+                "WHERE trial_id = ? AND status = ?",
+                (
+                    trial.status.value,
+                    trial.parameter_hash,
+                    data,
+                    trial.updated_at.isoformat(),
+                    trial.trial_id,
+                    from_status.value,
+                ),
+            )
+            if self.conn.execute("SELECT changes()").fetchone()[0] != 1:
+                raise ConflictError("experiment trial state changed concurrently")
+            self._insert_experiment_event(event)
+            self.conn.execute("COMMIT")
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    def append_experiment_event(self, event: ExperimentEvent) -> bool:
+        self.conn.execute("BEGIN")
+        try:
+            inserted = self._insert_experiment_event(event)
+            self.conn.execute("COMMIT")
+            return inserted
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    def _insert_experiment_event(self, event: ExperimentEvent) -> bool:
+        data = event.model_dump_json()
+        row = self.conn.execute(
+            "SELECT data FROM experiment_events WHERE event_id = ?", (event.event_id,)
+        ).fetchone()
+        if row is not None:
+            if row["data"] != data:
+                raise ConflictError(f"experiment event {event.event_id!r} conflicts")
+            return False
+        self.conn.execute(
+            "INSERT INTO experiment_events (event_id, experiment_id, kind, data, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                event.event_id,
+                event.experiment_id,
+                event.kind.value,
+                data,
+                event.created_at.isoformat(),
+            ),
+        )
+        return True
+
+    def list_experiment_events(self, experiment_id: str) -> list[ExperimentEvent]:
+        rows = self.conn.execute(
+            "SELECT data FROM experiment_events WHERE experiment_id = ? "
+            "ORDER BY created_at, event_id",
+            (experiment_id,),
+        ).fetchall()
+        return [ExperimentEvent.model_validate_json(row["data"]) for row in rows]
+
+    def is_protected_dataset_digest(self, digest: str) -> bool:
+        return (
+            self.conn.execute(
+                "SELECT 1 FROM protected_dataset_digests WHERE digest = ?", (digest,)
+            ).fetchone()
+            is not None
+        )
 
     # ---------------------------------------------------------------- applications / profiles
 
@@ -1199,6 +1459,24 @@ class Storage:
             redaction=row["redaction"],
             run_id=row["run_id"],
         )
+
+    def get_artifact_by_digest(
+        self, digest: str, *, mime_type: str | None = None
+    ) -> ArtifactRef | None:
+        """Return a durable ref for content-addressed bytes, optionally by media type."""
+        if mime_type is None:
+            row = self.conn.execute(
+                "SELECT artifact_id, mime_type FROM artifacts WHERE digest = ? "
+                "ORDER BY artifact_id LIMIT 1",
+                (digest,),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT artifact_id, mime_type FROM artifacts WHERE digest = ? AND mime_type = ? "
+                "ORDER BY artifact_id LIMIT 1",
+                (digest, mime_type),
+            ).fetchone()
+        return self.get_artifact(row["artifact_id"]) if row is not None else None
 
     def referenced_artifact_digests(self) -> set[str]:
         rows = self.conn.execute("SELECT DISTINCT digest FROM artifacts").fetchall()

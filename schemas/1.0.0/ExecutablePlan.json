@@ -341,6 +341,13 @@
           },
           "title": "Secret Env",
           "type": "object"
+        },
+        "startup_timeout_seconds": {
+          "default": 120.0,
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "title": "Startup Timeout Seconds",
+          "type": "number"
         }
       },
       "required": [
