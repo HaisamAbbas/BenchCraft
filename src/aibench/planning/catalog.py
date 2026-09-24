@@ -183,6 +183,11 @@ def build_catalog(
                     f"reads {requirement.path}, which application {profile.application_id!r} "
                     "does not expose (not declared or observed)"
                 )
+            elif head == "execution" and requirement.non_empty and name in profile.always_empty:
+                reasons.append(
+                    f"needs a non-empty {requirement.path}, which was empty in every recorded "
+                    f"execution of {profile.application_id!r}"
+                )
             if head == "case":
                 count = dataset.usable(requirement.path, non_empty=requirement.non_empty)
                 usable = count if usable is None else min(usable, count)

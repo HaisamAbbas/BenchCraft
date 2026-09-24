@@ -254,3 +254,52 @@ def score(
         _print_summary(summary)
     for warning in report.warnings:
         console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
+
+
+@evaluators_app.command("calibrate")
+def calibrate(
+    set_dir: Path = typer.Option(  # noqa: B008
+        Path("benchmarks/judges/v1"), "--set", help="Calibration set directory."
+    ),
+    out: Path | None = typer.Option(None, "--out", help="Write the full report (JSON) here."),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Measure the in-process (native) evaluators against labelled outputs: agreement,
+    false acceptance, false rejection and repeat stability, per category (§23)."""
+    from aibench.services.calibration import CalibrationError, run_calibration
+    from aibench.services.reports import write_text_atomic
+
+    try:
+        report = run_calibration(set_dir)
+    except (CalibrationError, BindingValidationError) as exc:
+        raise _fail(str(exc)) from exc
+    if out is not None:
+        write_text_atomic(out, json.dumps(report, indent=2) + "\n")
+    if json_output:
+        console.print_json(data=report)
+        return
+    console.print(
+        f"calibration set {escape(str(report['set']))}; labels: {escape(report['label_review'])}"
+    )
+    for binding, data in report["bindings"].items():
+        o = data["overall"]
+
+        def frac(m: dict[str, Any]) -> str:
+            return f"{m['numerator']}/{m['denominator']}"
+
+        console.print(
+            f"[bold]{escape(binding)}[/bold]: agreement {frac(o['agreement'])}, "
+            f"false acceptance {frac(o['false_acceptance'])}, false rejection "
+            f"{frac(o['false_rejection'])}, undecided {o['undecided']}, repeat stability "
+            f"{frac(o['repeat_stability'])}"
+        )
+        for d in data["disagreements"]:
+            console.print(
+                f"  disagrees on {escape(d['id'])} ({escape(d['category'])}): labelled "
+                f"{d['label']}, decided {d['decision']}"
+            )
+    for item in report["not_measured"]:
+        subject = item.get("evaluator") or item.get("measure")
+        console.print(
+            f"[yellow]not measured[/yellow] {escape(str(subject))}: {escape(item['reason'])}"
+        )

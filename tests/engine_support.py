@@ -131,7 +131,9 @@ class Harness:
     def invocations(self) -> list[dict[str, Any]]:
         if not self.log.exists():
             return []
-        return [json.loads(line) for line in self.log.read_text().splitlines()]
+        # Concurrent app processes append to one log; an interleaved append can leave a
+        # blank line. A partial JSON line would still fail loudly.
+        return [json.loads(line) for line in self.log.read_text().splitlines() if line.strip()]
 
     def count(self, case: str | None = None) -> int:
         return sum(1 for i in self.invocations() if case is None or i["case"] == case)

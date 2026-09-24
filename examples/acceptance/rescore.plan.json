@@ -1,0 +1,14 @@
+{
+  "plan_id": "acceptance-rescore",
+  "dataset": "rag100.jsonl",
+  "application": "rag.app.json",
+  "metrics": [
+    {
+      "metric": "native.exact_match",
+      "params": {
+        "case_sensitive": false,
+        "collapse_whitespace": true
+      }
+    }
+  ]
+}

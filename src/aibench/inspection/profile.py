@@ -73,6 +73,9 @@ class ApplicationProfile(FrozenModel):
     limitations: tuple[str, ...] = ()
     evidence_runs: tuple[str, ...] = ()
     scope: str = SCOPE
+    # Observed in recorded executions, but empty in every one of them (e.g. a retriever
+    # that is declared but disabled at runtime, §23): nothing can be measured from it.
+    always_empty: tuple[str, ...] = ()
 
     def claim(self, capability: str) -> ObservationClaim | None:
         return next((c for c in self.claims if c.capability == capability), None)
@@ -88,6 +91,9 @@ class ApplicationProfile(FrozenModel):
     @property
     def profile_hash(self) -> str:
         return content_hash(self.model_dump(mode="json"))
+
+
+MIN_ALWAYS_EMPTY_SAMPLE = 3  # reported-and-empty executions before a field is "always empty"
 
 
 class _Recorded:
@@ -145,6 +151,7 @@ def inspect_application(
     source = str(config_path)
     claims: list[ObservationClaim] = []
     gaps: list[str] = []
+    always_empty: list[str] = []
 
     def claim(
         capability: str,
@@ -195,6 +202,15 @@ def inspect_application(
         pointer = f"{source}#/output_binding/{capability}"
         if observed:
             empty = recorded.observed_empty(capability)
+            # One empty answer (an unanswerable question) says nothing about the app; only
+            # a field that was empty every time it was reported, over enough runs, does.
+            if empty == observed >= MIN_ALWAYS_EMPTY_SAMPLE:
+                always_empty.append(capability)
+                gaps.append(
+                    f"{capability}: empty in all {observed} recorded executions that reported "
+                    f"it ({recorded.total} successful); it is declared but returns nothing "
+                    "at runtime"
+                )
             claim(
                 capability,
                 ObservationState.OBSERVED,
@@ -235,4 +251,5 @@ def inspect_application(
         gaps=tuple(gaps),
         limitations=tuple(description.limitations),
         evidence_runs=tuple(run_ids),
+        always_empty=tuple(always_empty),
     )

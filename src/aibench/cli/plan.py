@@ -361,3 +361,97 @@ def validate_plan(
         else:
             err_console.print("nothing was dispatched: the plan is invalid")
     raise typer.Exit(code=code)
+
+
+# --------------------------------------------------------------------------- benchmark
+
+
+@plan_app.command("benchmark")
+def benchmark_planner(
+    fixtures: Path = typer.Option(  # noqa: B008
+        Path("benchmarks/planner/v1"), "--fixtures", help="Fixture set directory."
+    ),
+    planner: str = typer.Option("template", "--planner", help="template | model"),
+    provider_config: Path | None = typer.Option(  # noqa: B008
+        None, "--provider-config", help="Model provider config for --planner model."
+    ),
+    policy: Path | None = _POLICY,
+    out: Path | None = typer.Option(None, "--out", help="Write the full report (JSON) here."),  # noqa: B008
+    require_targets: bool = typer.Option(
+        False, "--require-targets", help="Exit 1 unless every §23 target is met."
+    ),
+    json_output: bool = _JSON,
+) -> None:
+    """Measure a planner against an annotated fixture set (§23). Nothing is executed:
+    applications are never contacted and catalog evaluators are manifests only."""
+    from aibench.planning.benchmark import FixtureSetError, load_fixture_set, run_fixture_set
+    from aibench.services.reports import write_text_atomic
+
+    if planner not in ("template", "model"):
+        raise _fail("--planner must be template or model", EXIT_INVALID)
+    try:
+        fixture_set = load_fixture_set(fixtures)
+    except FixtureSetError as exc:
+        raise _fail(str(exc), EXIT_INVALID) from exc
+    provider = None
+    if planner == "model":
+        if provider_config is None:
+            raise _fail("--planner model needs --provider-config", EXIT_INVALID)
+        provider, denials = _provider(provider_config, policy)
+        if provider is None:
+            for denial in denials:
+                err_console.print(f"[red]denied:[/red] {escape(denial)}")
+            raise _fail("the model planner was not contacted; nothing was measured", EXIT_DENIED)
+
+    def plan_one(inputs: Any) -> Any:
+        if provider is None:
+            return plan_with_template(inputs)
+        return plan_with_model(inputs, provider, PlannerLimits())
+
+    try:
+        name = "template" if provider is None else f"model:{provider.name}:{provider.model}"
+        report = run_fixture_set(fixture_set, plan_one, planner_name=name)
+    finally:
+        if provider is not None:
+            provider.close()
+    if out is not None:
+        write_text_atomic(out, json.dumps(report, indent=2) + "\n")
+    missed = [t for t in report["targets"] if t["status"] != "met"]
+    if json_output:
+        console.print_json(data=report)
+    else:
+        o = report["overall"]
+        console.print(
+            f"planner {escape(report['planner'])} on {escape(report['fixture_set'])}: "
+            f"{o['fixtures']} fixture(s); review: {escape(report['review']['status'])}"
+        )
+        for key in (
+            "selection_precision",
+            "selection_recall",
+            "gap_precision",
+            "gap_recall",
+            "unnecessary_evaluator_rate",
+            "first_pass_valid",
+            "invalid_rejection",
+        ):
+            m = o[key]
+            interval = f" (95% CI {m['wilson95'][0]}-{m['wilson95'][1]})" if m["wilson95"] else ""
+            console.print(f"  {key}: {m['value']} = {m['numerator']}/{m['denominator']}{interval}")
+        console.print(f"  unsupported_selections: {o['unsupported_selections']}")
+        for part in ("development_families", "holdout_families"):
+            p = report[part]
+            console.print(
+                f"  {part}: {p['fixtures']} fixture(s), precision "
+                f"{p['selection_precision']['value']}, recall {p['selection_recall']['value']}, "
+                f"gap precision {p['gap_precision']['value']}"
+            )
+        for t in report["targets"]:
+            colour = "green" if t["status"] == "met" else "red"
+            console.print(
+                f"  target {t['measure']} {t['target']}: [{colour}]{t['status']}[/{colour}] "
+                f"(observed {t['observed']})"
+            )
+        wrong = [f["id"] for f in report["fixtures"] if not f["correct"]]
+        if wrong:
+            console.print(f"  fixtures not planned as annotated: {escape(', '.join(wrong))}")
+    raise typer.Exit(code=1 if require_targets and missed else EXIT_OK)

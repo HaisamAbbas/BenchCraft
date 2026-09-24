@@ -1,0 +1,1642 @@
+{
+  "schema": "aibench.planner-fixtures/1",
+  "version": "planner-fixtures-v1",
+  "reviewers": [],
+  "notes": "Annotations were written by the implementing AI agent for Prompt 12, not by people. No fixture has been reviewed. \u00a723 asks for at least two human reviewers on a subset, with disagreements adjudicated; that has not happened. Held-out families were written after the template planner and were not used to change it.",
+  "catalog": [
+    {
+      "evaluator_id": "catalog.grounded",
+      "version": "1.0.0",
+      "plugin_id": "catalog",
+      "plugin_version": "1",
+      "description": "Catalog entry: answer supported by the retrieved passages (model judge).",
+      "value_kind": "scalar",
+      "direction": "higher",
+      "aggregation": "mean",
+      "requires": [
+        {
+          "path": "case.input"
+        },
+        {
+          "path": "execution.output",
+          "non_empty": false
+        },
+        {
+          "path": "execution.retrieved_context"
+        }
+      ],
+      "default_rule": {
+        "comparator": ">=",
+        "threshold": 0.5
+      },
+      "uses_models": true
+    },
+    {
+      "evaluator_id": "catalog.tool_names",
+      "version": "1.0.0",
+      "plugin_id": "catalog",
+      "plugin_version": "1",
+      "description": "Catalog entry: the expected tools were called.",
+      "value_kind": "boolean",
+      "direction": "higher",
+      "aggregation": "rate",
+      "requires": [
+        {
+          "path": "execution.tool_events"
+        },
+        {
+          "path": "case.reference.tools"
+        }
+      ],
+      "default_rule": {
+        "comparator": "is_true"
+      }
+    },
+    {
+      "evaluator_id": "catalog.refund_rule",
+      "version": "1.0.0",
+      "plugin_id": "catalog",
+      "plugin_version": "1",
+      "description": "Catalog entry: the answer states the case's refund window.",
+      "value_kind": "boolean",
+      "direction": "higher",
+      "aggregation": "rate",
+      "requires": [
+        {
+          "path": "execution.output",
+          "non_empty": false
+        },
+        {
+          "path": "case.expectations.refund_days"
+        }
+      ],
+      "default_rule": {
+        "comparator": "is_true"
+      }
+    }
+  ],
+  "policies": {
+    "judges": {
+      "allow_trusted_local": true,
+      "allowed_evaluators": [
+        "native.*",
+        "catalog.*"
+      ],
+      "allow_model_evaluators": true
+    },
+    "no_judges": {
+      "allow_trusted_local": true,
+      "allowed_evaluators": [
+        "native.*",
+        "catalog.*"
+      ],
+      "allow_model_evaluators": false
+    },
+    "native_only": {
+      "allow_trusted_local": true,
+      "allowed_evaluators": [
+        "native.*"
+      ]
+    },
+    "strict": {
+      "allowed_evaluators": [
+        "native.*",
+        "catalog.*"
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "id": "chatbot_refs",
+      "family": "chatbot",
+      "holdout": false,
+      "objectives": [
+        "catch wrong answers"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "chatbot_no_refs",
+      "family": "chatbot",
+      "holdout": false,
+      "objectives": [
+        "correct answers"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "correctness"
+        ],
+        "forbidden": [
+          "native.exact_match"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "chatbot_partial_refs",
+      "family": "partial",
+      "holdout": false,
+      "objectives": [
+        "accuracy"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 1,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        },
+        {
+          "count": 2,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "rag_declared",
+      "family": "rag",
+      "holdout": false,
+      "objectives": [
+        "unsupported claims",
+        "wrong answers"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "retrieved_context": "/ctx"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer",
+            "context": [
+              "the reference passage"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "groundedness",
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "rag_reference_context_only",
+      "family": "misleading",
+      "holdout": false,
+      "objectives": [
+        "unsupported claims"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer",
+            "context": [
+              "the reference passage"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "forbidden": [
+          "catalog.grounded"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "reference passages exist in the dataset, but the app exposes no retrieval"
+      }
+    },
+    {
+      "id": "rag_judges_not_permitted",
+      "family": "policy",
+      "holdout": false,
+      "objectives": [
+        "hallucinations"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "retrieved_context": "/ctx"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "context": [
+              "the reference passage"
+            ]
+          }
+        }
+      ],
+      "policy": "no_judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "forbidden": [
+          "catalog.grounded"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "rag_native_only",
+      "family": "policy",
+      "holdout": false,
+      "objectives": [
+        "faithfulness to the retrieved passages"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "retrieved_context": "/ctx"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "context": [
+              "the reference passage"
+            ]
+          }
+        }
+      ],
+      "policy": "native_only",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "forbidden": [
+          "catalog.grounded"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "agent_declared",
+      "family": "agent",
+      "holdout": false,
+      "objectives": [
+        "did it call the right tools"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "tool_events": "/tools"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_tools": [
+              "search"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "agent_blackbox",
+      "family": "agent",
+      "holdout": false,
+      "objectives": [
+        "tool use"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_tools": [
+              "search"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "tool_use"
+        ],
+        "forbidden": [
+          "catalog.tool_names"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "agent_no_expected_tools",
+      "family": "agent",
+      "holdout": false,
+      "objectives": [
+        "function calls"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "tool_events": "/tools"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "tool_use"
+        ],
+        "forbidden": [
+          "catalog.tool_names"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "blackbox_latency_errors",
+      "family": "blackbox",
+      "holdout": false,
+      "objectives": [
+        "latency",
+        "errors"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "both concepts are recorded by the engine; no metric and no gap are needed"
+      }
+    },
+    {
+      "id": "blackbox_correctness_no_refs",
+      "family": "blackbox",
+      "holdout": false,
+      "objectives": [
+        "wrong answers",
+        "response time"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "correctness"
+        ],
+        "forbidden": [
+          "native.exact_match"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "format_without_schema",
+      "family": "format",
+      "holdout": false,
+      "objectives": [
+        "valid JSON format"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "format"
+        ],
+        "forbidden": [
+          "native.json_schema"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "a schema is needed and was not supplied"
+      }
+    },
+    {
+      "id": "expectations_rule",
+      "family": "expectations",
+      "holdout": false,
+      "objectives": [
+        "business rules"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expectations": {
+              "refund_days": 30
+            }
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "expectations"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "expectations_missing",
+      "family": "expectations",
+      "holdout": false,
+      "objectives": [
+        "policy rules"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "expectations"
+        ],
+        "forbidden": [
+          "catalog.refund_rule"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "voice_turn_taking_unmapped",
+      "family": "unmapped",
+      "holdout": false,
+      "objectives": [
+        "natural turn-taking in voice calls"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "rag_agent_combined",
+      "family": "rag",
+      "holdout": false,
+      "objectives": [
+        "grounded answers",
+        "tool calls"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "retrieved_context": "/ctx",
+          "tool_events": "/tools"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "context": [
+              "the reference passage"
+            ],
+            "expected_tools": [
+              "search"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "groundedness",
+          "tool_use"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "duplicate_objectives",
+      "family": "chatbot",
+      "holdout": false,
+      "objectives": [
+        "wrong answers",
+        "accuracy"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "one metric should serve both objectives"
+      }
+    },
+    {
+      "id": "over_broad_request",
+      "family": "chatbot",
+      "holdout": false,
+      "objectives": [
+        "correctness",
+        "faithfulness",
+        "tool calls",
+        "json format",
+        "latency"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [
+          "groundedness",
+          "tool_use",
+          "format"
+        ],
+        "forbidden": [
+          "catalog.grounded",
+          "catalog.tool_names",
+          "native.json_schema"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "selecting everything must not win: only correctness is measurable"
+      }
+    },
+    {
+      "id": "security_cli_not_trusted",
+      "family": "security",
+      "holdout": false,
+      "objectives": [
+        "wrong answers"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        },
+        "runner": "cli"
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "strict",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": false
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "a CLI app without trusted-local mode must be refused"
+      }
+    },
+    {
+      "id": "security_remote_http_denied",
+      "family": "security",
+      "holdout": false,
+      "objectives": [
+        "wrong answers"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        },
+        "url": "https://rag.example.com/answer"
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": false
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "a non-loopback destination the policy does not allow must be refused"
+      }
+    },
+    {
+      "id": "security_effectful_app",
+      "family": "security",
+      "holdout": false,
+      "objectives": [
+        "wrong answers"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        },
+        "effects": "irreversible"
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": false
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "an irreversible-effect app above the policy's max_effects must be refused"
+      }
+    },
+    {
+      "id": "voice_declared_no_audio",
+      "family": "voice",
+      "holdout": true,
+      "objectives": [
+        "natural turn-taking",
+        "barge-in handling during calls"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        },
+        "application_id": "voice-agent"
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "\u00a723: report missing evidence instead of hallucinating turn-taking scores"
+      }
+    },
+    {
+      "id": "retriever_disabled_runtime",
+      "family": "retriever_disabled",
+      "holdout": false,
+      "objectives": [
+        "hallucinations"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "retrieved_context": "/ctx"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "context": [
+              "the reference passage"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "forbidden": [
+          "catalog.grounded"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "\u00a723: retrieval is declared but recorded runs show it disabled (always empty). Written as held out; moved to development after its first measurement exposed a planner defect that was then fixed (Prompt 12), so it no longer tests generalization."
+      },
+      "recorded_executions": [
+        {
+          "retrieved_context": []
+        },
+        {
+          "retrieved_context": []
+        },
+        {
+          "retrieved_context": []
+        }
+      ]
+    },
+    {
+      "id": "paraphrase_made_up",
+      "family": "paraphrase",
+      "holdout": true,
+      "objectives": [
+        "make sure it doesn't make things up"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "retrieved_context": "/ctx"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "context": [
+              "the reference passage"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "groundedness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "paraphrase_right_answer",
+      "family": "paraphrase",
+      "holdout": true,
+      "objectives": [
+        "does it give the right answer"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "paraphrase_apis",
+      "family": "paraphrase",
+      "holdout": true,
+      "objectives": [
+        "does the agent pick the right APIs"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "tool_events": "/tools"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_tools": [
+              "search"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "multilingual_spanish",
+      "family": "multilingual",
+      "holdout": true,
+      "objectives": [
+        "respuestas correctas"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "structured_extraction",
+      "family": "extraction",
+      "holdout": true,
+      "objectives": [
+        "extract invoice fields as JSON"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "format"
+        ],
+        "forbidden": [
+          "native.json_schema"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "code_assistant_tests",
+      "family": "coding",
+      "holdout": true,
+      "objectives": [
+        "generated code passes the hidden tests"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "executable coding oracles are not in the MVP catalog"
+      }
+    },
+    {
+      "id": "summarization_source",
+      "family": "summarization",
+      "holdout": true,
+      "objectives": [
+        "summaries stay faithful to the source document"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "forbidden": [
+          "catalog.grounded"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "classification_labels",
+      "family": "classification",
+      "holdout": true,
+      "objectives": [
+        "label accuracy"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "safety_refusals",
+      "family": "safety",
+      "holdout": true,
+      "objectives": [
+        "refuses unsafe requests"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "misleading_dependency_name",
+      "family": "misleading_dependency",
+      "holdout": true,
+      "objectives": [
+        "hallucinations"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        },
+        "application_id": "langchain-rag-bot"
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer",
+            "context": [
+              "the reference passage"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "forbidden": [
+          "catalog.grounded"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "the name suggests RAG; the declared binding exposes no retrieval"
+      }
+    },
+    {
+      "id": "partial_telemetry_tools",
+      "family": "partial_telemetry",
+      "holdout": true,
+      "objectives": [
+        "tool calls"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer",
+          "tool_events": "/tools"
+        }
+      },
+      "dataset": [
+        {
+          "count": 1,
+          "fields": {
+            "expected_tools": [
+              "search"
+            ]
+          }
+        },
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "negated_latency",
+      "family": "negation",
+      "holdout": true,
+      "objectives": [
+        "wrong answers",
+        "not worried about latency"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "the second objective declines latency; no metric and no gap are needed"
+      }
+    },
+    {
+      "id": "rag_cli_text_mode",
+      "family": "rag_text",
+      "holdout": true,
+      "objectives": [
+        "unsupported claims"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        },
+        "runner": "cli",
+        "cli": {
+          "output_mode": "text"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "context": [
+              "the reference passage"
+            ]
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "forbidden": [
+          "catalog.grounded"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "multi_turn_memory",
+      "family": "multi_turn",
+      "holdout": true,
+      "objectives": [
+        "remembers earlier turns in the conversation"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {}
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": ""
+      }
+    },
+    {
+      "id": "image_captions",
+      "family": "multimodal",
+      "holdout": true,
+      "objectives": [
+        "captions describe the image correctly"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "reference captions exist, so correctness against them is measurable"
+      }
+    },
+    {
+      "id": "budget_objective",
+      "family": "cost",
+      "holdout": true,
+      "objectives": [
+        "keep spend under five dollars"
+      ],
+      "app": {
+        "output_binding": {
+          "output": "/answer"
+        }
+      },
+      "dataset": [
+        {
+          "count": 3,
+          "fields": {
+            "expected_output": "the reviewed answer"
+          }
+        }
+      ],
+      "policy": "judges",
+      "expect": {
+        "select": [],
+        "gaps": [],
+        "forbidden": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "review": {
+        "status": "unreviewed",
+        "reviewers": [],
+        "notes": "needs review: a spending limit is a plan budget, not a metric or a gap"
+      }
+    }
+  ]
+}

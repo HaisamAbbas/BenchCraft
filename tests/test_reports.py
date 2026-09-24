@@ -285,7 +285,13 @@ def test_reports_regenerate_without_invoking_the_app_or_any_evaluator(
 
 def test_a_partial_snapshot_keeps_pending_work_in_every_denominator(tmp_path: Path) -> None:
     rows = _rows(("a", "yes", "yes"), ("b", "slow 30", "yes"), ("c", "yes", "yes"))
-    project = Project(tmp_path, rows, gates=[{"gate_id": "g", "binding": 0, "min_pass_rate": 0.5}])
+    # a and c run beside the slow b, so the snapshot never waits on b's 30 s sleep
+    project = Project(
+        tmp_path,
+        rows,
+        gates=[{"gate_id": "g", "binding": 0, "min_pass_rate": 0.5}],
+        concurrency={"application": 3, "evaluation": 3},
+    )
     snapshot: dict[str, Any] = {}
 
     async def during(ctl: RunController) -> None:

@@ -1,0 +1,4 @@
+command: AIBENCH_WORKLOAD_TESTS=1 python -m pytest -p no:cacheprovider tests/test_mvp_acceptance.py -k larger -s -q
+platform: Windows 11 Pro 10.0.26200, Python 3.12.10, 14 logical CPUs
+1,000-case workload: 152.6s, peak traced 15.0 MiB
+1 passed, 3 deselected in 157.42s (0:02:37)

@@ -1,0 +1,28 @@
+engine profile: 200 cases, loopback HTTP (rag_service), application/evaluation concurrency 16
+platform: Windows-11-10.0.26200-SP0, Python 3.12.10, 14 logical CPUs
+state completed, 28.6 s wall, 7.0 cases/s
+         2467316 function calls (2404364 primitive calls) in 28.587 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1986 to 332 due to restriction <'aibench|httpx|fsync|sqlite'>
+   List reduced from 332 to 18 due to restriction <18>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     1892    0.047    0.000   67.328    0.036 D:\BenchCraft\src\aibench\runners\http_runner.py:359(_exchange)
+     1492    0.009    0.000   32.542    0.022 D:\BenchCraft\.venv\Lib\site-packages\httpx\_client.py:1542(stream)
+     1292    0.034    0.000   29.986    0.023 D:\BenchCraft\.venv\Lib\site-packages\httpx\_client.py:1594(send)
+      400    0.015    0.000   27.397    0.068 D:\BenchCraft\src\aibench\services\execution.py:38(invoke_and_record)
+      800    0.006    0.000   27.066    0.034 D:\BenchCraft\src\aibench\runners\http_runner.py:440(_read_body)
+     1000    0.008    0.000   27.033    0.027 D:\BenchCraft\.venv\Lib\site-packages\httpx\_models.py:982(aiter_bytes)
+      200    0.013    0.000   26.659    0.133 D:\BenchCraft\src\aibench\services\execution.py:64(_commit_captures)
+     1292    0.009    0.000   26.279    0.020 D:\BenchCraft\.venv\Lib\site-packages\httpx\_client.py:1645(_send_handling_auth)
+     1000    0.019    0.000   22.726    0.023 D:\BenchCraft\.venv\Lib\site-packages\httpx\_models.py:1037(aiter_raw)
+     1292    0.041    0.000   22.576    0.017 D:\BenchCraft\.venv\Lib\site-packages\httpx\_client.py:1679(_send_handling_redirects)
+     1292    0.019    0.000   21.032    0.016 D:\BenchCraft\.venv\Lib\site-packages\httpx\_client.py:1717(_send_single_request)
+      400    0.023    0.000   20.869    0.052 D:\BenchCraft\src\aibench\storage\artifacts.py:89(write_bytes)
+      800    0.003    0.000   19.034    0.024 D:\BenchCraft\.venv\Lib\site-packages\httpx\_models.py:1065(aclose)
+     1292    0.029    0.000   18.313    0.014 D:\BenchCraft\.venv\Lib\site-packages\httpx\_transports\default.py:374(handle_async_request)
+      600    0.012    0.000   14.447    0.024 D:\BenchCraft\.venv\Lib\site-packages\httpx\_client.py:179(aclose)
+      600    0.016    0.000   14.431    0.024 D:\BenchCraft\.venv\Lib\site-packages\httpx\_transports\default.py:274(aclose)
+      400    0.007    0.000   12.018    0.030 D:\BenchCraft\src\aibench\storage\artifacts.py:222(commit_verified_artifact)
+      402    0.013    0.000   10.669    0.027 D:\BenchCraft\src\aibench\storage\artifacts.py:137(verify_ref)

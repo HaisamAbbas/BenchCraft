@@ -158,3 +158,16 @@ Review remediation: `tests/test_recovery_review_regressions.py`.
 
 Gates: 11-G1..G5. See `docs/engineering/reports/11.md`. Decisions: ADR 0010.
 Review remediation: `tests/test_report_review_regressions.py`.
+
+## Prompt 12 — MVP acceptance and harness validation
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 12-T1 | Full product acceptance: 100-case fixture with injected RAG failures, black-box missing evidence, interruption/resume, stored-output rescore; goal → clarification → revision → run → live question → pause/resume → failure discussion | DONE | `examples/acceptance/` (`rag_service.py`, `rag100.jsonl`, `make_dataset.py`, `run_acceptance.py`); `tests/test_mvp_acceptance.py` (`test_the_100_case_workflow_survives_a_kill_finds_the_injected_failures_and_rescores_offline`, `test_a_black_box_endpoint_yields_a_missing_evidence_gap_not_a_score`, `test_a_fresh_user_completes_the_conversational_acceptance_journey`, opt-in `test_a_larger_cheap_workload_stays_bounded_and_resumes`); `docs/engineering/evidence/12/acceptance-*` |
+| 12-T2 | Planner measurement: versioned 30–50 fixture set across app families with required concepts, acceptable alternatives and forbidden choices; comparison with the static template; reviewer status recorded | DONE (baseline; `acceptable` is supported in scoring but not yet annotated in v1); model planner not measured (blocked) | `benchmarks/planner/v1`, `planning/benchmark.py` (`load_fixture_set`, `run_fixture_set`, `benchmark_report`), `aibench plan benchmark`; `tests/test_planner_fixture_set.py`; `evidence/12/planner-template-v1.json` |
+| 12-T3 | Judges and invariants: deterministic calibration and contract cases, scoped live checks where available; planner, engine reliability and cost completeness with actual denominators | DONE (native); live checks blocked | `benchmarks/judges/v1`, `services/calibration.py`, `aibench evaluators calibrate`; `tests/test_judge_calibration.py` (calibration and randomized invariants); `evidence/12/judge-calibration-v1.json`, `evidence/12/acceptance-summary.json` (reliability 200/200, cost accounting) |
+| 12-T4 | Audit against the specification: every requirement and gate with evidence; MVP defects fixed; deferred scope, unsupported platforms and blocked live checks recorded | DONE | `docs/engineering/mvp-acceptance.md`; `requirements-matrix.md` (Status and Evidence columns); fixes in `inspection/profile.py`, `planning/catalog.py`, `services/reports.py`, `reporting/render.py` |
+
+Gates: 12-G1..G5. See `docs/engineering/reports/12.md`. Decisions: ADR 0011.
+Review remediation: `tests/test_acceptance_review_regressions.py`.
+Closeout: the time bound in the Prompt 10 blocking-judge test went from 110 s to 200 s after cold worker starts measured 111 s under load; the judge is still proven killed, since 2 x 120 s would exceed the bound.

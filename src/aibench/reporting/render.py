@@ -223,7 +223,16 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
                 else ""
             ),
         ),
-        ("Attempts (incl. retries)", str(app["attempts"])),
+        (
+            "Attempts (incl. retries)",
+            str(app["attempts"])
+            + (
+                f", plus {app['uncommitted_dispatches']} call(s) that may have reached the "
+                "application while a session was lost (no recorded attempt; cost unknown)"
+                if app.get("uncommitted_dispatches")
+                else ""
+            ),
+        ),
         (
             "Successful-request latency",
             (

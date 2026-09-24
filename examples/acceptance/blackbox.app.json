@@ -1,0 +1,21 @@
+{
+  "application_id": "acceptance-blackbox",
+  "runner": "http",
+  "effects": "none",
+  "revision": "acceptance-1",
+  "target": "http://127.0.0.1:8766/blackbox",
+  "transport": {
+    "kind": "http",
+    "url": "http://127.0.0.1:8766/blackbox",
+    "healthcheck_url": "http://127.0.0.1:8766/health",
+    "timeout_seconds": 30
+  },
+  "input_binding": {
+    "fields": {
+      "/question": "/input"
+    }
+  },
+  "output_binding": {
+    "output": "/answer"
+  }
+}

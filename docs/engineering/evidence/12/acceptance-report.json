@@ -1,0 +1,517 @@
+{
+  "application": {
+    "attempts": 100,
+    "by_status": {
+      "ok": 100
+    },
+    "completed": 100,
+    "cost": {
+      "accounting": "unknown",
+      "calls": 104,
+      "calls_with_known_cost": 0,
+      "calls_with_unknown_cost": 104,
+      "known_cost_usd": 0,
+      "total_cost_usd": null
+    },
+    "error_kinds": {},
+    "failed": 0,
+    "latency": {
+      "cache": "no execution caching; every latency is a fresh invocation",
+      "concurrency": 4,
+      "definition": "wall time of the final attempt of each successful request, measured by the runner around the invocation; p50/p95 by nearest rank. Failed and timed-out requests are excluded from the percentiles and counted separately.",
+      "excluded_failures": 0,
+      "excluded_timeouts": 0,
+      "max_ms": 466.589,
+      "min_ms": 27.594,
+      "p50_ms": 104.684,
+      "p95_ms": 298.834,
+      "successful_requests": 100
+    },
+    "not_recorded": 0,
+    "planned": 100,
+    "recorded": 100,
+    "retried_items": 4,
+    "uncommitted_dispatches": 4
+  },
+  "as_of_event_sequence": 410,
+  "basis": "stored facts only: no application, evaluator or judge was invoked",
+  "cost": {
+    "application": {
+      "accounting": "unknown",
+      "calls": 104,
+      "calls_with_known_cost": 0,
+      "calls_with_unknown_cost": 104,
+      "known_cost_usd": 0,
+      "total_cost_usd": null
+    },
+    "evaluator": {
+      "accounting": "complete",
+      "calls": 100,
+      "calls_with_known_cost": 100,
+      "calls_with_unknown_cost": 0,
+      "calls_with_unknown_tokens": 0,
+      "known_cost_usd": 0.0,
+      "reported_tokens": 0,
+      "total_cost_usd": 0.0
+    },
+    "evaluator_scoring_id": "engine-run-62469b4da08c",
+    "note": "observed spend only; estimates are never added to observed totals",
+    "planner": {
+      "accounting": "not_attributed",
+      "note": "planning and conversation usage is recorded per session (/budget), not per run"
+    }
+  },
+  "evidence": {
+    "content": "included",
+    "items": [
+      {
+        "case_id": "rag-003",
+        "execution": {
+          "attempt": 1,
+          "error_excerpt": null,
+          "error_kind": null,
+          "execution_id": "run-62469b4da08c:rag-003:r0:a1",
+          "output_excerpt": "We ship to over 40 countries; delivery takes 5 to 10 days.",
+          "retrieved_context_excerpts": [
+            "We ship to over 40 countries; delivery takes 5 to 10 days.",
+            "Refunds are available within 30 days of purchase with a receipt."
+          ],
+          "retrieved_context_items": 2,
+          "status": "ok",
+          "trace_refs": [
+            "run-62469b4da08c:rag-003:r0:a1:exchange",
+            "run-62469b4da08c:rag-003:r0:a1:response_body"
+          ],
+          "wall_ms": 420.735
+        },
+        "repetition": 0,
+        "results": [
+          {
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "decision": "fail",
+            "evidence_refs": [
+              "run-62469b4da08c:rag-003:r0:a1#execution.output",
+              "case:rag-003#case.reference.answer"
+            ],
+            "metric": "native.exact_match@1.0.0",
+            "raw_artifact": null,
+            "reason_excerpt": null,
+            "status": "ok",
+            "value": false
+          }
+        ]
+      },
+      {
+        "case_id": "rag-015",
+        "execution": {
+          "attempt": 1,
+          "error_excerpt": null,
+          "error_kind": null,
+          "execution_id": "run-62469b4da08c:rag-015:r0:a1",
+          "output_excerpt": "We ship to over 40 countries; delivery takes 5 to 10 days.",
+          "retrieved_context_excerpts": [
+            "We ship to over 40 countries; delivery takes 5 to 10 days.",
+            "All products carry a one-year limited warranty against defects."
+          ],
+          "retrieved_context_items": 2,
+          "status": "ok",
+          "trace_refs": [
+            "run-62469b4da08c:rag-015:r0:a1:exchange",
+            "run-62469b4da08c:rag-015:r0:a1:response_body"
+          ],
+          "wall_ms": 248.129
+        },
+        "repetition": 0,
+        "results": [
+          {
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "decision": "fail",
+            "evidence_refs": [
+              "run-62469b4da08c:rag-015:r0:a1#execution.output",
+              "case:rag-015#case.reference.answer"
+            ],
+            "metric": "native.exact_match@1.0.0",
+            "raw_artifact": null,
+            "reason_excerpt": null,
+            "status": "ok",
+            "value": false
+          }
+        ]
+      },
+      {
+        "case_id": "rag-032",
+        "execution": {
+          "attempt": 2,
+          "error_excerpt": null,
+          "error_kind": null,
+          "execution_id": "run-62469b4da08c:rag-032:r0:a2",
+          "output_excerpt": "Email support@example.com to reach a person on our team.",
+          "retrieved_context_excerpts": [
+            "Email support@example.com to reach a person on our team.",
+            "Support is open Monday to Friday, 9am to 5pm UTC."
+          ],
+          "retrieved_context_items": 2,
+          "status": "ok",
+          "trace_refs": [
+            "run-62469b4da08c:rag-032:r0:a2:exchange",
+            "run-62469b4da08c:rag-032:r0:a2:response_body"
+          ],
+          "wall_ms": 199.295
+        },
+        "repetition": 0,
+        "results": [
+          {
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "decision": "fail",
+            "evidence_refs": [
+              "run-62469b4da08c:rag-032:r0:a2#execution.output",
+              "case:rag-032#case.reference.answer"
+            ],
+            "metric": "native.exact_match@1.0.0",
+            "raw_artifact": null,
+            "reason_excerpt": null,
+            "status": "ok",
+            "value": false
+          }
+        ]
+      },
+      {
+        "case_id": "rag-048",
+        "execution": {
+          "attempt": 1,
+          "error_excerpt": null,
+          "error_kind": null,
+          "execution_id": "run-62469b4da08c:rag-048:r0:a1",
+          "output_excerpt": "Email support@example.com to reach a person on our team.",
+          "retrieved_context_excerpts": [
+            "Email support@example.com to reach a person on our team.",
+            "Reset your password from the sign-in page with Forgot password."
+          ],
+          "retrieved_context_items": 2,
+          "status": "ok",
+          "trace_refs": [
+            "run-62469b4da08c:rag-048:r0:a1:exchange",
+            "run-62469b4da08c:rag-048:r0:a1:response_body"
+          ],
+          "wall_ms": 102.461
+        },
+        "repetition": 0,
+        "results": [
+          {
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "decision": "fail",
+            "evidence_refs": [
+              "run-62469b4da08c:rag-048:r0:a1#execution.output",
+              "case:rag-048#case.reference.answer"
+            ],
+            "metric": "native.exact_match@1.0.0",
+            "raw_artifact": null,
+            "reason_excerpt": null,
+            "status": "ok",
+            "value": false
+          }
+        ]
+      },
+      {
+        "case_id": "rag-051",
+        "execution": {
+          "attempt": 1,
+          "error_excerpt": null,
+          "error_kind": null,
+          "execution_id": "run-62469b4da08c:rag-051:r0:a1",
+          "output_excerpt": "Email support@example.com to reach a person on our team.",
+          "retrieved_context_excerpts": [
+            "Email support@example.com to reach a person on our team.",
+            "You can cancel a subscription at any time from Account settings."
+          ],
+          "retrieved_context_items": 2,
+          "status": "ok",
+          "trace_refs": [
+            "run-62469b4da08c:rag-051:r0:a1:exchange",
+            "run-62469b4da08c:rag-051:r0:a1:response_body"
+          ],
+          "wall_ms": 82.847
+        },
+        "repetition": 0,
+        "results": [
+          {
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "decision": "fail",
+            "evidence_refs": [
+              "run-62469b4da08c:rag-051:r0:a1#execution.output",
+              "case:rag-051#case.reference.answer"
+            ],
+            "metric": "native.exact_match@1.0.0",
+            "raw_artifact": null,
+            "reason_excerpt": null,
+            "status": "ok",
+            "value": false
+          }
+        ]
+      },
+      {
+        "case_id": "rag-069",
+        "execution": {
+          "attempt": 1,
+          "error_excerpt": null,
+          "error_kind": null,
+          "execution_id": "run-62469b4da08c:rag-069:r0:a1",
+          "output_excerpt": "We ship to over 40 countries; delivery takes 5 to 10 days.",
+          "retrieved_context_excerpts": [
+            "We ship to over 40 countries; delivery takes 5 to 10 days.",
+            "We accept Visa, Mastercard and PayPal for all orders."
+          ],
+          "retrieved_context_items": 2,
+          "status": "ok",
+          "trace_refs": [
+            "run-62469b4da08c:rag-069:r0:a1:exchange",
+            "run-62469b4da08c:rag-069:r0:a1:response_body"
+          ],
+          "wall_ms": 70.843
+        },
+        "repetition": 0,
+        "results": [
+          {
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "decision": "fail",
+            "evidence_refs": [
+              "run-62469b4da08c:rag-069:r0:a1#execution.output",
+              "case:rag-069#case.reference.answer"
+            ],
+            "metric": "native.exact_match@1.0.0",
+            "raw_artifact": null,
+            "reason_excerpt": null,
+            "status": "ok",
+            "value": false
+          }
+        ]
+      },
+      {
+        "case_id": "rag-076",
+        "execution": {
+          "attempt": 1,
+          "error_excerpt": null,
+          "error_kind": null,
+          "execution_id": "run-62469b4da08c:rag-076:r0:a1",
+          "output_excerpt": "Email support@example.com to reach a person on our team.",
+          "retrieved_context_excerpts": [
+            "Email support@example.com to reach a person on our team.",
+            "Invoices are emailed after each payment and listed under Billing."
+          ],
+          "retrieved_context_items": 2,
+          "status": "ok",
+          "trace_refs": [
+            "run-62469b4da08c:rag-076:r0:a1:exchange",
+            "run-62469b4da08c:rag-076:r0:a1:response_body"
+          ],
+          "wall_ms": 72.831
+        },
+        "repetition": 0,
+        "results": [
+          {
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "decision": "fail",
+            "evidence_refs": [
+              "run-62469b4da08c:rag-076:r0:a1#execution.output",
+              "case:rag-076#case.reference.answer"
+            ],
+            "metric": "native.exact_match@1.0.0",
+            "raw_artifact": null,
+            "reason_excerpt": null,
+            "status": "ok",
+            "value": false
+          }
+        ]
+      },
+      {
+        "case_id": "rag-089",
+        "execution": {
+          "attempt": 1,
+          "error_excerpt": null,
+          "error_kind": null,
+          "execution_id": "run-62469b4da08c:rag-089:r0:a1",
+          "output_excerpt": "We ship to over 40 countries; delivery takes 5 to 10 days.",
+          "retrieved_context_excerpts": [
+            "We ship to over 40 countries; delivery takes 5 to 10 days.",
+            "We never sell personal data; see the privacy policy for details."
+          ],
+          "retrieved_context_items": 2,
+          "status": "ok",
+          "trace_refs": [
+            "run-62469b4da08c:rag-089:r0:a1:exchange",
+            "run-62469b4da08c:rag-089:r0:a1:response_body"
+          ],
+          "wall_ms": 62.452
+        },
+        "repetition": 0,
+        "results": [
+          {
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "decision": "fail",
+            "evidence_refs": [
+              "run-62469b4da08c:rag-089:r0:a1#execution.output",
+              "case:rag-089#case.reference.answer"
+            ],
+            "metric": "native.exact_match@1.0.0",
+            "raw_artifact": null,
+            "reason_excerpt": null,
+            "status": "ok",
+            "value": false
+          }
+        ]
+      }
+    ],
+    "note": "raw evaluator outputs and application traces are stored as separate artifacts; this report references them by ID and digest only",
+    "raw_artifacts": {},
+    "scoring_id": "engine-run-62469b4da08c"
+  },
+  "gates": [
+    {
+      "binding": 0,
+      "completed": 100,
+      "completed_coverage": 1.0,
+      "denominator": "selected",
+      "gate_id": "correct-answers",
+      "metric": "native.exact_match",
+      "min_completed_coverage": null,
+      "min_pass_rate": 0.95,
+      "pass_rate": 0.92,
+      "passes": 92,
+      "reason": "pass rate 92/100 below 0.95",
+      "selected": 100,
+      "status": "fail"
+    }
+  ],
+  "generated_at": "2026-09-24T06:37:08.879326+00:00",
+  "notes": [],
+  "outcome": {
+    "complete": true,
+    "gates_failed": [
+      "correct-answers"
+    ],
+    "gates_undecided": [],
+    "unhealthy_work": {}
+  },
+  "run": {
+    "application_hash": "sha256:c74b1cb1d13a6a422f9401b4c6aac19af4ea12e6c6acc4a00e09d7f75faa66a5",
+    "application_id": "acceptance-rag",
+    "application_revision": "acceptance-1",
+    "approved_by": "policy",
+    "created_at": "2026-09-24T06:36:53.255270+00:00",
+    "dataset_hash": "sha256:9b90d2e791ae113189791a307a74460f87d8726547c7e54dc9fa6648c38d334f",
+    "effects": "none",
+    "environment": {
+      "platform": "win32",
+      "python": "3.12.10"
+    },
+    "finished": true,
+    "mode": "manual_plan",
+    "partial": false,
+    "plan_hash": "sha256:64395f3f5a533fa62e78180dd72c7f3631c9add42778129f116489d033606660",
+    "plan_id": "acceptance-rag-100",
+    "plugins": {
+      "native.exact_match": "aibench.native==0.1.0"
+    },
+    "policy_hash": "sha256:8f25bb66661dcc9c67690cd45ca2fddd96d5eec182a36d4e487ac8a17e526227",
+    "provisional": false,
+    "repetitions": 1,
+    "run_id": "run-62469b4da08c",
+    "runner": "http",
+    "seed": 924334678,
+    "status": "completed",
+    "updated_at": "2026-09-24T06:37:05.675503+00:00"
+  },
+  "schema": "aibench.report/1",
+  "scoring_passes": [
+    {
+      "basis": "planned (case, repetition) items of the run",
+      "evaluator_cost": {
+        "accounting": "complete",
+        "calls": 100,
+        "calls_with_known_cost": 100,
+        "calls_with_unknown_cost": 0,
+        "calls_with_unknown_tokens": 0,
+        "known_cost_usd": 0.0,
+        "reported_tokens": 0,
+        "total_cost_usd": 0.0
+      },
+      "kind": "engine",
+      "metrics": [
+        {
+          "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+          "evaluator_failures": {},
+          "label": "native.exact_match@1.0.0",
+          "profile": {
+            "aggregation": "rate",
+            "description": "Output text equals the reference answer after optional normalization.",
+            "direction": "higher",
+            "evaluator_id": "native.exact_match",
+            "limitations": [
+              "Surface comparison only: a correct paraphrase fails.",
+              "A non-text output (null, object, list) is a failed match, not skipped."
+            ],
+            "params": {},
+            "plugin": "aibench.native==0.1.0",
+            "rule": {
+              "categories": [],
+              "comparator": "is_true",
+              "rule_id": "threshold",
+              "threshold": null,
+              "version": "1"
+            },
+            "scope": "case",
+            "source": "frozen_with_run",
+            "uses_models": false,
+            "value_kind": "boolean",
+            "version": "1.0.0"
+          },
+          "summary": {
+            "aggregation": "rate",
+            "attempted": 100,
+            "binding_hash": "sha256:451a8f728578703d6885752040b2f97a33dbc4f625bfd600b18d3fed321d1972",
+            "cancelled": 0,
+            "completed": 100,
+            "completed_coverage": 1.0,
+            "decisions": {
+              "fail": 8,
+              "indeterminate": 0,
+              "not_evaluated": 0,
+              "pass": 92
+            },
+            "direction": "higher",
+            "eligible": 100,
+            "eligible_coverage": 1.0,
+            "errors": 0,
+            "metric_id": "native.exact_match",
+            "metric_version": "1.0.0",
+            "not_applicable": 0,
+            "params": {},
+            "pending": 0,
+            "reasons": {},
+            "selected": 100,
+            "unavailable": 0,
+            "value_kind": "boolean",
+            "value_summary": {
+              "denominator": "completed",
+              "false": 8,
+              "rate": 0.92,
+              "true": 92
+            }
+          }
+        }
+      ],
+      "scoring_id": "engine-run-62469b4da08c"
+    }
+  ],
+  "work": {
+    "counts": {
+      "evaluation": {
+        "succeeded": 100
+      },
+      "execution": {
+        "succeeded": 100
+      }
+    },
+    "needs_attention": []
+  }
+}

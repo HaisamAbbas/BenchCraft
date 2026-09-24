@@ -1,0 +1,32 @@
+{
+  "plan_id": "acceptance-rag-100",
+  "dataset": "rag100.jsonl",
+  "application": "rag.app.json",
+  "metrics": [
+    {
+      "metric": "native.exact_match"
+    }
+  ],
+  "repetitions": 1,
+  "concurrency": {
+    "application": 4,
+    "evaluation": 4
+  },
+  "retry": {
+    "max_attempts": 2,
+    "initial_backoff_seconds": 0.1,
+    "max_backoff_seconds": 1
+  },
+  "budgets": {
+    "max_application_calls": 150,
+    "max_evaluator_calls": 300,
+    "max_wall_seconds": 900
+  },
+  "gates": [
+    {
+      "gate_id": "correct-answers",
+      "binding": 0,
+      "min_pass_rate": 0.95
+    }
+  ]
+}

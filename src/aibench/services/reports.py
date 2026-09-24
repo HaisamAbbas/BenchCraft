@@ -248,9 +248,20 @@ def _cost_block(
 
 
 def _application_section(
-    storage: Storage, run_id: str, planned_executions: int | None, concurrency: int | None
+    storage: Storage,
+    run_id: str,
+    planned_executions: int | None,
+    concurrency: int | None,
+    events: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[ExecutionResult]]:
     attempts = storage.list_execution_attempts(run_id)
+    # Calls that may have reached the application without a committed attempt: in flight
+    # when a session died, recorded when the next session recovered them (engine recovery).
+    uncommitted = sum(
+        int(e["payload"].get("uncommitted_dispatches", 0))
+        for e in events
+        if e["event_type"] == "recovered"
+    )
     finals = select_final_executions(attempts)
     status = Counter(e.status.value for e in finals)
     error_kinds = Counter(e.error_kind.value for e in finals if e.error_kind is not None)
@@ -266,7 +277,7 @@ def _application_section(
     failed = sum(1 for e in finals if e.status is not ExecutionStatus.OK)
     dispatched = [a for a in attempts if was_dispatched(a)]
     known = sum(float(a.cost) for a in dispatched if a.cost is not None)
-    unknown = sum(1 for a in dispatched if a.cost is None)
+    unknown = sum(1 for a in dispatched if a.cost is None) + uncommitted
     section = {
         "planned": planned_executions,
         "recorded": len(finals),
@@ -276,6 +287,7 @@ def _application_section(
         "by_status": dict(sorted(status.items())),
         "error_kinds": dict(sorted(error_kinds.items())),
         "attempts": len(attempts),
+        "uncommitted_dispatches": uncommitted,
         "retried_items": sum(1 for e in finals if e.attempt_id > 1),
         "latency": {
             "definition": (
@@ -293,7 +305,7 @@ def _application_section(
             "concurrency": concurrency,
             "cache": "no execution caching; every latency is a fresh invocation",
         },
-        "cost": _cost_block(len(dispatched), known, unknown),
+        "cost": _cost_block(len(dispatched) + uncommitted, known, unknown),
     }
     return section, finals
 
@@ -466,7 +478,7 @@ def build_report(
 
     planned_exec = sum(1 for w in items if w.kind == "execution") if items else None
     application, finals = _application_section(
-        storage, run_id, planned_exec, plan.concurrency.application if plan else None
+        storage, run_id, planned_exec, plan.concurrency.application if plan else None, events
     )
 
     all_results = storage.list_metric_results(run_id)

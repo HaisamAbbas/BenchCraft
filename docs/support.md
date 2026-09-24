@@ -68,10 +68,10 @@ are redacted from captured output, stored conversation turns and reports.
 - **Headless commands:**
   - `init`, `doctor`;
   - `dataset validate`, `inspect`;
-  - `plan`, `plan validate`;
+  - `plan`, `plan validate`, `plan benchmark` (planner fixture set);
   - `run`, `resume`, `evaluate` (rescore stored outputs);
   - `runs list/show/status`, `report`, `benchmark`;
-  - `sessions list/show/delete`, `evaluators list/describe/plugin`, `plugins list`, `score`, `app describe/smoke`.
+  - `sessions list/show/delete`, `evaluators list/describe/plugin/calibrate`, `plugins list`, `score`, `app describe/smoke`.
 - **Reports:** JSON, Markdown and static HTML, from stored facts. They include typed metric profiles, full denominators, release gates, latency definitions, cost completeness and case evidence.
 - **Release gates** in plans (`gates`): a minimum pass rate or minimum completed coverage for one metric binding, always over selected cases.
 
@@ -90,6 +90,8 @@ are redacted from captured output, stored conversation turns and reports.
 
 ## Known limits
 
+- **Engine throughput** is low. On the development machine (Windows 11, 14 CPUs), 1,000 cases took between 152 and 233 s at concurrency 16 against an instant local service. Each call waits on a fresh HTTP connection and on its capture artifacts being durably written and verified. Profiles are in `docs/engineering/evidence/12/`.
+- **Planner and judge measurements** (`aibench plan benchmark`, `aibench evaluators calibrate`) use fixture annotations and labels that no person has reviewed yet. The template planner misses objectives phrased without its keywords: 17/21 recall on the v1 fixture set, below the 0.85 target.
 - **Claim checking** links every number in an assistant reply to a result queried in that turn, and flags numbers it can't trace. It shows where a number could have come from, not that the sentence around it is right. An explanation of why cases failed is a hypothesis unless a stored result states it.
 - **Redaction** of credentials is pattern-based, as a safety net. Use secret references rather than relying on it.
 - **Latency** is runner-measured wall time per request under the plan's concurrency. It is not a load test.

@@ -1,0 +1,18 @@
+{
+  "schema": "aibench.judge-calibration/1",
+  "version": "judge-calibration-v1",
+  "review": {
+    "status": "unreviewed",
+    "notes": "Labels were written by the implementing AI agent for Prompt 12, not by human labelers. No label has been reviewed."
+  },
+  "not_measured": [
+    {
+      "evaluator": "deepeval.faithfulness@1",
+      "reason": "model judge: calibration, repeat stability and order/style sensitivity need live judge calls (paid; not authorized). Its contract is covered offline by recorded-response tests (Prompt 05, tests/test_deepeval_adapter.py)."
+    },
+    {
+      "measure": "order and style sensitivity of model judges",
+      "reason": "no model judge was run; the native evaluators are deterministic, so ordering cannot affect them"
+    }
+  ]
+}

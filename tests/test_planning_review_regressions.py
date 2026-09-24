@@ -321,7 +321,9 @@ def test_the_benchmark_counts_unjustified_and_uncatalogued_selections(tmp_path: 
     )
     result = assess(fixture, proposal, inputs.catalog, executable=True)
     assert result.unnecessary == 1 and "groundedness" in result.selected
-    assert result.forbidden_selected == {"made.up"}
+    # uncatalogued, and (since Prompt 12) selected although the catalog found it ineligible:
+    # this app exposes no retrieval, so fixture.grounded cannot be measured
+    assert result.forbidden_selected == {"made.up", "fixture.grounded"}
 
 
 @pytest.mark.parametrize(

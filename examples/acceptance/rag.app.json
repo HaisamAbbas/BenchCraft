@@ -1,0 +1,23 @@
+{
+  "application_id": "acceptance-rag",
+  "runner": "http",
+  "effects": "none",
+  "revision": "acceptance-1",
+  "target": "http://127.0.0.1:8766/answer",
+  "transport": {
+    "kind": "http",
+    "url": "http://127.0.0.1:8766/answer",
+    "healthcheck_url": "http://127.0.0.1:8766/health",
+    "timeout_seconds": 30
+  },
+  "input_binding": {
+    "fields": {
+      "/question": "/input"
+    }
+  },
+  "output_binding": {
+    "output": "/answer",
+    "retrieved_context": "/retrieved",
+    "retrieved_context_item": "/text"
+  }
+}
