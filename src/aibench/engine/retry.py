@@ -118,3 +118,8 @@ def backoff_delay(
     if retry_after is not None:
         delay = max(delay, min(retry_after, policy.max_backoff_seconds))
     return delay
+
+
+def http_status(result: ExecutionResult) -> tuple[int | None, float | None]:
+    """The HTTP status and Retry-After seconds an attempt recorded, when it has them."""
+    return _http_status(result)

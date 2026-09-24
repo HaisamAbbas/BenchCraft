@@ -1,9 +1,9 @@
 """Evidence-backed application profiles (§3 `inspect`, §5 ObservationClaim, 07-T1).
 
 Scope, stated in every profile: the declared application config, plus — when a run is
-named — what that run's recorded executions actually contained. No source code is read and
-no architecture is claimed (§17: "`inspect` initially validates declared interfaces and
-static metadata; advertise its limited scope accurately").
+named — what that run's recorded executions actually contained, plus — when an approved
+source tree is given — what its manifests and imports suggest (`inspection.source`,
+16-T1). Source findings are always `inferred` and never change a claim.
 
 Each capability gets one `ObservationClaim` with a state:
 
@@ -33,14 +33,15 @@ from aibench.core.models import (
     ObservationClaim,
     ObservationState,
 )
+from aibench.inspection.source import SourceFinding, SourceInspection
 from aibench.runners import LoadedApplication, create_runner, load_application
 from aibench.runners.bindings import OPTIONAL_CAPABILITIES
 from aibench.security.endpoints import origin_of
 
 PROFILE_SCHEMA_VERSION = "1.0.0"
 SCOPE = (
-    "declared application configuration and, when a run is named, its recorded executions; "
-    "no source code or architecture discovery"
+    "declared application configuration; recorded executions when a run is named; inferred "
+    "source findings when an approved source tree is given"
 )
 
 # How to close each gap without rewriting the application (§7: "minimal integration recipe").
@@ -54,11 +55,11 @@ _RECIPES = {
         "output_binding.tool_events"
     ),
     "usage": "return token usage in the response and map it with output_binding.usage",
+    "cost": "return the request's cost in the response and map it with output_binding.cost",
     "world_state": (
         "return the final application state or state assertion in the response and map it "
         "with output_binding.world_state"
     ),
-    "cost": "return the request's cost in the response and map it with output_binding.cost",
 }
 _MAX_EVIDENCE_REFS = 5
 
@@ -80,6 +81,9 @@ class ApplicationProfile(FrozenModel):
     # Observed in recorded executions, but empty in every one of them (e.g. a retriever
     # that is declared but disabled at runtime, §23): nothing can be measured from it.
     always_empty: tuple[str, ...] = ()
+    # What an approved source tree suggests (16-T1). Always `inferred`: it never makes a
+    # capability available; `claims` stay declared/observed/unknown.
+    source_findings: tuple[SourceFinding, ...] = ()
 
     def claim(self, capability: str) -> ObservationClaim | None:
         return next((c for c in self.claims if c.capability == capability), None)
@@ -140,11 +144,17 @@ def _endpoint(loaded: LoadedApplication) -> str:
     return loaded.spec.target
 
 
+# Source capabilities that correspond to an observable output of the application.
+_SOURCE_OBSERVABLES = {"retrieval": "retrieved_context", "tool_use": "tool_events",
+                       "model_provider": "usage"}  # fmt: skip
+
+
 def inspect_application(
     config_path: Path,
     *,
     executions: Iterable[ExecutionResult] = (),
     run_ids: Iterable[str] = (),
+    source_tree: SourceInspection | None = None,
 ) -> ApplicationProfile:
     """Build the profile from the declared config and, optionally, recorded executions of
     this application. Pure: nothing is invoked."""
@@ -252,8 +262,28 @@ def inspect_application(
         effects=spec.effects.value,
         isolation=description.isolation,
         claims=tuple(claims),
-        gaps=tuple(gaps),
+        gaps=tuple(gaps + _source_gaps(source_tree, claims)),
         limitations=tuple(description.limitations),
         evidence_runs=tuple(run_ids),
         always_empty=tuple(always_empty),
+        source_findings=source_tree.findings if source_tree is not None else (),
     )
+
+
+def _source_gaps(source: SourceInspection | None, claims: list[ObservationClaim]) -> list[str]:
+    """Where the source suggests a capability the application does not report: a hint of
+    what to expose, never evidence that it works."""
+    if source is None:
+        return []
+    states = {c.capability: c.state for c in claims}
+    gaps = []
+    for finding in source.findings:
+        observable = _SOURCE_OBSERVABLES.get(finding.capability)
+        if observable is None or states.get(observable) is not ObservationState.UNKNOWN:
+            continue
+        where = ", ".join(f"{e.path}:{e.line}" if e.line else e.path for e in finding.evidence[:3])
+        gaps.append(
+            f"source suggests {finding.capability} ({finding.library} at {where}; inferred), "
+            f"but {observable} is not observable: {_RECIPES[observable]}"
+        )
+    return gaps

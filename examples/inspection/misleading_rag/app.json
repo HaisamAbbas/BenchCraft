@@ -1,0 +1,8 @@
+{
+  "application_id": "misleading-rag",
+  "runner": "cli",
+  "target": "app.py",
+  "effects": "none",
+  "transport": {"kind": "cli", "argv": ["python", "app.py"], "timeout_seconds": 30},
+  "output_binding": {"output": "/answer"}
+}

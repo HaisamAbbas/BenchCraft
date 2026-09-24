@@ -1,0 +1,8 @@
+{
+  "application_id": "instrumented-rag",
+  "runner": "cli",
+  "target": "rag_app.py",
+  "effects": "none",
+  "transport": {"kind": "cli", "argv": ["python", "rag_app.py"], "timeout_seconds": 30},
+  "output_binding": {"output": "/answer", "retrieved_context": "/retrieved"}
+}

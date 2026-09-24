@@ -50,8 +50,15 @@ from aibench.core.models import (
     WorkItemState,
 )
 from aibench.core.plans import ExecutablePlan
+from aibench.engine import cache
 from aibench.engine.budget import BudgetLedger
-from aibench.engine.retry import backoff_delay, classify_evaluation, classify_execution
+from aibench.engine.quota import QuotaGate
+from aibench.engine.retry import (
+    backoff_delay,
+    classify_evaluation,
+    classify_execution,
+    http_status,
+)
 from aibench.registry import ResolvedMetric
 from aibench.runners.base import BaseRunner, ResetReport, race
 from aibench.services.execution import invoke_and_record
@@ -69,6 +76,8 @@ TERMINAL = frozenset(
     }
 )
 _POLL_SECONDS = 0.1
+# Evaluations held by a quota that dispatch looks past per pass (bounded work per pass).
+_HELD_SCAN = 256
 # The runner bounds a reset by its lifecycle timeout; this only waits for an abort.
 _RESET_WAIT_SECONDS = 3600.0
 _HEARTBEAT_SECONDS = 2.0
@@ -236,6 +245,16 @@ class RunEngine:
     reset_mode: str = "none"
     world_id: str | None = None
     world_seed: Any = None
+    # The dependency identity frozen by the run; every engine result must carry it.
+    dependency_lock_hash: str | None = None
+    # Opt-in caches (16-T3): the key parts that are fixed for the run, or None when off.
+    execution_cache: dict[str, Any] | None = None
+    evaluation_cache_policy: str | None = None
+    _exec_cache_keys: dict[str, str] = field(default_factory=dict)
+    # Provider-aware quotas (16-T4): consulted before a task is created.
+    _gates: list[QuotaGate] = field(default_factory=list)
+    _task_gates: dict[asyncio.Task[Any], list[QuotaGate]] = field(default_factory=dict)
+    _throttled: bool = False
     _episodes: dict[str, list[str]] = field(default_factory=dict)  # episode -> turn case IDs
     _episode_of: dict[str, str] = field(default_factory=dict)
     _succeeded_here: set[str] = field(default_factory=set)  # execution keys, this session
@@ -350,6 +369,7 @@ class RunEngine:
 
     async def execute(self) -> RunOutcome:
         self.controller.bind(asyncio.get_running_loop())
+        self._gates = [QuotaGate(q) for q in self.plan.quotas]
         self._load()
         self._set_state(RunState.RUNNING)
         self._event(
@@ -382,7 +402,9 @@ class RunEngine:
                     self.plan.evaluation_timeout_seconds,
                     self.controller.abort_event,
                     application=self.application,
+                    dependency_lock_hash=self.dependency_lock_hash,
                 )
+                scorer.cache_policy_hash = self.evaluation_cache_policy
                 await scorer.open()
                 self._scorers[metric.binding_hash] = scorer
 
@@ -399,6 +421,7 @@ class RunEngine:
         ctl = self.controller
         while True:
             self._keep_lease()
+            self._throttled = False
             if ctl.cancelled:
                 self._drain_delayed()  # waiting retries are cancelled, not stranded
             self._release_due_retries()
@@ -421,6 +444,12 @@ class RunEngine:
             if ctl.paused and not stopping:
                 self._set_state(RunState.PAUSED)
                 await ctl.wait_for_change(_POLL_SECONDS * 5)
+                continue
+            if self._throttled:
+                # A quota's rate or cooldown holds the next work back: it waits as a queue
+                # entry, and the loop stays responsive to controls meanwhile. (A cancelled
+                # run consults no quota, so this never delays a cancel.)
+                await ctl.wait_for_change(_POLL_SECONDS)
                 continue
             if self._delayed and not stopping:
                 await ctl.wait_for_change(self._next_wait())
@@ -460,6 +489,9 @@ class RunEngine:
         while self._exec_queue and self._running("execution") < self.plan.concurrency.application:
             if self._stop_reason is not None:
                 return
+            gates = self._gates_for("execution")
+            if self._held(gates):
+                return
             denial = self.ledger.reserve_application()
             if denial is not None:
                 self._stop_reason = denial
@@ -479,6 +511,7 @@ class RunEngine:
                 continue
             task = asyncio.ensure_future(self._reset_then_invoke(item))
             self._in_flight[task] = item
+            self._start(task, gates)
 
     def _is_first_turn(self, item: _Item) -> bool:
         return self._episodes[self._episode_of[item.case_id]][0] == item.case_id
@@ -517,6 +550,26 @@ class RunEngine:
         await asyncio.gather(reset, return_exceptions=True)
         return ResetReport("aborted", "the run was aborted during the reset")
 
+    def _cached_execution(self, item: _Item) -> ExecutionResult | None:
+        assert self.execution_cache is not None
+        key = cache.execution_key(self.cases[item.case_id], item.repetition, **self.execution_cache)
+        self._exec_cache_keys[item.task_key] = key
+        entry = self.storage.get_cache_entry("execution", key)
+        source = self.storage.get_execution_attempt(entry[1]) if entry else None
+        if source is None or source.status is not ExecutionStatus.OK:
+            return None
+        copy = cache.execution_from_cache(
+            source, run_id=self.run_id, repetition=item.repetition, attempt=item.attempt, key=key
+        )
+        self.storage.commit_execution_attempt(copy)
+        self._event(
+            "cache_hit",
+            task_key=item.task_key,
+            kind="execution",
+            source=entry[1] if entry else None,
+        )
+        return copy
+
     def _block_undispatched(self, item: _Item, reason: str) -> None:
         if self._transition(item, {WorkItemState.PENDING}, WorkItemState.BLOCKED, error=reason):
             self._exec_states[item.task_key] = WorkItemState.BLOCKED
@@ -524,8 +577,14 @@ class RunEngine:
 
     async def _reset_then_invoke(self, item: _Item) -> ExecutionResult:
         """Reset the application first when this attempt needs a known state, then invoke.
-        A reset that fails raises ResetFailed: the case is not run on unknown state."""
+        A reset that fails raises ResetFailed: the case is not run on unknown state. With
+        the execution cache on, a stored result for the same key is copied instead: nothing
+        is reset or invoked."""
         assert self.runner is not None
+        if self.execution_cache is not None:
+            cached = self._cached_execution(item)
+            if cached is not None:
+                return cached
         if self.reset_mode == "per_case" or (
             self.reset_mode == "per_episode" and self._is_first_turn(item)
         ):
@@ -556,7 +615,22 @@ class RunEngine:
     async def _dispatch_evaluations(self, stopping: bool) -> None:
         if stopping and not self.controller.cancelled:
             return  # interrupt: unstarted evaluations stay pending for resume
+        # Work held by one evaluator's quota does not hold back other evaluators or
+        # records that need no evaluator: up to _HELD_SCAN held entries are looked past,
+        # and put back in order.
+        held_back: list[_Item] = []
+        held_evaluators: set[str] = set()
+        try:
+            await self._dispatch_evaluations_past(held_back, held_evaluators)
+        finally:
+            self._eval_queue.extendleft(reversed(held_back))
+
+    async def _dispatch_evaluations_past(
+        self, held_back: list[_Item], held_evaluators: set[str]
+    ) -> None:
         while self._eval_queue and self._running("evaluation") < self.plan.concurrency.evaluation:
+            if len(held_back) >= _HELD_SCAN:
+                return
             item = self._eval_queue.popleft()
             assert item.binding_hash is not None
             scorer = self._scorers[item.binding_hash]
@@ -564,6 +638,17 @@ class RunEngine:
             execution = self._executions.get(exec_key)
             exec_state = self._exec_states.get(exec_key)
             needs_evaluator = exec_state is WorkItemState.SUCCEEDED and execution is not None
+            evaluator_id = scorer.manifest.evaluator_id
+            gates = (
+                self._gates_for("evaluation", evaluator_id)
+                if needs_evaluator and not self.controller.cancelled
+                else []
+            )
+            if gates and (evaluator_id in held_evaluators or self._held(gates)):
+                self._throttled = True
+                held_evaluators.add(evaluator_id)
+                held_back.append(item)
+                continue
             if needs_evaluator and self.controller.cancelled:
                 self._record_without_evaluator(item, scorer, "cancelled", ExecutionStatus.CANCELLED)
                 continue
@@ -589,6 +674,23 @@ class RunEngine:
                 continue
             task = asyncio.ensure_future(scorer.score(execution, [self.cases[item.case_id]]))
             self._in_flight[task] = item
+            self._start(task, gates)
+
+    def _gates_for(self, kind: str, evaluator_id: str | None = None) -> list[QuotaGate]:
+        return [g for g in self._gates if g.applies_to(kind, evaluator_id)]
+
+    def _held(self, gates: list[QuotaGate]) -> bool:
+        """Whether a quota holds the next work back (rate, cap or cooldown)."""
+        if any(g.wait_seconds() > 0 for g in gates):
+            self._throttled = True
+            return True
+        return False
+
+    def _start(self, task: asyncio.Task[Any], gates: list[QuotaGate]) -> None:
+        for gate in gates:
+            gate.start()
+        if gates:
+            self._task_gates[task] = gates
 
     def _running(self, kind: str) -> int:
         return sum(1 for i in self._in_flight.values() if i.kind == kind)
@@ -642,12 +744,30 @@ class RunEngine:
     # ------------------------------------------------------------------ completion
 
     async def _complete(self, task: asyncio.Task[Any], item: _Item) -> None:
+        gates = self._task_gates.pop(task, [])
+        for gate in gates:
+            gate.finish()
         if item.kind == "execution":
             await self._complete_execution(task, item)
+            self._backpressure(task, gates)
         else:
             self._complete_evaluation(task, item)
 
+    def _backpressure(self, task: asyncio.Task[Any], gates: list[QuotaGate]) -> None:
+        """A provider's "slow down" (HTTP 429 or 503) pauses every quota the call ran
+        under, for its Retry-After or the quota's backoff."""
+        if not gates or task.cancelled() or task.exception() is not None:
+            return
+        result = task.result()
+        status, retry_after = http_status(result)
+        if status not in (429, 503):
+            return
+        for gate in gates:
+            pause = gate.backpressure(retry_after)
+            self._event("backpressure", quota=gate.quota.name, status=status, pause_seconds=pause)
+
     async def _complete_execution(self, task: asyncio.Task[Any], item: _Item) -> None:
+        key = self._exec_cache_keys.pop(item.task_key, None)  # released on every path
         try:
             result: ExecutionResult = task.result()
         except ResetFailed as exc:
@@ -672,7 +792,10 @@ class RunEngine:
             )
             return
         self.ledger.settle_application(dispatched=was_dispatched(result), cost=result.cost)
-        if result.cost is not None or result.usage is not None:
+        if key is not None and result.status is ExecutionStatus.OK and not result.cache:
+            self.storage.put_cache_entry("execution", key, self.run_id, result.execution_id)
+        if not result.cache and (result.cost is not None or result.usage is not None):
+            # A cache hit spent nothing now: its source run already recorded the spend.
             self.storage.commit_usage_event(
                 UsageEvent(
                     usage_event_id=f"{result.execution_id}:usage",
@@ -870,6 +993,7 @@ class RunEngine:
             budget=budget,
             stop_reason=self._stop_reason,
             warnings=self.warnings,
+            quotas=[g.summary() for g in self._gates],
         )
         return RunOutcome(state, counts, budget, self._stop_reason, list(self.warnings))
 

@@ -318,3 +318,74 @@ Argument constraints and state assertions use:
 A worked example with a deliberately faulty agent is `examples/agent_world/`
 (`aibench run --plan examples/agent_world/plan.json --policy examples/agent_world/policy.json`,
 with `python examples/apps/booking_world.py` running).
+
+## Traces
+
+If your application exports OpenTelemetry traces, aibench can attach them to a run's
+executions:
+
+```
+aibench traces import RUN_ID traces.json     # OTLP/JSON: one document or JSON Lines
+aibench traces show RUN_ID
+```
+
+A trace is matched to an execution by a span attribute `aibench.correlation_id`, or by
+`http.request.header.x-request-id`. The HTTP runner sends the execution's ID in
+`X-Request-ID` by default (`transport.correlation_header`; a renamed header must still be
+exported as the `aibench.correlation_id` attribute to match). Unmatched traces are kept and counted, and the raw file is stored as a restricted
+artifact. Usage is read from `gen_ai.usage.input_tokens` / `output_tokens` on the lowest
+spans that report it. A parent span that repeats its children's totals is not counted
+twice. A trace that is sampled out, has dropped spans, or is missing its root or a
+parent is marked **partial**, and its usage is reported as a lower bound. So is a trace
+with two different spans under one ID, or with looping parent links.
+
+Importing a file again, or a file that has grown, never counts a trace twice. A trace
+split across several files is merged and normalized again as one.
+`examples/apps/traced_app.py` is a worked example.
+
+## Caching and rate limits
+
+Caching is off by default. A plan can opt in:
+
+```json
+{"cache": {"executions": true, "evaluations": true}}
+```
+
+- A hit requires everything that could change the result to be unchanged:
+  - **executions:** the case input, the repetition, the application config (including
+    `revision`), source files under the configured working directory and Python import paths,
+    the values of inherited and explicitly referenced secret environment variables (hashed,
+    never stored), the aibench version, the test world's seed and the policy;
+  - **evaluations:** the output, the whole case (references too), the evaluator, its
+    version and parameters, the plugin version, the policy and the repetition.
+- **Code aibench can't see.** For an HTTP endpoint, an entry point that isn't a local
+  source file, or a container with host bind mounts, declare `revision` (or
+  `environment_digest`) in the application config and change it whenever the application or
+  mounted code changes. Execution caching is refused until you do.
+- **Where caching is refused.** Execution caching is refused for applications with effects
+  and no test world, for per-episode state and for shared state.
+- **What a hit is.** A hit is a new record that names the run it came from. It never counts
+  toward latency or as an independent repetition. `aibench compare` refuses to compare a
+  run whose executions came from the cache.
+- `aibench cache list` shows the entries, and `aibench cache clear [--kind execution|evaluation]`
+  empties them.
+
+Quotas tell aibench about your provider's limits. They apply to the application, or to
+evaluators matched by a glob:
+
+```json
+{"quotas": [
+  {"name": "app", "applies_to": "application", "max_in_flight": 4,
+   "requests_per_second": 10, "burst": 2},
+  {"name": "judge-provider", "applies_to": "evaluator:deepeval.*", "max_in_flight": 2}
+]}
+```
+
+- **Before dispatch.** Work over a quota waits in the queue.
+- **"Slow down" answers.** An HTTP 429 or 503 from the application pauses everything under
+  that quota for the response's `Retry-After` (at most `max_backpressure_seconds`, default
+  60 s), or the quota's `backoff_seconds` (default 1 s). The call is then retried under the
+  plan's retry policy.
+- **Evaluator quotas.** They limit work in flight and the start rate. They don't react to
+  a judge provider's 429, because evaluators retry internally.
+- **Controls.** Pause and cancel still work while work is throttled.

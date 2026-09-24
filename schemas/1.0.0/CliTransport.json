@@ -96,6 +96,21 @@
       "title": "Output Mode",
       "type": "string"
     },
+    "reset_argv": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reset Argv"
+    },
     "secret_env": {
       "additionalProperties": {
         "type": "string"

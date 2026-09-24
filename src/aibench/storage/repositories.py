@@ -638,6 +638,84 @@ class Storage:
             for row in rows
         ]
 
+    # ---------------------------------------------------------------- traces (16-T2)
+
+    def commit_trace_observations(
+        self, import_id: str, run_id: str, rows: list[tuple[str, str | None, bool, str]]
+    ) -> int:
+        """Store an import's per-trace observations (trace_id, execution_id, complete, data
+        JSON) in one transaction. A run keeps one current observation per trace: a row for
+        a trace already imported replaces it (the caller merged the spans of both). Returns
+        the rows written."""
+        now = _now()
+        with self.conn:
+            for trace_id, execution_id, complete, data in rows:
+                self.conn.execute(
+                    "DELETE FROM trace_observations WHERE run_id = ? AND trace_id = ?",
+                    (run_id, trace_id),
+                )
+                self.conn.execute(
+                    "INSERT INTO trace_observations (import_id, run_id, trace_id, "
+                    "execution_id, complete, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (import_id, run_id, trace_id, execution_id, int(complete), data, now),
+                )
+        return len(rows)
+
+    def list_trace_observations(self, run_id: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT import_id, trace_id, execution_id, complete, data FROM trace_observations "
+            "WHERE run_id = ? ORDER BY import_id, trace_id",
+            (run_id,),
+        ).fetchall()
+        return [
+            {
+                "import_id": row["import_id"],
+                "trace_id": row["trace_id"],
+                "execution_id": row["execution_id"],
+                "complete": bool(row["complete"]),
+                **json.loads(row["data"]),
+            }
+            for row in rows
+        ]
+
+    # ---------------------------------------------------------------- cache (16-T3)
+
+    def get_cache_entry(self, kind: str, key: str) -> tuple[str, str] | None:
+        """(run_id, record_id) of the cached record for `key`, or None."""
+        row = self.conn.execute(
+            "SELECT run_id, record_id FROM cache_entries WHERE kind = ? AND cache_key = ?",
+            (kind, key),
+        ).fetchone()
+        return (row["run_id"], row["record_id"]) if row else None
+
+    def put_cache_entry(self, kind: str, key: str, run_id: str, record_id: str) -> None:
+        """The first record stored for a key stays its source (a later identical result is
+        not a new source)."""
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO cache_entries (kind, cache_key, run_id, record_id, "
+                "created_at) VALUES (?, ?, ?, ?, ?)",
+                (kind, key, run_id, record_id, _now()),
+            )
+
+    def list_cache_entries(self, kind: str | None = None) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT kind, cache_key, run_id, record_id, created_at FROM cache_entries "
+            + ("WHERE kind = ? " if kind else "")
+            + "ORDER BY created_at",
+            (kind,) if kind else (),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def clear_cache(self, kind: str | None = None) -> int:
+        """Invalidate cache entries (never the records they point at)."""
+        with self.conn:
+            cursor = self.conn.execute(
+                "DELETE FROM cache_entries" + (" WHERE kind = ?" if kind else ""),
+                (kind,) if kind else (),
+            )
+        return cursor.rowcount
+
     def get_work_item_by_task_key(self, run_id: str, task_key: str) -> WorkItem | None:
         row = self.conn.execute(
             "SELECT data FROM work_items WHERE run_id = ? AND task_key = ?",

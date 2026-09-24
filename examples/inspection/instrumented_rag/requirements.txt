@@ -1,0 +1,2 @@
+# the real retriever would be chromadb; this fixture keeps an in-memory stand-in
+chromadb>=0.5

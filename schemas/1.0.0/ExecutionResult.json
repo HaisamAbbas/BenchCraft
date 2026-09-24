@@ -51,6 +51,10 @@
       "title": "Attempt Id",
       "type": "integer"
     },
+    "cache": {
+      "default": null,
+      "title": "Cache"
+    },
     "case_id": {
       "title": "Case Id",
       "type": "string"
@@ -169,6 +173,10 @@
     "usage": {
       "default": null,
       "title": "Usage"
+    },
+    "world_state": {
+      "default": null,
+      "title": "World State"
     }
   },
   "required": [

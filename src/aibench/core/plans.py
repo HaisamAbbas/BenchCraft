@@ -135,6 +135,28 @@ class ReleaseGate(FrozenModel):
         return self
 
 
+class Quota(FrozenModel):
+    """A provider-aware limit shared by the work it applies to (§15, 16-T4): the
+    application, or evaluators whose ID matches `evaluator:<glob>`."""
+
+    name: str = Field(min_length=1, max_length=100)
+    applies_to: str = Field(pattern=r"^(application|evaluator:\S+)$")
+    max_in_flight: int | None = Field(default=None, ge=1, le=64)
+    requests_per_second: float | None = Field(default=None, gt=0, le=10_000)
+    burst: int = Field(default=1, ge=1, le=1_000)
+    # Pause after "slow down" (HTTP 429/503) when the provider gives no Retry-After.
+    backoff_seconds: float = Field(default=1.0, gt=0, le=600)
+    # The longest pause a provider's Retry-After can impose on the whole quota.
+    max_backpressure_seconds: float = Field(default=60.0, gt=0, le=3600)
+
+
+class CachePolicy(FrozenModel):
+    """Opt-in cross-run caches (§14, 16-T3). Off by default: every record is fresh."""
+
+    executions: bool = False
+    evaluations: bool = False
+
+
 class ExecutablePlan(FrozenModel):
     schema_version: str = SCHEMA_VERSION
     plan_id: str = Field(min_length=1, max_length=200)
@@ -151,6 +173,8 @@ class ExecutablePlan(FrozenModel):
     gates: tuple[ReleaseGate, ...] = ()
     # A test world the application declares; its seed is loaded before each case/episode.
     test_world: str | None = Field(default=None, min_length=1, max_length=200)
+    cache: CachePolicy = Field(default_factory=CachePolicy)
+    quotas: tuple[Quota, ...] = ()
 
     @model_validator(mode="after")
     def _backoff_bounds(self) -> ExecutablePlan:
@@ -161,6 +185,9 @@ class ExecutablePlan(FrozenModel):
         ids = [g.gate_id for g in self.gates]
         if len(set(ids)) != len(ids):
             raise ValueError("gates contain duplicate gate_id values")
+        names = [q.name for q in self.quotas]
+        if len(set(names)) != len(names):
+            raise ValueError("quotas contain duplicate names")
         for gate in self.gates:
             if gate.binding >= len(self.metrics):
                 raise ValueError(

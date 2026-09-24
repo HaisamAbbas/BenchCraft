@@ -434,6 +434,33 @@ _0007_sessions = Migration(
     """,
 )
 
+# Prompt 16: imported trace observations (16-T2) and the explicit cross-run cache (16-T3).
+_0008_traces_and_cache = Migration(
+    version=8,
+    name="traces_and_cache",
+    sql="""
+    CREATE TABLE trace_observations (
+        import_id     TEXT NOT NULL,
+        run_id        TEXT NOT NULL REFERENCES runs(run_id),
+        trace_id      TEXT NOT NULL,
+        execution_id  TEXT,
+        complete      INTEGER NOT NULL,
+        data          TEXT NOT NULL,
+        created_at    TEXT NOT NULL,
+        PRIMARY KEY (import_id, trace_id)
+    );
+    CREATE INDEX idx_trace_observations_run ON trace_observations(run_id);
+    CREATE TABLE cache_entries (
+        kind        TEXT NOT NULL,
+        cache_key   TEXT NOT NULL,
+        run_id      TEXT NOT NULL,
+        record_id   TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        PRIMARY KEY (kind, cache_key)
+    );
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
@@ -442,6 +469,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _0005_run_events,
     _0006_run_leases,
     _0007_sessions,
+    _0008_traces_and_cache,
 )
 
 

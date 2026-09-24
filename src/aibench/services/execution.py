@@ -17,10 +17,12 @@ import sys
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from aibench.core.hashes import content_hash
 from aibench.core.models import (
     ApplicationSpec,
+    ArtifactRef,
     BenchmarkCase,
     DatasetManifest,
     ExecutionResult,
@@ -29,7 +31,7 @@ from aibench.core.models import (
 )
 from aibench.runners.base import BaseRunner, InvocationContext, InvocationOutcome
 from aibench.runners.bindings import AppInputEnvelope
-from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
+from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import Storage
 
 SMOKE_RUN_PREFIX = "smoke-"
@@ -55,33 +57,60 @@ async def invoke_and_record(
         cancel=cancel,
     )
     outcome = await runner.invoke(AppInputEnvelope.from_case(case), ctx)
-    trace_refs = _commit_captures(outcome, ctx, storage=storage, artifacts=artifacts)
+    # The call was dispatched and answered: it is recorded even if the task is cancelled
+    # while its captures are written off the loop, as it was when nothing awaited between
+    # the answer and the commit. The write is bounded, so the cancel is only delayed.
+    record = asyncio.ensure_future(_record(outcome, ctx, storage=storage, artifacts=artifacts))
+    try:
+        return await asyncio.shield(record)
+    except asyncio.CancelledError:
+        return await record
+
+
+async def _record(
+    outcome: InvocationOutcome,
+    ctx: InvocationContext,
+    *,
+    storage: Storage,
+    artifacts: ArtifactStore,
+) -> ExecutionResult:
+    trace_refs = await _commit_captures(outcome, ctx, storage=storage, artifacts=artifacts)
     result = _to_result(outcome, ctx, trace_refs)
     storage.commit_execution_attempt(result)
     return result
 
 
-def _commit_captures(
+async def _commit_captures(
     outcome: InvocationOutcome,
     ctx: InvocationContext,
     *,
     storage: Storage,
     artifacts: ArtifactStore,
 ) -> tuple[str, ...]:
+    """Durably write and verify each capture, then commit its reference. The file work
+    (write, fsync, read back, hash) runs in a worker thread, so the event loop, and a chat
+    or controls sharing it, stays responsive under load (16-T4); the database commit stays
+    on the loop's single writer connection (§14)."""
     refs: list[str] = []
     for capture in outcome.captures:
         # Raw application traffic may contain personal data: restricted, never inlined into
         # sanitized reports (§16 "Store raw traces separately from sanitized reports").
-        ref = artifacts.write_bytes(
-            capture.data,
-            mime_type=capture.mime_type,
-            run_id=ctx.run_id,
-            redaction=RedactionClass.RESTRICTED,
-            artifact_id=f"{ctx.execution_id}:{capture.name}",
-        )
-        commit_verified_artifact(artifacts, storage, ref)
+        ref = await asyncio.to_thread(_write_verified, artifacts, capture, ctx)
+        storage.commit_artifact_unverified(ref)
         refs.append(ref.artifact_id)
     return tuple(refs)
+
+
+def _write_verified(artifacts: ArtifactStore, capture: Any, ctx: InvocationContext) -> ArtifactRef:
+    ref = artifacts.write_bytes(
+        capture.data,
+        mime_type=capture.mime_type,
+        run_id=ctx.run_id,
+        redaction=RedactionClass.RESTRICTED,
+        artifact_id=f"{ctx.execution_id}:{capture.name}",
+    )
+    artifacts.verify_ref(ref)  # what commit_verified_artifact checks, off the loop
+    return ref
 
 
 def _to_result(

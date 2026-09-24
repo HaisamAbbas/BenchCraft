@@ -657,6 +657,8 @@ class ExecutionResult(FrozenModel):
     tool_events: tuple[FrozenValue, ...] = Field(default_factory=tuple)
     # The test world's state after the invocation, when the application reports it.
     world_state: FrozenValue = None
+    # Set when this record is a copy from the execution cache (16-T3): its source and key.
+    cache: FrozenValue = None
     trace_refs: tuple[str, ...] = Field(default_factory=tuple)
     timing: FrozenValue = Field(default_factory=dict)
     usage: FrozenValue = None

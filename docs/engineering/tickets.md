@@ -204,3 +204,14 @@ Gates: 14-G1..G4. See `docs/engineering/reports/14.md`. Decision: ADR 0013. Raga
 
 Gates: 15-G1..G4. See `docs/engineering/reports/15.md`. Decisions: ADR 0014.
 Review remediation: `tests/test_runner_review_regressions.py`.
+
+## Prompt 16 — Inspection, traces, caching, and parallel execution
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 16-T1 | Repository inspection of approved source/manifests with evidence locations; declared/inferred/observed kept distinct; probes are policy-controlled engine actions | DONE | `inspection/source.py`, `inspection/probe.py`, `inspection/profile.py` (`source_findings`), `inspect --source/--policy/--probe`, policy `inspection_roots`; `examples/inspection/`; `tests/test_source_inspection.py` |
+| 16-T2 | Normalize selected OpenTelemetry traces; preserve raw attributes, correlation IDs and sampling completeness; no parent/child usage double counting | DONE | `observations/otel.py`, `services/traces.py`, `aibench traces import/show`, migration 8 `trace_observations`, report "Imported traces" row; `examples/apps/traced_app.py`; `tests/test_trace_import.py` |
+| 16-T3 | Version-complete execution/evaluation cache keys, invalidation and provenance; effectful unsnapshotted execution caching refused; hits excluded from latency/repeat claims | DONE | `engine/cache.py`, plan `cache`, engine + `BindingScorer` cache paths, `compile._check_cache`, migration 8 `cache_entries`, `aibench cache list/clear`, report "Cache" row; `tests/test_caches.py` (invalidation matrix) |
+| 16-T4 | Provider-aware quotas, backpressure, bounded batching, cancellation; terminal responsiveness independent of worker load | DONE | `engine/quota.py`, plan `quotas`, gates checked before task creation, `backpressure` events, quota summaries; event-loop blocking removed (`http_runner._build_client`, threaded capture writes); `examples/apps/rate_limited_app.py`; `tests/test_parallel_execution.py` |
+
+Gates: 16-G1..G5. See `docs/engineering/reports/16.md`. Decisions: ADR 0015.

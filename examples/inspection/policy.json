@@ -1,0 +1,5 @@
+{
+  "allow_trusted_local": true,
+  "max_effects": "none",
+  "inspection_roots": ["."]
+}

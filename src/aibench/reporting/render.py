@@ -43,6 +43,35 @@ def fraction(numerator: int | None, denominator: int | None) -> str:
     return f"{numerator}/{denominator} = {100 * numerator / denominator:.1f}%"
 
 
+def _cache_text(cache: dict[str, Any] | None) -> str:
+    if not cache or not (cache["execution_hits"] or cache["evaluation_hits"]):
+        return "no cached records; everything was freshly measured"
+    return (
+        f"{cache['execution_hits']} of {cache['executions']} execution(s) and "
+        f"{cache['evaluation_hits']} of {cache['evaluations']} evaluation(s) reused from the "
+        "cache: not fresh measurements or independent repetitions"
+    )
+
+
+def _traces_text(traces: dict[str, Any] | None) -> str:
+    if not traces:
+        return "none imported"
+    usage = traces["usage"]
+    text = (
+        f"{traces['traces']} trace(s), {traces['matched_to_executions']} matched to executions; "
+        f"{traces['complete']} complete, {traces['partial']} partial"
+    )
+    if traces["partial_reasons"]:
+        text += " (" + ", ".join(f"{k} {v}" for k, v in traces["partial_reasons"].items()) + ")"
+    if usage["traces_with_usage"]:
+        text += (
+            f"; {usage['total_tokens']} tokens from traces "
+            f"({usage['bound'].replace('_', ' ')}, {usage['aggregate_spans_excluded']} "
+            "aggregate span(s) excluded)"
+        )
+    return text
+
+
 def _state_text(state: dict[str, Any]) -> str:
     mode = state.get("reset_mode", "none")
     text = {
@@ -260,6 +289,8 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         ),
         ("Latency definition", latency["definition"]),
         ("State between cases", _state_text(app.get("state") or {})),
+        ("Imported traces", _traces_text(report.get("traces"))),
+        ("Cache", _cache_text(report.get("cache"))),
     ]
     cost = report["cost"]
     costs = [

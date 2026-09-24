@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -43,6 +44,17 @@ if TYPE_CHECKING:
 DEFAULT_MAX_ARTIFACT_BYTES = 200 * 1024 * 1024  # 200 MB
 DEFAULT_GC_GRACE_SECONDS = 3600.0
 TEMP_PREFIX = ".tmp-"
+
+# Captures are written from worker threads (16-T4). Identical bytes share one final path,
+# and on Windows replacing a file another thread has open fails, so writers of the same
+# digest take turns within a process.
+_DIGEST_LOCKS: dict[str, threading.Lock] = {}
+_DIGEST_LOCKS_GUARD = threading.Lock()
+
+
+def _digest_lock(digest: str) -> threading.Lock:
+    with _DIGEST_LOCKS_GUARD:
+        return _DIGEST_LOCKS.setdefault(digest, threading.Lock())
 
 
 @dataclass
@@ -107,22 +119,11 @@ class ArtifactStore:
         target_path = self._path_for_digest(digest)
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if not target_path.exists():
-            fd, tmp_name = tempfile.mkstemp(dir=target_path.parent, prefix=TEMP_PREFIX)
-            try:
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(data)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(tmp_name, target_path)  # atomic on the same filesystem
-            except BaseException:
-                try:
-                    os.unlink(tmp_name)
-                except OSError:
-                    pass
-                raise
-        # else: content-addressed dedup — identical bytes already committed under this
-        # digest, so there is nothing new to write.
+        with _digest_lock(digest):
+            if not target_path.exists():
+                self._write_new(data, target_path)
+            # else: content-addressed dedup — identical bytes already committed under this
+            # digest, so there is nothing new to write.
 
         return ArtifactRef(
             artifact_id=artifact_id or uuid.uuid4().hex,
@@ -133,6 +134,29 @@ class ArtifactStore:
             redaction=redaction,
             run_id=run_id,
         )
+
+    @staticmethod
+    def _write_new(data: bytes, target_path: Path) -> None:
+        fd, tmp_name = tempfile.mkstemp(dir=target_path.parent, prefix=TEMP_PREFIX)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.replace(tmp_name, target_path)  # atomic on the same filesystem
+            except PermissionError:
+                # Another process committed the same digest first and has it open (Windows
+                # refuses the replace). Its bytes are identical by construction.
+                if not target_path.is_file():
+                    raise
+                os.unlink(tmp_name)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def verify_ref(self, ref: ArtifactRef) -> bytes:
         """Validate that `ref` truthfully describes a real file in this store — path inside

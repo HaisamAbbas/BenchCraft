@@ -77,6 +77,8 @@ def test_expected_tables_exist_after_migration() -> None:
         "artifacts",
         "usage_events",
         "approvals",
+        "trace_observations",
+        "cache_entries",
         "schema_migrations",
     }
     assert expected.issubset(tables)
@@ -188,7 +190,7 @@ def test_upgrading_a_pre_remediation_database_backfills_content_hash_columns() -
 
     # Upgrade: apply the full, current migration set from migration 3 onward.
     applied = apply_migrations(conn)
-    assert applied == [3, 4, 5, 6, 7]
+    assert applied == [3, 4, 5, 6, 7, 8]
 
     db = Database(conn)
     storage = Storage(db)
@@ -259,7 +261,7 @@ def test_migration_4_rekeys_existing_evaluation_attempts() -> None:
         "'ok','pass','h',?, 'now')",
         (legacy.model_dump_json(),),
     )
-    assert apply_migrations(conn) == [4, 5, 6, 7]
+    assert apply_migrations(conn) == [4, 5, 6, 7, 8]
     row = conn.execute(
         "SELECT repetition_id, binding_hash, scoring_id FROM evaluation_attempts"
     ).fetchone()

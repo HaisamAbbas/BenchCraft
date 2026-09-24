@@ -742,7 +742,22 @@ def _application_facts(
     raw, problem, _raw_digest = _artifact_json(storage, artifacts, artifact_id)
     if raw is not None:
         source = "frozen_application_artifact"
+    elif artifact_id:
+        # An expected frozen artifact is authoritative.  Never replace a missing,
+        # unreadable, or tampered artifact with the mutable application catalog: doing
+        # so would let a run qualify against a different observation contract.
+        return {
+            "available": False,
+            "source": "frozen_application_artifact",
+            "code": problem or "artifact_unavailable",
+            "application_id": manifest.application_id,
+            "application_hash": manifest.application_hash,
+            "manifest_hash_verified": False,
+        }
     else:
+        # Legacy runs without an artifact reference may use the catalog as historical
+        # context, but the strict global check still requires an explicit verified
+        # contract when one is otherwise required by the run.
         application_id = manifest.application_id
         if application_id:
             try:
@@ -752,15 +767,6 @@ def _application_facts(
             if spec is not None:
                 raw = _plain(spec.model_dump(mode="json"))
                 source = "application_catalog"
-        if raw is None and problem is not None and artifact_id:
-            return {
-                "available": False,
-                "source": source,
-                "code": problem,
-                "application_id": manifest.application_id,
-                "application_hash": manifest.application_hash,
-                "manifest_hash_verified": False,
-            }
     if raw is None:
         environment = deep_unfreeze(manifest.environment) or {}
         contract = environment.get("instrumentation") if isinstance(environment, Mapping) else None
@@ -1693,6 +1699,35 @@ def _global_identity(
         },
         blocking=True,
     )
+    # Cache hits (16-T3) reuse earlier observations: a run served from the cache measured
+    # nothing, so paired differences against it are not evidence of (no) change.
+    cached = {
+        side: {
+            "cached_executions": sum(1 for e in run.executions if e.cache),
+            "cached_evaluations": sum(
+                1 for r in run.all_results if (deep_unfreeze(r.provenance) or {}).get("cache")
+            ),
+        }
+        for side, run in (("baseline", baseline), ("current", current))
+    }
+    fresh_executions = not any(c["cached_executions"] for c in cached.values())
+    fresh_evaluations = not any(c["cached_evaluations"] for c in cached.values())
+    fresh_check = _check(
+        "fresh_executions",
+        ok=fresh_executions,
+        code=None if fresh_executions else "cached_executions_present",
+        baseline=cached["baseline"],
+        current=cached["current"],
+        blocking=True,
+    )
+    fresh_eval_check = _check(
+        "fresh_evaluations",
+        ok=fresh_evaluations,
+        code=None if fresh_evaluations else "cached_evaluations_present",
+        baseline=cached["baseline"],
+        current=cached["current"],
+        blocking=False,
+    )
     checks = {
         "dataset": dataset_check,
         "case_content": case_check,
@@ -1701,6 +1736,8 @@ def _global_identity(
         "run_state": run_state_check,
         "application": app_check,
         "application_artifact": app_artifact_check,
+        "fresh_executions": fresh_check,
+        "fresh_evaluations": fresh_eval_check,
     }
     for name, check in checks.items():
         if check["blocking"] and check["compatible"] is not True:
@@ -1780,12 +1817,13 @@ def _lineage_mismatch_count(run: _RunFacts, spec: _MetricSpec) -> int:
             final[key] = execution
     mismatches = 0
     for result in spec.results:
+        # A result with no execution identity represents a planned item that was never
+        # dispatched (for example, budget exhaustion).  It is a coverage loss, not a
+        # lineage mismatch; the selected work-item key keeps it in the denominator.
+        if not result.execution_id:
+            continue
         final_execution = final.get((result.case_id, result.repetition_id))
-        if (
-            not result.execution_id
-            or final_execution is None
-            or result.execution_id != final_execution.execution_id
-        ):
+        if final_execution is None or result.execution_id != final_execution.execution_id:
             mismatches += 1
     return mismatches
 
@@ -1859,22 +1897,51 @@ def _side(
 
 
 def _coverage_gate(stats: Mapping[str, Any], threshold: float) -> dict[str, Any]:
-    value = stats.get("denominators", {}).get("coverage", {}).get(
-        "complete_numeric_pairs_over_paired_selected"
-    )
-    ratio = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-    complete = stats.get("denominators", {}).get("complete_numeric_pairs")
+    denominators = stats.get("denominators", {})
+    coverage = denominators.get("coverage", {})
+    if not isinstance(coverage, Mapping):
+        coverage = {}
+
+    def ratio(name: str) -> float | None:
+        value = coverage.get(name)
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    paired_ratio = ratio("complete_numeric_pairs_over_paired_selected")
+    baseline_ratio = ratio("complete_numeric_pairs_over_baseline_selected")
+    current_ratio = ratio("complete_numeric_pairs_over_current_selected")
+    selected_ratios = [value for value in (paired_ratio, baseline_ratio, current_ratio) if value is not None]
+    # A complete pair is usable evidence only when it is not hiding an unpaired selected
+    # unit.  Gate on the most conservative selected-side ratio, not just the intersection.
+    required_ratio = min(selected_ratios) if selected_ratios else None
+    complete = denominators.get("complete_numeric_pairs")
     has_complete = isinstance(complete, int) and not isinstance(complete, bool) and complete > 0
-    passed = ratio is not None and has_complete and ratio >= threshold
+    passed = required_ratio is not None and has_complete and required_ratio >= threshold
     return {
         "status": "pass" if passed else "fail",
         "passed": passed,
         "minimum": threshold,
-        "paired_complete_over_paired_selected": ratio,
-        "paired_selected": stats.get("denominators", {}).get("paired_selected"),
+        "paired_complete_over_paired_selected": paired_ratio,
+        "complete_numeric_pairs_over_baseline_selected": baseline_ratio,
+        "complete_numeric_pairs_over_current_selected": current_ratio,
+        "complete_numeric_pairs_over_required_selected": required_ratio,
+        "required_selected_denominator": max(
+            value
+            for value in (
+                denominators.get("baseline_selected", 0),
+                denominators.get("current_selected", 0),
+            )
+            if isinstance(value, int) and not isinstance(value, bool)
+        )
+        if any(
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            for value in (denominators.get("baseline_selected"), denominators.get("current_selected"))
+        )
+        else 0,
+        "paired_selected": denominators.get("paired_selected"),
         "complete_numeric_pairs": complete,
         "reason_code": None if passed else (
-            "no_complete_numeric_pairs" if not has_complete else "paired_coverage_below_minimum"
+            "no_complete_numeric_pairs" if not has_complete else "selected_coverage_below_minimum"
         ),
     }
 
@@ -1932,6 +1999,11 @@ def _numeric_comparison(
 # Judge stability
 
 
+def _cached_result(result: EvaluationResult) -> bool:
+    provenance = deep_unfreeze(result.provenance) or {}
+    return isinstance(provenance, Mapping) and bool(provenance.get("cache"))
+
+
 def _judge_observations(
     run: _RunFacts, spec_binding: str, scoring_ids: Sequence[str]
 ) -> tuple[list[JudgeObservation], list[ExecutionKey]]:
@@ -1947,7 +2019,10 @@ def _judge_observations(
                     spec.binding_hash == spec_binding and result in spec.results
                     for spec in _specs_for_pass(run, selected)
                 )
-            if not binding_matches or not result.execution_id:
+            if not binding_matches or not result.execution_id or _cached_result(result):
+                # A cache hit is explicitly not an independent judge repetition.  Keep
+                # the pass in the denominator as a missing observation instead of letting
+                # a copied result inflate stability/agreement.
                 continue
             key = ExecutionKey(result.execution_id, result.repetition_id)
             units.add(key)

@@ -43,6 +43,23 @@ def test_identical_content_dedupes_to_the_same_path(store) -> None:
     assert ref1.artifact_id != ref2.artifact_id  # distinct identity, same content
 
 
+def test_concurrent_writers_of_identical_content_all_succeed(store) -> None:
+    """Captures are written from worker threads (16-T4). Identical bytes written and
+    verified at once used to fail on Windows ("Access is denied" replacing a file another
+    thread had open), which failed executions in the 100-case acceptance run."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    payloads = [b"shared capture %d" % (i % 3) for i in range(96)]
+
+    def write_and_verify(data: bytes) -> bytes:
+        return store.verify_ref(store.write_bytes(data, mime_type="text/plain"))
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        assert list(pool.map(write_and_verify, payloads)) == payloads
+    leftovers = [p for p in store.artifacts_dir.rglob("*") if p.name.startswith(".tmp-")]
+    assert not leftovers
+
+
 def test_oversized_payload_is_rejected_before_any_write(tmp_path) -> None:
     store = ArtifactStore(tmp_path / "artifacts", max_bytes=10)
     with pytest.raises(ValidationError):

@@ -5,6 +5,47 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased Phase 2 working tree — Prompt 16
+
+- **Evidence-backed inspection.**
+  - `aibench inspect APP --source DIR --policy P` reads manifests and Python/JS imports
+    from a tree inside the policy's new `inspection_roots`.
+  - Findings are *inferred*, with file, line and context (code, tests, `TYPE_CHECKING`,
+    guarded, commented out). They never satisfy an evaluator's applicability check.
+  - Secret-like files are never read.
+  - `--probe N` runs N dataset cases through the runner under the policy (effects must be
+    `none`), turning declarations into observations.
+- **Trace import.**
+  - `aibench traces import RUN FILE` and `aibench traces show RUN` read OTLP/JSON,
+    preserve the raw export as a restricted artifact, and match traces by correlation ID.
+  - Partial traces are marked with reasons.
+  - Token usage is summed over the lowest reporting spans only.
+  - Reports gain an "Imported traces" row.
+- **Opt-in caches.**
+  - Plan `cache: {executions, evaluations}`, with version-complete keys. The execution
+    key includes the application's source files and inherited environment. Endpoints need
+    a declared `revision`.
+  - Comparisons against cached executions are blocked.
+  - Every hit carries provenance.
+  - Execution caching is refused for effectful apps without a test world, for
+    per-episode state and for shared state.
+  - `aibench cache list/clear`.
+  - Reports gain a "Cache" row. Hits are excluded from latency.
+- **Provider-aware quotas.** Plan `quotas` (`application` or `evaluator:<glob>`) with
+  `max_in_flight`, `requests_per_second`/`burst`, and backpressure on HTTP 429/503
+  (`Retry-After` or `backoff_seconds`). Quota summaries and `backpressure` events are
+  recorded in the run events.
+- **Responsiveness fix.**
+  - HTTP client creation and capture-file writes no longer block the event loop. The loop
+    stalled for up to 1.7 s under load; it now stays below 0.25 s.
+  - This affects the live terminal, which shares the loop.
+  - Concurrent writes of identical artifacts are safe on Windows.
+
+### Workspace
+
+Schema version 8 adds the tables `trace_observations` and `cache_entries`. Older
+workspaces migrate forward on first use.
+
 ## Unreleased Phase 2 working tree — Prompt 15
 
 - **New application transports** behind the same runner contract:

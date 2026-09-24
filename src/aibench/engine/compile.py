@@ -38,11 +38,13 @@ from aibench.core.hashes import bytes_hash, content_hash
 from aibench.core.models import (
     BenchmarkCase,
     DatasetManifest,
+    EffectLevel,
     ResetPolicy,
     deep_unfreeze,
 )
 from aibench.core.plans import CasePredicate, ExecutablePlan
 from aibench.datasets.ingest import ingest_dataset
+from aibench.engine.cache import code_identity_problem
 from aibench.evaluators.protocol import EvaluationView, case_field
 from aibench.registry import (
     BindingValidationError,
@@ -402,6 +404,34 @@ def _check_state(analysis: PlanAnalysis) -> None:
         )
 
 
+def _check_cache(analysis: PlanAnalysis) -> None:
+    """Execution caching is refused where the output depends on state the key cannot
+    capture (§14): declared effects without a snapshotted test world, episodes, and shared
+    state."""
+    app, plan = analysis.application, analysis.plan
+    if app is None or not plan.cache.executions:
+        return
+    spec = app.spec
+    problems = []
+    if spec.effects is not EffectLevel.NONE and plan.test_world is None:
+        problems.append(
+            f"it declares {spec.effects.value} effects and no test world snapshots its state"
+        )
+    if spec.reset_policy is ResetPolicy.PER_EPISODE:
+        problems.append("its episode turns depend on the state earlier turns built")
+    if spec.reset_policy is ResetPolicy.SHARED:
+        problems.append("it declares shared state that changes between cases")
+    code_problem = code_identity_problem(spec, app.base_dir)
+    if code_problem is not None:
+        problems.append(code_problem)
+    for problem in problems:
+        analysis.add(
+            "invalid",
+            f"execution caching is not allowed for application {spec.application_id!r}: {problem}",
+            "cache",
+        )
+
+
 def _check_episodes(analysis: PlanAnalysis, all_cases: list[BenchmarkCase]) -> None:
     """A selection must keep episodes whole from their first turn: a later turn run without
     the turns before it would start from the seed instead of the state they build."""
@@ -613,6 +643,7 @@ def analyze_plan(
     except AibenchError as exc:
         analysis.add("invalid", str(exc), "application")
     _check_state(analysis)
+    _check_cache(analysis)
 
     try:
         report = ingest_dataset(analysis.plan_dir / plan.dataset)

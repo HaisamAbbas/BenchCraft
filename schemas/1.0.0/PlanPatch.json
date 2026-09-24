@@ -222,6 +222,11 @@
       ],
       "default": null
     },
+    "clear_test_world": {
+      "default": false,
+      "title": "Clear Test World",
+      "type": "boolean"
+    },
     "dataset": {
       "anyOf": [
         {
@@ -302,6 +307,20 @@
         }
       ],
       "default": null
+    },
+    "test_world": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Test World"
     }
   },
   "title": "PlanPatch",

@@ -21,4 +21,5 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 13 | MVP | Release candidate and pilot handoff | COMPLETE | `docs/engineering/reports/13.md` |
 | 14 | Phase 2 | Second evaluator ecosystem and comparisons | COMPLETE | `docs/engineering/reports/14.md` |
 | 15 | Phase 2 | Richer runners and agent outcome contracts | COMPLETE | `docs/engineering/reports/15.md` |
-| 16–21 | Phase 2/3 | Optional expansion | NOT_STARTED | — |
+| 16 | Phase 2 | Inspection, traces, caching, and parallel execution | COMPLETE | `docs/engineering/reports/16.md` |
+| 17–21 | Phase 2/3 | Optional expansion | NOT_STARTED | — |

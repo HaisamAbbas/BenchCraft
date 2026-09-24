@@ -103,6 +103,20 @@ def _check_header(name: str, value: str) -> None:
         raise ConfigError(f"header {name!r} contains control characters")
 
 
+def _build_client(**kwargs: Any) -> httpx.AsyncClient:
+    """The client, plus the modules httpcore imports on its first request (the async
+    backend and HTTP/1.1 parser), loaded here in the worker thread rather than on the loop
+    during a run's first call."""
+    import anyio._backends._asyncio
+    import anyio._core._sockets
+    import anyio.streams.tls  # noqa: F401
+    import h11  # noqa: F401
+    import httpcore._backends.anyio
+    import httpcore._backends.auto  # noqa: F401
+
+    return httpx.AsyncClient(**kwargs)
+
+
 class HttpRunner(BaseRunner):
     kind = "http"
 
@@ -186,7 +200,11 @@ class HttpRunner(BaseRunner):
         self._redacted_headers = redacted
         self.redactor = Redactor(secrets)
 
-        self._client = httpx.AsyncClient(
+        # Building the client loads TLS context and CA certificates (over a second on a
+        # loaded Windows machine): done in a worker thread so the event loop, and a chat
+        # sharing it, never freezes while a run starts (16-T4).
+        self._client = await asyncio.to_thread(
+            _build_client,
             verify=self._ssl_verify(),
             follow_redirects=False,
             trust_env=False,

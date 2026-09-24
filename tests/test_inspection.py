@@ -50,7 +50,8 @@ def test_declared_config_gives_declared_or_unknown_with_evidence_and_recipes(
         "tool_events is not observable" in g and "output_binding.tool_events" in g
         for g in profile.gaps
     )
-    assert "no source code or architecture discovery" in profile.scope
+    assert "inferred source findings when an approved source tree is given" in profile.scope
+    assert profile.source_findings == ()  # no source tree given: nothing read
     assert profile.endpoint == "http://127.0.0.1:9/"  # origin only
 
 

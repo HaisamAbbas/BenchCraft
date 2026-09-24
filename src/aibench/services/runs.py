@@ -58,6 +58,7 @@ from aibench.core.models import (
 )
 from aibench.core.plans import ExecutablePlan
 from aibench.engine.budget import BudgetLedger
+from aibench.engine.cache import application_code_identity
 from aibench.engine.compile import CompiledRun, PlanInvalid, PolicyDenied, load_plan
 from aibench.engine.engine import (
     RunController,
@@ -640,6 +641,21 @@ async def _execute_leased(
         )
     world_id, seed = _frozen_world_seed(storage, artifacts, manifest)
     reset = params.get("reset") or {"mode": "none"}
+    world = params.get("test_world") or {}
+    execution_cache = (
+        {
+            "application_hash": manifest.application_hash,
+            "code_identity": application_code_identity(
+                spec,
+                Path(params["application_base_dir"]),
+                environ if environ is not None else os.environ,
+            ),
+            "world_seed_hash": world.get("seed_hash"),
+            "policy_hash": params["policy_hash"],
+        }
+        if plan.cache.executions
+        else None
+    )
     engine = RunEngine(
         storage=storage,
         artifacts=artifacts,
@@ -650,8 +666,11 @@ async def _execute_leased(
         reset_mode=reset["mode"],
         world_id=world_id,
         world_seed=seed,
+        execution_cache=execution_cache,
+        evaluation_cache_policy=params["policy_hash"] if plan.cache.evaluations else None,
         cases={cid: case for cid, case in cases.items() if cid in needed},  # dataset order
         metrics=metrics,
+        dependency_lock_hash=manifest.dependency_lock_hash,
         scoring_id=params["scoring_id"],
         ledger=ledger,
         controller=controller or RunController(),

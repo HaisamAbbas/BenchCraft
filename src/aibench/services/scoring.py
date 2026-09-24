@@ -42,6 +42,7 @@ from aibench.core.models import (
     UsageRole,
     deep_unfreeze,
 )
+from aibench.engine.cache import evaluation_from_cache, evaluation_key
 from aibench.evaluators.protocol import (
     EvaluationOutcome,
     EvaluationView,
@@ -272,6 +273,7 @@ def decide(
     return Decision.PASS if passed else Decision.FAIL
 
 
+
 async def score_recorded_run(
     *,
     storage: Storage,
@@ -397,6 +399,9 @@ class BindingScorer:
         )
         self.timeout_seconds = timeout_seconds
         self.prepare_timeout_seconds = prepare_timeout_seconds
+        # Set to the run's policy hash to enable the evaluation cache (16-T3).
+        self.cache_policy_hash: str | None = None
+        self._cache_pending: dict[str, str] = {}
         self.cancel = cancel or asyncio.Event()
         self.prepare_error: str | None = None
         self._evaluator: Evaluator | None = None
@@ -417,10 +422,50 @@ class BindingScorer:
     async def score(
         self, execution: ExecutionResult, candidates: list[BenchmarkCase]
     ) -> EvaluationResult:
-        """Evaluate one execution and commit the attempt (evaluation_attempts)."""
-        result = await self._score_one(self._evaluator, execution, candidates)
+        """Evaluate one execution and commit the attempt (evaluation_attempts). With the
+        evaluation cache on (`cache_policy_hash`), a stored result for the same key is
+        copied instead of calling the evaluator (16-T3)."""
+        key = self._cache_key(execution, candidates)
+        result = self._from_cache(key, execution) if key else None
+        if result is None:
+            result = await self._score_one(self._evaluator, execution, candidates)
+            if key and result.status is ExecutionStatus.OK:
+                self._cache_pending[result.result_id] = key
         self.storage.commit_evaluation_attempt(result, attempt_number=result.attempt_number)
         return result
+
+    def _cache_key(self, execution: ExecutionResult, candidates: list[BenchmarkCase]) -> str | None:
+        if (
+            self.cache_policy_hash is None
+            or len(candidates) != 1
+            or execution.status is not ExecutionStatus.OK
+        ):
+            return None
+        manifest = self.manifest
+        return evaluation_key(
+            execution,
+            candidates[0],
+            binding_hash=self.metric.binding_hash,
+            evaluator=f"{manifest.evaluator_id}@{manifest.version}",
+            plugin=f"{manifest.plugin_id}=={manifest.plugin_version}",
+            policy_hash=self.cache_policy_hash,
+        )
+
+    def _from_cache(self, key: str, execution: ExecutionResult) -> EvaluationResult | None:
+        entry = self.storage.get_cache_entry("evaluation", key)
+        if entry is None:
+            return None
+        source_run, record = entry
+        case_id, _, result_id = record.partition("\t")
+        source = next(
+            (r for r in self.storage.list_metric_results(source_run, case_id)
+             if r.result_id == result_id),
+            None,
+        )  # fmt: skip
+        if source is None:
+            return None
+        fresh = self._result(execution, EvaluationOutcome(ExecutionStatus.OK))
+        return evaluation_from_cache(source, fresh, key=key)
 
     def score_missing(
         self,
@@ -436,8 +481,14 @@ class BindingScorer:
         return result
 
     def finalize(self, result: EvaluationResult) -> None:
-        """Commit the attempt chosen as this item's result (metric_results)."""
+        """Commit the attempt chosen as this item's result (metric_results), and make a
+        fresh successful result the cache source for its key."""
         self.storage.commit_metric_result(result)
+        key = self._cache_pending.pop(result.result_id, None)
+        if key is not None:
+            self.storage.put_cache_entry(
+                "evaluation", key, result.run_id, f"{result.case_id}\t{result.result_id}"
+            )
 
     async def close(self, warnings: list[str]) -> None:
         """Results are already recorded; a failed cleanup cannot change them, so it is

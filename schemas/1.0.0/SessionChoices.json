@@ -307,6 +307,18 @@
     },
     "selection": {
       "$ref": "#/$defs/CaseSelection"
+    },
+    "test_world": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Test World"
     }
   },
   "required": [

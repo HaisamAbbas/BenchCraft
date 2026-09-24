@@ -98,6 +98,24 @@
       "title": "BudgetLimits",
       "type": "object"
     },
+    "CachePolicy": {
+      "additionalProperties": false,
+      "description": "Opt-in cross-run caches (\u00a714, 16-T3). Off by default: every record is fresh.",
+      "properties": {
+        "evaluations": {
+          "default": false,
+          "title": "Evaluations",
+          "type": "boolean"
+        },
+        "executions": {
+          "default": false,
+          "title": "Executions",
+          "type": "boolean"
+        }
+      },
+      "title": "CachePolicy",
+      "type": "object"
+    },
     "CasePredicate": {
       "additionalProperties": false,
       "description": "A selector over Golden fields only (never execution data): `path` is a `case.*`\nevaluation-view path, e.g. `case.metadata.category` or `case.reference.answer`.\n`exists` means present and non-empty.",
@@ -331,6 +349,78 @@
       "title": "PluginEnvironmentRef",
       "type": "object"
     },
+    "Quota": {
+      "additionalProperties": false,
+      "description": "A provider-aware limit shared by the work it applies to (\u00a715, 16-T4): the\napplication, or evaluators whose ID matches `evaluator:<glob>`.",
+      "properties": {
+        "applies_to": {
+          "pattern": "^(application|evaluator:\\S+)$",
+          "title": "Applies To",
+          "type": "string"
+        },
+        "backoff_seconds": {
+          "default": 1.0,
+          "exclusiveMinimum": 0,
+          "maximum": 600,
+          "title": "Backoff Seconds",
+          "type": "number"
+        },
+        "burst": {
+          "default": 1,
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Burst",
+          "type": "integer"
+        },
+        "max_backpressure_seconds": {
+          "default": 60.0,
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "title": "Max Backpressure Seconds",
+          "type": "number"
+        },
+        "max_in_flight": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max In Flight"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "requests_per_second": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 10000,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requests Per Second"
+        }
+      },
+      "required": [
+        "name",
+        "applies_to"
+      ],
+      "title": "Quota",
+      "type": "object"
+    },
     "ReleaseGate": {
       "additionalProperties": false,
       "description": "A predeclared release gate on one metric binding (\u00a712), checked against the run's\nstored results. Both thresholds use every selected case as the denominator, so losing\nobservations can only fail a gate, never pass it:\n- `min_pass_rate`: passing decisions / selected;\n- `min_completed_coverage`: completed evaluations / selected.\nA gate is decided only for a finished run; a partial snapshot leaves it undecided.",
@@ -430,6 +520,9 @@
     "budgets": {
       "$ref": "#/$defs/BudgetLimits"
     },
+    "cache": {
+      "$ref": "#/$defs/CachePolicy"
+    },
     "concurrency": {
       "$ref": "#/$defs/ConcurrencyLimits"
     },
@@ -474,6 +567,14 @@
       "title": "Plugin Environments",
       "type": "array"
     },
+    "quotas": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Quota"
+      },
+      "title": "Quotas",
+      "type": "array"
+    },
     "repetitions": {
       "default": 1,
       "maximum": 100,
@@ -491,6 +592,20 @@
     },
     "selection": {
       "$ref": "#/$defs/CaseSelection"
+    },
+    "test_world": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Test World"
     }
   },
   "required": [

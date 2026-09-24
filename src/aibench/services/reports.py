@@ -54,6 +54,7 @@ from aibench.reporting.render import render
 from aibench.security.redaction import sanitize
 from aibench.services.runs import _FINISHED, RunError, _frozen_application, _frozen_plan
 from aibench.services.scoring import select_final_executions
+from aibench.services.traces import traces_summary
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import Storage
 
@@ -267,10 +268,12 @@ def _application_section(
     finals = select_final_executions(attempts)
     status = Counter(e.status.value for e in finals)
     error_kinds = Counter(e.error_kind.value for e in finals if e.error_kind is not None)
+    cache_hits = sum(1 for e in finals if e.cache)
     ok_wall = [
         float(w)
         for e in finals
         if e.status is ExecutionStatus.OK
+        and not e.cache  # a cached output is not a fresh latency measurement (§14)
         and isinstance(w := (deep_unfreeze(e.timing) or {}).get("wall_ms"), (int, float))
     ]
     timeouts = sum(
@@ -291,11 +294,13 @@ def _application_section(
         "attempts": len(attempts),
         "uncommitted_dispatches": uncommitted,
         "retried_items": sum(1 for e in finals if e.attempt_id > 1),
+        "cache_hits": cache_hits,
         "latency": {
             "definition": (
                 "wall time of the final attempt of each successful request, measured by the "
                 "runner around the invocation; p50/p95 by nearest rank. Failed and timed-out "
-                "requests are excluded from the percentiles and counted separately."
+                "requests are excluded from the percentiles and counted separately. Cache "
+                "hits are excluded: a cached output is not a fresh measurement."
             ),
             "successful_requests": len(ok_wall),
             "p50_ms": percentile(ok_wall, 50),
@@ -305,10 +310,31 @@ def _application_section(
             "excluded_failures": failed - timeouts,
             "excluded_timeouts": timeouts,
             "concurrency": concurrency,
+            "cache": (
+                f"{cache_hits} cached execution(s) excluded from latency"
+                if cache_hits
+                else "no cached executions; every latency is a fresh invocation"
+            ),
         },
         "cost": _cost_block(len(dispatched) + uncommitted, known, unknown),
     }
     return section, finals
+
+
+def _cache_section(
+    finals: list[ExecutionResult], results: list[EvaluationResult]
+) -> dict[str, Any]:
+    """Cache hits are labelled (§14): reused observations, not fresh measurements or
+    independent repetitions."""
+    evaluation_hits = sum(1 for r in results if (deep_unfreeze(r.provenance) or {}).get("cache"))
+    return {
+        "execution_hits": sum(1 for e in finals if e.cache),
+        "executions": len(finals),
+        "evaluation_hits": evaluation_hits,
+        "evaluations": len(results),
+        "note": "cache hits reuse stored observations: they are not fresh latency "
+        "measurements or independent repetitions",
+    }
 
 
 def _state_section(params: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -647,6 +673,9 @@ def build_report(
             ],
         },
         "application": application,
+        # Imported OpenTelemetry traces (16-T2), kept apart from what responses reported.
+        "traces": traces_summary(storage, run_id),
+        "cache": _cache_section(finals, all_results),
         "scoring_passes": passes,
         "gates": gates,
         "cost": {

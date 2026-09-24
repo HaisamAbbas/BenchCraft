@@ -1,9 +1,12 @@
-"""`aibench inspect APP` (07-T1, 07-T4): an evidence-backed profile of what the harness can
-observe, from the declared config and — with `--run` — recorded executions. Nothing is
-invoked; no source code is read."""
+"""`aibench inspect APP` (07-T1, 07-T4, 16-T1): an evidence-backed profile of what the
+harness can observe, from the declared config, recorded executions (`--run`), an approved
+source tree (`--source`, manifests and imports only, all findings inferred) and, when asked,
+policy-checked probes (`--probe N`, the ordinary runner on N dataset cases). Without
+`--probe` nothing is invoked."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -14,9 +17,13 @@ from rich.markup import escape
 
 from aibench.core.errors import AibenchError
 from aibench.core.hashes import content_hash
+from aibench.engine.compile import load_policy
 from aibench.inspection.dataset_summary import summarize_dataset
+from aibench.inspection.probe import ProbeRefused, probe_application, probe_denials
 from aibench.inspection.profile import inspect_application
+from aibench.inspection.source import inspect_source
 from aibench.runners import load_application
+from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
 
@@ -64,6 +71,29 @@ def _recorded(
     return executions, used, notes
 
 
+def _probe(app_file: Path, dataset: Path, policy: Any, workspace: Path | None, limit: int) -> Any:
+    loaded = load_application(app_file)
+    denials = probe_denials(loaded, policy)
+    if denials:
+        raise ProbeRefused(denials)  # before the workspace is touched
+    ws = Workspace.at(workspace or Path.cwd())
+    ws.ensure_directories()
+    storage = Storage(Database.open_workspace(ws))
+    try:
+        return asyncio.run(
+            probe_application(
+                loaded,
+                dataset,
+                policy=policy,
+                storage=storage,
+                artifacts=ArtifactStore(ws.artifacts_dir),
+                limit=limit,
+            )
+        )
+    finally:
+        storage.db.close()
+
+
 def inspect(
     app_file: Path = typer.Argument(..., help="Application config file (JSON/YAML)."),  # noqa: B008
     dataset: Path | None = typer.Option(None, "--dataset", help="Also summarize a dataset."),  # noqa: B008
@@ -73,15 +103,42 @@ def inspect(
     workspace: Path | None = typer.Option(  # noqa: B008
         None, "--workspace", help="Project root containing .aibench/ (default: cwd)."
     ),
+    source: Path | None = typer.Option(  # noqa: B008
+        None, "--source", help="Approved source tree: read manifests and imports (inferred)."
+    ),
+    policy: Path | None = typer.Option(  # noqa: B008
+        None, "--policy", help="Policy: inspection_roots for --source; app approval for --probe."
+    ),
+    probe: int = typer.Option(
+        0, "--probe", min=0, help="Invoke the first N --dataset cases through the runner."
+    ),
     out: Path | None = typer.Option(None, "--out", help="Write the profile JSON here."),  # noqa: B008
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
-    """Build an evidence-backed application profile (declared config and recorded runs only;
-    no source code or architecture discovery)."""
+    """Build an evidence-backed application profile: declared config, recorded runs, an
+    approved source tree (inferred findings only) and optional policy-checked probes."""
     try:
+        loaded_policy = load_policy(policy)
         executions, used, notes = _recorded(app_file, list(run_ids), workspace)
-        profile = inspect_application(app_file, executions=executions, run_ids=used)
+        if probe:
+            if dataset is None:
+                raise _fail("--probe needs --dataset: probes invoke dataset cases")
+            probed = _probe(app_file, dataset, loaded_policy, workspace, probe)
+            executions = [*executions, *probed.results]
+            used = [*used, probed.run_id]
+            notes.append(
+                f"probed {len(probed.results)} case(s) in run {probed.run_id} (developer "
+                "smoke: no retries, no evaluation)"
+            )
+        tree = inspect_source(source, policy=loaded_policy) if source is not None else None
+        profile = inspect_application(
+            app_file, executions=executions, run_ids=used, source_tree=tree
+        )
         summary = summarize_dataset(dataset) if dataset is not None else None
+    except ProbeRefused as exc:
+        for denial in exc.denials:
+            err_console.print(f"[red]denied:[/red] {escape(denial)}")
+        raise typer.Exit(code=4) from exc
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
     data = {
@@ -105,6 +162,17 @@ def inspect(
         console.print(
             f"  [{style}]{claim.capability}: {claim.state.value}[/{style}]{escape(detail + limit)}"
         )
+    for finding in profile.source_findings:
+        where = ", ".join(
+            f"{e.path}:{e.line} ({e.context})" if e.line else f"{e.path} ({e.context})"
+            for e in finding.evidence[:3]
+        )
+        console.print(
+            f"  [cyan]inferred {escape(finding.capability)}[/cyan]: {escape(finding.summary)}"
+            f" [dim]{escape(where)}[/dim]"
+        )
+        for caveat in finding.caveats[1:]:
+            console.print(f"    [dim]{escape(caveat)}[/dim]")
     for gap in profile.gaps:
         console.print(f"  [yellow]gap:[/yellow] {escape(gap)}")
     if summary is not None:

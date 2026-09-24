@@ -96,6 +96,21 @@
           "title": "Output Mode",
           "type": "string"
         },
+        "reset_argv": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reset Argv"
+        },
         "secret_env": {
           "additionalProperties": {
             "type": "string"
@@ -115,6 +130,181 @@
         "argv"
       ],
       "title": "CliTransport",
+      "type": "object"
+    },
+    "ContainerMount": {
+      "additionalProperties": false,
+      "description": "A read-only bind mount. Writable bind mounts are not offered (\u00a716: read-only source\nmounts; writable space is tmpfs only).",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "pattern": "^/(?:[A-Za-z0-9_.-]+/?)*$",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ],
+      "title": "ContainerMount",
+      "type": "object"
+    },
+    "ContainerTransport": {
+      "additionalProperties": false,
+      "description": "One container per invocation (\u00a77 \"Container\", \u00a716): an image pinned by digest, a\nnon-root user, a read-only root filesystem, read-only bind mounts, tmpfs for scratch\nspace, no Linux capabilities, resource limits, and no network unless the policy allows\nit. JSON on stdin and stdout, as in the CLI protocol. Not a hostile multi-tenant\nsandbox.",
+      "properties": {
+        "argv": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Argv",
+          "type": "array"
+        },
+        "cpus": {
+          "default": 1.0,
+          "exclusiveMinimum": 0,
+          "maximum": 64,
+          "title": "Cpus",
+          "type": "number"
+        },
+        "engine": {
+          "const": "docker",
+          "default": "docker",
+          "title": "Engine",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "object"
+        },
+        "image": {
+          "pattern": "^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$",
+          "title": "Image",
+          "type": "string"
+        },
+        "kind": {
+          "const": "container",
+          "default": "container",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_stderr_bytes": {
+          "default": 65536,
+          "minimum": 0,
+          "title": "Max Stderr Bytes",
+          "type": "integer"
+        },
+        "max_stdout_bytes": {
+          "default": 1048576,
+          "exclusiveMinimum": 0,
+          "title": "Max Stdout Bytes",
+          "type": "integer"
+        },
+        "memory_mb": {
+          "default": 512,
+          "maximum": 65536,
+          "minimum": 16,
+          "title": "Memory Mb",
+          "type": "integer"
+        },
+        "mounts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ContainerMount"
+          },
+          "title": "Mounts",
+          "type": "array"
+        },
+        "network": {
+          "default": "none",
+          "enum": [
+            "none",
+            "bridge"
+          ],
+          "title": "Network",
+          "type": "string"
+        },
+        "output_mode": {
+          "default": "json",
+          "enum": [
+            "json",
+            "text"
+          ],
+          "title": "Output Mode",
+          "type": "string"
+        },
+        "pids_limit": {
+          "default": 128,
+          "maximum": 65536,
+          "minimum": 8,
+          "title": "Pids Limit",
+          "type": "integer"
+        },
+        "secret_env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Secret Env",
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": 120.0,
+          "exclusiveMinimum": 0,
+          "maximum": 86400,
+          "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "tmpfs": {
+          "default": [
+            "/tmp"
+          ],
+          "items": {
+            "pattern": "^/(?:[A-Za-z0-9_.-]+/?)*$",
+            "type": "string"
+          },
+          "title": "Tmpfs",
+          "type": "array"
+        },
+        "tmpfs_size_mb": {
+          "default": 64,
+          "exclusiveMinimum": 0,
+          "maximum": 4096,
+          "title": "Tmpfs Size Mb",
+          "type": "integer"
+        },
+        "user": {
+          "default": "65534:65534",
+          "pattern": "^[0-9]+(:[0-9]+)?$",
+          "title": "User",
+          "type": "string"
+        },
+        "workdir": {
+          "anyOf": [
+            {
+              "pattern": "^/(?:[A-Za-z0-9_.-]+/?)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workdir"
+        }
+      },
+      "required": [
+        "image",
+        "argv"
+      ],
+      "title": "ContainerTransport",
       "type": "object"
     },
     "EffectLevel": {
@@ -286,6 +476,225 @@
       "title": "HttpTransport",
       "type": "object"
     },
+    "OpenAICompatibleTransport": {
+      "additionalProperties": false,
+      "description": "An OpenAI-compatible chat-completions endpoint as the application (\u00a77). Observes the\nmodel response and the usage the endpoint reports, never hidden application internals.\nTool calls in a response are requests by the model, not executed effects. Unrelated to\nany OpenAI evaluator plugin.",
+      "properties": {
+        "allow_plaintext_http": {
+          "default": false,
+          "title": "Allow Plaintext Http",
+          "type": "boolean"
+        },
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key"
+        },
+        "base_url": {
+          "title": "Base Url",
+          "type": "string"
+        },
+        "connect_timeout_seconds": {
+          "default": 10.0,
+          "exclusiveMinimum": 0,
+          "maximum": 600,
+          "title": "Connect Timeout Seconds",
+          "type": "number"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Headers",
+          "type": "object"
+        },
+        "kind": {
+          "const": "openai_compatible",
+          "default": "openai_compatible",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_request_bytes": {
+          "default": 1048576,
+          "exclusiveMinimum": 0,
+          "title": "Max Request Bytes",
+          "type": "integer"
+        },
+        "max_response_bytes": {
+          "default": 4194304,
+          "exclusiveMinimum": 0,
+          "title": "Max Response Bytes",
+          "type": "integer"
+        },
+        "model": {
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "parameters": {
+          "title": "Parameters"
+        },
+        "system_prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Prompt"
+        },
+        "timeout_seconds": {
+          "default": 120.0,
+          "exclusiveMinimum": 0,
+          "maximum": 86400,
+          "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "tools": {
+          "default": [],
+          "items": {},
+          "title": "Tools",
+          "type": "array"
+        },
+        "verify_tls": {
+          "default": true,
+          "title": "Verify Tls",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "base_url",
+        "model"
+      ],
+      "title": "OpenAICompatibleTransport",
+      "type": "object"
+    },
+    "PythonTransport": {
+      "additionalProperties": false,
+      "description": "A Python callable (\u00a77 \"Python callable\"), `module:function` or `path/file.py:function`.\nIt runs in a fresh interpreter process per invocation through a small standard-library\nshim, so timeouts, cancellation and process-tree cleanup are those of the CLI protocol.\nThe function receives the bound input and returns a JSON document (an object is used as\nthe response document; any other value becomes `{\"output\": value}`).",
+      "properties": {
+        "callable": {
+          "pattern": "^.+:[A-Za-z_][A-Za-z0-9_]*$",
+          "title": "Callable",
+          "type": "string"
+        },
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cwd"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "object"
+        },
+        "inherit_env": {
+          "default": [
+            "PATH",
+            "PATHEXT",
+            "SYSTEMROOT",
+            "SYSTEMDRIVE",
+            "WINDIR",
+            "COMSPEC",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            "HOME",
+            "USERPROFILE",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Inherit Env",
+          "type": "array"
+        },
+        "kind": {
+          "const": "python",
+          "default": "python",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_stderr_bytes": {
+          "default": 65536,
+          "minimum": 0,
+          "title": "Max Stderr Bytes",
+          "type": "integer"
+        },
+        "max_stdout_bytes": {
+          "default": 1048576,
+          "exclusiveMinimum": 0,
+          "title": "Max Stdout Bytes",
+          "type": "integer"
+        },
+        "paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "python": {
+          "default": "python",
+          "title": "Python",
+          "type": "string"
+        },
+        "reset_callable": {
+          "anyOf": [
+            {
+              "pattern": "^.+:[A-Za-z_][A-Za-z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reset Callable"
+        },
+        "secret_env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Secret Env",
+          "type": "object"
+        },
+        "timeout_seconds": {
+          "default": 60.0,
+          "exclusiveMinimum": 0,
+          "maximum": 86400,
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "callable"
+      ],
+      "title": "PythonTransport",
+      "type": "object"
+    },
     "ResetPolicy": {
       "enum": [
         "per_case",
@@ -298,10 +707,42 @@
     "RunnerKind": {
       "enum": [
         "cli",
-        "http"
+        "http",
+        "python",
+        "container",
+        "openai_compatible"
       ],
       "title": "RunnerKind",
       "type": "string"
+    },
+    "TestWorldSpec": {
+      "additionalProperties": false,
+      "description": "A named, versioned starting state for a stateful application (\u00a77 \"State\"): the seed\nis sent to the application's reset hook before each case or episode. Seeds describe a\ntest double or an ephemeral environment, never production.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "seed": {
+          "default": null,
+          "title": "Seed"
+        },
+        "seed_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed File"
+        }
+      },
+      "title": "TestWorldSpec",
+      "type": "object"
     }
   },
   "$id": "aibench/1.0.0/ApplicationSpec.json",
@@ -357,13 +798,23 @@
       "title": "Target",
       "type": "string"
     },
+    "test_worlds": {
+      "additionalProperties": {
+        "$ref": "#/$defs/TestWorldSpec"
+      },
+      "title": "Test Worlds",
+      "type": "object"
+    },
     "transport": {
       "anyOf": [
         {
           "discriminator": {
             "mapping": {
               "cli": "#/$defs/CliTransport",
-              "http": "#/$defs/HttpTransport"
+              "container": "#/$defs/ContainerTransport",
+              "http": "#/$defs/HttpTransport",
+              "openai_compatible": "#/$defs/OpenAICompatibleTransport",
+              "python": "#/$defs/PythonTransport"
             },
             "propertyName": "kind"
           },
@@ -373,6 +824,15 @@
             },
             {
               "$ref": "#/$defs/HttpTransport"
+            },
+            {
+              "$ref": "#/$defs/PythonTransport"
+            },
+            {
+              "$ref": "#/$defs/ContainerTransport"
+            },
+            {
+              "$ref": "#/$defs/OpenAICompatibleTransport"
             }
           ]
         },

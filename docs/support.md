@@ -117,6 +117,10 @@ are redacted from captured output, stored conversation turns and reports.
   - three separate outcome metrics: `native.tool_calls` (names), `native.tool_outcomes` (arguments, success, authorization) and `native.final_state` (world state).
 
   In chat, `/app` explains what the runner observes and what evidence is missing, and `/world NAME` selects an approved test world.
+- **Evidence-backed inspection** (Prompt 16): `inspect --source DIR --policy P` reads manifests and imports from a tree the policy approves (`inspection_roots`), and never reads secret files. Findings are *inferred*, with file and line, and never count as a confirmed capability. `inspect --probe N` turns declarations into observations by running N cases through the runner, under the policy.
+- **Trace import** (Prompt 16): `traces import RUN FILE` / `traces show RUN` attach OpenTelemetry (OTLP/JSON) traces to executions by correlation ID. Partial traces stay partial, and parent spans are not double counted.
+- **Opt-in caches** (Prompt 16): plan `cache: {executions, evaluations}`, with version-complete keys, provenance on every hit, and `cache list/clear`. Hits are excluded from latency and repeat claims.
+- **Provider-aware quotas** (Prompt 16): plan `quotas` limit work in flight and the start rate for the application or evaluator globs, and back off on HTTP 429/503.
 
 ## Not available yet
 
@@ -126,8 +130,8 @@ are redacted from captured output, stored conversation turns and reports.
 | Dashboard or web app | Not planned for the MVP. Reports are static files |
 | Release gates in conversation drafts | Gates are authored in plan files. A session's draft can't declare them yet |
 | Planning and conversation cost per run | Tracked per session (`/budget`), not attributed to a run's report |
-| Source-code inspection | `inspect` reads declared configuration and static metadata only |
-| Execution caching, distributed workers, detached runs | Not in the MVP. A run stops dispatching when its terminal exits and resumes on request |
+| Source-code inspection beyond Python and JS/TS | Other languages, dynamic imports and plugins loaded by name are not seen |
+| Distributed workers, detached runs | Not available. A run stops dispatching when its terminal exits and resumes on request |
 | Session export | Not available. Sessions can be deleted (`aibench sessions delete`), and deletion keeps run records |
 | Live model checks | The conversation, DeepEval adapter and Ragas adapter are tested against scripted or deterministic local judges. No live provider run is part of this evidence |
 
@@ -137,7 +141,9 @@ are redacted from captured output, stored conversation turns and reports.
 - **Planner and judge measurements** (`aibench plan benchmark`, `aibench evaluators calibrate`) use fixture annotations and labels that no person has reviewed yet. The template planner misses objectives phrased without its keywords: 17/21 recall on the v1 fixture set, below the 0.85 target.
 - **Claim checking** links every number in an assistant reply to a result queried in that turn, and flags numbers it can't trace. It shows where a number could have come from, not that the sentence around it is right. An explanation of why cases failed is a hypothesis unless a stored result states it.
 - **Redaction** of credentials is pattern-based, as a safety net. Use secret references rather than relying on it.
-- **Latency** is runner-measured wall time per request under the plan's concurrency. It is not a load test.
+- **Latency** is runner-measured wall time per request under the plan's concurrency. It is not a load test. Cache hits are excluded.
+- **Parallel execution** was measured only against a local rate-limited server: a 15 rps quota held 45 cases to at most 17 starts per second and 3 in flight, with event-loop lag under 0.25 s. This says nothing about production-scale capacity; no million-case throughput is claimed. Work items are held in memory, and the workspace has a single SQLite writer.
+- **Imported traces** are only as complete as the export. Usage from partial traces is a lower bound, and traces without a correlation ID stay unmatched.
 - **Containers** run non-root, read-only, capability-free, resource-limited and offline by default, but they are not a hostile multi-tenant sandbox: they share the host kernel. Only Linux images were exercised, with Docker Engine 29.7.2 through Docker Desktop on Windows 11. The host `docker` client is fixed, engine-sensitive environment overrides are refused, and image pulls are disabled for each invocation. Per-episode state is not supported for containers.
 - **OpenAI-compatible endpoints** were exercised against a local stub only. Tool calls from a model are recorded as requests, never as executed effects, and cost stays unknown.
 - **Stateful applications** with a reset hook run one case at a time (`concurrency.application: 1`). Episode turns are never retried. After a failure or an interruption, the rest of that episode is blocked rather than replayed into unknown state.
