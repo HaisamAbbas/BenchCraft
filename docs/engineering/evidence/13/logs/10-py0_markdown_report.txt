@@ -1,0 +1,85 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m aibench report run-737dd076c561 --format markdown --out -
+exit=0
+--- stdout
+# Benchmark report: run-737dd076c561
+
+## Provenance
+
+| Item | Value |
+|---|---|
+| Run | run-737dd076c561 |
+| Status | completed |
+| Plan | quickstart-support (sha256:d412bb3a761f10c4ba480f39c4e089cbf58609fae7c3fdb522dd2e691b5d2e2f) |
+| Dataset | sha256:4de9c5fe4961698e82dfe5fc51ba90e470487f097707d605ba15d4f5b588fab5 |
+| Application | quickstart-support (sha256:1959e6e8f885e10c41a4562f4000d22191e3051391b211f68e145ebd4dcc5302), runner cli, effects none, revision quickstart-1 |
+| Policy | sha256:88fdddffd46bb0911cfb75f720d818a501a89089061f6312a6c8da935422ab67 |
+| Evaluator plugins | native.exact\_match: aibench.native==0.1.0rc1, native.json\_schema: aibench.native==0.1.0rc1 |
+| Repetitions | 1 |
+| Seed | 1784318724 |
+| Environment | python 3.12.10, platform win32 |
+| Approved by | policy |
+| Created | 2026-09-24T10:01:01.008877+00:00 |
+| Report basis | stored facts only: no application, evaluator or judge was invoked |
+| As of event | 63 |
+
+Work items: evaluation: succeeded 20, execution: failed 1, succeeded 9
+
+## Release gates
+
+| Gate | Binding | Threshold | Observed | Status |
+|---|---|---|---|---|
+| correct-answers | metrics\[0\] native.exact\_match | pass rate \>= 0.9 | passes 8/10 = 80.0%; completed 9/10 = 90.0% | FAIL: pass rate 8/10 below 0.9 |
+| answers-present | metrics\[1\] native.json\_schema | completed coverage \>= 0.9 | passes 9/10 = 90.0%; completed 9/10 = 90.0% | PASS |
+
+## Metrics: engine scoring pass engine-run-737dd076c561
+
+Basis: planned (case, repetition) items of the run.
+Evaluator cost: USD 0 observed; accounting complete (18/18 = 100.0% calls).
+
+| Metric | Selected | Completed | Decisions | Passes / selected | Values | Evaluator errors | Not applicable | Unavailable (no app output) | Cancelled | Pending |
+|---|---|---|---|---|---|---|---|---|---|---|
+| native.exact\_match@1.0.0 | 10 | 9/10 = 90.0% | pass 8, fail 1, indeterminate 0, not evaluated 1 | 8/10 = 80.0% | true 8/9 = 88.9% of completed | 0 | 0 | 1 | 0 | 0 |
+| native.json\_schema@1.0.0 | 10 | 9/10 = 90.0% | pass 9, fail 0, indeterminate 0, not evaluated 1 | 9/10 = 90.0% | true 9/9 = 100.0% of completed | 0 | 0 | 1 | 0 | 0 |
+
+- **native.exact\_match@1.0.0**: boolean, higher is better, aggregation rate; pass if true; params {"case\_sensitive": false, "collapse\_whitespace": true}
+  Limitations: Surface comparison only: a correct paraphrase fails.; A non-text output (null, object, list) is a failed match, not skipped.
+- **native.json\_schema@1.0.0**: boolean, higher is better, aggregation rate; pass if true; params {"parse\_text": false, "schema": {"minLength": 1, "type": "string"}}
+  Limitations: Format keywords (e.g. 'email') are annotations only; they are not asserted.; Remote $ref targets are never fetched; a schema that needs one is an error.; Schemas with regex keywords are validated in a worker process (slower).
+
+## Application
+
+| Item | Value |
+|---|---|
+| Planned executions | 10 |
+| Recorded | 10 |
+| Completed | 9/10 = 90.0% |
+| Application failures | 1 (nonzero\_exit: 1) |
+| Attempts (incl. retries) | 10 |
+| Successful-request latency | p50 324.661 ms, p95 419.411 ms over 9 successful requests; excluded: 1 failed, 0 timed out; concurrency 2 |
+| Latency definition | wall time of the final attempt of each successful request, measured by the runner around the invocation; p50/p95 by nearest rank. Failed and timed-out requests are excluded from the percentiles and counted separately. |
+
+## Cost
+
+| Role | Observed |
+|---|---|
+| Application | unknown: no call reported its cost (10 calls) |
+| Evaluator (scoring pass engine-run-737dd076c561) | USD 0 observed; accounting complete (18/18 = 100.0% calls) |
+| Planner | not attributed to runs |
+
+observed spend only; estimates are never added to observed totals
+
+## Case evidence
+
+raw evaluator outputs and application traces are stored as separate artifacts; this report references them by ID and digest only
+
+### support-004 (repetition 0)
+- application: ok, attempt 1, wall 280.485 ms, execution run-737dd076c561:support-004:r0:a1
+- output: We ship to over 40 countries; delivery takes 5-10 days.
+- retrieved (1 of 1): We ship to over 40 countries; delivery takes 5-10 days.
+- native.exact\_match@1.0.0: fail (status ok, value false), evidence run-737dd076c561:support-004:r0:a1#execution.output, case:support-004#case.reference.answer
+
+### support-010 (repetition 0)
+- application: error (nonzero\_exit), attempt 1, wall 256.612 ms, execution run-737dd076c561:support-010:r0:a1
+- error: process exited with code 2
+
+--- stderr

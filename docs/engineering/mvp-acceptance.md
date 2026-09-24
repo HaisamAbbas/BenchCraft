@@ -68,11 +68,11 @@ Command: `python examples/acceptance/run_acceptance.py --out DIR`. The result is
 | • Artifact atomicity, cancellation | Verified | reports/02, 06 |
 | • Invariants | Verified | `test_scoring_invariants_hold_for_generated_cases`: seeded randomized, 600 cases through the real scorer (`BindingScorer`), with an evaluator that raises, returns errors, the wrong value kind or non-booleans. The test asserts that pass, fail, error, not-applicable and skipped each occurred, so no branch is vacuous. No property-testing library is used |
 | • Fault injection (kill before, during and after invocation and persistence; unknown effects; preserved attempt costs) | Verified | reports/06, 10; `test_engine_faults.py`, `test_session_recovery.py` |
-| • Disk-full and partial-artifact failure | Partial | Partial-artifact and orphan handling are verified (reports/02). A real disk-full condition was not exercised |
+| • Disk-full and partial-artifact failure | Verified (simulated disk full; Prompt 13) | Partial-artifact and orphan handling (reports/02). Disk full, I/O error and full database during a run: `tests/test_storage_failures.py` makes the real write path raise the OS error. This found and fixed a defect: cases were marked failed and calls were lost from the accounting. A real full volume was not used (report 13) |
 | • Invalid plans cause zero app and evaluator calls | Verified | reports/06 |
 | **Plugin conformance** | Verified offline | DeepEval recorded responses (reports/05). The live drift test is blocked (no key or authorization) |
 | **Conversational product validation** | Verified with a scripted model | reports/08–10 and the acceptance journey: corrections, interruptions, chat during a run, retried turns, stale revisions, recovery, `/status`/`/pause`/`/stop` during a model outage |
-| • Terminal checks | Partial | Piped and non-TTY use is verified; terminal resizing is not tested; multiline input is covered by the ConPTY tests (Windows only) |
+| • Terminal checks | Verified (Windows) | Piped and non-TTY use; multiline input; terminal resizing from 8×20 to 50×200 (`test_resizing_the_terminal_keeps_the_chat_working`, Prompt 13). All ConPTY tests are Windows only |
 | • Conversation-quality metrics (task completion, clarification count, correction retention, action-intent accuracy) | Not done | No live-model trials, which need an authorized provider |
 | **Benchmark the planner** | Partial | See the planner section below. The template baseline is measured. The model planner is not measured (blocked). No fixture has been reviewed |
 | **Judge and outcome validation** | Partial | Native evaluators are calibrated (below). A human-labelled set and the model judges are not done (no human labelers; live judge calls blocked) |
@@ -172,9 +172,9 @@ Fixed after the independent review of this prompt (`tests/test_acceptance_review
 - **Platforms not exercised:**
   - Linux: CI is configured, but no result was observed (no `gh` here). WSL here has no Python distribution.
   - macOS: not run anywhere.
-  - Python 3.11: not installed here.
-  - A Docker-based Linux / Python 3.11 run would need starting Docker Desktop and pulling an image, which was not done without your go-ahead.
+  - Python 3.11 was validated on Windows in Prompt 13 with a clean artifact install, quickstart and 100-case acceptance; the full test suite was not run on 3.11.
+  - A Docker-based Linux run would need starting Docker Desktop and pulling an image, which was not done without your go-ahead.
 - **Live checks still blocked:** the DeepEval live judge, live-model conversation trials, and the model planner benchmark. All need an API key and authorization for paid calls.
 - **Human review:** neither the planner fixtures nor the calibration labels have been reviewed by people. §23's two reviewers and adjudication are pending.
 - **Planner scoring:** gap and unnecessary-evaluator scoring use the concepts the planner assigns to its own objectives, so a model planner could over-label them. That needs checking once a model planner is measured.
-- **Crash between recovery and its event:** if a process dies after recovery has changed work-item states but before the `recovered` event is written, those uncommitted dispatches are lost from both the report and the ledger. This is pre-existing and rare.
+- **Crash between recovery and its event:** fixed in Prompt 13. Recovery's settlements and its `recovered` event now commit in one transaction (`test_a_crash_during_recovery_never_loses_the_uncommitted_dispatch`).

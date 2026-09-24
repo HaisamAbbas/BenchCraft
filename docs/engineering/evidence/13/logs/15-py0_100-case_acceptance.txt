@@ -1,0 +1,80 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe D:\BenchCraft\examples\acceptance\run_acceptance.py --out C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\acceptance-py0
+exit=0
+--- stdout
+{
+  "run_id": "run-4bb32bcfae56",
+  "hardware": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "cpu_count": 14
+  },
+  "workload": "100 cases, 1 exact-match binding, application concurrency 4, loopback HTTP",
+  "wall_seconds": 30.5,
+  "interruption": {
+    "calls_at_kill": 32,
+    "calls_while_stopped": 0,
+    "resume_exit_code": 1
+  },
+  "application_calls": {
+    "total": 104,
+    "distinct_cases_called": 100,
+    "max_calls_for_one_case": 2,
+    "cases_called_twice": 4
+  },
+  "reliability": {
+    "definition": "(successful executions + completed evaluations) / (planned executions + evaluations with a usable execution)",
+    "executions": [
+      100,
+      100
+    ],
+    "evaluations": [
+      100,
+      100
+    ],
+    "completed": 200,
+    "scheduled": 200,
+    "value": 1.0,
+    "error_taxonomy": {
+      "application": {},
+      "evaluator": {},
+      "work_items_needing_attention": 0
+    },
+    "application_attempts": 100,
+    "uncommitted_dispatches": 4
+  },
+  "cost_accounting": {
+    "application": {
+      "calls": 104,
+      "calls_with_known_cost": 0,
+      "accounting": "unknown",
+      "total_cost_usd": null
+    },
+    "evaluator": {
+      "calls": 100,
+      "calls_with_known_cost": 100,
+      "accounting": "complete",
+      "total_cost_usd": 0.0
+    }
+  },
+  "quality": {
+    "selected": 100,
+    "passes": 92,
+    "fails": 8,
+    "failing_cases_equal_injected": true,
+    "gates": [
+      [
+        "correct-answers",
+        "fail",
+        "pass rate 92/100 below 0.95"
+      ]
+    ],
+    "exit_code": 1
+  },
+  "rescore": {
+    "application_calls_during_rescore": 0,
+    "selected": 100,
+    "passes": 92
+  }
+}
+
+--- stderr

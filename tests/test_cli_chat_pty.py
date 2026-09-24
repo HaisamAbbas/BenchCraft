@@ -21,67 +21,114 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_bare_aibench_opens_chat_and_accepts_terminal_controls(tmp_path: Path) -> None:
-    from winpty import PtyProcess
+class _Terminal:
+    """Bare `aibench` in a real pseudo-console, read on a background thread."""
 
-    project = tmp_path / "project"
-    project.mkdir()
-    application = write_app(project)
-    dataset = write_dataset(project, [{"case_id": "one", "input": "hello"}])
-    (project / "aibench.json").write_text(
-        json.dumps(
-            {
-                "application_target": str(application),
-                "dataset_path": str(dataset),
-            }
-        ),
-        encoding="utf-8",
-    )
-    source_root = Path(__file__).resolve().parents[1] / "src"
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(source_root) + os.pathsep + env.get("PYTHONPATH", "")
-    process = PtyProcess.spawn(
-        [sys.executable, "-m", "aibench"],
-        cwd=str(project),
-        env=env,
-        dimensions=(40, 120),
-    )
-    chunks: queue.Queue[str] = queue.Queue()
+    def __init__(self, project: Path, dimensions: tuple[int, int] = (40, 120)) -> None:
+        from winpty import PtyProcess
 
-    def read_output() -> None:
+        source_root = Path(__file__).resolve().parents[1] / "src"
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(source_root) + os.pathsep + env.get("PYTHONPATH", "")
+        self.process = PtyProcess.spawn(
+            [sys.executable, "-m", "aibench"], cwd=str(project), env=env, dimensions=dimensions
+        )
+        self.observed = ""
+        self._chunks: queue.Queue[str] = queue.Queue()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self) -> None:
         while True:
             try:
-                chunks.put(process.read(2048))
+                self._chunks.put(self.process.read(2048))
             except EOFError:
                 return
             except Exception:  # noqa: BLE001 - process teardown closes the PTY handle
                 return
 
-    reader = threading.Thread(target=read_output, daemon=True)
-    reader.start()
-    observed = ""
+    def send(self, line: str) -> None:
+        self.process.write(line + "\r")
 
-    def expect(fragment: str, timeout: float = 12.0) -> None:
-        nonlocal observed
+    def expect(self, fragment: str, timeout: float = 12.0) -> None:
         deadline = time.monotonic() + timeout
-        while fragment not in observed and time.monotonic() < deadline:
+        while not self.shows(fragment) and time.monotonic() < deadline:
             try:
-                observed += chunks.get(timeout=0.1)
+                self.observed += self._chunks.get(timeout=0.1)
             except queue.Empty:
-                if not process.isalive():
+                if not self.process.isalive():
                     break
-        assert fragment in observed, f"terminal did not display {fragment!r}: {observed[-2000:]}"
+        assert self.shows(fragment), (
+            f"terminal did not display {fragment!r}: {self.observed[-2000:]}"
+        )
 
-    try:
-        expect("Type /help for commands")
-        process.write("/help\r")
-        expect("Anything else is a message")
-        process.write("/exit\r")
+    def shows(self, fragment: str) -> bool:
+        """Whether `fragment` was displayed, even if the terminal wrapped it (a word wrap
+        drops the space at the break, so whitespace is ignored)."""
+        return fragment in self.observed or "".join(fragment.split()) in _unwrapped(self.observed)
+
+    def exit(self) -> None:
+        self.send("/exit")
         deadline = time.monotonic() + 12
-        while process.isalive() and time.monotonic() < deadline:
+        while self.process.isalive() and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert not process.isalive(), "aibench did not exit after /exit"
+        assert not self.process.isalive(), "aibench did not exit after /exit"
+
+    def close(self) -> None:
+        if self.process.isalive():
+            self.process.terminate(force=True)
+        self.process.close(force=True)
+
+
+def _project(tmp_path: Path) -> Path:
+    project = tmp_path / "project"
+    project.mkdir()
+    application = write_app(project)
+    dataset = write_dataset(project, [{"case_id": "one", "input": "hello"}])
+    (project / "aibench.json").write_text(
+        json.dumps({"application_target": str(application), "dataset_path": str(dataset)}),
+        encoding="utf-8",
+    )
+    return project
+
+
+def test_bare_aibench_opens_chat_and_accepts_terminal_controls(tmp_path: Path) -> None:
+    terminal = _Terminal(_project(tmp_path))
+    try:
+        terminal.expect("Type /help for commands")
+        terminal.send("/help")
+        terminal.expect("Anything else is a message")
+        terminal.exit()
     finally:
-        if process.isalive():
-            process.terminate(force=True)
-        process.close(force=True)
+        terminal.close()
+
+
+def test_resizing_the_terminal_keeps_the_chat_working(tmp_path: Path) -> None:
+    """§23 terminal resizing (13-T1): shrink and grow the console while the chat is open.
+    Input keeps working, a line longer than the narrow width is read whole, and nothing
+    crashes."""
+    terminal = _Terminal(_project(tmp_path))
+    try:
+        terminal.expect("Type /help for commands")
+        terminal.process.setwinsize(12, 40)
+        assert terminal.process.getwinsize() == (12, 40)
+        terminal.send("/resized" + "x" * 70)  # wraps at 40 columns
+        terminal.expect("type /help")  # the unknown-command reply
+        assert terminal.shows("unknown command /resized" + "x" * 70)  # read whole
+        terminal.process.setwinsize(50, 200)
+        terminal.send("/help")
+        terminal.expect("Anything else is a message")
+        terminal.process.setwinsize(8, 20)  # too small for the toolbar
+        terminal.send("/status")  # still accepted and answered
+        terminal.expect("this session has not started a run")
+        assert "Traceback" not in terminal.observed
+        terminal.exit()
+    finally:
+        terminal.close()
+
+
+def _unwrapped(text: str) -> str:
+    """Terminal output without escape sequences or any whitespace."""
+    import re
+
+    text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07", "", text)
+    return "".join(text.split())

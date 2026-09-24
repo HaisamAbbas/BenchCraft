@@ -154,6 +154,8 @@ def _print_outcome(run_id: str, outcome: RunOutcome) -> None:
         console.print(f"  [yellow]not enforced:[/yellow] {escape(note)}")
     if outcome.stop_reason:
         console.print(f"  [yellow]stopped dispatching:[/yellow] {escape(outcome.stop_reason)}")
+    for warning in outcome.warnings:
+        console.print(f"  [yellow]warning:[/yellow] {escape(warning)}")
     if outcome.state is RunState.INTERRUPTED:
         console.print(f"  resume with: aibench resume {run_id}")
 
@@ -322,3 +324,5 @@ def status(
         console.print(
             f"  [yellow]{item['state']}[/yellow] {escape(item['task_key'])}: {escape(str(item['reason']))}"
         )
+    for warning in data["warnings"]:
+        console.print(f"  [yellow]warning:[/yellow] {escape(warning)}")

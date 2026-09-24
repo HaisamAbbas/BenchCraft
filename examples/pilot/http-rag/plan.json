@@ -1,0 +1,16 @@
+{
+  "plan_id": "pilot-http-rag-v1",
+  "dataset": "dataset.jsonl",
+  "application": "app.json",
+  "metrics": [
+    {
+      "metric": "native.exact_match",
+      "params": {"case_sensitive": false, "collapse_whitespace": true}
+    }
+  ],
+  "repetitions": 1,
+  "concurrency": {"application": 2, "evaluation": 2},
+  "retry": {"max_attempts": 2, "initial_backoff_seconds": 0.2, "max_backoff_seconds": 1},
+  "budgets": {"max_application_calls": 20, "max_evaluator_calls": 20, "max_wall_seconds": 600},
+  "gates": [{"gate_id": "correct-answers", "binding": 0, "min_pass_rate": 0.9}]
+}

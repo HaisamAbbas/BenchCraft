@@ -1,0 +1,12 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m aibench chat --new --objective answers are correct --send /plan
+exit=0
+--- stdout
+Plan, revision 1 (ready to run)
+  objective: answers are correct
+  metric native.exact_match@1.0.0: measures correctness: the answer matches the
+reviewed reference answer (Output text equals the reference answer after
+optional normalization.); usable in up to 10 dataset case(s)
+  10 case(s) x 1 repetition(s): up to 30 application call(s), 10 evaluation(s),
+0 by a model judge; cost unknown
+
+--- stderr

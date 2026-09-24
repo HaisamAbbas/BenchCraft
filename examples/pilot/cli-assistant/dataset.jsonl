@@ -1,0 +1,6 @@
+{"case_id": "refund-policy", "input": "What is your refund policy?", "expected_output": "Refunds are available within 30 days of purchase.", "expectations": {"refund_days": 30}}
+{"case_id": "money-back", "input": "Can I get my money back after two weeks?", "expected_output": "Refunds are available within 30 days of purchase.", "expectations": {"refund_days": 30}}
+{"case_id": "gift-return", "input": "Can I return a gift I received?", "expected_output": "Refunds are available within 30 days of purchase.", "expectations": {"refund_days": 30}}
+{"case_id": "send-back", "input": "How long do I have to send something back?", "expected_output": "Refunds are available within 30 days of purchase.", "expectations": {"refund_days": 30}}
+{"case_id": "shipping", "input": "Do you ship internationally?", "expected_output": "We ship to over 40 countries; delivery takes 5-10 days."}
+{"case_id": "guarantee", "input": "Is there a guarantee?", "expected_output": "All products carry a one-year limited warranty."}

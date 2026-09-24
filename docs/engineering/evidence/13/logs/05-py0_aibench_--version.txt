@@ -1,0 +1,6 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m aibench --version
+exit=0
+--- stdout
+aibench 0.1.0rc1
+
+--- stderr

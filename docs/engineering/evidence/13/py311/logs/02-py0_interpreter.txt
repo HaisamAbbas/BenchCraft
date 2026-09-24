@@ -1,0 +1,6 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\aibench-prompt13-release-20260924\venv-py0\Scripts\python.exe -c import platform, sys; print(platform.python_version(), sys.platform)
+exit=0
+--- stdout
+3.11.16 win32
+
+--- stderr

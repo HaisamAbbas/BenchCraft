@@ -29,6 +29,11 @@ class ConfigError(AibenchError):
     """Configuration resolution or precedence failed."""
 
 
+class WorkspaceTooNew(ConfigError):
+    """The workspace database was migrated by a newer aibench than this one. Writing to a
+    schema this version does not know could corrupt it, so the workspace is refused."""
+
+
 class ConflictError(AibenchError):
     """A logical commit collided with an existing record under the same identity but with
     different content. A duplicate commit of *identical* content is idempotent and must not

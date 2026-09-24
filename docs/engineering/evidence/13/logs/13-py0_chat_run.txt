@@ -1,0 +1,6 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m aibench chat --send /run
+exit=3
+--- stdout
+start run: done run-e0c3ad4eee46
+
+--- stderr

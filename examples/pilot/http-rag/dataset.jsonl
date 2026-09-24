@@ -1,0 +1,6 @@
+{"case_id": "refund-policy", "input": "What is the refund policy?", "expected_output": "Refunds may be requested within 30 days of purchase with a receipt."}
+{"case_id": "warranty-length", "input": "How long is the warranty?", "expected_output": "All products carry a one-year limited warranty against manufacturing defects."}
+{"case_id": "shipping-countries", "input": "Do you ship to other countries?", "expected_output": "We ship to over 40 countries. International delivery takes 5 to 10 days."}
+{"case_id": "support-hours", "input": "What are your support hours?", "expected_output": "Support is available Monday to Friday, 9am to 5pm UTC."}
+{"case_id": "late-return", "input": "Can I return an item I bought three weeks ago?", "expected_output": "Refunds may be requested within 30 days of purchase with a receipt."}
+{"case_id": "warranty-defects", "input": "Is there a warranty on defects?", "expected_output": "All products carry a one-year limited warranty against manufacturing defects."}

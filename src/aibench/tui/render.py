@@ -109,6 +109,8 @@ def status(console: Console, snapshot: dict[str, Any]) -> None:
             f"  [yellow]{safe(item['state'])}[/yellow] {safe(item['task_key'])}: "
             f"{safe(str(item['reason']))}",
         )
+    for warning in snapshot.get("warnings", []):
+        out(console, f"  [yellow]warning:[/yellow] {safe(warning)}")
     if snapshot.get("session_error"):
         out(console, f"  [red]could not run:[/red] {safe(snapshot['session_error'])}")
 

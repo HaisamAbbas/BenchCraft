@@ -1,0 +1,9 @@
+$ D:\BenchCraft\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider -rs tests/test_deepeval_adapter.py tests/test_worker_evaluator.py
+exit=0
+--- stdout
+............s.................                                           [100%]
+=========================== short test summary info ===========================
+SKIPPED [1] tests\test_deepeval_adapter.py:303: live-provider smoke needs AIBENCH_LIVE_DEEPEVAL=1 and OPENAI_API_KEY (one small judge call budget)
+29 passed, 1 skipped in 362.54s (0:06:02)
+
+--- stderr

@@ -1,0 +1,304 @@
+{
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64"
+  },
+  "artifacts": {
+    "aibench-0.1.0rc1-py3-none-any.whl": "4fc4f107a56142b6173cbe90095d9f972628ad71a4a24c106fbd4ebc331d3905",
+    "aibench-0.1.0rc1.tar.gz": "7cf688f98c5e7b8356ad572bb190959092a1594f39dbbc15ddf645b946c4f918",
+    "aibench_deepeval-0.1.0rc1-py3-none-any.whl": "8fbfbad7c3631178caeb6c3e95b2d60e42e4f46cdc2b996e4b56ae0789b37507",
+    "aibench_deepeval-0.1.0rc1.tar.gz": "13f5057d35ef57182ce04f2fb51ec7f90f02a3fe7cb4181b9acdacc77944af8c"
+  },
+  "environments": [
+    {
+      "tag": "py0",
+      "python": "3.12.10 win32"
+    }
+  ],
+  "steps": [
+    {
+      "name": "build BenchCraft",
+      "command": [
+        "D:\\BenchCraft\\.venv\\Scripts\\python.exe",
+        "-m",
+        "build",
+        "--outdir",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\dist",
+        "D:\\BenchCraft"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 39.9,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "build deepeval",
+      "command": [
+        "D:\\BenchCraft\\.venv\\Scripts\\python.exe",
+        "-m",
+        "build",
+        "--outdir",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\dist",
+        "D:\\BenchCraft\\plugins\\deepeval"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 174.9,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: interpreter",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-c",
+        "import platform, sys; print(platform.python_version(), sys.platform)"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 0.2,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: install wheel",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "pip",
+        "install",
+        "-q",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\dist\\aibench-0.1.0rc1-py3-none-any.whl"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 84.9,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: aibench imported from the venv",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-c",
+        "import aibench, sys; print(aibench.__file__); print(sys.version)"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 0.2,
+      "checks": {
+        "site-packages, not the repository": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: aibench --version",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "--version"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 3.8,
+      "checks": {},
+      "note": "aibench 0.1.0rc1",
+      "ok": true
+    },
+    {
+      "name": "py0: init",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "init",
+        "support-bench"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 2.0,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: doctor",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "doctor"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 2.4,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: run",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "run",
+        "--json"
+      ],
+      "expected_exit": 3,
+      "exit_code": 3,
+      "seconds": 4.4,
+      "checks": {
+        "correct-answers gate fails at 8/10": true,
+        "answers-present gate passes": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: report",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "report",
+        "run-737dd076c561"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 2.5,
+      "checks": {
+        "report.html written": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: markdown report",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "report",
+        "run-737dd076c561",
+        "--format",
+        "markdown",
+        "--out",
+        "-"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 3.0,
+      "checks": {
+        "shows support-004 evidence": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: rescore",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "evaluate",
+        "run-737dd076c561",
+        "--plan",
+        "plan.json",
+        "--json"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 2.0,
+      "checks": {
+        "no application call": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: chat /plan",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "chat",
+        "--new",
+        "--objective",
+        "answers are correct",
+        "--send",
+        "/plan"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 3.9,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: chat /run",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "chat",
+        "--send",
+        "/run"
+      ],
+      "expected_exit": 3,
+      "exit_code": 3,
+      "seconds": 7.0,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: chat /report",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "chat",
+        "--send",
+        "/report"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 2.8,
+      "checks": {
+        "reports 8/10": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: 100-case acceptance",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\venv-py0\\Scripts\\python.exe",
+        "D:\\BenchCraft\\examples\\acceptance\\run_acceptance.py",
+        "--out",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\acceptance-py0"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 31.0,
+      "checks": {
+        "failures are exactly the injected cases": true,
+        "reliability 1.0": true,
+        "rescore made 0 application calls": true,
+        "nothing called while stopped": true
+      },
+      "note": "",
+      "ok": true
+    }
+  ],
+  "failed": []
+}

@@ -7,18 +7,20 @@ locally. Nothing here calls a paid service unless you add an assistant model you
 
 ## 1. Install
 
-aibench is not published to a package index. Install it from a clone of this repository,
-using Python 3.11 or 3.12:
+aibench is not published to a package index. Install the release wheel you were given,
+using Python 3.11 or 3.12. Check it against its `SHA256SUMS` first:
 
 ```bash
 python -m venv .venv
-.venv/Scripts/pip install .            # Windows
-.venv/bin/pip install .                # Linux/macOS
+.venv/Scripts/pip install aibench-0.1.0rc1-py3-none-any.whl    # Windows
+.venv/bin/pip install aibench-0.1.0rc1-py3-none-any.whl        # Linux/macOS
+aibench --version                                               # aibench 0.1.0rc1
 ```
 
-Alternatively, install a built wheel: run `python -m build` in the repository, then
-`pip install dist/aibench-0.1.0-py3-none-any.whl`. Check the install with
-`aibench --version`.
+From a clone of the repository, `pip install .` works too.
+`python scripts/release_check.py --out DIR` builds the release files and checks them. See
+[upgrade and recovery](release/upgrade-and-recovery.md) for upgrading and for interrupted
+runs.
 
 The core install has no evaluator framework in it. Optional evaluators are installed
 separately (see [Optional evaluators](support.md#optional-evaluators)).

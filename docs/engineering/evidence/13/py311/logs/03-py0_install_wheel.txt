@@ -1,0 +1,8 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\aibench-prompt13-release-20260924\venv-py0\Scripts\python.exe -m pip install -q C:\Users\haisam.abbas\AppData\Local\Temp\aibench-prompt13-release-20260924\dist\aibench-0.1.0rc1-py3-none-any.whl
+exit=0
+--- stdout
+
+--- stderr
+
+[notice] A new release of pip is available: 24.0 -> 26.2.1
+[notice] To update, run: C:\Users\haisam.abbas\AppData\Local\Temp\aibench-prompt13-release-20260924\venv-py0\Scripts\python.exe -m pip install --upgrade pip

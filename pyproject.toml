@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aibench"
-version = "0.1.0"
+# The single source of the version is `aibench.__version__`.
+dynamic = ["version"]
 description = "Conversational CLI for AI application benchmarking"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -30,7 +31,10 @@ dev = [
 ]
 
 [project.scripts]
-aibench = "aibench.cli.main:app"
+aibench = "aibench.cli.main:run"
+
+[tool.setuptools.dynamic]
+version = {attr = "aibench.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

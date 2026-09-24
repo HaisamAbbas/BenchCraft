@@ -33,11 +33,26 @@ matrix: `docs/engineering/platform-matrix.md`. CI: `.github/workflows/ci.yml`.
 .venv/Scripts/python -m build
 ```
 
-Produces `dist/aibench-<version>-py3-none-any.whl` and `dist/aibench-<version>.tar.gz`,
-installable standalone (without editable mode or dev extras) in any environment matching the
-supported Python versions.
+This produces `dist/aibench-<version>-py3-none-any.whl` and `dist/aibench-<version>.tar.gz`.
+They install standalone, without editable mode or dev extras, in any environment with a
+supported Python version.
+
+To build every release artifact and prove it works from a clean install:
+`python scripts/release_check.py --out DIR [--python PATH ...] [--plugin]`. It builds the
+core plus the separately packaged DeepEval adapter with `SHA256SUMS`, installs
+the core wheel into a fresh venv per interpreter, and runs the documented quickstart and
+100-case acceptance workflow. `--plugin` checks the DeepEval plugin in its own clean
+environment. It publishes nothing.
 
 ## Status
 
-MVP under construction. See `docs/engineering/phase-status.md` for current phase status
-and `docs/engineering/reports/` for per-prompt completion reports.
+**MVP release candidate:** `0.1.0rc1` is a local candidate, ready for MVP review and not
+broad external release. Linux/macOS, live-provider, human fixture review and real-team pilot
+checks remain open. See [release readiness](docs/engineering/release-readiness.md).
+
+- **Changes:** [CHANGELOG.md](CHANGELOG.md).
+- **Upgrading and recovering interrupted runs:** [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
+- **Pilot recipes and feedback form:** [docs/pilot/](docs/pilot/README.md).
+
+Per-prompt status is in `docs/engineering/phase-status.md`, and the completion reports are
+in `docs/engineering/reports/`.

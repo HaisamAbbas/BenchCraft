@@ -13,6 +13,8 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from aibench.core.errors import WorkspaceTooNew
+
 
 @dataclass(frozen=True)
 class Migration:
@@ -473,11 +475,19 @@ def apply_migrations(conn: sqlite3.Connection) -> list[int]:
     a half-applied schema or a recorded-but-not-really-applied version.
 
     Returns the versions actually applied this call (empty on an already up-to-date
-    database — idempotent and restart-safe)."""
+    database — idempotent and restart-safe). Refuses a database that records a migration
+    this version doesn't know (`WorkspaceTooNew`): it was written by a newer aibench."""
     from datetime import UTC, datetime
 
     _ensure_migrations_table(conn)
     already = applied_versions(conn)
+    unknown = already - {m.version for m in MIGRATIONS}
+    if unknown:
+        raise WorkspaceTooNew(
+            f"this workspace was upgraded by a newer aibench (schema version {max(unknown)}; "
+            f"this aibench knows up to {MIGRATIONS[-1].version}). Install that newer version "
+            "to use it; an older one could damage it"
+        )
     newly_applied: list[int] = []
     for migration in MIGRATIONS:
         if migration.version in already:

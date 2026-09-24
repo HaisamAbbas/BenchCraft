@@ -1,0 +1,6 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -c import platform, sys; print(platform.python_version(), sys.platform)
+exit=0
+--- stdout
+3.12.10 win32
+
+--- stderr

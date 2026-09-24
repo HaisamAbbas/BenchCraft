@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aibench-deepeval"
-version = "0.1.0"
+# The single source of the version is `aibench_deepeval._version.__version__`.
+dynamic = ["version"]
 description = "DeepEval metrics for aibench, run in an isolated plugin environment"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = "Apache-2.0"
 dependencies = [
-    "aibench>=0.1,<0.2",
+    # Pre-release bound: `>=0.1` alone would exclude the 0.1.0rc1 release candidate.
+    "aibench>=0.1.0rc1,<0.2",
     # Exact pin: the adapter maps onto this version's API and refuses to run on another
     # (see aibench_deepeval.faithfulness.PINNED_DEEPEVAL).
     "deepeval==4.2.5",
@@ -18,6 +20,9 @@ dependencies = [
 
 [project.entry-points."aibench.evaluators"]
 deepeval = "aibench_deepeval:EVALUATORS"
+
+[tool.setuptools.dynamic]
+version = {attr = "aibench_deepeval._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

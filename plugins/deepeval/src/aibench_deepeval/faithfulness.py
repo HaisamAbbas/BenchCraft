@@ -36,6 +36,8 @@ import json
 import os
 from typing import Any
 
+from aibench_deepeval._version import __version__
+
 from aibench.core.models import DecisionRule, EvaluatorManifest, FieldRequirement, MetricDirection
 from aibench.evaluators.protocol import (
     EvaluationOutcome,
@@ -89,7 +91,7 @@ class Faithfulness(Evaluator):
         evaluator_id="deepeval.faithfulness",
         version="1.0.0",
         plugin_id="aibench-deepeval",
-        plugin_version="0.1.0",
+        plugin_version=__version__,
         description=(
             f"DeepEval {PINNED_DEEPEVAL} FaithfulnessMetric: the share of the answer's claims "
             "supported by the context the application actually retrieved."

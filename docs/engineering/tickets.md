@@ -171,3 +171,14 @@ Review remediation: `tests/test_report_review_regressions.py`.
 Gates: 12-G1..G5. See `docs/engineering/reports/12.md`. Decisions: ADR 0011.
 Review remediation: `tests/test_acceptance_review_regressions.py`.
 Closeout: the time bound in the Prompt 10 blocking-judge test went from 110 s to 200 s after cold worker starts measured 111 s under load; the judge is still proven killed, since 2 x 120 s would exceed the bound.
+
+## Prompt 13 — Release candidate and pilot handoff
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 13-T1 | Resolve acceptance findings: triage Prompt 12's open items against §23's release bar, fix release-blocking defects, rerun affected checks | DONE | Fixed: storage failure → resumable interruption (`engine.is_storage_failure`, `_stop_for_storage`; `tests/test_storage_failures.py`); atomic recovery (`Storage.settle_work_items`; `test_a_crash_during_recovery_never_loses_the_uncommitted_dispatch`, which fails on the old code); terminal resizing (`test_resizing_the_terminal_keeps_the_chat_working`); stop reasons surfaced (`RunOutcome.warnings`, `runs status`, chat). Recorded, not changed: planner recall, throughput, hosted/live and human review; Linux CI and macOS remain unverified (ADR 0012) |
+| 13-T2 | Distribution: versioned artifacts, migration/recovery instructions, changelog, quickstart, plugin/Python/platform matrix; install from built artifacts | DONE | `0.1.0rc1`; four artifacts and verified `SHA256SUMS` in `docs/engineering/evidence/13/dist/`; 3.12: 16/16 steps; 3.11: 19/19 including installed DeepEval plugin tests (29 passed, 1 live skip); `CHANGELOG.md`; `docs/release/upgrade-and-recovery.md`; `platform-matrix.md`; `WorkspaceTooNew` regression tests; CI job configured, result not observed |
+| 13-T3 | Pilot evidence: two recipes, feedback forms (setup effort, value over direct evaluator use), local trials; real-team trials marked pending | DONE (local); real-team trials PENDING | `docs/pilot/` (README, recipe A HTTP RAG, recipe B CLI assistant plus own oracle, feedback form); `examples/pilot/`; `tests/test_pilot_recipes.py` (both recipes run as written through the CLI) |
+| 13-T4 | Honest readiness decision: executable acceptance, external validation, residual risks, next actions; local artifacts only | DONE | `docs/engineering/release-readiness.md`; nothing published, deployed or sent; no pilot user contacted |
+
+Gates: 13-G1..G5. See `docs/engineering/reports/13.md`. Decisions: ADR 0012.

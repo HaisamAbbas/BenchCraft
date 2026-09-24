@@ -1,0 +1,614 @@
+$ D:\BenchCraft\.venv\Scripts\python.exe -m build --outdir C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\dist D:\BenchCraft
+exit=0
+--- stdout
+running egg_info
+writing src\aibench.egg-info\PKG-INFO
+writing dependency_links to src\aibench.egg-info\dependency_links.txt
+writing entry points to src\aibench.egg-info\entry_points.txt
+writing requirements to src\aibench.egg-info\requires.txt
+writing top-level names to src\aibench.egg-info\top_level.txt
+reading manifest file 'src\aibench.egg-info\SOURCES.txt'
+writing manifest file 'src\aibench.egg-info\SOURCES.txt'
+running sdist
+running egg_info
+writing src\aibench.egg-info\PKG-INFO
+writing dependency_links to src\aibench.egg-info\dependency_links.txt
+writing entry points to src\aibench.egg-info\entry_points.txt
+writing requirements to src\aibench.egg-info\requires.txt
+writing top-level names to src\aibench.egg-info\top_level.txt
+reading manifest file 'src\aibench.egg-info\SOURCES.txt'
+writing manifest file 'src\aibench.egg-info\SOURCES.txt'
+running check
+creating aibench-0.1.0rc1
+creating aibench-0.1.0rc1\src\aibench
+creating aibench-0.1.0rc1\src\aibench.egg-info
+creating aibench-0.1.0rc1\src\aibench\cli
+creating aibench-0.1.0rc1\src\aibench\config
+creating aibench-0.1.0rc1\src\aibench\conversation
+creating aibench-0.1.0rc1\src\aibench\core
+creating aibench-0.1.0rc1\src\aibench\datasets
+creating aibench-0.1.0rc1\src\aibench\engine
+creating aibench-0.1.0rc1\src\aibench\evaluators
+creating aibench-0.1.0rc1\src\aibench\inspection
+creating aibench-0.1.0rc1\src\aibench\observations
+creating aibench-0.1.0rc1\src\aibench\planning
+creating aibench-0.1.0rc1\src\aibench\quickstart
+creating aibench-0.1.0rc1\src\aibench\quickstart\files
+creating aibench-0.1.0rc1\src\aibench\registry
+creating aibench-0.1.0rc1\src\aibench\reporting
+creating aibench-0.1.0rc1\src\aibench\runners
+creating aibench-0.1.0rc1\src\aibench\security
+creating aibench-0.1.0rc1\src\aibench\services
+creating aibench-0.1.0rc1\src\aibench\sessions
+creating aibench-0.1.0rc1\src\aibench\storage
+creating aibench-0.1.0rc1\src\aibench\tui
+creating aibench-0.1.0rc1\tests
+copying files to aibench-0.1.0rc1...
+copying README.md -> aibench-0.1.0rc1
+copying pyproject.toml -> aibench-0.1.0rc1
+copying src\aibench\__init__.py -> aibench-0.1.0rc1\src\aibench
+copying src\aibench\__main__.py -> aibench-0.1.0rc1\src\aibench
+copying src\aibench.egg-info\PKG-INFO -> aibench-0.1.0rc1\src\aibench.egg-info
+copying src\aibench.egg-info\SOURCES.txt -> aibench-0.1.0rc1\src\aibench.egg-info
+copying src\aibench.egg-info\dependency_links.txt -> aibench-0.1.0rc1\src\aibench.egg-info
+copying src\aibench.egg-info\entry_points.txt -> aibench-0.1.0rc1\src\aibench.egg-info
+copying src\aibench.egg-info\requires.txt -> aibench-0.1.0rc1\src\aibench.egg-info
+copying src\aibench.egg-info\top_level.txt -> aibench-0.1.0rc1\src\aibench.egg-info
+copying src\aibench\cli\__init__.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\app.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\benchmark.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\chat.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\dataset.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\inspect.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\main.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\plan.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\project.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\report.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\run.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\runs.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\score.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\cli\sessions.py -> aibench-0.1.0rc1\src\aibench\cli
+copying src\aibench\config\__init__.py -> aibench-0.1.0rc1\src\aibench\config
+copying src\aibench\config\model.py -> aibench-0.1.0rc1\src\aibench\config
+copying src\aibench\config\resolve.py -> aibench-0.1.0rc1\src\aibench\config
+copying src\aibench\conversation\__init__.py -> aibench-0.1.0rc1\src\aibench\conversation
+copying src\aibench\conversation\agent.py -> aibench-0.1.0rc1\src\aibench\conversation
+copying src\aibench\core\__init__.py -> aibench-0.1.0rc1\src\aibench\core
+copying src\aibench\core\errors.py -> aibench-0.1.0rc1\src\aibench\core
+copying src\aibench\core\hashes.py -> aibench-0.1.0rc1\src\aibench\core
+copying src\aibench\core\models.py -> aibench-0.1.0rc1\src\aibench\core
+copying src\aibench\core\plans.py -> aibench-0.1.0rc1\src\aibench\core
+copying src\aibench\core\schema_export.py -> aibench-0.1.0rc1\src\aibench\core
+copying src\aibench\core\sessions.py -> aibench-0.1.0rc1\src\aibench\core
+copying src\aibench\datasets\__init__.py -> aibench-0.1.0rc1\src\aibench\datasets
+copying src\aibench\datasets\ingest.py -> aibench-0.1.0rc1\src\aibench\datasets
+copying src\aibench\datasets\normalize.py -> aibench-0.1.0rc1\src\aibench\datasets
+copying src\aibench\engine\__init__.py -> aibench-0.1.0rc1\src\aibench\engine
+copying src\aibench\engine\budget.py -> aibench-0.1.0rc1\src\aibench\engine
+copying src\aibench\engine\compile.py -> aibench-0.1.0rc1\src\aibench\engine
+copying src\aibench\engine\engine.py -> aibench-0.1.0rc1\src\aibench\engine
+copying src\aibench\engine\retry.py -> aibench-0.1.0rc1\src\aibench\engine
+copying src\aibench\evaluators\__init__.py -> aibench-0.1.0rc1\src\aibench\evaluators
+copying src\aibench\evaluators\native.py -> aibench-0.1.0rc1\src\aibench\evaluators
+copying src\aibench\evaluators\protocol.py -> aibench-0.1.0rc1\src\aibench\evaluators
+copying src\aibench\evaluators\schema_worker.py -> aibench-0.1.0rc1\src\aibench\evaluators
+copying src\aibench\evaluators\validation.py -> aibench-0.1.0rc1\src\aibench\evaluators
+copying src\aibench\evaluators\worker_client.py -> aibench-0.1.0rc1\src\aibench\evaluators
+copying src\aibench\inspection\__init__.py -> aibench-0.1.0rc1\src\aibench\inspection
+copying src\aibench\inspection\dataset_summary.py -> aibench-0.1.0rc1\src\aibench\inspection
+copying src\aibench\inspection\profile.py -> aibench-0.1.0rc1\src\aibench\inspection
+copying src\aibench\observations\__init__.py -> aibench-0.1.0rc1\src\aibench\observations
+copying src\aibench\planning\__init__.py -> aibench-0.1.0rc1\src\aibench\planning
+copying src\aibench\planning\benchmark.py -> aibench-0.1.0rc1\src\aibench\planning
+copying src\aibench\planning\catalog.py -> aibench-0.1.0rc1\src\aibench\planning
+copying src\aibench\planning\drafts.py -> aibench-0.1.0rc1\src\aibench\planning
+copying src\aibench\planning\openai_provider.py -> aibench-0.1.0rc1\src\aibench\planning
+copying src\aibench\planning\planner.py -> aibench-0.1.0rc1\src\aibench\planning
+copying src\aibench\planning\service.py -> aibench-0.1.0rc1\src\aibench\planning
+copying src\aibench\planning\template.py -> aibench-0.1.0rc1\src\aibench\planning
+copying src\aibench\quickstart\__init__.py -> aibench-0.1.0rc1\src\aibench\quickstart
+copying src\aibench\quickstart\files\aibench.json -> aibench-0.1.0rc1\src\aibench\quickstart\files
+copying src\aibench\quickstart\files\dataset.jsonl -> aibench-0.1.0rc1\src\aibench\quickstart\files
+copying src\aibench\quickstart\files\plan.json -> aibench-0.1.0rc1\src\aibench\quickstart\files
+copying src\aibench\quickstart\files\policy.json -> aibench-0.1.0rc1\src\aibench\quickstart\files
+copying src\aibench\quickstart\files\support.app.json -> aibench-0.1.0rc1\src\aibench\quickstart\files
+copying src\aibench\quickstart\files\support_app.py -> aibench-0.1.0rc1\src\aibench\quickstart\files
+copying src\aibench\registry\__init__.py -> aibench-0.1.0rc1\src\aibench\registry
+copying src\aibench\registry\discovery.py -> aibench-0.1.0rc1\src\aibench\registry
+copying src\aibench\registry\eval_worker.py -> aibench-0.1.0rc1\src\aibench\registry
+copying src\aibench\registry\worker.py -> aibench-0.1.0rc1\src\aibench\registry
+copying src\aibench\reporting\__init__.py -> aibench-0.1.0rc1\src\aibench\reporting
+copying src\aibench\reporting\aggregation.py -> aibench-0.1.0rc1\src\aibench\reporting
+copying src\aibench\reporting\render.py -> aibench-0.1.0rc1\src\aibench\reporting
+copying src\aibench\runners\__init__.py -> aibench-0.1.0rc1\src\aibench\runners
+copying src\aibench\runners\base.py -> aibench-0.1.0rc1\src\aibench\runners
+copying src\aibench\runners\bindings.py -> aibench-0.1.0rc1\src\aibench\runners
+copying src\aibench\runners\cli_runner.py -> aibench-0.1.0rc1\src\aibench\runners
+copying src\aibench\runners\http_runner.py -> aibench-0.1.0rc1\src\aibench\runners
+copying src\aibench\runners\process_tree.py -> aibench-0.1.0rc1\src\aibench\runners
+copying src\aibench\security\__init__.py -> aibench-0.1.0rc1\src\aibench\security
+copying src\aibench\security\endpoints.py -> aibench-0.1.0rc1\src\aibench\security
+copying src\aibench\security\policy.py -> aibench-0.1.0rc1\src\aibench\security
+copying src\aibench\security\redaction.py -> aibench-0.1.0rc1\src\aibench\security
+copying src\aibench\security\secrets.py -> aibench-0.1.0rc1\src\aibench\security
+copying src\aibench\services\__init__.py -> aibench-0.1.0rc1\src\aibench\services
+copying src\aibench\services\calibration.py -> aibench-0.1.0rc1\src\aibench\services
+copying src\aibench\services\execution.py -> aibench-0.1.0rc1\src\aibench\services
+copying src\aibench\services\reports.py -> aibench-0.1.0rc1\src\aibench\services
+copying src\aibench\services\runs.py -> aibench-0.1.0rc1\src\aibench\services
+copying src\aibench\services\scoring.py -> aibench-0.1.0rc1\src\aibench\services
+copying src\aibench\sessions\__init__.py -> aibench-0.1.0rc1\src\aibench\sessions
+copying src\aibench\sessions\controller.py -> aibench-0.1.0rc1\src\aibench\sessions
+copying src\aibench\sessions\drafting.py -> aibench-0.1.0rc1\src\aibench\sessions
+copying src\aibench\sessions\store.py -> aibench-0.1.0rc1\src\aibench\sessions
+copying src\aibench\sessions\summary.py -> aibench-0.1.0rc1\src\aibench\sessions
+copying src\aibench\storage\__init__.py -> aibench-0.1.0rc1\src\aibench\storage
+copying src\aibench\storage\artifacts.py -> aibench-0.1.0rc1\src\aibench\storage
+copying src\aibench\storage\db.py -> aibench-0.1.0rc1\src\aibench\storage
+copying src\aibench\storage\migrations.py -> aibench-0.1.0rc1\src\aibench\storage
+copying src\aibench\storage\repositories.py -> aibench-0.1.0rc1\src\aibench\storage
+copying src\aibench\tui\__init__.py -> aibench-0.1.0rc1\src\aibench\tui
+copying src\aibench\tui\app.py -> aibench-0.1.0rc1\src\aibench\tui
+copying src\aibench\tui\commands.py -> aibench-0.1.0rc1\src\aibench\tui
+copying src\aibench\tui\render.py -> aibench-0.1.0rc1\src\aibench\tui
+copying tests\test_acceptance_review_regressions.py -> aibench-0.1.0rc1\tests
+copying tests\test_bootstrap.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_app.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_chat.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_chat_pty.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_dataset.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_plan.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_project.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_run.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_runner.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_runs.py -> aibench-0.1.0rc1\tests
+copying tests\test_cli_score.py -> aibench-0.1.0rc1\tests
+copying tests\test_config.py -> aibench-0.1.0rc1\tests
+copying tests\test_conversation.py -> aibench-0.1.0rc1\tests
+copying tests\test_conversation_hardening.py -> aibench-0.1.0rc1\tests
+copying tests\test_deepeval_adapter.py -> aibench-0.1.0rc1\tests
+copying tests\test_dependency_boundaries.py -> aibench-0.1.0rc1\tests
+copying tests\test_endpoint_policy.py -> aibench-0.1.0rc1\tests
+copying tests\test_engine.py -> aibench-0.1.0rc1\tests
+copying tests\test_engine_faults.py -> aibench-0.1.0rc1\tests
+copying tests\test_engine_policy.py -> aibench-0.1.0rc1\tests
+copying tests\test_engine_review_regressions.py -> aibench-0.1.0rc1\tests
+copying tests\test_execution_service.py -> aibench-0.1.0rc1\tests
+copying tests\test_http_runner.py -> aibench-0.1.0rc1\tests
+copying tests\test_ingest.py -> aibench-0.1.0rc1\tests
+copying tests\test_inspection.py -> aibench-0.1.0rc1\tests
+copying tests\test_judge_calibration.py -> aibench-0.1.0rc1\tests
+copying tests\test_models.py -> aibench-0.1.0rc1\tests
+copying tests\test_mvp_acceptance.py -> aibench-0.1.0rc1\tests
+copying tests\test_native_evaluators.py -> aibench-0.1.0rc1\tests
+copying tests\test_normalize.py -> aibench-0.1.0rc1\tests
+copying tests\test_openai_provider.py -> aibench-0.1.0rc1\tests
+copying tests\test_openai_provider_stream.py -> aibench-0.1.0rc1\tests
+copying tests\test_pilot_recipes.py -> aibench-0.1.0rc1\tests
+copying tests\test_plan_equivalence.py -> aibench-0.1.0rc1\tests
+copying tests\test_plan_validation.py -> aibench-0.1.0rc1\tests
+copying tests\test_planner.py -> aibench-0.1.0rc1\tests
+copying tests\test_planner_benchmark.py -> aibench-0.1.0rc1\tests
+copying tests\test_planner_fixture_set.py -> aibench-0.1.0rc1\tests
+copying tests\test_planning_review_regressions.py -> aibench-0.1.0rc1\tests
+copying tests\test_plugin_discovery.py -> aibench-0.1.0rc1\tests
+copying tests\test_quickstart.py -> aibench-0.1.0rc1\tests
+copying tests\test_quickstart_pty.py -> aibench-0.1.0rc1\tests
+copying tests\test_recovery_review_regressions.py -> aibench-0.1.0rc1\tests
+copying tests\test_registry.py -> aibench-0.1.0rc1\tests
+copying tests\test_release_candidate.py -> aibench-0.1.0rc1\tests
+copying tests\test_report_review_regressions.py -> aibench-0.1.0rc1\tests
+copying tests\test_reports.py -> aibench-0.1.0rc1\tests
+copying tests\test_retry_budget.py -> aibench-0.1.0rc1\tests
+copying tests\test_runner_bindings.py -> aibench-0.1.0rc1\tests
+copying tests\test_scoring_review_regressions.py -> aibench-0.1.0rc1\tests
+copying tests\test_scoring_service.py -> aibench-0.1.0rc1\tests
+copying tests\test_session_controller.py -> aibench-0.1.0rc1\tests
+copying tests\test_session_recovery.py -> aibench-0.1.0rc1\tests
+copying tests\test_session_review_regressions.py -> aibench-0.1.0rc1\tests
+copying tests\test_session_store.py -> aibench-0.1.0rc1\tests
+copying tests\test_storage_artifacts.py -> aibench-0.1.0rc1\tests
+copying tests\test_storage_failures.py -> aibench-0.1.0rc1\tests
+copying tests\test_storage_migrations.py -> aibench-0.1.0rc1\tests
+copying tests\test_storage_recovery.py -> aibench-0.1.0rc1\tests
+copying tests\test_storage_repositories.py -> aibench-0.1.0rc1\tests
+copying tests\test_tui.py -> aibench-0.1.0rc1\tests
+copying tests\test_worker_evaluator.py -> aibench-0.1.0rc1\tests
+Writing aibench-0.1.0rc1\setup.cfg
+Creating tar archive
+removing 'aibench-0.1.0rc1' (and everything under it)
+running egg_info
+writing src\aibench.egg-info\PKG-INFO
+writing dependency_links to src\aibench.egg-info\dependency_links.txt
+writing entry points to src\aibench.egg-info\entry_points.txt
+writing requirements to src\aibench.egg-info\requires.txt
+writing top-level names to src\aibench.egg-info\top_level.txt
+reading manifest file 'src\aibench.egg-info\SOURCES.txt'
+writing manifest file 'src\aibench.egg-info\SOURCES.txt'
+running bdist_wheel
+running build
+running build_py
+creating build\lib\aibench
+copying src\aibench\__init__.py -> build\lib\aibench
+copying src\aibench\__main__.py -> build\lib\aibench
+creating build\lib\aibench\cli
+copying src\aibench\cli\app.py -> build\lib\aibench\cli
+copying src\aibench\cli\benchmark.py -> build\lib\aibench\cli
+copying src\aibench\cli\chat.py -> build\lib\aibench\cli
+copying src\aibench\cli\dataset.py -> build\lib\aibench\cli
+copying src\aibench\cli\inspect.py -> build\lib\aibench\cli
+copying src\aibench\cli\main.py -> build\lib\aibench\cli
+copying src\aibench\cli\plan.py -> build\lib\aibench\cli
+copying src\aibench\cli\project.py -> build\lib\aibench\cli
+copying src\aibench\cli\report.py -> build\lib\aibench\cli
+copying src\aibench\cli\run.py -> build\lib\aibench\cli
+copying src\aibench\cli\runs.py -> build\lib\aibench\cli
+copying src\aibench\cli\score.py -> build\lib\aibench\cli
+copying src\aibench\cli\sessions.py -> build\lib\aibench\cli
+copying src\aibench\cli\__init__.py -> build\lib\aibench\cli
+creating build\lib\aibench\config
+copying src\aibench\config\model.py -> build\lib\aibench\config
+copying src\aibench\config\resolve.py -> build\lib\aibench\config
+copying src\aibench\config\__init__.py -> build\lib\aibench\config
+creating build\lib\aibench\conversation
+copying src\aibench\conversation\agent.py -> build\lib\aibench\conversation
+copying src\aibench\conversation\__init__.py -> build\lib\aibench\conversation
+creating build\lib\aibench\core
+copying src\aibench\core\errors.py -> build\lib\aibench\core
+copying src\aibench\core\hashes.py -> build\lib\aibench\core
+copying src\aibench\core\models.py -> build\lib\aibench\core
+copying src\aibench\core\plans.py -> build\lib\aibench\core
+copying src\aibench\core\schema_export.py -> build\lib\aibench\core
+copying src\aibench\core\sessions.py -> build\lib\aibench\core
+copying src\aibench\core\__init__.py -> build\lib\aibench\core
+creating build\lib\aibench\datasets
+copying src\aibench\datasets\ingest.py -> build\lib\aibench\datasets
+copying src\aibench\datasets\normalize.py -> build\lib\aibench\datasets
+copying src\aibench\datasets\__init__.py -> build\lib\aibench\datasets
+creating build\lib\aibench\engine
+copying src\aibench\engine\budget.py -> build\lib\aibench\engine
+copying src\aibench\engine\compile.py -> build\lib\aibench\engine
+copying src\aibench\engine\engine.py -> build\lib\aibench\engine
+copying src\aibench\engine\retry.py -> build\lib\aibench\engine
+copying src\aibench\engine\__init__.py -> build\lib\aibench\engine
+creating build\lib\aibench\evaluators
+copying src\aibench\evaluators\native.py -> build\lib\aibench\evaluators
+copying src\aibench\evaluators\protocol.py -> build\lib\aibench\evaluators
+copying src\aibench\evaluators\schema_worker.py -> build\lib\aibench\evaluators
+copying src\aibench\evaluators\validation.py -> build\lib\aibench\evaluators
+copying src\aibench\evaluators\worker_client.py -> build\lib\aibench\evaluators
+copying src\aibench\evaluators\__init__.py -> build\lib\aibench\evaluators
+creating build\lib\aibench\inspection
+copying src\aibench\inspection\dataset_summary.py -> build\lib\aibench\inspection
+copying src\aibench\inspection\profile.py -> build\lib\aibench\inspection
+copying src\aibench\inspection\__init__.py -> build\lib\aibench\inspection
+creating build\lib\aibench\observations
+copying src\aibench\observations\__init__.py -> build\lib\aibench\observations
+creating build\lib\aibench\planning
+copying src\aibench\planning\benchmark.py -> build\lib\aibench\planning
+copying src\aibench\planning\catalog.py -> build\lib\aibench\planning
+copying src\aibench\planning\drafts.py -> build\lib\aibench\planning
+copying src\aibench\planning\openai_provider.py -> build\lib\aibench\planning
+copying src\aibench\planning\planner.py -> build\lib\aibench\planning
+copying src\aibench\planning\service.py -> build\lib\aibench\planning
+copying src\aibench\planning\template.py -> build\lib\aibench\planning
+copying src\aibench\planning\__init__.py -> build\lib\aibench\planning
+creating build\lib\aibench\quickstart
+copying src\aibench\quickstart\__init__.py -> build\lib\aibench\quickstart
+creating build\lib\aibench\registry
+copying src\aibench\registry\discovery.py -> build\lib\aibench\registry
+copying src\aibench\registry\eval_worker.py -> build\lib\aibench\registry
+copying src\aibench\registry\worker.py -> build\lib\aibench\registry
+copying src\aibench\registry\__init__.py -> build\lib\aibench\registry
+creating build\lib\aibench\reporting
+copying src\aibench\reporting\aggregation.py -> build\lib\aibench\reporting
+copying src\aibench\reporting\render.py -> build\lib\aibench\reporting
+copying src\aibench\reporting\__init__.py -> build\lib\aibench\reporting
+creating build\lib\aibench\runners
+copying src\aibench\runners\base.py -> build\lib\aibench\runners
+copying src\aibench\runners\bindings.py -> build\lib\aibench\runners
+copying src\aibench\runners\cli_runner.py -> build\lib\aibench\runners
+copying src\aibench\runners\http_runner.py -> build\lib\aibench\runners
+copying src\aibench\runners\process_tree.py -> build\lib\aibench\runners
+copying src\aibench\runners\__init__.py -> build\lib\aibench\runners
+creating build\lib\aibench\security
+copying src\aibench\security\endpoints.py -> build\lib\aibench\security
+copying src\aibench\security\policy.py -> build\lib\aibench\security
+copying src\aibench\security\redaction.py -> build\lib\aibench\security
+copying src\aibench\security\secrets.py -> build\lib\aibench\security
+copying src\aibench\security\__init__.py -> build\lib\aibench\security
+creating build\lib\aibench\services
+copying src\aibench\services\calibration.py -> build\lib\aibench\services
+copying src\aibench\services\execution.py -> build\lib\aibench\services
+copying src\aibench\services\reports.py -> build\lib\aibench\services
+copying src\aibench\services\runs.py -> build\lib\aibench\services
+copying src\aibench\services\scoring.py -> build\lib\aibench\services
+copying src\aibench\services\__init__.py -> build\lib\aibench\services
+creating build\lib\aibench\sessions
+copying src\aibench\sessions\controller.py -> build\lib\aibench\sessions
+copying src\aibench\sessions\drafting.py -> build\lib\aibench\sessions
+copying src\aibench\sessions\store.py -> build\lib\aibench\sessions
+copying src\aibench\sessions\summary.py -> build\lib\aibench\sessions
+copying src\aibench\sessions\__init__.py -> build\lib\aibench\sessions
+creating build\lib\aibench\storage
+copying src\aibench\storage\artifacts.py -> build\lib\aibench\storage
+copying src\aibench\storage\db.py -> build\lib\aibench\storage
+copying src\aibench\storage\migrations.py -> build\lib\aibench\storage
+copying src\aibench\storage\repositories.py -> build\lib\aibench\storage
+copying src\aibench\storage\__init__.py -> build\lib\aibench\storage
+creating build\lib\aibench\tui
+copying src\aibench\tui\app.py -> build\lib\aibench\tui
+copying src\aibench\tui\commands.py -> build\lib\aibench\tui
+copying src\aibench\tui\render.py -> build\lib\aibench\tui
+copying src\aibench\tui\__init__.py -> build\lib\aibench\tui
+creating build\lib\aibench\quickstart\files
+copying src\aibench\quickstart\files\support_app.py -> build\lib\aibench\quickstart\files
+running egg_info
+writing src\aibench.egg-info\PKG-INFO
+writing dependency_links to src\aibench.egg-info\dependency_links.txt
+writing entry points to src\aibench.egg-info\entry_points.txt
+writing requirements to src\aibench.egg-info\requires.txt
+writing top-level names to src\aibench.egg-info\top_level.txt
+reading manifest file 'src\aibench.egg-info\SOURCES.txt'
+writing manifest file 'src\aibench.egg-info\SOURCES.txt'
+copying src\aibench\quickstart\files\aibench.json -> build\lib\aibench\quickstart\files
+copying src\aibench\quickstart\files\dataset.jsonl -> build\lib\aibench\quickstart\files
+copying src\aibench\quickstart\files\plan.json -> build\lib\aibench\quickstart\files
+copying src\aibench\quickstart\files\policy.json -> build\lib\aibench\quickstart\files
+copying src\aibench\quickstart\files\support.app.json -> build\lib\aibench\quickstart\files
+installing to build\bdist.win-amd64\wheel
+running install
+running install_lib
+creating build\bdist.win-amd64\wheel
+creating build\bdist.win-amd64\wheel\aibench
+creating build\bdist.win-amd64\wheel\aibench\cli
+copying build\lib\aibench\cli\app.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\benchmark.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\chat.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\dataset.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\inspect.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\main.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\plan.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\project.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\report.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\run.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\runs.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\score.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\sessions.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+copying build\lib\aibench\cli\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\cli
+creating build\bdist.win-amd64\wheel\aibench\config
+copying build\lib\aibench\config\model.py -> build\bdist.win-amd64\wheel\.\aibench\config
+copying build\lib\aibench\config\resolve.py -> build\bdist.win-amd64\wheel\.\aibench\config
+copying build\lib\aibench\config\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\config
+creating build\bdist.win-amd64\wheel\aibench\conversation
+copying build\lib\aibench\conversation\agent.py -> build\bdist.win-amd64\wheel\.\aibench\conversation
+copying build\lib\aibench\conversation\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\conversation
+creating build\bdist.win-amd64\wheel\aibench\core
+copying build\lib\aibench\core\errors.py -> build\bdist.win-amd64\wheel\.\aibench\core
+copying build\lib\aibench\core\hashes.py -> build\bdist.win-amd64\wheel\.\aibench\core
+copying build\lib\aibench\core\models.py -> build\bdist.win-amd64\wheel\.\aibench\core
+copying build\lib\aibench\core\plans.py -> build\bdist.win-amd64\wheel\.\aibench\core
+copying build\lib\aibench\core\schema_export.py -> build\bdist.win-amd64\wheel\.\aibench\core
+copying build\lib\aibench\core\sessions.py -> build\bdist.win-amd64\wheel\.\aibench\core
+copying build\lib\aibench\core\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\core
+creating build\bdist.win-amd64\wheel\aibench\datasets
+copying build\lib\aibench\datasets\ingest.py -> build\bdist.win-amd64\wheel\.\aibench\datasets
+copying build\lib\aibench\datasets\normalize.py -> build\bdist.win-amd64\wheel\.\aibench\datasets
+copying build\lib\aibench\datasets\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\datasets
+creating build\bdist.win-amd64\wheel\aibench\engine
+copying build\lib\aibench\engine\budget.py -> build\bdist.win-amd64\wheel\.\aibench\engine
+copying build\lib\aibench\engine\compile.py -> build\bdist.win-amd64\wheel\.\aibench\engine
+copying build\lib\aibench\engine\engine.py -> build\bdist.win-amd64\wheel\.\aibench\engine
+copying build\lib\aibench\engine\retry.py -> build\bdist.win-amd64\wheel\.\aibench\engine
+copying build\lib\aibench\engine\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\engine
+creating build\bdist.win-amd64\wheel\aibench\evaluators
+copying build\lib\aibench\evaluators\native.py -> build\bdist.win-amd64\wheel\.\aibench\evaluators
+copying build\lib\aibench\evaluators\protocol.py -> build\bdist.win-amd64\wheel\.\aibench\evaluators
+copying build\lib\aibench\evaluators\schema_worker.py -> build\bdist.win-amd64\wheel\.\aibench\evaluators
+copying build\lib\aibench\evaluators\validation.py -> build\bdist.win-amd64\wheel\.\aibench\evaluators
+copying build\lib\aibench\evaluators\worker_client.py -> build\bdist.win-amd64\wheel\.\aibench\evaluators
+copying build\lib\aibench\evaluators\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\evaluators
+creating build\bdist.win-amd64\wheel\aibench\inspection
+copying build\lib\aibench\inspection\dataset_summary.py -> build\bdist.win-amd64\wheel\.\aibench\inspection
+copying build\lib\aibench\inspection\profile.py -> build\bdist.win-amd64\wheel\.\aibench\inspection
+copying build\lib\aibench\inspection\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\inspection
+creating build\bdist.win-amd64\wheel\aibench\observations
+copying build\lib\aibench\observations\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\observations
+creating build\bdist.win-amd64\wheel\aibench\planning
+copying build\lib\aibench\planning\benchmark.py -> build\bdist.win-amd64\wheel\.\aibench\planning
+copying build\lib\aibench\planning\catalog.py -> build\bdist.win-amd64\wheel\.\aibench\planning
+copying build\lib\aibench\planning\drafts.py -> build\bdist.win-amd64\wheel\.\aibench\planning
+copying build\lib\aibench\planning\openai_provider.py -> build\bdist.win-amd64\wheel\.\aibench\planning
+copying build\lib\aibench\planning\planner.py -> build\bdist.win-amd64\wheel\.\aibench\planning
+copying build\lib\aibench\planning\service.py -> build\bdist.win-amd64\wheel\.\aibench\planning
+copying build\lib\aibench\planning\template.py -> build\bdist.win-amd64\wheel\.\aibench\planning
+copying build\lib\aibench\planning\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\planning
+creating build\bdist.win-amd64\wheel\aibench\quickstart
+creating build\bdist.win-amd64\wheel\aibench\quickstart\files
+copying build\lib\aibench\quickstart\files\aibench.json -> build\bdist.win-amd64\wheel\.\aibench\quickstart\files
+copying build\lib\aibench\quickstart\files\dataset.jsonl -> build\bdist.win-amd64\wheel\.\aibench\quickstart\files
+copying build\lib\aibench\quickstart\files\plan.json -> build\bdist.win-amd64\wheel\.\aibench\quickstart\files
+copying build\lib\aibench\quickstart\files\policy.json -> build\bdist.win-amd64\wheel\.\aibench\quickstart\files
+copying build\lib\aibench\quickstart\files\support.app.json -> build\bdist.win-amd64\wheel\.\aibench\quickstart\files
+copying build\lib\aibench\quickstart\files\support_app.py -> build\bdist.win-amd64\wheel\.\aibench\quickstart\files
+copying build\lib\aibench\quickstart\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\quickstart
+creating build\bdist.win-amd64\wheel\aibench\registry
+copying build\lib\aibench\registry\discovery.py -> build\bdist.win-amd64\wheel\.\aibench\registry
+copying build\lib\aibench\registry\eval_worker.py -> build\bdist.win-amd64\wheel\.\aibench\registry
+copying build\lib\aibench\registry\worker.py -> build\bdist.win-amd64\wheel\.\aibench\registry
+copying build\lib\aibench\registry\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\registry
+creating build\bdist.win-amd64\wheel\aibench\reporting
+copying build\lib\aibench\reporting\aggregation.py -> build\bdist.win-amd64\wheel\.\aibench\reporting
+copying build\lib\aibench\reporting\render.py -> build\bdist.win-amd64\wheel\.\aibench\reporting
+copying build\lib\aibench\reporting\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\reporting
+creating build\bdist.win-amd64\wheel\aibench\runners
+copying build\lib\aibench\runners\base.py -> build\bdist.win-amd64\wheel\.\aibench\runners
+copying build\lib\aibench\runners\bindings.py -> build\bdist.win-amd64\wheel\.\aibench\runners
+copying build\lib\aibench\runners\cli_runner.py -> build\bdist.win-amd64\wheel\.\aibench\runners
+copying build\lib\aibench\runners\http_runner.py -> build\bdist.win-amd64\wheel\.\aibench\runners
+copying build\lib\aibench\runners\process_tree.py -> build\bdist.win-amd64\wheel\.\aibench\runners
+copying build\lib\aibench\runners\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\runners
+creating build\bdist.win-amd64\wheel\aibench\security
+copying build\lib\aibench\security\endpoints.py -> build\bdist.win-amd64\wheel\.\aibench\security
+copying build\lib\aibench\security\policy.py -> build\bdist.win-amd64\wheel\.\aibench\security
+copying build\lib\aibench\security\redaction.py -> build\bdist.win-amd64\wheel\.\aibench\security
+copying build\lib\aibench\security\secrets.py -> build\bdist.win-amd64\wheel\.\aibench\security
+copying build\lib\aibench\security\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\security
+creating build\bdist.win-amd64\wheel\aibench\services
+copying build\lib\aibench\services\calibration.py -> build\bdist.win-amd64\wheel\.\aibench\services
+copying build\lib\aibench\services\execution.py -> build\bdist.win-amd64\wheel\.\aibench\services
+copying build\lib\aibench\services\reports.py -> build\bdist.win-amd64\wheel\.\aibench\services
+copying build\lib\aibench\services\runs.py -> build\bdist.win-amd64\wheel\.\aibench\services
+copying build\lib\aibench\services\scoring.py -> build\bdist.win-amd64\wheel\.\aibench\services
+copying build\lib\aibench\services\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\services
+creating build\bdist.win-amd64\wheel\aibench\sessions
+copying build\lib\aibench\sessions\controller.py -> build\bdist.win-amd64\wheel\.\aibench\sessions
+copying build\lib\aibench\sessions\drafting.py -> build\bdist.win-amd64\wheel\.\aibench\sessions
+copying build\lib\aibench\sessions\store.py -> build\bdist.win-amd64\wheel\.\aibench\sessions
+copying build\lib\aibench\sessions\summary.py -> build\bdist.win-amd64\wheel\.\aibench\sessions
+copying build\lib\aibench\sessions\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\sessions
+creating build\bdist.win-amd64\wheel\aibench\storage
+copying build\lib\aibench\storage\artifacts.py -> build\bdist.win-amd64\wheel\.\aibench\storage
+copying build\lib\aibench\storage\db.py -> build\bdist.win-amd64\wheel\.\aibench\storage
+copying build\lib\aibench\storage\migrations.py -> build\bdist.win-amd64\wheel\.\aibench\storage
+copying build\lib\aibench\storage\repositories.py -> build\bdist.win-amd64\wheel\.\aibench\storage
+copying build\lib\aibench\storage\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\storage
+creating build\bdist.win-amd64\wheel\aibench\tui
+copying build\lib\aibench\tui\app.py -> build\bdist.win-amd64\wheel\.\aibench\tui
+copying build\lib\aibench\tui\commands.py -> build\bdist.win-amd64\wheel\.\aibench\tui
+copying build\lib\aibench\tui\render.py -> build\bdist.win-amd64\wheel\.\aibench\tui
+copying build\lib\aibench\tui\__init__.py -> build\bdist.win-amd64\wheel\.\aibench\tui
+copying build\lib\aibench\__init__.py -> build\bdist.win-amd64\wheel\.\aibench
+copying build\lib\aibench\__main__.py -> build\bdist.win-amd64\wheel\.\aibench
+running install_egg_info
+Copying src\aibench.egg-info to build\bdist.win-amd64\wheel\.\aibench-0.1.0rc1-py3.12.egg-info
+running install_scripts
+creating build\bdist.win-amd64\wheel\aibench-0.1.0rc1.dist-info\WHEEL
+creating 'C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\opencode\\benchcraft-p13-release\\dist\\.tmp-zb63ssgn\\aibench-0.1.0rc1-py3-none-any.whl' and adding 'build\\bdist.win-amd64\\wheel' to it
+adding 'aibench/__init__.py'
+adding 'aibench/__main__.py'
+adding 'aibench/cli/__init__.py'
+adding 'aibench/cli/app.py'
+adding 'aibench/cli/benchmark.py'
+adding 'aibench/cli/chat.py'
+adding 'aibench/cli/dataset.py'
+adding 'aibench/cli/inspect.py'
+adding 'aibench/cli/main.py'
+adding 'aibench/cli/plan.py'
+adding 'aibench/cli/project.py'
+adding 'aibench/cli/report.py'
+adding 'aibench/cli/run.py'
+adding 'aibench/cli/runs.py'
+adding 'aibench/cli/score.py'
+adding 'aibench/cli/sessions.py'
+adding 'aibench/config/__init__.py'
+adding 'aibench/config/model.py'
+adding 'aibench/config/resolve.py'
+adding 'aibench/conversation/__init__.py'
+adding 'aibench/conversation/agent.py'
+adding 'aibench/core/__init__.py'
+adding 'aibench/core/errors.py'
+adding 'aibench/core/hashes.py'
+adding 'aibench/core/models.py'
+adding 'aibench/core/plans.py'
+adding 'aibench/core/schema_export.py'
+adding 'aibench/core/sessions.py'
+adding 'aibench/datasets/__init__.py'
+adding 'aibench/datasets/ingest.py'
+adding 'aibench/datasets/normalize.py'
+adding 'aibench/engine/__init__.py'
+adding 'aibench/engine/budget.py'
+adding 'aibench/engine/compile.py'
+adding 'aibench/engine/engine.py'
+adding 'aibench/engine/retry.py'
+adding 'aibench/evaluators/__init__.py'
+adding 'aibench/evaluators/native.py'
+adding 'aibench/evaluators/protocol.py'
+adding 'aibench/evaluators/schema_worker.py'
+adding 'aibench/evaluators/validation.py'
+adding 'aibench/evaluators/worker_client.py'
+adding 'aibench/inspection/__init__.py'
+adding 'aibench/inspection/dataset_summary.py'
+adding 'aibench/inspection/profile.py'
+adding 'aibench/observations/__init__.py'
+adding 'aibench/planning/__init__.py'
+adding 'aibench/planning/benchmark.py'
+adding 'aibench/planning/catalog.py'
+adding 'aibench/planning/drafts.py'
+adding 'aibench/planning/openai_provider.py'
+adding 'aibench/planning/planner.py'
+adding 'aibench/planning/service.py'
+adding 'aibench/planning/template.py'
+adding 'aibench/quickstart/__init__.py'
+adding 'aibench/quickstart/files/aibench.json'
+adding 'aibench/quickstart/files/dataset.jsonl'
+adding 'aibench/quickstart/files/plan.json'
+adding 'aibench/quickstart/files/policy.json'
+adding 'aibench/quickstart/files/support.app.json'
+adding 'aibench/quickstart/files/support_app.py'
+adding 'aibench/registry/__init__.py'
+adding 'aibench/registry/discovery.py'
+adding 'aibench/registry/eval_worker.py'
+adding 'aibench/registry/worker.py'
+adding 'aibench/reporting/__init__.py'
+adding 'aibench/reporting/aggregation.py'
+adding 'aibench/reporting/render.py'
+adding 'aibench/runners/__init__.py'
+adding 'aibench/runners/base.py'
+adding 'aibench/runners/bindings.py'
+adding 'aibench/runners/cli_runner.py'
+adding 'aibench/runners/http_runner.py'
+adding 'aibench/runners/process_tree.py'
+adding 'aibench/security/__init__.py'
+adding 'aibench/security/endpoints.py'
+adding 'aibench/security/policy.py'
+adding 'aibench/security/redaction.py'
+adding 'aibench/security/secrets.py'
+adding 'aibench/services/__init__.py'
+adding 'aibench/services/calibration.py'
+adding 'aibench/services/execution.py'
+adding 'aibench/services/reports.py'
+adding 'aibench/services/runs.py'
+adding 'aibench/services/scoring.py'
+adding 'aibench/sessions/__init__.py'
+adding 'aibench/sessions/controller.py'
+adding 'aibench/sessions/drafting.py'
+adding 'aibench/sessions/store.py'
+adding 'aibench/sessions/summary.py'
+adding 'aibench/storage/__init__.py'
+adding 'aibench/storage/artifacts.py'
+adding 'aibench/storage/db.py'
+adding 'aibench/storage/migrations.py'
+adding 'aibench/storage/repositories.py'
+adding 'aibench/tui/__init__.py'
+adding 'aibench/tui/app.py'
+adding 'aibench/tui/commands.py'
+adding 'aibench/tui/render.py'
+adding 'aibench-0.1.0rc1.dist-info/METADATA'
+adding 'aibench-0.1.0rc1.dist-info/WHEEL'
+adding 'aibench-0.1.0rc1.dist-info/entry_points.txt'
+adding 'aibench-0.1.0rc1.dist-info/top_level.txt'
+adding 'aibench-0.1.0rc1.dist-info/RECORD'
+removing build\bdist.win-amd64\wheel
+Successfully built aibench-0.1.0rc1.tar.gz and aibench-0.1.0rc1-py3-none-any.whl
+
+--- stderr
+* Creating isolated environment: venv+pip...
+* Installing packages in isolated environment:
+  - setuptools>=68
+  - wheel
+* Getting build dependencies for sdist...
+* Installed build dependency versions:
+  - setuptools==84.0.0
+  - wheel==0.48.0
+* Building sdist...
+* Building wheel from sdist
+* Creating isolated environment: venv+pip...
+* Installing packages in isolated environment:
+  - setuptools>=68
+  - wheel
+* Getting build dependencies for wheel...
+* Installed build dependency versions:
+  - setuptools==84.0.0
+  - wheel==0.48.0
+* Building wheel...

@@ -1,0 +1,8 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m pip install -q C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\dist\aibench-0.1.0rc1-py3-none-any.whl
+exit=0
+--- stdout
+
+--- stderr
+
+[notice] A new release of pip is available: 25.0.1 -> 26.2.1
+[notice] To update, run: C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m pip install --upgrade pip

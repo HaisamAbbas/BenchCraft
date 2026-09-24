@@ -1,0 +1,21 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m aibench chat --send /report
+exit=0
+--- stdout
+report for run run-e0c3ad4eee46: completed
+  stored facts only: no application, evaluator or judge was invoked
+  native.exact_match@1.0.0: pass 8/10 (80.0%) of selected, completed 9/10
+(90.0%); evaluator errors 0, not applicable 0, unavailable 1, cancelled 0,
+pending 0
+  application: completed 9/10 (90.0%), failed 1; successful-request latency p50
+287.426 ms, p95 397.775 ms over 9
+  application cost: unknown (no call reported its cost)
+  evaluator cost: USD 0 (complete)
+  non-passing cases: support-004 r0, support-010 r0 (/case CASE_ID)
+  wrote html:
+C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\demo-p
+y0\support-bench\.aibench\reports\run-e0c3ad4eee46\report.html
+  wrote json:
+C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\demo-p
+y0\support-bench\.aibench\reports\run-e0c3ad4eee46\report.json
+
+--- stderr

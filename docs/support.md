@@ -1,16 +1,18 @@
 # Support and limitations
 
-This covers what aibench 0.1.0 supports, what has actually been tested, and what isn't
-available yet. The authoritative design is `docs/spec/implementation-plan.md`, and
+This covers what aibench 0.1.0rc1 (the MVP release candidate) supports, what has actually
+been tested, and what isn't available yet. The release decision and its open items are in
+`docs/engineering/release-readiness.md`. The authoritative design is `docs/spec/implementation-plan.md`, and
 per-prompt evidence is in `docs/engineering/reports/`.
 
 ## Platforms
 
 | | Supported | Tested |
 |---|---|---|
-| Python | 3.11, 3.12 | 3.12.10 |
-| OS | Windows, Linux, macOS | Windows 11. Linux runs in CI (`ubuntu-latest`) but no local run is recorded. macOS is not run anywhere |
-| Terminal chat | Any terminal prompt_toolkit supports | Windows ConPTY (automated tests) |
+| Python | 3.11, 3.12 | Full suite on 3.12.10 (Prompt 12); clean wheel install, quickstart and 100-case acceptance on 3.12.10 and 3.11.16 (Prompt 13) |
+| OS | Windows, Linux, macOS | Windows 11. Linux is configured in CI (`ubuntu-latest`), but no result has been observed. macOS is not run anywhere |
+| Terminal chat | Any terminal prompt_toolkit supports | Windows ConPTY (automated tests, including resizing) |
+| Model providers | OpenAI-compatible endpoints | Scripted and local test providers only. No live model has been exercised |
 
 Details are in `docs/engineering/platform-matrix.md`. `aibench doctor` warns on a platform
 outside the tested matrix.
@@ -58,7 +60,7 @@ used. It must also be listed in the policy's `allowed_secret_refs`:
 | Assistant model | `api_key: "env:OPENAI_API_KEY"` in the provider config |
 
 Set the variables in your shell or your CI's secret store. Don't commit a `.env` file: aibench
-doesn't read one, and the DeepEval adapter disables DeepEval's own `.env` loading.
+doesn't read one; the DeepEval adapter disables its own `.env` loading.
 `aibench doctor` reports whether each reference is set, without printing its value. Secrets
 are redacted from captured output, stored conversation turns and reports.
 
@@ -95,3 +97,4 @@ are redacted from captured output, stored conversation turns and reports.
 - **Claim checking** links every number in an assistant reply to a result queried in that turn, and flags numbers it can't trace. It shows where a number could have come from, not that the sentence around it is right. An explanation of why cases failed is a hypothesis unless a stored result states it.
 - **Redaction** of credentials is pattern-based, as a safety net. Use secret references rather than relying on it.
 - **Latency** is runner-measured wall time per request under the plan's concurrency. It is not a load test.
+- **A full disk or failing workspace** (disk full, quota, I/O error, read-only filesystem, database full) stops the run's dispatching and leaves it resumable (exit code 130), with the reason in the output and in `aibench runs status`. No case is marked failed for it. This is tested by making the real write path fail, not on a real full volume. Recovery steps: `docs/release/upgrade-and-recovery.md`.

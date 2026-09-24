@@ -270,3 +270,43 @@ def test_resume_verifies_frozen_identities(tmp_path: Path) -> None:
     with pytest.raises(RunError, match="frozen plan"):
         h.execute(tampered)
     assert h.count() == 1  # the tampered run dispatched nothing
+
+
+def test_a_crash_during_recovery_never_loses_the_uncommitted_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recovery settles in-flight items and records them in one transaction. A crash while
+    recording must leave the items `running`, so the next recovery still counts the call
+    that may have reached the application, in the ledger and the report (13-T1)."""
+    from aibench.services.reports import build_report
+
+    h = Harness(tmp_path)
+    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()))
+    _crash_once(monkeypatch, Storage, "commit_execution_attempt", lambda self, result: True)
+    _run_with_crash(h, run_id)
+    monkeypatch.undo()
+    assert h.count("a") == 1  # the app ran; its result was never committed
+
+    _crash_once(monkeypatch, Storage, "_insert_run_event", lambda self, run, kind, payload: True)
+    with pytest.raises(SimulatedCrash):
+        h.execute(run_id)  # dies while recording recovery
+    monkeypatch.undo()
+    storage, _ = h.storage()
+    try:
+        [item] = [w for w in storage.list_work_items(run_id) if w.kind == "execution"]
+        assert item.state is WorkItemState.RUNNING  # nothing settled without its record
+        assert not [e for e in storage.list_run_events(run_id) if e["event_type"] == "recovered"]
+    finally:
+        storage.db.close()
+
+    assert h.execute(run_id).state is RunState.COMPLETED
+    assert h.count("a") == 2
+    storage, artifacts = h.storage()
+    try:
+        [event] = [e for e in storage.list_run_events(run_id) if e["event_type"] == "recovered"]
+        report = build_report(storage, artifacts, run_id)
+    finally:
+        storage.db.close()
+    assert event["payload"]["uncommitted_dispatches"] == 1
+    assert report["application"]["uncommitted_dispatches"] == 1
+    _no_duplicate_commits(h, run_id)

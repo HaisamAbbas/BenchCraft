@@ -63,7 +63,9 @@ def notable_event(event: dict[str, Any]) -> str | None:
         return f"#{seq} {payload.get('action', 'control')} requested ({payload.get('source')})"
     if kind in ("run_session_ended", "run_session_aborted", "run_session_lost", "recovered"):
         state = payload.get("state") or payload.get("stop_reason") or ""
-        return f"#{seq} {kind.replace('_', ' ')} {state}".rstrip()
+        warnings = payload.get("warnings") or []
+        why = f": {warnings[0]}" if warnings else ""
+        return f"#{seq} {kind.replace('_', ' ')} {state}{why}".rstrip()[:200]
     if kind == "budget_exhausted":
         return f"#{seq} budget exhausted: {payload.get('reason', '')}".rstrip()
     return None

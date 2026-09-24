@@ -1,0 +1,22 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\aibench-prompt13-release-20260924\venv-py0\Scripts\python.exe -m aibench init support-bench
+exit=0
+--- stdout
+created a quickstart project in
+C:\Users\haisam.abbas\AppData\Local\Temp\aibench-prompt13-release-20260924\demo
+-py0\support-bench:
+  aibench.json
+  support.app.json
+  support_app.py
+  dataset.jsonl
+  plan.json
+  policy.json
+nothing was installed or run. Next:
+  cd
+C:\Users\haisam.abbas\AppData\Local\Temp\aibench-prompt13-release-20260924\demo
+-py0\support-bench
+  aibench doctor            check the environment and the project
+  aibench                   plan and run it in conversation (/plan, /run)
+  aibench run               or run the plan headlessly
+  aibench report RUN_ID     then render its report
+
+--- stderr

@@ -82,9 +82,11 @@ deferred; they are owned by prompts 14–21 and are out of scope until explicitl
 | §23 Judge calibration | Labelled calibration set, agreement / false acceptance / false rejection / stability; `aibench evaluators calibrate` | 12 | 12-G4 | Partial | benchmarks/judges/v1; tests/test_judge_calibration.py: native only; labels unreviewed; model judges not measured |
 | §23 Invariants | Randomized checks through the real scorer: Goldens never mutated, errors never scored, decisions follow the frozen rule; every branch asserted to occur | 12 | 12-G1 | Verified | test_scoring_invariants_hold_for_generated_cases |
 | §23 Larger workload | 1,000 cases, interrupted and resumed, bounded memory | 12 | 12-G1 | Verified (opt-in test) | AIBENCH_WORKLOAD_TESTS=1; throughput limitation recorded in mvp-acceptance.md |
-| §23 Platforms | Linux, macOS, Python 3.11 | 12 | 12-G4 | Blocked | Not available in this environment; Linux CI configured but no result observed |
+| §23 Platforms | Linux, macOS, Python 3.11 | 12 | 12-G4 | Partial | Python 3.11.16 artifact install and acceptance verified on Windows in Prompt 13; Linux CI has no observed result; macOS not exercised |
 | §23 Live checks | Live DeepEval judge, live-model conversation and planner trials | 12 | 12-G4 | Blocked | Needs an API key and authorization for paid calls |
-| §17–18, §22–24 | Release candidate and pilot handoff | 13 | 13-G1..G5 | Not started | Prompt 13 |
+| §17 Distribution and recovery | Versioned core/plugin artifacts, clean install demo, migration and recovery instructions, compatibility matrix | 13 | 13-G1, 13-G3 | Verified (Windows, Python 3.11/3.12) | `reports/13`; `evidence/13/` |
+| §22 Pilot trials | Two executable integration recipes and feedback form; local runs observed, real-team validation kept distinct | 13 | 13-G3 | Partial (local trials complete; real-team trials pending) | `tests/test_pilot_recipes.py`; `docs/pilot/`; `reports/13` |
+| §17–18, §22–24 | Release candidate and pilot handoff; readiness, residual risks and stopping point | 13 | 13-G1..G5 | Complete (technical candidate for review; external pilot/platform checks remain open) | `reports/13`; `release-readiness.md`; ADR 0012 |
 | §9, §18 (Phase 2) | Second evaluator ecosystem, comparisons | 14 (deferred) | 14-G1..G4 | Deferred | Phase 2/3 scope |
 | §7, §18 (Phase 2) | Richer runners, agent outcome contracts | 15 (deferred) | 15-G1..G4 | Deferred | Phase 2/3 scope |
 | §16, §18 (Phase 2) | Inspection, traces, caching, parallel execution | 16 (deferred) | — | Deferred | Phase 2/3 scope |

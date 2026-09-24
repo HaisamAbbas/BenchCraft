@@ -1,4 +1,4 @@
-from aibench.cli.main import app
+from aibench.cli.main import run
 
 if __name__ == "__main__":
-    app()
+    run()

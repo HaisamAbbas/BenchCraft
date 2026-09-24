@@ -1,0 +1,6 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\aibench-prompt13-release-20260924\venv-plugin\Scripts\python.exe -c import importlib.metadata as m; print(m.version('aibench'), m.version('aibench-deepeval'), m.version('deepeval'))
+exit=0
+--- stdout
+0.1.0rc1 0.1.0rc1 4.2.5
+
+--- stderr

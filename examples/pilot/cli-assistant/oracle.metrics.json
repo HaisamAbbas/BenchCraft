@@ -1,0 +1,5 @@
+{
+  "metrics": [
+    {"metric": "acme.refund_window@1"}
+  ]
+}

@@ -34,6 +34,16 @@ from aibench.core.models import (
 from aibench.storage.db import Database
 
 
+@dataclass(frozen=True)
+class WorkItemSettlement:
+    """One compare-and-set transition for `Storage.settle_work_items`."""
+
+    task_key: str
+    from_states: frozenset[WorkItemState]
+    to_state: WorkItemState
+    last_error: str | None = None
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -461,29 +471,10 @@ class Storage:
         """Compare-and-set a work item's state: applied only if the item is currently in one
         of `from_states`, so a stale or duplicate transition can never overwrite a newer
         one. Returns the updated item, or None if the transition did not apply."""
-        allowed = [s.value for s in from_states]
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            row = self.conn.execute(
-                "SELECT data, state FROM work_items WHERE run_id = ? AND task_key = ?",
-                (run_id, task_key),
-            ).fetchone()
-            if row is None or row["state"] not in allowed:
-                self.conn.execute("ROLLBACK")
-                return None
-            current = WorkItem.model_validate_json(row["data"])
-            updated = current.model_copy(
-                update={
-                    "state": to_state,
-                    "attempt": current.attempt if attempt is None else attempt,
-                    "last_error": last_error,
-                }
-            )
-            data = updated.model_dump_json()
-            self.conn.execute(
-                "UPDATE work_items SET state = ?, attempt = ?, data = ?, content_hash = ?, "
-                "updated_at = ? WHERE run_id = ? AND task_key = ?",
-                (to_state.value, updated.attempt, data, _hash_of(data), _now(), run_id, task_key),
+            updated = self._set_work_item_state(
+                run_id, task_key, from_states, to_state, attempt, last_error
             )
             self.conn.execute("COMMIT")
             return updated
@@ -491,26 +482,92 @@ class Storage:
             self.conn.execute("ROLLBACK")
             raise
 
+    def settle_work_items(
+        self,
+        run_id: str,
+        settlements: Iterable[WorkItemSettlement],
+        *,
+        event_type: str,
+        payload: dict[str, object],
+    ) -> list[str]:
+        """Apply several compare-and-set transitions and append one run event describing
+        them, in a single transaction: either every applied transition and the event are
+        committed, or none are. Recovery relies on this, because the event is the only
+        record of work that may have run without a committed result. Returns the task keys
+        whose transition applied."""
+        applied: list[str] = []
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            for s in settlements:
+                if self._set_work_item_state(
+                    run_id, s.task_key, s.from_states, s.to_state, None, s.last_error
+                ):
+                    applied.append(s.task_key)
+            self._insert_run_event(run_id, event_type, payload)
+            self.conn.execute("COMMIT")
+            return applied
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+
+    def _set_work_item_state(
+        self,
+        run_id: str,
+        task_key: str,
+        from_states: Iterable[WorkItemState],
+        to_state: WorkItemState,
+        attempt: int | None,
+        last_error: str | None,
+    ) -> WorkItem | None:
+        """The compare-and-set itself; the caller owns the transaction."""
+        allowed = [s.value for s in from_states]
+        row = self.conn.execute(
+            "SELECT data, state FROM work_items WHERE run_id = ? AND task_key = ?",
+            (run_id, task_key),
+        ).fetchone()
+        if row is None or row["state"] not in allowed:
+            return None
+        current = WorkItem.model_validate_json(row["data"])
+        updated = current.model_copy(
+            update={
+                "state": to_state,
+                "attempt": current.attempt if attempt is None else attempt,
+                "last_error": last_error,
+            }
+        )
+        data = updated.model_dump_json()
+        self.conn.execute(
+            "UPDATE work_items SET state = ?, attempt = ?, data = ?, content_hash = ?, "
+            "updated_at = ? WHERE run_id = ? AND task_key = ?",
+            (to_state.value, updated.attempt, data, _hash_of(data), _now(), run_id, task_key),
+        )
+        return updated
+
     # ---------------------------------------------------------------- run events
 
     def append_run_event(self, run_id: str, event_type: str, payload: dict[str, object]) -> int:
         """Append an event with the next per-run sequence number; returns that number."""
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            row = self.conn.execute(
-                "SELECT COALESCE(MAX(sequence), 0) FROM run_events WHERE run_id = ?", (run_id,)
-            ).fetchone()
-            sequence = int(row[0]) + 1
-            self.conn.execute(
-                "INSERT INTO run_events (run_id, sequence, event_type, payload, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (run_id, sequence, event_type, json.dumps(payload, sort_keys=True), _now()),
-            )
+            sequence = self._insert_run_event(run_id, event_type, payload)
             self.conn.execute("COMMIT")
             return sequence
         except BaseException:
             self.conn.execute("ROLLBACK")
             raise
+
+    def _insert_run_event(self, run_id: str, event_type: str, payload: dict[str, object]) -> int:
+        """The insert itself; the caller owns the transaction."""
+        row = self.conn.execute(
+            "SELECT COALESCE(MAX(sequence), 0) FROM run_events WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        sequence = int(row[0]) + 1
+        self.conn.execute(
+            "INSERT INTO run_events (run_id, sequence, event_type, payload, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, sequence, event_type, json.dumps(payload, sort_keys=True), _now()),
+        )
+        return sequence
 
     # ---------------------------------------------------------------- run leases
 

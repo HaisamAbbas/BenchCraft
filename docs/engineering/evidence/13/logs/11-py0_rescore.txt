@@ -1,0 +1,91 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m aibench evaluate run-737dd076c561 --plan plan.json --json
+exit=0
+--- stdout
+{
+  "scoring_id": "score-ac2c14e02218",
+  "run_id": "run-737dd076c561",
+  "summaries": [
+    {
+      "metric_id": "native.exact_match",
+      "metric_version": "1.0.0",
+      "binding_hash": "sha256:824d1148258dcd2649aa0ffd586444df1168aef6b63fc2bb0c279f5d808359d5",
+      "value_kind": "boolean",
+      "direction": "higher",
+      "aggregation": "rate",
+      "selected": 10,
+      "eligible": 9,
+      "attempted": 9,
+      "completed": 9,
+      "errors": 0,
+      "cancelled": 0,
+      "not_applicable": 0,
+      "unavailable": 1,
+      "eligible_coverage": 0.9,
+      "completed_coverage": 0.9,
+      "decisions": {
+        "pass": 8,
+        "fail": 1,
+        "indeterminate": 0,
+        "not_evaluated": 1
+      },
+      "value_summary": {
+        "true": 8,
+        "false": 1,
+        "rate": 0.888889,
+        "denominator": "completed"
+      },
+      "reasons": {
+        "execution_error": 1
+      },
+      "params": {
+        "case_sensitive": false,
+        "collapse_whitespace": true
+      },
+      "pending": 0
+    },
+    {
+      "metric_id": "native.json_schema",
+      "metric_version": "1.0.0",
+      "binding_hash": "sha256:d46b191ec6861124911d662196af3c24a9ee1f5f8fbe0abc872d2d86fb631350",
+      "value_kind": "boolean",
+      "direction": "higher",
+      "aggregation": "rate",
+      "selected": 10,
+      "eligible": 9,
+      "attempted": 9,
+      "completed": 9,
+      "errors": 0,
+      "cancelled": 0,
+      "not_applicable": 0,
+      "unavailable": 1,
+      "eligible_coverage": 0.9,
+      "completed_coverage": 0.9,
+      "decisions": {
+        "pass": 9,
+        "fail": 0,
+        "indeterminate": 0,
+        "not_evaluated": 1
+      },
+      "value_summary": {
+        "true": 9,
+        "false": 0,
+        "rate": 1.0,
+        "denominator": "completed"
+      },
+      "reasons": {
+        "execution_error": 1
+      },
+      "params": {
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parse_text": false
+      },
+      "pending": 0
+    }
+  ],
+  "warnings": []
+}
+
+--- stderr

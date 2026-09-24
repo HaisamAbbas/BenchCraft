@@ -1,0 +1,100 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m aibench run --json
+exit=3
+--- stdout
+{
+  "run_id": "run-737dd076c561",
+  "state": "completed",
+  "counts": {
+    "execution": {
+      "succeeded": 9,
+      "failed": 1
+    },
+    "evaluation": {
+      "succeeded": 20
+    }
+  },
+  "budget": {
+    "application": {
+      "calls": 10,
+      "known_cost_usd": 0.0,
+      "calls_with_unknown_cost": 10,
+      "reported_tokens": 0,
+      "calls_with_unknown_tokens": 0
+    },
+    "evaluator": {
+      "calls": 18,
+      "known_cost_usd": 0.0,
+      "calls_with_unknown_cost": 0,
+      "reported_tokens": 0,
+      "calls_with_unknown_tokens": 0
+    },
+    "planner": {
+      "calls": 0,
+      "known_cost_usd": 0.0,
+      "calls_with_unknown_cost": 0,
+      "reported_tokens": 0,
+      "calls_with_unknown_tokens": 0
+    },
+    "elapsed_seconds": 2.0,
+    "limits": {
+      "hard": {
+        "max_application_calls": 30,
+        "max_evaluator_calls": 60,
+        "max_judge_tokens": null,
+        "max_wall_seconds": 600.0
+      },
+      "soft": {
+        "max_cost_usd": null
+      }
+    },
+    "projected_cost_usd_estimate": 0.0,
+    "unenforced": []
+  },
+  "stop_reason": null,
+  "warnings": [],
+  "gates": [
+    {
+      "gate_id": "correct-answers",
+      "binding": 0,
+      "metric": "native.exact_match",
+      "min_pass_rate": 0.9,
+      "min_completed_coverage": null,
+      "denominator": "selected",
+      "passes": 8,
+      "completed": 9,
+      "selected": 10,
+      "pass_rate": 0.8,
+      "completed_coverage": 0.9,
+      "status": "fail",
+      "reason": "pass rate 8/10 below 0.9"
+    },
+    {
+      "gate_id": "answers-present",
+      "binding": 1,
+      "metric": "native.json_schema",
+      "min_pass_rate": null,
+      "min_completed_coverage": 0.9,
+      "denominator": "selected",
+      "passes": 9,
+      "completed": 9,
+      "selected": 10,
+      "pass_rate": 0.9,
+      "completed_coverage": 0.9,
+      "status": "pass",
+      "reason": null
+    }
+  ],
+  "outcome": {
+    "complete": false,
+    "unhealthy_work": {
+      "failed": 1
+    },
+    "gates_failed": [
+      "correct-answers"
+    ],
+    "gates_undecided": []
+  },
+  "exit_code": 3
+}
+
+--- stderr

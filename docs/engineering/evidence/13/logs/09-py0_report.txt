@@ -1,0 +1,8 @@
+$ C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\venv-py0\Scripts\python.exe -m aibench report run-737dd076c561
+exit=0
+--- stdout
+wrote
+C:\Users\haisam.abbas\AppData\Local\Temp\opencode\benchcraft-p13-release\demo-p
+y0\support-bench\.aibench\reports\run-737dd076c561\report.html
+
+--- stderr

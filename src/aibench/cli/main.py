@@ -19,6 +19,7 @@ from aibench.cli import run as run_cli
 from aibench.cli import runs as runs_cli
 from aibench.cli import score as score_cli
 from aibench.cli import sessions as sessions_cli
+from aibench.core.errors import WorkspaceTooNew
 
 app = typer.Typer(
     name="aibench",
@@ -82,5 +83,15 @@ def main(
         raise typer.Exit(code=0)
 
 
+def run() -> None:
+    """The `aibench` console entry point: the Typer app, with a workspace written by a
+    newer aibench reported as a plain error (exit 2) wherever it is opened."""
+    try:
+        app()
+    except WorkspaceTooNew as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise SystemExit(2) from exc
+
+
 if __name__ == "__main__":
-    app()
+    run()

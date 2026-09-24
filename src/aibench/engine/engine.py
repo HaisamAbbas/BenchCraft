@@ -26,9 +26,11 @@ Work graph: one execution item per (case, repetition), and one evaluation item p
 from __future__ import annotations
 
 import asyncio
+import errno
 import heapq
 import itertools
 import random
+import sqlite3
 import time
 from collections import deque
 from collections.abc import Callable
@@ -198,6 +200,7 @@ class RunOutcome:
     counts: dict[str, dict[str, int]]
     budget: dict[str, Any]
     stop_reason: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -541,6 +544,9 @@ class RunEngine:
             result: ExecutionResult = task.result()
         except Exception as exc:  # noqa: BLE001 - an engine-side failure, recorded not raised
             self.ledger.settle_application(dispatched=True, cost=None)
+            if is_storage_failure(exc):
+                self._stop_for_storage(item, exc)
+                return
             self._final_execution(
                 item, WorkItemState.FAILED, f"engine_error:{type(exc).__name__}: {exc}"[:500], None
             )
@@ -609,6 +615,22 @@ class RunEngine:
         self._executions[item.task_key] = result
         self._eval_queue.extend(self._waiting_evals.pop(item.task_key, []))
 
+    def _stop_for_storage(self, item: _Item, exc: BaseException) -> None:
+        """The workspace can't take writes (disk full, I/O error, ...). That is not a result
+        of this item: leave it `running`, exactly as a crash would, and stop dispatching.
+        Resume's recovery then counts a possibly dispatched call and repeats it only if the
+        application declares no effects."""
+        warning = (
+            f"workspace storage failed ({type(exc).__name__}: {exc}); stopped dispatching. "
+            f"Free space or fix the workspace, then resume the run"
+        )
+        if warning not in self.warnings:
+            self.warnings.append(warning[:500])
+        if not self.controller.interrupting:
+            # A second interrupt means "abort what is in flight"; another storage failure,
+            # or one after the user's first Ctrl+C, must not escalate to that.
+            self.controller.interrupt()
+
     def _complete_evaluation(self, task: asyncio.Task[Any], item: _Item) -> None:
         assert item.binding_hash is not None
         scorer = self._scorers[item.binding_hash]
@@ -616,6 +638,9 @@ class RunEngine:
             result = task.result()
         except BaseException as exc:  # noqa: BLE001 - includes cancellation of the task
             self._release_evaluation(item)
+            if is_storage_failure(exc):
+                self._stop_for_storage(item, exc)
+                return
             status = (
                 ExecutionStatus.CANCELLED
                 if isinstance(exc, asyncio.CancelledError)
@@ -724,7 +749,39 @@ class RunEngine:
             stop_reason=self._stop_reason,
             warnings=self.warnings,
         )
-        return RunOutcome(state, counts, budget, self._stop_reason)
+        return RunOutcome(state, counts, budget, self._stop_reason, list(self.warnings))
+
+
+_STORAGE_ERRNOS = frozenset(
+    code
+    for code in (
+        errno.ENOSPC,
+        getattr(errno, "EDQUOT", None),
+        errno.EIO,
+        errno.EROFS,
+    )
+    if code is not None
+)
+
+
+# Windows codes whose errno mapping is too generic to use: ERROR_WRITE_PROTECT (19, maps to
+# EACCES), ERROR_HANDLE_DISK_FULL (39, EINVAL), ERROR_DISK_FULL (112, ENOSPC).
+_STORAGE_WINERRORS = frozenset({19, 39, 112})
+# SQLite primary result codes: READONLY, IOERR, FULL. Not BUSY/LOCKED (contention) and not
+# CONSTRAINT (a bug): those are not the workspace running out of room.
+_STORAGE_SQLITE_CODES = frozenset({8, 10, 13})
+
+
+def is_storage_failure(exc: BaseException) -> bool:
+    """Whether `exc` means the workspace itself can't take writes, rather than something
+    wrong with one work item: a full disk or quota, an I/O error, or a read-only
+    filesystem, whether reported by the OS or by the run database."""
+    if isinstance(exc, sqlite3.DatabaseError):
+        code = getattr(exc, "sqlite_errorcode", None)
+        return code is not None and code & 0xFF in _STORAGE_SQLITE_CODES
+    if not isinstance(exc, OSError):
+        return False
+    return exc.errno in _STORAGE_ERRNOS or getattr(exc, "winerror", None) in _STORAGE_WINERRORS
 
 
 _NEVER_DISPATCHED = frozenset(

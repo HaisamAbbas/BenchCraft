@@ -1,0 +1,356 @@
+{
+  "host": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64"
+  },
+  "artifacts": {
+    "aibench-0.1.0rc1-py3-none-any.whl": "990b1196d90751bca9760e335a7a007502b16707bf9a639579f0223584665bf8",
+    "aibench-0.1.0rc1.tar.gz": "1981cd32bbafde98fa444bb8642ff9e5f307be510c7966bf8875d1c766b9760a",
+    "aibench_deepeval-0.1.0rc1-py3-none-any.whl": "be7b964765061a6c0cefae053f1290318fc1be2777d806d79f2b1520bbc7e6fd",
+    "aibench_deepeval-0.1.0rc1.tar.gz": "0999948bf531882b2b1ee0350228ce2e66d76418479acf6219c5462af3bbf725"
+  },
+  "environments": [
+    {
+      "tag": "py0",
+      "python": "3.11.16 win32"
+    }
+  ],
+  "steps": [
+    {
+      "name": "build BenchCraft",
+      "command": [
+        "D:\\BenchCraft\\.venv\\Scripts\\python.exe",
+        "-m",
+        "build",
+        "--outdir",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\dist",
+        "D:\\BenchCraft"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 39.0,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "build deepeval",
+      "command": [
+        "D:\\BenchCraft\\.venv\\Scripts\\python.exe",
+        "-m",
+        "build",
+        "--outdir",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\dist",
+        "D:\\BenchCraft\\plugins\\deepeval"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 23.9,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: interpreter",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-c",
+        "import platform, sys; print(platform.python_version(), sys.platform)"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 0.2,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: install wheel",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "pip",
+        "install",
+        "-q",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\dist\\aibench-0.1.0rc1-py3-none-any.whl"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 50.5,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: aibench imported from the venv",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-c",
+        "import aibench, sys; print(aibench.__file__); print(sys.version)"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 0.1,
+      "checks": {
+        "site-packages, not the repository": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: aibench --version",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "--version"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 2.0,
+      "checks": {},
+      "note": "aibench 0.1.0rc1",
+      "ok": true
+    },
+    {
+      "name": "py0: init",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "init",
+        "support-bench"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 1.7,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: doctor",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "doctor"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 1.4,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: run",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "run",
+        "--json"
+      ],
+      "expected_exit": 3,
+      "exit_code": 3,
+      "seconds": 3.2,
+      "checks": {
+        "correct-answers gate fails at 8/10": true,
+        "answers-present gate passes": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: report",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "report",
+        "run-e2eb8a7de8a5"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 1.9,
+      "checks": {
+        "report.html written": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: markdown report",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "report",
+        "run-e2eb8a7de8a5",
+        "--format",
+        "markdown",
+        "--out",
+        "-"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 1.5,
+      "checks": {
+        "shows support-004 evidence": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: rescore",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "evaluate",
+        "run-e2eb8a7de8a5",
+        "--plan",
+        "plan.json",
+        "--json"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 1.6,
+      "checks": {
+        "no application call": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: chat /plan",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "chat",
+        "--new",
+        "--objective",
+        "answers are correct",
+        "--send",
+        "/plan"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 2.3,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: chat /run",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "chat",
+        "--send",
+        "/run"
+      ],
+      "expected_exit": 3,
+      "exit_code": 3,
+      "seconds": 4.1,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: chat /report",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "-m",
+        "aibench",
+        "chat",
+        "--send",
+        "/report"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 1.9,
+      "checks": {
+        "reports 8/10": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "py0: 100-case acceptance",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-py0\\Scripts\\python.exe",
+        "D:\\BenchCraft\\examples\\acceptance\\run_acceptance.py",
+        "--out",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\acceptance-py0"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 18.6,
+      "checks": {
+        "failures are exactly the injected cases": true,
+        "reliability 1.0": true,
+        "rescore made 0 application calls": true,
+        "nothing called while stopped": true
+      },
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "plugin: install both wheels",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-plugin\\Scripts\\python.exe",
+        "-m",
+        "pip",
+        "install",
+        "-q",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\dist\\aibench-0.1.0rc1-py3-none-any.whl",
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\dist\\aibench_deepeval-0.1.0rc1-py3-none-any.whl"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 147.2,
+      "checks": {},
+      "note": "",
+      "ok": true
+    },
+    {
+      "name": "plugin: installed versions",
+      "command": [
+        "C:\\Users\\haisam.abbas\\AppData\\Local\\Temp\\aibench-prompt13-release-20260924\\venv-plugin\\Scripts\\python.exe",
+        "-c",
+        "import importlib.metadata as m; print(m.version('aibench'), m.version('aibench-deepeval'), m.version('deepeval'))"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 0.4,
+      "checks": {},
+      "note": "0.1.0rc1 0.1.0rc1 4.2.5",
+      "ok": true
+    },
+    {
+      "name": "plugin: adapter contract tests against the installed plugin",
+      "command": [
+        "D:\\BenchCraft\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-rs",
+        "tests/test_deepeval_adapter.py",
+        "tests/test_worker_evaluator.py"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "seconds": 363.6,
+      "checks": {},
+      "note": "",
+      "ok": true
+    }
+  ],
+  "failed": []
+}

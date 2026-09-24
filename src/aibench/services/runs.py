@@ -79,7 +79,7 @@ from aibench.runners import LoadedApplication, create_runner
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
 from aibench.services.scoring import ScoringReport, metric_profiles, score_recorded_run
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
-from aibench.storage.repositories import RunLease, Storage
+from aibench.storage.repositories import RunLease, Storage, WorkItemSettlement
 
 LEASE_TTL_SECONDS = 60.0  # a lease not heartbeated for this long belongs to a dead session
 # A run in any of these states can be continued by a new session. A run left
@@ -288,20 +288,29 @@ def _frozen_registry(
 
 def _recover_in_flight(
     storage: Storage, run_id: str, spec: ApplicationSpec, plan: ExecutablePlan, scoring_id: str
-) -> tuple[list[str], int]:
-    """Settle work items left `running` by a session that ended abruptly. Returns notes and
-    the number of executions that may have been dispatched without a committed attempt."""
+) -> int:
+    """Settle work items left `running` by a session that ended abruptly. The transitions
+    and the `recovered` event that records them commit together, so a crash during
+    recovery can never settle an item while losing the record that it may have been
+    dispatched. Returns the number of executions that may have been dispatched without a
+    committed attempt."""
+    settlements: list[WorkItemSettlement] = []
     notes: list[str] = []
     uncommitted = 0
     finals = {
         (r.case_id, r.repetition_id, r.binding_hash)
         for r in storage.list_metric_results(run_id, scoring_id=scoring_id)
     }
+    running = frozenset({WorkItemState.RUNNING})
+
+    def settle(item: WorkItem, state: WorkItemState, note: str, error: str | None) -> None:
+        settlements.append(WorkItemSettlement(item.task_key, running, state, error))
+        notes.append(f"{item.task_key}: {note}")
+
     for item in storage.list_work_items(run_id):
         if item.state is not WorkItemState.RUNNING:
             continue
         case_id, repetition, binding_key = parse_work_item_key(item.task_key, item.kind)
-        running = {WorkItemState.RUNNING}
         if item.kind == "execution":
             attempt = storage.get_execution_attempt(
                 ExecutionResult.build_id(run_id, case_id, repetition, item.attempt)
@@ -313,50 +322,48 @@ def _recover_in_flight(
                 reason = verdict.reason
                 if verdict.retry and not retry:
                     reason = f"{reason} (retries exhausted after {item.attempt} attempts)"
-                storage.transition_work_item(
-                    run_id,
-                    item.task_key,
-                    from_states=running,
-                    to_state=state,
-                    last_error=None if state is WorkItemState.SUCCEEDED else reason,
+                settle(
+                    item,
+                    state,
+                    f"settled from its committed attempt ({state.value})",
+                    None if state is WorkItemState.SUCCEEDED else reason,
                 )
-                notes.append(f"{item.task_key}: settled from its committed attempt ({state.value})")
                 continue
             uncommitted += 1
             if spec.effects is EffectLevel.NONE:
-                storage.transition_work_item(
-                    run_id,
-                    item.task_key,
-                    from_states=running,
-                    to_state=WorkItemState.PENDING,
-                    last_error="interrupted in flight; safe to repeat (no effects)",
+                settle(
+                    item,
+                    WorkItemState.PENDING,
+                    "re-dispatch (no declared effects)",
+                    "interrupted in flight; safe to repeat (no effects)",
                 )
-                notes.append(f"{item.task_key}: re-dispatch (no declared effects)")
             else:
-                storage.transition_work_item(
-                    run_id,
-                    item.task_key,
-                    from_states=running,
-                    to_state=WorkItemState.UNKNOWN_EFFECT,
-                    last_error="interrupted while possibly dispatched to an effectful application; "
+                settle(
+                    item,
+                    WorkItemState.UNKNOWN_EFFECT,
+                    "unknown_effect (effectful, not repeated)",
+                    "interrupted while possibly dispatched to an effectful application; "
                     "reconcile the application state before repeating",
                 )
-                notes.append(f"{item.task_key}: unknown_effect (effectful, not repeated)")
         else:
             done = any(
                 f[0] == case_id and f[1] == repetition and f[2] and f[2][7:23] == binding_key
                 for f in finals
             )
-            storage.transition_work_item(
-                run_id,
-                item.task_key,
-                from_states=running,
-                to_state=WorkItemState.SUCCEEDED if done else WorkItemState.PENDING,
+            settle(
+                item,
+                WorkItemState.SUCCEEDED if done else WorkItemState.PENDING,
+                "settled from its final result" if done else "re-evaluate",
+                None,
             )
-            notes.append(
-                f"{item.task_key}: {'settled from its final result' if done else 're-evaluate'}"
-            )
-    return notes, uncommitted
+    if settlements:
+        storage.settle_work_items(
+            run_id,
+            settlements,
+            event_type="recovered",
+            payload={"items": notes, "uncommitted_dispatches": uncommitted},
+        )
+    return uncommitted
 
 
 _SESSION_EVENTS = ("run_session_ended", "run_session_aborted", "run_session_lost")
@@ -530,11 +537,7 @@ async def _execute_leased(
 
     ledger = BudgetLedger(plan.budgets)
     _replay_prior_spend(storage, run_id, ledger, params["scoring_id"])  # before recovery
-    notes, uncommitted = _recover_in_flight(storage, run_id, spec, plan, params["scoring_id"])
-    if notes:
-        storage.append_run_event(
-            run_id, "recovered", {"items": notes, "uncommitted_dispatches": uncommitted}
-        )
+    uncommitted = _recover_in_flight(storage, run_id, spec, plan, params["scoring_id"])
     for _ in range(uncommitted):
         ledger.record_prior_application(None)
 
@@ -588,6 +591,8 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
         "counts": work_counts(storage, run_id),
         "needs_attention": blocked,
         "budget": last_session["payload"].get("budget") if last_session else None,
+        # Why the last session stopped early, if it said (storage failure, lease lost).
+        "warnings": list(last_session["payload"].get("warnings") or []) if last_session else [],
         "last_event_sequence": events[-1]["sequence"] if events else 0,
     }
 
@@ -651,6 +656,7 @@ def outcome_json(outcome: RunOutcome) -> dict[str, Any]:
                 "counts": outcome.counts,
                 "budget": outcome.budget,
                 "stop_reason": outcome.stop_reason,
+                "warnings": outcome.warnings,
             }
         )
     )

@@ -1,0 +1,13 @@
+{
+  "application_id": "pilot-cli-assistant",
+  "runner": "cli",
+  "target": "../../apps/cli_chatbot.py",
+  "effects": "none",
+  "revision": "pilot-1",
+  "transport": {
+    "kind": "cli",
+    "argv": ["python", "../../apps/cli_chatbot.py"],
+    "timeout_seconds": 30
+  },
+  "output_binding": {"output": "/output"}
+}

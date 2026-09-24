@@ -1,0 +1,22 @@
+{
+  "application_id": "pilot-http-rag",
+  "runner": "http",
+  "target": "http://127.0.0.1:8765/answer",
+  "effects": "none",
+  "revision": "pilot-1",
+  "transport": {
+    "kind": "http",
+    "url": "http://127.0.0.1:8765/answer",
+    "healthcheck_url": "http://127.0.0.1:8765/health",
+    "timeout_seconds": 30
+  },
+  "input_binding": {
+    "template": {"top_k": 2},
+    "fields": {"/question": "/input"}
+  },
+  "output_binding": {
+    "output": "/answer",
+    "retrieved_context": "/retrieved",
+    "retrieved_context_item": "/text"
+  }
+}

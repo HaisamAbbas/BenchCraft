@@ -8,9 +8,12 @@ runner = CliRunner()
 
 
 def test_package_imports() -> None:
+    import importlib.metadata
+
     import aibench
 
-    assert aibench.__version__ == "0.1.0"
+    # One source of truth: pyproject reads the version from `aibench.__version__`.
+    assert aibench.__version__ == importlib.metadata.version("aibench")
 
 
 def test_cli_help() -> None:
@@ -22,4 +25,6 @@ def test_cli_help() -> None:
 def test_cli_version() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "0.1.0" in result.stdout
+    import aibench
+
+    assert result.stdout.strip() == f"aibench {aibench.__version__}"
