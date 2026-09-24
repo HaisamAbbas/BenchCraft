@@ -5,13 +5,24 @@ extra dependencies are needed); DeepEval-specific behaviour is in test_deepeval_
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from aibench.core.models import Decision, ExecutionStatus
+from aibench.core.models import (
+    BenchmarkCase,
+    Decision,
+    ExecutionResult,
+    ExecutionStatus,
+    FieldRequirement,
+    Fixture,
+    ReferenceAnswer,
+    ReferenceStatus,
+    RepositoryFixture,
+)
 from aibench.registry import EvaluatorRegistry
 from tests.scoring_support import Seeded, case, execution
 
@@ -67,7 +78,19 @@ class Probe(Evaluator):
             "scalar", 0.75,
             raw={"pid": os.getpid(), "calls": self.calls, "instances": INSTANCES,
                   "home": os.environ.get("HOME"), "cwd": os.getcwd(),
-                  "leak": os.environ.get("HARNESS_ONLY_SECRET")},
+                  "leak": os.environ.get("HARNESS_ONLY_SECRET"),
+                  "case_has_reference": view.case.reference is not None,
+                  "case_fixture_count": len(view.case.fixtures),
+                  "case_id": view.case.case_id,
+                  "case_group_id": view.case.group_id,
+                  "case_repository": (view.case.repository.path if view.case.repository else None),
+                  "execution_retrieved_context": view.execution.retrieved_context,
+                  "execution_tool_event_count": len(view.execution.tool_events),
+                  "execution_trace_count": len(view.execution.trace_refs),
+                  "execution_world_state": view.execution.world_state,
+                  "execution_cache": getattr(view.execution, "cache", None),
+                  "execution_id": view.execution.execution_id,
+                  "execution_run_id": view.execution.run_id},
         )
 
 EVALUATORS = (Probe,)
@@ -112,6 +135,151 @@ def _score(tmp_path: Path, outputs: dict[str, str], registry: EvaluatorRegistry,
     seeded = Seeded(tmp_path)
     seeded.seed([case(c) for c in outputs], [execution(c, o) for c, o in outputs.items()])
     return seeded, seeded.score([{"metric": "vendor.probe"}], registry=registry, **kw)
+
+
+def test_worker_projection_excludes_every_undeclared_stored_field() -> None:
+    from aibench.evaluators.worker_client import project_worker_view
+
+    golden = BenchmarkCase(
+        case_id="SECRET-CASE-ID",
+        input="SECRET-INPUT",
+        reference=ReferenceAnswer(
+            answer="SECRET-ANSWER",
+            context=("SECRET-CONTEXT",),
+            status=ReferenceStatus.SOURCE_VERIFIED,
+        ),
+        fixtures=(
+            Fixture(name="private", content={"secret": "SECRET-FIXTURE"}, app_visible=True),
+        ),
+        metadata={"private": "SECRET-METADATA"},
+        expectations={"private": "SECRET-EXPECTATION"},
+        repository=RepositoryFixture(
+            path="SECRET-REPOSITORY",
+            commit="SECRET-COMMIT",
+            setup_recipe="SECRET-SETUP",
+            hidden_tests_ref="SECRET-HIDDEN-TESTS",
+            success_criteria="SECRET-CRITERIA",
+        ),
+        group_id="SECRET-GROUP-ID",
+        extensions={"private": "SECRET-EXTENSION"},
+    )
+    execution_values: dict[str, Any] = {
+        "execution_id": "SECRET-EXECUTION-ID",
+        "run_id": "SECRET-RUN-ID",
+        "case_id": "SECRET-EXECUTION-CASE-ID",
+        "status": ExecutionStatus.OK,
+        "output": "answer",
+        "retrieved_context": ("SECRET-RETRIEVED",),
+        "tool_events": ({"name": "SECRET-TOOL"},),
+        "world_state": {"booking": "SECRET-WORLD-STATE"},
+        "trace_refs": ("SECRET-TRACE",),
+        "usage": {"input": 1},
+        "cost": 0.1,
+    }
+    if "cache" in ExecutionResult.model_fields:
+        execution_values["cache"] = {"key": "SECRET-CACHE-KEY"}
+    execution = ExecutionResult(**execution_values)
+    projected_case, projected_execution = project_worker_view(
+        golden, execution, (FieldRequirement(path="execution.output", non_empty=False),)
+    )
+    payload = {
+        "case": projected_case.model_dump(mode="json"),
+        "execution": projected_execution.model_dump(mode="json"),
+    }
+    serialized = json.dumps(payload)
+    assert payload["case"]["case_id"] == ""
+    assert payload["case"]["input"] is None
+    assert payload["execution"]["execution_id"] == ""
+    assert payload["execution"]["run_id"] == ""
+    assert payload["execution"]["case_id"] == ""
+    assert payload["execution"]["output"] == "answer"
+    if "cache" in ExecutionResult.model_fields:
+        assert payload["execution"]["cache"] is None
+    for secret in (
+        "SECRET-ANSWER",
+        "SECRET-CONTEXT",
+        "SECRET-FIXTURE",
+        "SECRET-METADATA",
+        "SECRET-RETRIEVED",
+        "SECRET-TOOL",
+        "SECRET-TRACE",
+        "SECRET-CASE-ID",
+        "SECRET-INPUT",
+        "SECRET-EXECUTION-ID",
+        "SECRET-RUN-ID",
+        "SECRET-EXECUTION-CASE-ID",
+        "SECRET-REPOSITORY",
+        "SECRET-COMMIT",
+        "SECRET-SETUP",
+        "SECRET-HIDDEN-TESTS",
+        "SECRET-CRITERIA",
+        "SECRET-GROUP-ID",
+        "SECRET-EXPECTATION",
+        "SECRET-EXTENSION",
+        "SECRET-WORLD-STATE",
+        "SECRET-CACHE-KEY",
+        "source_verified",
+    ):
+        assert secret not in serialized
+
+    world_case, world_execution = project_worker_view(
+        golden,
+        execution,
+        (FieldRequirement(path="execution.world_state", non_empty=False),),
+    )
+    assert world_case.case_id == ""
+    assert world_execution.world_state == execution.world_state
+    assert world_execution.output is None
+
+    identified_case, _ = project_worker_view(
+        golden,
+        execution,
+        (FieldRequirement(path="case.case_id", non_empty=False),),
+    )
+    assert identified_case.case_id == "SECRET-CASE-ID"
+
+
+def test_real_worker_receives_only_manifest_fields(tmp_path: Path) -> None:
+    golden = case(
+        "SECRET-CASE-ID",
+        "SECRET-ANSWER",
+        fixtures=(Fixture(name="private", content="SECRET-FIXTURE"),),
+        group_id="SECRET-GROUP-ID",
+        repository=RepositoryFixture(path="SECRET-REPOSITORY"),
+    )
+    stored_fields: dict[str, Any] = {
+        "retrieved_context": ("SECRET-RETRIEVED",),
+        "tool_events": ({"name": "SECRET-TOOL"},),
+        "trace_refs": ("SECRET-TRACE",),
+        "world_state": {"booking": "SECRET-WORLD-STATE"},
+        "usage": {"input": 1},
+        "cost": 0.1,
+    }
+    if "cache" in ExecutionResult.model_fields:
+        stored_fields["cache"] = {"key": "SECRET-CACHE-KEY"}
+    stored = execution(
+        "SECRET-CASE-ID",
+        "answer",
+        **stored_fields,
+    )
+    seeded = Seeded(tmp_path)
+    seeded.seed([golden], [stored])
+    [result] = seeded.score([{"metric": "vendor.probe"}], registry=_registry(tmp_path)).results
+    raw = json.loads(
+        seeded.artifacts.read_bytes(seeded.storage.get_artifact(result.raw_artifact_ref))
+    )
+    assert raw["case_has_reference"] is False
+    assert raw["case_fixture_count"] == 0
+    assert raw["execution_retrieved_context"] is None
+    assert raw["execution_tool_event_count"] == 0
+    assert raw["execution_trace_count"] == 0
+    assert raw["case_id"] == ""
+    assert raw["case_group_id"] is None
+    assert raw["case_repository"] is None
+    assert raw["execution_world_state"] is None
+    assert raw["execution_cache"] is None
+    assert raw["execution_id"] == ""
+    assert raw["execution_run_id"] == ""
 
 
 def test_worker_results_are_canonical_and_the_plugin_is_never_imported_here(

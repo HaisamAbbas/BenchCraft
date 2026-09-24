@@ -566,10 +566,22 @@ def _passes_for_run(
 def _select_pass(passes: Sequence[_Pass], requested: str | None) -> _Pass | None:
     if requested is not None:
         return next((p for p in passes if p.scoring_id == requested), None)
-    # The manifest's engine pass wins.  When it is absent, fall back to the
-    # latest committed pass as required by the public API.
-    return next((p for p in passes if p.kind == "engine"), None) or (
-        passes[-1] if passes else None
+    # A normal run has one frozen engine pass. If historical data contains only
+    # several rescore passes, choosing the newest silently would change the
+    # estimand; require an explicit pass ID instead. With no engine identity,
+    # one lone pass remains a safe historical fallback.
+    engine = next((p for p in passes if p.kind == "engine"), None)
+    if engine is not None:
+        return engine
+    if len(passes) <= 1:
+        return passes[-1] if passes else None
+    return _Pass(
+        run_id=passes[0].run_id,
+        scoring_id="",
+        kind="rescore",
+        sequence=-1,
+        source="pass_selection_required",
+        complete=False,
     )
 
 

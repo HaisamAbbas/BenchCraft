@@ -535,6 +535,22 @@ def test_explicit_rescore_selection_and_same_stored_execution_ids(tmp_path: Path
     assert binding and dataset_hash
 
 
+def test_multiple_legacy_rescore_passes_require_an_explicit_selection() -> None:
+    from aibench.services.comparison import _Pass, _select_pass
+
+    passes = (
+        _Pass(run_id="legacy", scoring_id="rescore-a", kind="rescore", sequence=1),
+        _Pass(run_id="legacy", scoring_id="rescore-b", kind="rescore", sequence=2),
+    )
+
+    implicit = _select_pass(passes, None)
+    explicit = _select_pass(passes, "rescore-b")
+
+    assert implicit is not None
+    assert implicit.source == "pass_selection_required"
+    assert explicit is not None and explicit.scoring_id == "rescore-b"
+
+
 def test_judge_stability_groups_all_passes_and_reports_missing_repeats(tmp_path: Path) -> None:
     storage = Storage(Database.open_in_memory())
     cases = _cases("a1")

@@ -35,7 +35,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from aibench.core.errors import AibenchError, ConflictError
 from aibench.core.models import (
@@ -61,8 +61,11 @@ from aibench.engine.compile import PlanInvalid, PolicyDenied, compile_plan, load
 from aibench.engine.engine import RunController, RunOutcome
 from aibench.planning.planner import PlanningInputs
 from aibench.reporting.aggregation import reason_code
+from aibench.runners import load_application
 from aibench.security.policy import ExecutionPolicy
 from aibench.security.redaction import sanitize
+from aibench.services.applications import describe_application
+from aibench.services.comparison import compare_runs as compare_stored_runs
 from aibench.services.reports import build_report, export_report, report_dir, report_facts
 from aibench.services.runs import (
     RESUMABLE_STATES,
@@ -103,6 +106,78 @@ STARTING = "starting:"
 STARTING_TTL_SECONDS = 600.0
 
 
+_COMPARISON_DROP_KEYS = frozenset(
+    {
+        "cases",
+        "groups",
+        "units",
+        "missing_repeats",
+        "identity_checks",
+        "identities",
+        "evidence",
+        "artifacts",
+        "raw",
+        "baseline_only_keys",
+        "current_only_keys",
+    }
+)
+_COMPARISON_HIDDEN_KEYS = frozenset(
+    {
+        "application_hash",
+        "binding_hash",
+        "case_content_hash",
+        "compatibility_hash",
+        "semantic_digest",
+        "parameters_hash",
+        "rule_digest",
+        "selection_digest",
+        "input_binding_digest",
+        "output_binding_digest",
+        "environment_digest",
+        "instrumentation_digest",
+        "changed_case_ids",
+        "dataset_hash",
+        "digest",
+        "execution_id",
+        "group_id",
+        "case_id",
+        "case_ids",
+        "judge",
+        "rubric",
+        "params",
+        "reason",
+    }
+)
+
+
+def _comparison_key_hidden(name: str) -> bool:
+    lowered = name.lower()
+    return (
+        name in _COMPARISON_DROP_KEYS
+        or name in _COMPARISON_HIDDEN_KEYS
+        or "case_id" in lowered
+        or "group_id" in lowered
+        or lowered.endswith(("_hash", "_digest"))
+    )
+
+
+def _comparison_for_assistant(value: Any, *, key: str = "") -> Any:
+    """Remove identity hashes, case/group IDs and raw ledger rows from chat facts."""
+    if _comparison_key_hidden(key):
+        return None
+    if isinstance(value, dict):
+        return {
+            str(name): _comparison_for_assistant(item, key=str(name))
+            for name, item in value.items()
+            if not _comparison_key_hidden(str(name))
+        }
+    if isinstance(value, list):
+        return [_comparison_for_assistant(item, key=key) for item in value]
+    if isinstance(value, str) and value.startswith("sha256:"):
+        return None
+    return value
+
+
 class SessionError(AibenchError):
     """A session cannot be created or opened as asked."""
 
@@ -121,7 +196,11 @@ class PatchResult:
             "revision": self.revision,
             "decision_id": self.decision.decision_id if self.decision else None,
             "changes": deep_unfreeze(self.decision.structured_change) if self.decision else None,
-            "draft": draft_summary(deep_unfreeze(self.decision.draft)) if self.decision else None,
+            "draft": draft_summary(
+                deep_unfreeze(self.decision.draft), self.decision.choices.test_world
+            )
+            if self.decision
+            else None,
             "problems": self.problems,
             "active_run_unchanged": self.active_run,
         }
@@ -259,6 +338,15 @@ class SessionController:
         path = self.session.policy_path
         return load_policy(Path(path) if path else None)
 
+    def describe_application(self) -> dict[str, Any]:
+        """The application's runner: what it observes, what evidence is missing, how its
+        state is reset, and the test worlds it declares with the session policy's approval.
+        Starts nothing."""
+        choices = self.current_decision().choices
+        data = describe_application(load_application(Path(choices.application)), self.policy())
+        data["selected_test_world"] = choices.test_world
+        return data
+
     def inputs(self) -> PlanningInputs:
         """Evidence for the current revision (profile, dataset counts, catalog), cached."""
         decision = self.current_decision()
@@ -302,7 +390,7 @@ class SessionController:
                 "params": {k: deep_unfreeze(v) for k, v in choices.params.items()},
                 "rules": {k: v.model_dump(mode="json") for k, v in choices.rules.items()},
             },
-            "draft": draft_summary(deep_unfreeze(decision.draft)),
+            "draft": draft_summary(deep_unfreeze(decision.draft), decision.choices.test_world),
             "open_questions": [
                 q.model_dump(mode="json") for q in self.store.questions(self.session_id, "open")
             ],
@@ -1003,6 +1091,38 @@ class SessionController:
             "paths": paths,
             "outcome": document["outcome"],
         }
+
+    def compare_runs(
+        self,
+        baseline_run_id: str,
+        current_run_id: str,
+        *,
+        baseline_scoring_id: str | None = None,
+        current_scoring_id: str | None = None,
+        mode: str = "strict",
+        min_paired_coverage: float = 0.95,
+        bootstrap_seed: int = 0,
+        bootstrap_replicates: int = 2_000,
+        for_assistant: bool = False,
+    ) -> dict[str, Any]:
+        """Compare two runs started by this session through the shared stored-only service."""
+        baseline = self._run_id(baseline_run_id)
+        current = self._run_id(current_run_id)
+        if mode not in {"strict", "exploratory"}:
+            raise SessionError("comparison mode must be 'strict' or 'exploratory'")
+        report = compare_stored_runs(
+            self.storage,
+            self.artifacts,
+            baseline,
+            current,
+            baseline_scoring_id=baseline_scoring_id,
+            current_scoring_id=current_scoring_id,
+            mode=cast(Literal["strict", "exploratory"], mode),
+            min_paired_coverage=min_paired_coverage,
+            bootstrap_seed=bootstrap_seed,
+            bootstrap_replicates=bootstrap_replicates,
+        )
+        return _comparison_for_assistant(report) if for_assistant else report
 
     def _scoring_id(self, run_id: str) -> str:
         record = self.storage.get_run(run_id)

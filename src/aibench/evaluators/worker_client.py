@@ -28,7 +28,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from aibench.core.models import SCHEMA_VERSION, EvaluatorManifest, ExecutionStatus, MetricValue
+from aibench.core.models import (
+    SCHEMA_VERSION,
+    BenchmarkCase,
+    EvaluatorManifest,
+    ExecutionResult,
+    ExecutionStatus,
+    FieldRequirement,
+    Fixture,
+    MetricValue,
+    Provenance,
+    ReferenceAnswer,
+)
 from aibench.evaluators.protocol import (
     EvaluationOutcome,
     EvaluationView,
@@ -82,6 +93,110 @@ def make_worker_factory(manifest: EvaluatorManifest, spec: WorkerSpec) -> type[E
     )
 
 
+def _nested_projection(value: Any, paths: set[str]) -> dict[str, Any]:
+    """Copy only declared descendants from a frozen mapping-like value."""
+    selected: dict[str, Any] = {}
+    for path in paths:
+        parts = path.split(".")
+        cursor: Any = value
+        found = True
+        for part in parts:
+            if not hasattr(cursor, "get"):
+                found = False
+                break
+            cursor = cursor.get(part)
+            if cursor is None:
+                found = False
+                break
+        if not found:
+            continue
+        target = selected
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+        target[parts[-1]] = cursor
+    return selected
+
+
+def project_worker_view(
+    case: BenchmarkCase,
+    execution: ExecutionResult,
+    requirements: tuple[FieldRequirement, ...],
+) -> tuple[BenchmarkCase, ExecutionResult]:
+    """Send a worker only the case/execution fields its manifest declares.
+
+    Worker isolation is not a confidentiality sandbox, but accidental transmission is still a
+    data-egress risk. This projection prevents an adapter that reads only `case.input` and
+    `execution.output` from receiving reference answers, unrelated fixtures, traces or tool
+    events. The worker still validates the same typed models.
+    """
+    paths = {requirement.path for requirement in requirements}
+    reference = None
+    if case.reference is not None and any(path.startswith("case.reference.") for path in paths):
+        reference = ReferenceAnswer(
+            answer=case.reference.answer if "case.reference.answer" in paths else None,
+            context=case.reference.context if "case.reference.context" in paths else (),
+            tools=case.reference.tools if "case.reference.tools" in paths else None,
+        )
+
+    expectations = _nested_projection(
+        case.expectations,
+        {path.removeprefix("case.expectations.") for path in paths if path.startswith("case.expectations.")},
+    )
+    metadata = _nested_projection(
+        case.metadata,
+        {path.removeprefix("case.metadata.") for path in paths if path.startswith("case.metadata.")},
+    )
+    fixtures = tuple(
+        Fixture(name=fixture.name, content=fixture.content)
+        for fixture in case.fixtures
+        if f"case.fixtures.{fixture.name}" in paths
+    )
+    projected_case = BenchmarkCase(
+        case_id=case.case_id if "case.case_id" in paths else "",
+        input=case.input if "case.input" in paths else None,
+        reference=reference,
+        expectations=expectations,
+        fixtures=fixtures,
+        metadata=metadata,
+        extensions={},
+        provenance=Provenance(),
+    )
+
+    execution_fields = {path.split(".", 1)[1] for path in paths if path.startswith("execution.")}
+    completeness: dict[str, object] = {}
+    if "tool_events" in execution_fields:
+        completeness["tool_events"] = execution.observation_completeness.get("tool_events", {})
+    execution_values: dict[str, Any] = {
+        "execution_id": "",
+        "run_id": "",
+        "case_id": "",
+        "repetition_id": 0,
+        "attempt_id": 0,
+        "status": ExecutionStatus.OK,
+        "output": execution.output if "output" in execution_fields else None,
+        "retrieved_context": (
+            execution.retrieved_context if "retrieved_context" in execution_fields else None
+        ),
+        "tool_events": execution.tool_events if "tool_events" in execution_fields else (),
+        "world_state": execution.world_state if "world_state" in execution_fields else None,
+        "trace_refs": (),
+        "timing": {},
+        "usage": execution.usage if "usage" in execution_fields else None,
+        "cost": execution.cost if "cost" in execution_fields else None,
+        "error": None,
+        "observation_completeness": completeness,
+        "error_kind": None,
+        "effect_state": None,
+        "correlation_id": None,
+    }
+    # Prompt 16 adds cache metadata outside the evaluator view. Clear it when present while
+    # keeping this worker projection compatible with older core schema versions.
+    if "cache" in ExecutionResult.model_fields:
+        execution_values["cache"] = None
+    projected_execution = ExecutionResult(**execution_values)
+    return projected_case, projected_execution
+
+
 class WorkerEvaluator(Evaluator):
     spec: ClassVar[WorkerSpec]
 
@@ -114,10 +229,13 @@ class WorkerEvaluator(Evaluator):
 
     async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
         await self.ensure_ready()  # no-op when the scorer already did it
+        case, execution = project_worker_view(
+            view.case, view.execution, self.manifest.requires
+        )
         request = {
             "op": "evaluate",
-            "case": view.case.model_dump(mode="json"),
-            "execution": view.execution.model_dump(mode="json"),
+            "case": case.model_dump(mode="json"),
+            "execution": execution.model_dump(mode="json"),
         }
         try:
             response = await self._call(request)
