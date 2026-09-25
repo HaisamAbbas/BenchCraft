@@ -652,6 +652,7 @@ def test_the_assistant_has_no_terminal_file_or_network_tool(tmp_path: Path) -> N
         "get_run_status",
         "list_failures",
         "get_case_evidence",
+        "get_trace_evidence",
         "get_report",
         "rescore_run",
         "compare_runs",
@@ -659,6 +660,9 @@ def test_the_assistant_has_no_terminal_file_or_network_tool(tmp_path: Path) -> N
         "list_experiments",
         "get_experiment_report",
         "propose_experiment_adoption",
+        "run_controlled_experiment",
+        "resume_controlled_experiment",
+        "evaluate_experiment_holdout",
         # Writes only the run's own report under .aibench/reports/; it takes no path.
         "export_report",
         "request_action",

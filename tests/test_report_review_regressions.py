@@ -161,10 +161,10 @@ def test_the_claim_check_catches_invented_numbers_the_review_found() -> None:
     assert {c["number"] for c in good} == {"8", "10", "80%", "90%", "1152.7ms", "10%"}
 
 
-def test_chat_run_that_only_shows_the_plan_exits_as_authorization_required(
+def test_chat_run_starts_a_clear_request_without_second_confirmation(
     tmp_path: Path,
 ) -> None:
-    # Review 5: `/run` on a draft not yet shown displays it and asks again; nothing ran.
+    # `/run` is an explicit bounded request and starts the validated draft directly.
     project = tmp_path / "q"
     assert cli.invoke(app, ["init", str(project)]).exit_code == 0
     first = cli.invoke(
@@ -182,8 +182,11 @@ def test_chat_run_that_only_shows_the_plan_exits_as_authorization_required(
         ],
     )
     data = json.loads(first.stdout.strip().splitlines()[-1])
-    assert data["kind"] == "confirm" and "runs" not in data
-    assert first.exit_code == 4 == data["exit_code"]
+    assert data["kind"] == "action" and data["ok"] is True
+    assert data["data"]["state"] == "done"
+    assert data["runs"]
+    assert data["runs"][0]["run_id"] == data["data"]["run_id"]
+    assert first.exit_code != 4  # the request was authorized and execution started
 
 
 # --------------------------------------------------------------------------- minor

@@ -47,7 +47,7 @@ def test_plan_writes_an_executable_plan_and_its_draft_document(tmp_path: Path) -
         tmp_path, "--objective", "catch wrong answers", "--objective", "keep latency low", "--json"
     )
     assert result.exit_code == 0, result.output
-    document = json.loads(result.output)
+    document = json.loads(result.stdout)
     assert document["executable"] is True and document["revision"] == 1
     assert [m["metric"] for m in document["rationale"]] == ["native.exact_match@1.0.0"]
     assert document["coverage"][0]["eligible_cases"] == 2
@@ -71,7 +71,7 @@ def test_missing_objectives_exit_2_with_a_pending_question(tmp_path: Path) -> No
     _setup(tmp_path)
     result = _plan(tmp_path, "--json")
     assert result.exit_code == 2
-    document = json.loads(result.output)
+    document = json.loads(result.stdout)
     [question] = document["pending_questions"]
     assert question["prompt"] == "What should this benchmark check?"
     assert question["draft_revision"] == 1 and "correctness" in question["choices"]
@@ -114,7 +114,7 @@ def test_missing_permission_exits_4_and_is_distinguished(tmp_path: Path) -> None
     _setup(tmp_path, runner="cli")
     result = _plan(tmp_path, "--objective", "wrong answers", "--json")
     assert result.exit_code == 4
-    kinds = {f["kind"] for f in json.loads(result.output)["findings"] if f["blocking"]}
+    kinds = {f["kind"] for f in json.loads(result.stdout)["findings"] if f["blocking"]}
     assert kinds == {"missing_permission"}
     assert (
         _plan(tmp_path, "--objective", "wrong answers", "--trust-local-app", "--revise").exit_code
@@ -141,7 +141,7 @@ def test_revisions_never_silently_overwrite_a_different_plan(tmp_path: Path) -> 
         "--json",
     )
     assert revised.exit_code == 0, revised.output
-    document = json.loads(revised.output)
+    document = json.loads(revised.stdout)
     assert document["revision"] == 2 and document["supersedes"] == first["plan_hash"]
     assert (tmp_path / "plan.rev1.json").is_file()
     plan = json.loads((tmp_path / "plan.json").read_text(encoding="utf-8"))
@@ -179,7 +179,7 @@ def test_model_planner_through_the_cli_and_a_denied_endpoint(tmp_path: Path) -> 
             "--json",
         )
     assert result.exit_code == 0, result.output
-    planner = json.loads(result.output)["planner"]
+    planner = json.loads(result.stdout)["planner"]
     assert (planner["kind"], planner["model_calls"], planner["fallback_reason"]) == (
         "model",
         1,
@@ -258,7 +258,7 @@ def test_real_deepeval_manifest_needs_a_judge_the_planner_will_not_invent(tmp_pa
         "--json",
     )
     assert result.exit_code == 0, result.output
-    document = json.loads(result.output)
+    document = json.loads(result.stdout)
     assert document["rationale"] == []
     [question] = document["pending_questions"]
     assert "deepeval.faithfulness@1.0.0 needs judge" in question["prompt"]

@@ -279,7 +279,7 @@ def test_revision_numbering_survives_a_lost_draft_document_and_never_overwrites_
     (tmp_path / "plan.draft.json").write_text("corrupt", encoding="utf-8")
     third = runner.invoke(app, [*base, "--sample", "1", "--seed", "4", "--revise", "--json"])
     assert third.exit_code == 0, third.output
-    assert json.loads(third.output)["revision"] == 3
+    assert json.loads(third.stdout)["revision"] == 3
     assert sorted(p.name for p in tmp_path.glob("plan.rev*.json")) == [
         "plan.rev1.json",
         "plan.rev2.json",
