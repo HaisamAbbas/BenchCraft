@@ -149,6 +149,56 @@ def integrations(console: Console, data: dict[str, Any]) -> None:
         out(console, f"  [dim]{safe(entry['live_verification'])}[/dim]")
 
 
+def plugins(console: Console, data: dict[str, Any]) -> None:
+    """`/plugins`: optional metric plugins, their state here and how to enable them."""
+    labels = {
+        "installed": "[green]installed[/green]",
+        "not_allowed": "[yellow]installed, not allowed by the policy[/yellow]",
+        "broken": "[red]environment missing[/red]",
+        "not_installed": "[dim]not installed[/dim]",
+    }
+    for row in data["plugins"]:
+        out(
+            console,
+            f"[bold]{safe(row['name'])}[/bold] {labels[row['state']]}: {safe(row['summary'])}",
+        )
+        out(console, f"  metrics: {safe(', '.join(row['metrics']))}")
+        out(console, f"  [dim]not included: {safe(row['not_included'])}[/dim]")
+        for missing in row["missing"]:
+            out(console, f"  [yellow]needs:[/yellow] {safe(missing)}")
+        if row["state"] != "installed":
+            out(console, f"  enable: {safe(row['enable'])}")
+
+
+def plugin_preview(console: Console, data: dict[str, Any]) -> None:
+    """What `/plugins install NAME` would change; nothing has changed yet."""
+    where = "create" if data["creates_environment"] else "use"
+    out(console, f"[bold]install {safe(data['plugin'])}[/bold] ({safe(data['package'])})")
+    out(console, f"  {where} environment: {safe(data['environment'])}")
+    out(console, f"  metrics: {safe(', '.join(data['metrics']))}")
+    if data["judge"]:
+        out(console, f"  judge: {safe(data['judge'])} (paid calls to that provider)")
+    for name, ref in data["secret_env"].items():
+        out(console, f"  judge key: {safe(ref)}, passed to its workers as {safe(name)}")
+    out(console, f"  project config: {safe(data['config'])} (plugin_environments)")
+    if data["policy_changes"]:
+        out(console, f"  policy {safe(data['policy'])} (kept as .bak):")
+        for change in data["policy_changes"]:
+            out(console, f"    {safe(change)}")
+    out(console, f"[bold]Nothing has changed yet.[/bold] To go ahead: {safe(data['confirm'])}")
+
+
+def plugin_installed(console: Console, data: dict[str, Any]) -> None:
+    out(
+        console,
+        f"[green]{safe(data['plugin'])} installed[/green]: {len(data['evaluators'])} metric(s) "
+        f"now in this session (draft revision {data['revision']})",
+    )
+    for problem in data.get("problems") or []:
+        out(console, f"  [yellow]{safe(problem)}[/yellow]")
+    out(console, '  ask for what to measure, e.g. "check relevancy and bias", or /plan')
+
+
 def status(console: Console, snapshot: dict[str, Any]) -> None:
     out(console, safe(status_line(snapshot)) + f" [dim]as of {safe(snapshot['as_of'])}[/dim]")
     for item in snapshot.get("needs_attention", [])[:10]:

@@ -1,0 +1,597 @@
+"""DeepEval's single-turn metrics as aibench evaluators, one per metric, from one table.
+
+Field translation (checked against DeepEval 4.2.5's `LLMTestCase`); a metric reads only the
+fields its spec lists:
+
+    case.input                     -> input (JSON text if not a string)
+    execution.output (text)        -> actual_output
+    case.reference.answer          -> expected_output
+    execution.retrieved_context[]  -> retrieval_context (what the application retrieved)
+    case.reference.context[]       -> context (the Golden's reviewed ground truth)
+    execution.tool_events[]        -> tools_called (name, arguments, result)
+    case.reference.tools.tool_names -> expected_tools (names)
+
+The two contexts are never substituted for each other: retrieval metrics read only what the
+application retrieved, and hallucination reads only the reviewed reference context.
+
+Not applicable instead of a score: output empty or not text (`unscorable_output:<kind>`);
+a context with no non-blank chunk (`empty:<path>`); no expected tools
+(`empty:case.reference.tools`); a tool metric with no tool call it can read, where the
+metric scores the calls themselves (`no_tool_calls`). Everything else is DeepEval's own
+score: every metric here is normalized so higher is better (DeepEval's success is
+`score >= threshold` for all of them, bias and toxicity included). The upstream success
+flag is kept as metadata; the harness decides with the binding's rule.
+
+Execution: a new metric (and judge) per case; DeepEval's retries, telemetry, `.env` and
+legacy key file are off (set before DeepEval is imported, see `faithfulness`).
+"""
+
+from __future__ import annotations
+
+import inspect
+import json
+import os
+from dataclasses import dataclass, field
+from typing import Any, ClassVar
+
+from aibench.core.models import DecisionRule, EvaluatorManifest, FieldRequirement, MetricDirection
+from aibench.evaluators.agent import parse_tool_events
+from aibench.evaluators.protocol import (
+    EvaluationOutcome,
+    EvaluationView,
+    Evaluator,
+    EvaluatorContext,
+)
+from aibench_deepeval._version import __version__
+from aibench_deepeval.faithfulness import (
+    DEEPEVAL_ENVIRONMENT,
+    PINNED_DEEPEVAL,
+    _require_pinned_deepeval,
+)
+from aibench_deepeval.judges import JUDGE_SCHEMA, build_judge, report_judge_usage
+
+# Test-case field -> (evaluation view path, requirement is non-empty)
+FIELDS: dict[str, tuple[str, bool]] = {
+    "input": ("case.input", True),
+    "actual_output": ("execution.output", False),  # blank or non-text: not applicable
+    "expected_output": ("case.reference.answer", True),
+    "retrieval_context": ("execution.retrieved_context", False),  # empty: not applicable
+    # Required non-empty, so planning sees which datasets have reviewed context at all.
+    "context": ("case.reference.context", True),
+    "tools_called": ("execution.tool_events", False),  # none called is evidence
+    "expected_tools": ("case.reference.tools", True),
+}
+
+# Upstream lists worth keeping in the raw artifact, when a metric has them.
+_TRACE_ATTRIBUTES = (
+    "statements",
+    "truths",
+    "claims",
+    "opinions",
+    "extracted_pii",
+    "misuses",
+    "advices",
+    "role_violations",
+    "evaluation_steps",
+    "verdicts",
+)
+
+
+@dataclass(frozen=True)
+class Spec:
+    name: str  # evaluator ID suffix: deepeval.<name>
+    upstream: str  # DeepEval metric class
+    summary: str
+    fields: tuple[str, ...]
+    concepts: tuple[str, ...]
+    judged: bool = True
+    params: dict[str, Any] = field(default_factory=dict)  # extra JSON Schema properties
+    required: tuple[str, ...] = ()
+    limitations: tuple[str, ...] = ()
+    needs_tool_calls: bool = False  # not applicable when no tool call can be read
+
+
+_STRINGS = {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+_TOOL_NAMES = {"type": "array", "items": {"type": "string", "minLength": 1}}
+
+SPECS: tuple[Spec, ...] = (
+    Spec(
+        "answer_relevancy",
+        "AnswerRelevancyMetric",
+        "the share of the answer's statements that address the input",
+        ("input", "actual_output"),
+        ("relevancy",),
+    ),
+    Spec(
+        "contextual_precision",
+        "ContextualPrecisionMetric",
+        "whether the retrieved chunks relevant to the reference answer are ranked first",
+        ("input", "actual_output", "expected_output", "retrieval_context"),
+        ("retrieval_precision",),
+    ),
+    Spec(
+        "contextual_recall",
+        "ContextualRecallMetric",
+        "the share of the reference answer's statements the retrieved context supports",
+        ("input", "actual_output", "expected_output", "retrieval_context"),
+        ("retrieval_recall",),
+    ),
+    Spec(
+        "contextual_relevancy",
+        "ContextualRelevancyMetric",
+        "the share of retrieved statements relevant to the input",
+        ("input", "actual_output", "retrieval_context"),
+        ("retrieval_relevancy",),
+    ),
+    Spec(
+        "hallucination",
+        "HallucinationMetric",
+        "the share of the reviewed reference context the answer does not contradict",
+        ("input", "actual_output", "context"),
+        ("groundedness",),
+        limitations=(
+            (
+                "Reads the Golden's reviewed reference context, not what the application "
+                "retrieved; use faithfulness for retrieved passages."
+            ),
+        ),
+    ),
+    Spec(
+        "bias",
+        "BiasMetric",
+        "the share of the answer's opinions that are free of bias",
+        ("input", "actual_output"),
+        ("bias",),
+        limitations=("An answer with no opinions scores 1.0 upstream (nothing to be biased).",),
+    ),
+    Spec(
+        "toxicity",
+        "ToxicityMetric",
+        "the share of the answer's opinions that are not toxic",
+        ("input", "actual_output"),
+        ("toxicity",),
+        limitations=("An answer with no opinions scores 1.0 upstream.",),
+    ),
+    Spec(
+        "pii_leakage",
+        "PIILeakageMetric",
+        "whether the answer is free of personal data leakage",
+        ("input", "actual_output"),
+        ("privacy",),
+    ),
+    Spec(
+        "misuse",
+        "MisuseMetric",
+        "whether the answer avoids misuse outside the application's domain",
+        ("input", "actual_output"),
+        ("misuse",),
+        params={"domain": {"type": "string", "minLength": 1}},
+        required=("domain",),
+    ),
+    Spec(
+        "non_advice",
+        "NonAdviceMetric",
+        "whether the answer avoids giving the listed kinds of advice",
+        ("input", "actual_output"),
+        ("advice",),
+        params={"advice_types": _STRINGS},
+        required=("advice_types",),
+    ),
+    Spec(
+        "role_violation",
+        "RoleViolationMetric",
+        "1 when the answer stays in the declared role, 0 when it breaks it",
+        ("input", "actual_output"),
+        ("role_adherence",),
+        params={"role": {"type": "string", "minLength": 1}},
+        required=("role",),
+    ),
+    Spec(
+        "prompt_alignment",
+        "PromptAlignmentMetric",
+        "the share of the given instructions the answer follows",
+        ("input", "actual_output"),
+        ("instruction_following",),
+        params={"prompt_instructions": _STRINGS},
+        required=("prompt_instructions",),
+    ),
+    Spec(
+        "summarization",
+        "SummarizationMetric",
+        "how well the answer summarizes the input (coverage and alignment)",
+        ("input", "actual_output"),
+        ("summarization",),
+        params={
+            "assessment_questions": _STRINGS,
+            "n": {"type": "integer", "minimum": 1, "maximum": 50},
+            "truths_extraction_limit": {"type": "integer", "minimum": 1},
+        },
+    ),
+    Spec(
+        "task_completion",
+        "TaskCompletionMetric",
+        "how completely the answer accomplishes the task in the input",
+        ("input", "actual_output", "tools_called"),
+        ("task_completion",),
+        params={"task": {"type": "string", "minLength": 1}},
+        limitations=(
+            (
+                "Judged from the input, answer and reported tool calls; aibench records no "
+                "agent trace, so DeepEval's trace-based mode is not used."
+            ),
+        ),
+    ),
+    Spec(
+        "argument_correctness",
+        "ArgumentCorrectnessMetric",
+        "the share of tool calls whose arguments suit the input",
+        ("input", "actual_output", "tools_called"),
+        ("tool_arguments",),
+        needs_tool_calls=True,
+    ),
+    Spec(
+        "tool_correctness",
+        "ToolCorrectnessMetric",
+        "how well the called tools match the reference tools, by name",
+        ("input", "actual_output", "tools_called", "expected_tools"),
+        ("tool_use",),
+        params={
+            "should_consider_ordering": {"type": "boolean"},
+            "should_exact_match": {"type": "boolean"},
+        },
+        limitations=(
+            (
+                "DeepEval builds its judge model even when it compares names only, so a judge "
+                "must be configured; comparing names makes no judge calls."
+            ),
+        ),
+    ),
+    Spec(
+        "tool_permission",
+        "ToolPermissionMetric",
+        "whether every tool call stays within the allowed tools and off the denied ones",
+        ("tools_called",),
+        ("tool_permissions",),
+        judged=False,
+        params={"allowed_tools": _TOOL_NAMES, "denied_tools": _TOOL_NAMES},
+        required=("allowed_tools|denied_tools",),
+    ),
+    Spec(
+        "exact_match",
+        "ExactMatchMetric",
+        "1 when the answer equals the reference answer exactly, else 0",
+        ("input", "actual_output", "expected_output"),
+        ("correctness",),
+        judged=False,
+    ),
+    Spec(
+        "pattern_match",
+        "PatternMatchMetric",
+        "1 when the whole answer matches the given regular expression, else 0",
+        ("input", "actual_output"),
+        ("pattern",),
+        judged=False,
+        params={"pattern": {"type": "string", "minLength": 1}, "ignore_case": {"type": "boolean"}},
+        required=("pattern",),
+    ),
+)
+
+
+def _parameters_schema(spec: Spec) -> dict[str, Any]:
+    properties: dict[str, Any] = dict(spec.params)
+    required = [name for name in spec.required if "|" not in name]
+    alternatives = [name.split("|") for name in spec.required if "|" in name]
+    if spec.judged:
+        properties["judge"] = JUDGE_SCHEMA
+        required.insert(0, "judge")
+    schema: dict[str, Any] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": required,
+        "properties": properties,
+    }
+    if alternatives:
+        schema["anyOf"] = [{"required": [name]} for name in alternatives[0]]
+    return schema
+
+
+def _manifest(spec: Spec) -> EvaluatorManifest:
+    judged = spec.judged
+    return EvaluatorManifest(
+        evaluator_id=f"deepeval.{spec.name}",
+        version="1.0.0",
+        plugin_id="aibench-deepeval",
+        plugin_version=__version__,
+        package_name="deepeval",
+        package_version=PINNED_DEEPEVAL,
+        description=f"DeepEval {PINNED_DEEPEVAL} {spec.upstream}: {spec.summary}.",
+        limitations=(
+            *(
+                ("Judge-dependent: scores from different judge models are not comparable.",)
+                if judged
+                else ()
+            ),
+            *spec.limitations,
+        ),
+        concepts=spec.concepts,
+        value_kind="scalar",
+        direction=MetricDirection.HIGHER,
+        aggregation="mean",
+        requires=tuple(
+            FieldRequirement(path=FIELDS[name][0], non_empty=FIELDS[name][1])
+            for name in spec.fields
+        ),
+        default_rule=DecisionRule(comparator=">=", threshold=0.5),
+        parameters_schema=_parameters_schema(spec),
+        uses_models=judged,
+        credentials=(
+            ("the judge provider's key, passed explicitly to the plugin environment",)
+            if judged
+            else ()
+        ),
+        network_destinations=(
+            ("the configured judge model's API (none for a local python_factory judge)",)
+            if judged
+            else ()
+        ),
+        internal_retries=0,
+        internal_concurrency=2 if judged else 1,
+        requires_worker=True,
+    )
+
+
+def _text(value: Any) -> str:
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+
+
+def _jsonable(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+class DeepEvalMetric(Evaluator):
+    """One DeepEval single-turn metric; subclasses differ only in `spec` and `manifest`."""
+
+    spec: ClassVar[Spec]
+
+    async def prepare(self, params: Any) -> None:
+        self.params = dict(params)
+        os.environ.update(DEEPEVAL_ENVIRONMENT)
+        _require_pinned_deepeval()
+        import deepeval.metrics  # noqa: F401 - import once up front so failures surface here
+
+        if self.spec.judged:
+            build_judge(self.params["judge"])  # validate the judge before any case runs
+
+    def _fields(self) -> tuple[str, ...]:
+        return self.spec.fields
+
+    def _test_case(self, view: EvaluationView) -> tuple[dict[str, Any] | None, str | None]:
+        """The LLMTestCase arguments, or the reason the case is not applicable."""
+        from deepeval.test_case import ToolCall
+
+        values: dict[str, Any] = {}
+        fields = self._fields()
+        # The harness checks the manifest's static requirements before evaluating; G-Eval's
+        # depend on its parameters, so every field read here is checked again.
+        for name in fields:
+            if view.state(FIELDS[name][0]) == "missing":
+                return None, f"missing:{FIELDS[name][0]}"
+        # DeepEval requires input and actual_output on every test case; they are only
+        # *judged* when a metric reads them.
+        values["input"] = _text(view.get("case.input"))
+        values["actual_output"] = ""
+        if "actual_output" in fields:
+            output = view.get("execution.output")
+            if not isinstance(output, str):
+                return None, f"unscorable_output:{type(output).__name__}"
+            if not output.strip():
+                return None, "unscorable_output:blank"
+            values["actual_output"] = output
+        if "expected_output" in fields:
+            values["expected_output"] = view.get("case.reference.answer")
+        for name in ("retrieval_context", "context"):
+            if name in fields:
+                path = FIELDS[name][0]
+                chunks = [c for c in view.get(path) if isinstance(c, str) and c.strip()]
+                if not chunks:
+                    return None, f"empty:{path}"
+                values[name] = chunks
+        if "tools_called" in fields:
+            attempts = [a for a in parse_tool_events(view.get("execution.tool_events")) if a.name]
+            if self.spec.needs_tool_calls and not attempts:
+                return None, "no_tool_calls"
+            values["tools_called"] = [
+                ToolCall(
+                    name=attempt.name,
+                    input_parameters=attempt.arguments
+                    if isinstance(attempt.arguments, dict)
+                    else None,
+                    output=attempt.result,
+                )
+                for attempt in attempts
+            ]
+        if "expected_tools" in fields:
+            names = (view.get("case.reference.tools") or {}).get("tool_names") or []
+            if not names:
+                return None, "empty:case.reference.tools"
+            values["expected_tools"] = [ToolCall(name=name) for name in names]
+        return values, None
+
+    def _metric_arguments(self, judge: Any) -> dict[str, Any]:
+        arguments = {key: self.params[key] for key in self.spec.params if key in self.params}
+        arguments.update(
+            threshold=0.5,  # upstream flag only; the harness decides with its own rule
+            include_reason=True,
+            async_mode=True,
+            strict_mode=False,
+            verbose_mode=False,
+        )
+        if judge is not None:
+            arguments["model"] = judge
+        return arguments
+
+    def _new_metric(self, judge: Any) -> Any:
+        import deepeval.metrics
+
+        upstream = getattr(deepeval.metrics, self.spec.upstream)
+        accepted = inspect.signature(upstream.__init__).parameters
+        arguments = {k: v for k, v in self._metric_arguments(judge).items() if k in accepted}
+        return upstream(**arguments)
+
+    async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
+        from deepeval.test_case import LLMTestCase
+
+        values, not_applicable = self._test_case(view)
+        if values is None:
+            return EvaluationOutcome.not_applicable(str(not_applicable))
+        judge = build_judge(self.params["judge"]) if self.spec.judged else None
+        metric = self._new_metric(judge)
+        try:
+            score = await metric.a_measure(LLMTestCase(**values), _show_indicator=False)
+        finally:
+            if judge is not None:
+                report_judge_usage(ctx, metric, judge)
+        raw: dict[str, Any] = {
+            "deepeval_version": PINNED_DEEPEVAL,
+            "metric": self.spec.upstream,
+            "judge": getattr(metric, "evaluation_model", None),
+            "score": metric.score,
+            "reason": getattr(metric, "reason", None),
+            "upstream_success": metric.success,
+            "upstream_threshold": metric.threshold,
+            "evaluation_cost": getattr(metric, "evaluation_cost", None),
+        }
+        for attribute in _TRACE_ATTRIBUTES:
+            value = getattr(metric, attribute, None)
+            if isinstance(value, (list, tuple)):
+                raw[attribute] = _jsonable(value)
+        return EvaluationOutcome.ok(
+            "scalar",
+            float(score),
+            evidence=tuple(FIELDS[name][0] for name in self._fields()),
+            raw=raw,
+        )
+
+
+def _evaluator_class(spec: Spec) -> type[DeepEvalMetric]:
+    name = "".join(part.title() for part in spec.name.split("_"))
+    return type(name, (DeepEvalMetric,), {"spec": spec, "manifest": _manifest(spec)})
+
+
+METRICS: tuple[type[DeepEvalMetric], ...] = tuple(_evaluator_class(spec) for spec in SPECS)
+
+
+# --------------------------------------------------------------------------- G-Eval
+
+_GEVAL_FIELDS = ("input", "actual_output", "expected_output", "retrieval_context", "context")
+
+GEVAL_SPEC = Spec(
+    "g_eval",
+    "GEval",
+    "a judge scores the answer against criteria you write",
+    ("input", "actual_output"),
+    ("custom_criteria",),
+)
+
+
+class GEval(DeepEvalMetric):
+    """G-Eval: the plan supplies the criteria (or explicit steps), which fields the judge
+    sees, and optionally a rubric. The criteria are part of the metric's identity. Fields
+    beyond input and output are required only when named (`parameter_requirements`)."""
+
+    spec = GEVAL_SPEC
+    manifest = EvaluatorManifest(
+        **{
+            **_manifest(GEVAL_SPEC).model_dump(),
+            "description": (
+                f"DeepEval {PINNED_DEEPEVAL} GEval: a judge scores the answer against "
+                "criteria the plan states (0 to 1)."
+            ),
+            "limitations": (
+                "Judge-dependent: scores from different judge models are not comparable.",
+                (
+                    "Criteria wording changes the metric: runs with different criteria are not "
+                    "comparable."
+                ),
+            ),
+            "parameter_requirements": {
+                "evaluation_params": {
+                    name: {"path": FIELDS[name][0], "non_empty": FIELDS[name][1]}
+                    for name in _GEVAL_FIELDS
+                    if name not in ("input", "actual_output")
+                }
+            },
+            "parameters_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["judge", "name"],
+                "anyOf": [{"required": ["criteria"]}, {"required": ["evaluation_steps"]}],
+                "properties": {
+                    "judge": JUDGE_SCHEMA,
+                    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                    "criteria": {"type": "string", "minLength": 1},
+                    "evaluation_steps": _STRINGS,
+                    "evaluation_params": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": True,
+                        "items": {"enum": list(_GEVAL_FIELDS)},
+                    },
+                    "rubric": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["score_range", "expected_outcome"],
+                            "properties": {
+                                "score_range": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "items": {"type": "integer", "minimum": 0, "maximum": 10},
+                                },
+                                "expected_outcome": {"type": "string", "minLength": 1},
+                            },
+                        },
+                    },
+                },
+            },
+        }
+    )
+
+    def _fields(self) -> tuple[str, ...]:
+        chosen = self.params.get("evaluation_params") or ["input", "actual_output"]
+        return tuple(name for name in _GEVAL_FIELDS if name in chosen)
+
+    def _new_metric(self, judge: Any) -> Any:
+        from deepeval.metrics import GEval as UpstreamGEval
+        from deepeval.metrics.g_eval import Rubric
+        from deepeval.test_case import SingleTurnParams
+
+        rubric = [
+            Rubric(
+                score_range=tuple(item["score_range"]), expected_outcome=item["expected_outcome"]
+            )
+            for item in self.params.get("rubric") or []
+        ]
+        return UpstreamGEval(
+            name=self.params["name"],
+            evaluation_params=[SingleTurnParams(name) for name in self._fields()],
+            criteria=self.params.get("criteria"),
+            evaluation_steps=self.params.get("evaluation_steps"),
+            rubric=rubric or None,
+            model=judge,
+            threshold=0.5,
+            async_mode=True,
+            strict_mode=False,
+            verbose_mode=False,
+        )

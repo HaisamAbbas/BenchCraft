@@ -11,9 +11,12 @@ the user to repeat the command.
 
 from __future__ import annotations
 
+import asyncio
+import shlex
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from aibench.core.errors import AibenchError
@@ -38,6 +41,7 @@ COMMANDS: dict[str, str] = {
     "/report": "/report [html|markdown|json] - the current run's report, from stored facts",
     "/compare": "/compare BASELINE CURRENT - paired stored-run comparison (no model)",
     "/integrations": "external integrations: modes, data destinations, availability",
+    "/plugins": "/plugins [install NAME [--yes]] - optional metric plugins (DeepEval, Ragas)",
     "/sessions": "sessions of this project",
     "/new": "start a fresh session in this project",
     "/exit": "leave; an active run stops dispatching and stays resumable",
@@ -65,12 +69,23 @@ class CommandResult:
 
 
 NewSession = Callable[[], SessionController]
+# The judge a plugin install configures (the assistant's own model), and its secret_env.
+JudgeSource = tuple[dict[str, Any], dict[str, str]]
 
 
 class Commands:
-    def __init__(self, controller: SessionController, new_session: NewSession | None = None):
+    def __init__(
+        self,
+        controller: SessionController,
+        new_session: NewSession | None = None,
+        *,
+        judge: JudgeSource | None = None,
+        progress: Callable[[str], None] | None = None,
+    ):
         self.controller = controller
         self.new_session = new_session
+        self.judge = judge
+        self.progress = progress or (lambda _line: None)
 
     async def run(self, text: str, *, message_id: str | None = None) -> CommandResult:
         name, _, argument = text.strip().partition(" ")
@@ -167,6 +182,65 @@ class Commands:
     async def _integrations(self, _: str) -> CommandResult:
         return CommandResult(
             "/integrations", "integrations", {"integrations": self.controller.integrations()}
+        )
+
+    async def _plugins(self, argument: str) -> CommandResult:
+        """`/plugins`: optional plugins and whether this project can use them.
+        `/plugins install NAME` shows what installing it changes; adding `--yes` does it:
+        the plugin's own environment, the project config and the policy lines it needs.
+        The user typing this is the approval; the assistant can only suggest it."""
+        from aibench.services.plugins import install, plan_install, plugin_status, session_plugins
+
+        root = self.controller.project_root
+        words = shlex.split(argument, posix=False)
+        if not words:
+            rows = plugin_status(root, self.controller.policy())
+            return CommandResult("/plugins", "plugins", {"plugins": rows})
+        usage = "usage: /plugins install NAME [--use-env PYTHON] [--yes]"
+        if words[0] != "install" or len(words) < 2:
+            return CommandResult("/plugins", "error", {"error": usage}, ok=False)
+        name, options = words[1], words[2:]
+        existing: Path | None = None
+        if "--use-env" in options:
+            index = options.index("--use-env")
+            if index + 1 >= len(options):
+                return CommandResult("/plugins", "error", {"error": usage}, ok=False)
+            existing = Path(options[index + 1].strip('"'))
+        judge, secrets = self.judge if self.judge else (None, {})
+        policy = self.controller.session.policy_path
+        plan = plan_install(
+            name,
+            root,
+            policy_path=Path(policy) if policy else None,
+            judge=judge,
+            secret_env=secrets,
+            existing_python=existing,
+        )
+        if "--yes" not in options:
+            confirm = f"/plugins install {argument.split(maxsplit=1)[1]} --yes"
+            return CommandResult(
+                "/plugins", "plugin_preview", {**plan.summary(), "confirm": confirm}
+            )
+        if self.controller.active_run() is not None:
+            return CommandResult(
+                "/plugins",
+                "error",
+                {"error": "a run is active in this session; /pause, /stop or wait first"},
+                ok=False,
+            )
+        done = await asyncio.to_thread(install, plan, self.progress)
+        environments, defaults = session_plugins(root)
+        result = self.controller.use_plugin_environments(environments, defaults)
+        return CommandResult(
+            "/plugins",
+            "plugin_installed",
+            {
+                **done,
+                "revision": result.revision,
+                "status": result.status,
+                "problems": result.problems,
+            },
+            ok=result.status == "applied",
         )
 
     async def _app(self, _: str) -> CommandResult:

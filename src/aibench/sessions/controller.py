@@ -264,6 +264,7 @@ class SessionController:
         policy_path: Path | None = None,
         trusted_local: bool = False,
         plugin_environments: tuple[PluginEnvironmentRef, ...] = (),
+        evaluator_defaults: dict[str, dict[str, Any]] | None = None,
         environ: dict[str, str] | None = None,
     ) -> SessionController:
         """Open a new session with its first draft (revision 1)."""
@@ -274,6 +275,7 @@ class SessionController:
             policy_path=str(policy_path.resolve()) if policy_path else None,
             trusted_local=trusted_local,
             plugin_environments=tuple(e.model_dump(mode="json") for e in plugin_environments),
+            evaluator_defaults=evaluator_defaults or {},
             revision=1,
         )
         choices = SessionChoices(
@@ -364,6 +366,13 @@ class SessionController:
         from aibench.services.integrations import integrations
 
         return integrations(self.policy())
+
+    def optional_plugins(self) -> list[dict[str, Any]]:
+        """Optional metric plugins, their state in this project and how to enable them.
+        Reads files only."""
+        from aibench.services.plugins import plugin_status
+
+        return plugin_status(self.project_root, self.policy())
 
     def inputs(self) -> PlanningInputs:
         """Evidence for the current revision (profile, dataset counts, catalog), cached."""
@@ -665,6 +674,61 @@ class SessionController:
                 expected_revision=expected_revision,
                 questions=draft.questions(),
                 answered=patch.answers,
+            )
+        except StaleRevision as exc:
+            return PatchResult("stale", exc.current, problems=[str(exc)], active_run=active)
+        self._inputs = (revision, draft.inputs)
+        return PatchResult("applied", updated.revision, decision=decision, active_run=active)
+
+    def use_plugin_environments(
+        self,
+        environments: tuple[PluginEnvironmentRef, ...],
+        defaults: dict[str, dict[str, Any]],
+    ) -> PatchResult:
+        """Make these plugin environments (and their parameter defaults) the session's, then
+        redraft the current choices as the next revision, so the catalog, questions and
+        metrics reflect what is now installed. Never touches a run."""
+        session = self.session
+        active = self.active_run(session)
+        self.store.update_session(
+            self.session_id,
+            plugin_environments=tuple(e.model_dump(mode="json") for e in environments),
+            evaluator_defaults=defaults,
+        )
+        session = self.session
+        current = self.current_decision()
+        revision = session.revision + 1
+        try:
+            draft = build_draft(
+                session,
+                current.choices,
+                revision=revision,
+                directory=self.directory,
+                supersedes=current.plan_hash,
+            )
+        except AibenchError as exc:
+            problems = exc.problems if isinstance(exc, PatchRejected) else [str(exc)]
+            return PatchResult("rejected", session.revision, problems=problems)
+        decision = DecisionRecord(
+            decision_id=f"{self.session_id}:d{revision}",
+            session_id=self.session_id,
+            source_turn_id=None,
+            source="user",
+            revision=revision,
+            supersedes=current.decision_id,
+            structured_change={"plugin_environments": [e.python for e in environments]},
+            choices=current.choices,
+            plan_file=draft.plan_file,
+            plan_hash=draft.plan_hash,
+            executable=draft.executable,
+            draft=draft.document.model_dump(mode="json"),
+        )
+        try:
+            updated = self.store.commit_decision(
+                decision,
+                expected_revision=session.revision,
+                questions=draft.questions(),
+                answered=(),
             )
         except StaleRevision as exc:
             return PatchResult("stale", exc.current, problems=[str(exc)], active_run=active)

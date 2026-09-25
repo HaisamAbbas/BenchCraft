@@ -386,6 +386,126 @@ def list_plugins(json_output: bool = _JSON) -> None:
     console.print(safe(data["note"]))
 
 
+_PROJECT = typer.Option(None, "--project", help="Project directory (default: current).")
+_JUDGE_PROVIDER = typer.Option(
+    None,
+    "--judge-provider",
+    help="An OpenAI-compatible provider config (like the chat's) whose model judges.",
+)
+_USE_ENV = typer.Option(
+    None, "--use-env", help="Adopt an existing plugin environment's python instead."
+)
+_YES = typer.Option(False, "--yes", help="Apply without asking.")
+
+
+def _project_policy(root: Path) -> Path | None:
+    from aibench.cli.chat import project_settings
+
+    return project_settings(root, None, None, None)["policy"]
+
+
+@plugins_app.command("status")
+def plugins_status(project: Path | None = _PROJECT, json_output: bool = _JSON) -> None:
+    """Optional evaluator plugins (DeepEval, Ragas): installed for this project, allowed by
+    its policy, and how to enable them. Starts nothing."""
+    from aibench.engine.compile import load_policy
+    from aibench.services.plugins import plugin_status
+
+    root = (project or Path.cwd()).resolve()
+    try:
+        rows = plugin_status(root, load_policy(_project_policy(root)))
+    except AibenchError as exc:
+        err_console.print(f"[red]{safe(str(exc))}[/red]")
+        raise typer.Exit(code=2) from exc
+    if json_output:
+        console.print_json(data={"plugins": rows})
+        return
+    for row in rows:
+        console.print(
+            f"[bold]{safe(row['name'])}[/bold] {safe(row['state'])}: {safe(row['summary'])}"
+        )
+        for missing in row["missing"]:
+            console.print(f"  [yellow]needs:[/yellow] {safe(missing)}")
+        if row["state"] != "installed":
+            console.print(f"  enable: aibench plugins install {safe(row['name'])}")
+
+
+@plugins_app.command("install")
+def plugins_install(
+    name: str = typer.Argument(..., help="The optional plugin, e.g. deepeval."),
+    project: Path | None = _PROJECT,
+    judge_provider: Path | None = _JUDGE_PROVIDER,
+    use_env: Path | None = _USE_ENV,
+    yes: bool = _YES,
+    json_output: bool = _JSON,
+) -> None:
+    """Install an optional evaluator plugin for this project: its own environment, the
+    project config entry and the policy lines it needs (the old policy is kept as .bak)."""
+    from aibench.services.plugins import install, judge_from_provider, plan_install
+
+    root = (project or Path.cwd()).resolve()
+    try:
+        judge: dict[str, Any] | None = None
+        secrets: dict[str, str] = {}
+        if judge_provider is not None:
+            from aibench.cli.chat import provider_config
+
+            config = provider_config(judge_provider)
+            judge, secrets = judge_from_provider(
+                config.base_url, config.model, str(config.api_key) if config.api_key else None
+            )
+        plan = plan_install(
+            name,
+            root,
+            policy_path=_project_policy(root),
+            judge=judge,
+            secret_env=secrets,
+            existing_python=use_env,
+        )
+    except AibenchError as exc:
+        err_console.print(f"[red]{safe(str(exc))}[/red]")
+        raise typer.Exit(code=2) from exc
+    summary = plan.summary()
+    if not json_output:
+        for line in install_preview(summary):
+            console.print(line)
+    if not yes and not typer.confirm("Go ahead?", default=False):
+        raise typer.Exit(code=1)
+    try:
+        done = install(plan, progress=lambda line: err_console.print(f"[dim]{safe(line)}[/dim]"))
+    except AibenchError as exc:
+        err_console.print(f"[red]{safe(str(exc))}[/red]")
+        raise typer.Exit(code=1) from exc
+    if json_output:
+        console.print_json(data=done)
+        return
+    console.print(
+        f"[green]{safe(name)} installed[/green]: {len(done['evaluators'])} metric(s) "
+        "available to new chat sessions (/plugins install in an open chat adds them there)"
+    )
+
+
+def install_preview(summary: dict[str, Any]) -> list[str]:
+    """What an install will change, as terminal lines (shared with the chat's /plugins)."""
+    where = "create" if summary["creates_environment"] else "use"
+    lines = [
+        f"[bold]install {safe(summary['plugin'])}[/bold] ({safe(summary['package'])})",
+        f"  {where} environment: {safe(summary['environment'])}",
+        f"  metrics: {safe(', '.join(summary['metrics']))}",
+    ]
+    if summary["judge"]:
+        lines.append(f"  judge: {safe(summary['judge'])} (paid calls to that provider)")
+    for name, ref in summary["secret_env"].items():
+        lines.append(f"  judge key: {safe(ref)} passed to its workers as {safe(name)}")
+    lines.append(f"  project config: {safe(summary['config'])} (plugin_environments)")
+    if summary["policy_changes"]:
+        lines.append(f"  policy {safe(summary['policy'])}:")
+        lines += [f"    {safe(change)}" for change in summary["policy_changes"]]
+    else:
+        lines.append("  policy: no change needed")
+    return lines
+
+
 def compare(
     baseline: str = typer.Argument(..., help="Baseline run ID."),
     current: str = typer.Argument(..., help="Current run ID."),

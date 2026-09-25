@@ -230,7 +230,7 @@ class WorkerEvaluator(Evaluator):
     async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
         await self.ensure_ready()  # no-op when the scorer already did it
         case, execution = project_worker_view(
-            view.case, view.execution, self.manifest.requires
+            view.case, view.execution, self.required_fields(self.params)
         )
         request = {
             "op": "evaluate",

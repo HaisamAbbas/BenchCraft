@@ -514,6 +514,14 @@ Rules:
   stays a coverage gap; never describe it as measured. A plan-only request must not run.
 - Use rescore_run only when the latest user message explicitly asks to rescore a stored run;
   it uses this session's validated current draft and stored executions.
+- Optional plugins (DeepEval, Ragas) add metrics beyond the installed ones. When the user
+  asks for a framework or a metric list_evaluators lacks, call list_optional_plugins, say
+  what the plugin offers and what it does not, and that the user can enable it by typing
+  its enable command (e.g. /plugins install deepeval), which shows the environment, policy
+  and judge changes before anything changes. You cannot install plugins or change the
+  policy; never say a listed plugin does not exist. Once installed, its metrics are chosen
+  like any other: from the objectives' concepts (objective_concepts); parameters only the
+  user can give (G-Eval criteria, a role, a domain) come from the draft's questions.
 - Ask a question (ask_user) only when the answer changes the benchmark; at most two.
 - While a run is active, questions and explanations never affect it. A change to the
   dataset, metrics, thresholds or sampling creates a new draft revision; the active run
@@ -573,6 +581,13 @@ def tool_specs() -> list[dict[str, Any]]:
         ),
         _tool("summarize_dataset", "Dataset field coverage counts (no values).", _NO_ARGS),
         _tool("list_evaluators", "Installed evaluators with eligibility.", _NO_ARGS),
+        _tool(
+            "list_optional_plugins",
+            "Optional metric plugins (DeepEval, Ragas): their metrics, what they do not "
+            "include, whether this project has them installed and allowed, and the command "
+            "the user types to enable one. You cannot install them.",
+            _NO_ARGS,
+        ),
         _tool(
             "list_integrations",
             "External integrations (openai/evals, the OpenAI Evals API, Langfuse): supported "
@@ -925,6 +940,7 @@ class _Turn:
             "summarize_dataset": self._read(lambda i: json.loads(i.dataset.model_dump_json())),
             "list_evaluators": self._read(lambda i: [o.as_dict() for o in i.catalog]),
             "list_integrations": self._integrations,
+            "list_optional_plugins": self._optional_plugins,
             "describe_evaluator": self._describe,
             "explain_metric": self._explain,
             "propose_plan_patch": self._patch,
@@ -996,6 +1012,10 @@ class _Turn:
     async def _integrations(self, _: dict[str, Any]) -> Any:
         self.outcome.explained.append({"tool": "list_integrations", "subject": "integrations"})
         return self.controller.integrations()
+
+    async def _optional_plugins(self, _: dict[str, Any]) -> Any:
+        self.outcome.explained.append({"tool": "list_optional_plugins", "subject": "plugins"})
+        return self.controller.optional_plugins()
 
     async def _describe_application(self, _: dict[str, Any]) -> Any:
         self.outcome.explained.append({"tool": "describe_application", "subject": "application"})

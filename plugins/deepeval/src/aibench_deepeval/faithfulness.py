@@ -30,7 +30,6 @@ metadata only; the harness applies its own frozen rule. Unknown judge cost stays
 
 from __future__ import annotations
 
-import importlib
 import importlib.metadata
 import json
 import os
@@ -44,6 +43,7 @@ from aibench.evaluators.protocol import (
     EvaluatorContext,
 )
 from aibench_deepeval._version import __version__
+from aibench_deepeval.judges import JUDGE_SCHEMA, build_judge, report_judge_usage
 
 PINNED_DEEPEVAL = "4.2.5"
 
@@ -103,6 +103,7 @@ class Faithfulness(Evaluator):
             "Not numerically equivalent to Ragas faithfulness.",
             "An answer with no extractable claims is not applicable (upstream would give 1.0).",
         ),
+        concepts=("groundedness",),
         value_kind="scalar",
         direction=MetricDirection.HIGHER,
         aggregation="mean",
@@ -117,31 +118,7 @@ class Faithfulness(Evaluator):
             "additionalProperties": False,
             "required": ["judge"],
             "properties": {
-                "judge": {
-                    "oneOf": [
-                        {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["kind", "model"],
-                            "properties": {
-                                "kind": {"const": "deepeval_model"},
-                                "model": {"type": "string", "minLength": 1},
-                            },
-                        },
-                        {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["kind", "factory"],
-                            "properties": {
-                                "kind": {"const": "python_factory"},
-                                "factory": {
-                                    "type": "string",
-                                    "pattern": r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$",
-                                },
-                            },
-                        },
-                    ]
-                },
+                "judge": JUDGE_SCHEMA,
                 "truths_extraction_limit": {"type": "integer", "minimum": 1},
                 "penalize_ambiguous_claims": {"type": "boolean"},
                 "empty_context_policy": {"enum": ["not_applicable"]},
@@ -163,19 +140,7 @@ class Faithfulness(Evaluator):
         _require_pinned_deepeval()
         import deepeval.metrics  # noqa: F401 - import once up front so failures surface here
 
-        self._new_judge()  # validate the judge configuration before any case runs
-
-    def _new_judge(self) -> Any:
-        judge = self.params["judge"]
-        if judge["kind"] == "deepeval_model":
-            return judge["model"]  # resolved by DeepEval's native model support
-        from deepeval.models import DeepEvalBaseLLM
-
-        module_name, _, attribute = judge["factory"].partition(":")
-        instance = getattr(importlib.import_module(module_name), attribute)()
-        if not isinstance(instance, DeepEvalBaseLLM):
-            raise TypeError(f"{judge['factory']} did not return a DeepEvalBaseLLM")
-        return instance
+        build_judge(self.params["judge"])  # validate the judge before any case runs
 
     async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
         from deepeval.metrics import FaithfulnessMetric
@@ -188,9 +153,10 @@ class Faithfulness(Evaluator):
         if not [chunk for chunk in view.get("execution.retrieved_context") if chunk.strip()]:
             return EvaluationOutcome.not_applicable("empty:execution.retrieved_context")
 
+        judge = build_judge(self.params["judge"])
         metric = FaithfulnessMetric(
             threshold=0.5,  # upstream flag only; the harness decides with its own rule
-            model=self._new_judge(),
+            model=judge,
             include_reason=True,
             async_mode=True,
             strict_mode=False,
@@ -198,22 +164,11 @@ class Faithfulness(Evaluator):
             truths_extraction_limit=self.params.get("truths_extraction_limit"),
             penalize_ambiguous_claims=self.params.get("penalize_ambiguous_claims", False),
         )
-        score = await metric.a_measure(build_test_case(view), _show_indicator=False)
-
+        try:
+            score = await metric.a_measure(build_test_case(view), _show_indicator=False)
+        finally:
+            report_judge_usage(ctx, metric, judge)
         cost = metric.evaluation_cost  # None for custom judges: unknown, not zero
-        tokens = {
-            k: v
-            for k, v in (("input", metric.input_tokens), ("output", metric.output_tokens))
-            if isinstance(v, int)
-        }
-        if cost is not None or tokens:
-            # Native judges: report what DeepEval measured; the call count is not exposed.
-            ctx.report_usage(
-                provider=metric.evaluation_model,
-                calls=None,
-                tokens=tokens,
-                cost=None if cost is None else float(cost),
-            )
         if not metric.claims:
             return EvaluationOutcome.not_applicable("no_claims")
         return EvaluationOutcome.ok(

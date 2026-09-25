@@ -83,6 +83,7 @@ Inside the chat:
 | `/failures` | The failed case and the application failure |
 | `/case support-004` | The question, the reference answer, the app's answer and what it retrieved |
 | `/report` | Report summary in the terminal, plus `report.html` and `report.json` under `.aibench/reports/RUN_ID/` |
+| `/plugins` | Optional metric plugins (DeepEval, Ragas). `/plugins install deepeval` shows what installing it changes; add `--yes` to do it, with the assistant's model as judge |
 | `/themes` | Lists the colour themes (red `crimson` by default). `/themes ocean` switches and saves the choice in `.aibench/ui.json` |
 | `/exit` | Leave. Reopening with `aibench` restores the session and never restarts a run |
 

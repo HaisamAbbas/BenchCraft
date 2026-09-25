@@ -219,6 +219,9 @@ class BenchmarkSession(FrozenModel):
     policy_path: str | None = None
     trusted_local: bool = False  # the user's explicit grant when the session was opened
     plugin_environments: tuple[FrozenValue, ...] = ()  # PluginEnvironmentRef dumps
+    # Project-configured parameters by evaluator-ID pattern (e.g. the judge for
+    # `deepeval.*`), filled into plans where the user gave none (planning.catalog).
+    evaluator_defaults: FrozenValue = Field(default_factory=dict)
     revision: int = Field(ge=0)
     decision_id: str | None = None  # the current draft's decision
     presented_revision: int | None = None  # the latest revision shown to the user

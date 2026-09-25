@@ -3,7 +3,8 @@ the left and the commands on the right, coloured by the active theme.
 
 Block and box-drawing characters are used only when the console's encoding can print them;
 otherwise the logo and separators fall back to ASCII, so a legacy Windows code page still
-gets a readable banner. The logo is skipped on terminals too narrow to hold it.
+gets a readable banner. A terminal too narrow for the one-line logo gets BENCH stacked over
+CRAFT; one too narrow for that gets no logo.
 """
 
 from __future__ import annotations
@@ -27,6 +28,12 @@ BLOCK_LOGO = (
     "╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝        ╚═╝   ",
 )
 
+_BENCH_WIDTH = 42  # B, E, N, C, H: the columns before CRAFT in BLOCK_LOGO
+
+STACKED_LOGO = tuple(row[:_BENCH_WIDTH] for row in BLOCK_LOGO) + tuple(
+    row[_BENCH_WIDTH:] for row in BLOCK_LOGO
+)
+
 ASCII_LOGO = (
     r" ____                  _      ____            __ _   ",
     r"| __ )  ___ _ __   ___| |__  / ___|_ __ __ _ / _| |_ ",
@@ -40,14 +47,14 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("plan", ("/plan", "/run", "/world", "/app")),
     ("run", ("/status", "/pause", "/resume", "/stop", "/budget")),
     ("results", ("/failures", "/case", "/report", "/compare")),
-    ("session", ("/sessions", "/new", "/integrations", "/themes", "/help", "/exit")),
+    ("session", ("/sessions", "/new", "/integrations", "/plugins", "/themes", "/help", "/exit")),
 )
 
-_UNICODE_PROBE = BLOCK_LOGO[0] + BLOCK_LOGO[-1] + "·❯"
+_UNICODE_PROBE = BLOCK_LOGO[0] + BLOCK_LOGO[-1] + "·❯◆•│─"
 
 
 def unicode_ok(console: Console) -> bool:
-    """Whether the console can print the block logo, middle dot and prompt glyph."""
+    """Whether the console can print the block logo and the terminal's other glyphs."""
     try:
         _UNICODE_PROBE.encode(console.encoding)
     except (UnicodeEncodeError, LookupError):
@@ -56,14 +63,23 @@ def unicode_ok(console: Console) -> bool:
 
 
 def logo(console: Console, theme: Theme) -> Text | None:
-    """The logo in the theme's top-to-bottom gradient, or None when it would not fit."""
-    rows = BLOCK_LOGO if unicode_ok(console) else ASCII_LOGO
-    if console.width < len(rows[0]) + 2:
+    """The widest logo that fits, each word in the theme's top-to-bottom gradient; None when
+    none fits."""
+    layouts = (
+        ((BLOCK_LOGO, len(BLOCK_LOGO)), (STACKED_LOGO, len(BLOCK_LOGO)))
+        if unicode_ok(console)
+        else ((ASCII_LOGO, len(ASCII_LOGO)),)
+    )
+    for rows, band in layouts:
+        if console.width >= max(len(row.rstrip()) for row in rows) + 2:
+            break
+    else:
         return None
     text = Text(no_wrap=True, overflow="crop")
     for index, row in enumerate(rows):
-        colour = theme.logo[index * len(theme.logo) // len(rows)]
-        text.append(row.rstrip() + "\n", style=f"bold {colour}" if index < 2 else colour)
+        line = index % band  # the gradient restarts for each stacked word
+        colour = theme.logo[line * len(theme.logo) // band]
+        text.append(row.rstrip() + "\n", style=f"bold {colour}" if line < 2 else colour)
     text.rstrip()
     return text
 

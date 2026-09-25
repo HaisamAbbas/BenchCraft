@@ -1147,11 +1147,18 @@ class EvaluatorManifest(FrozenModel):
     core_schema: str = ">=1.0.0,<2.0.0"
     description: str
     limitations: tuple[str, ...] = ()
+    # What the metric measures, in the planner's concept vocabulary (planning.catalog). When
+    # empty, concepts are read from the fields the metric requires.
+    concepts: tuple[str, ...] = ()
     value_kind: ValueKind
     direction: MetricDirection
     scope: MetricScope = MetricScope.CASE
     aggregation: Literal["rate", "mean", "category_counts", "none"]
     requires: tuple[FieldRequirement, ...] = ()
+    # Fields a parameter adds, when the metric reads what the plan names: parameter ->
+    # listed value -> requirement, e.g. {"evaluation_params": {"expected_output":
+    # {"path": "case.reference.answer", "non_empty": true}}}. Read by `required_fields`.
+    parameter_requirements: FrozenValue = Field(default_factory=dict)
     default_rule: DecisionRule | None = None
     parameters_schema: FrozenValue = Field(default_factory=dict)
     # recorded_outputs: scores stored executions per case (the default).

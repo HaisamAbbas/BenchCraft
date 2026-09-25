@@ -218,6 +218,7 @@ def planning_inputs(
         rules=dict(choices.rules),
         test_world=choices.test_world,
         source_root=Path(session.project_root),
+        default_params=deep_unfreeze(session.evaluator_defaults) or {},
     )
     inputs = gathered.inputs
     inputs.context = replace(inputs.context, revision=revision)

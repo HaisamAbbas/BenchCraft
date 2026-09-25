@@ -8,11 +8,14 @@ assistant turns, run progress and the engine, each independently cancellable.
 - Slash commands run at once, even while the assistant is replying, and never wait for a
   model (09-G2, 09-G3). Messages go to a turn worker, one at a time, in order.
 - Replies stream: text fragments are shown as they arrive, grouped into whole lines so
-  they do not tear the prompt, with a compact card per tool call.
+  they do not tear the prompt, with a compact card per tool call. Their Markdown is shown
+  styled and wrapped to the terminal's width (`tui.reply`), under a label per reply.
 - Progress comes from committed run events, polled and coalesced: a line on each state
   change and at most one per interval otherwise, never one message per case. The bottom
   toolbar shows project, session, revision and the run's live state.
-- Ctrl+C interrupts the assistant's reply, never a benchmark; with a run active it points
+- A sent message is redrawn as a tinted band; while the assistant replies, a spinning
+  `Working (Ns)` line sits above the input.
+- Esc or Ctrl+C interrupts the assistant's reply, never a benchmark; with a run active it points
   to /pause and /stop. /stop is the explicit cancel. Leaving (/exit, Ctrl+D) stops new
   dispatch, lets in-flight work finish and keeps the run resumable; reopening a session
   never restarts work (09-T4).
@@ -31,6 +34,7 @@ from typing import Any
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.history import FileHistory, History, InMemoryHistory
 from prompt_toolkit.input import Input
@@ -42,17 +46,20 @@ from rich.console import Console
 
 from aibench.conversation.agent import ConversationAgent, TurnEvent, TurnLimits, TurnOutcome
 from aibench.planning.planner import PlannerProvider
+from aibench.services.plugins import judge_from_provider
 from aibench.services.runs import RunError
 from aibench.sessions.controller import SessionController
 from aibench.tui import banner, render
-from aibench.tui.commands import COMMANDS, CommandResult, Commands, NewSession
+from aibench.tui.commands import COMMANDS, CommandResult, Commands, JudgeSource, NewSession
 from aibench.tui.render import safe
+from aibench.tui.reply import ReplyFormatter, user_band
 from aibench.tui.themes import THEMES, Theme, load_theme, save_theme
 
-_WRAP = 88  # stream a partial line once it grows this long, at a word boundary
-
-
 MAX_REPLAYED = 10  # notable missed events shown on reopening; the rest are counted
+
+_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_ASCII_SPINNER = "|/-\\"
+_FRAME_SECONDS = 0.1  # how often the Working line redraws while the assistant replies
 
 # Commands of the interactive terminal itself: they change only how it looks, so they are
 # handled here rather than recorded in the session like the benchmark controls.
@@ -147,6 +154,12 @@ def render_result(console: Console, result: CommandResult) -> None:
         render.application(console, data)
     elif kind == "integrations":
         render.integrations(console, data)
+    elif kind == "plugins":
+        render.plugins(console, data)
+    elif kind == "plugin_preview":
+        render.plugin_preview(console, data)
+    elif kind == "plugin_installed":
+        render.plugin_installed(console, data)
     elif kind == "report":
         render.report(console, data)
     elif kind == "comparison":
@@ -198,6 +211,8 @@ class ChatApp:
         self._turn: asyncio.Task[TurnOutcome] | None = None
         self._stream = ""
         self._streamed = False
+        self._turn_started = 0.0
+        self._new_reply()
         self._toolbar = ""
         self._exit = False
         self._use(controller)
@@ -205,7 +220,12 @@ class ChatApp:
     def _use(self, controller: SessionController) -> None:
         self.controller = controller
         self.agent = ConversationAgent(controller, self.provider, self.limits)
-        self.commands = Commands(controller, self.new_session)
+        self.commands = Commands(
+            controller,
+            self.new_session,
+            judge=self._judge(),
+            progress=lambda line: self.say(f"[dim]{safe(line)}[/dim]"),
+        )
         self._seen_run: str | None = None
         self._last_sequence = 0
         self._last_state: str | None = None
@@ -217,13 +237,48 @@ class ChatApp:
     def say(self, text: str) -> None:
         render.out(self.console, text)
 
+    def _judge(self) -> JudgeSource | None:
+        """The assistant's own model, offered as the judge when a plugin is installed."""
+        config = getattr(self.provider, "config", None)
+        if config is None or not getattr(config, "base_url", None):
+            return None
+        api_key = str(config.api_key) if config.api_key else None
+        return judge_from_provider(config.base_url, config.model, api_key)
+
+    def _new_reply(self) -> None:
+        self._reply = ReplyFormatter(self.theme, unicode=banner.unicode_ok(self.console))
+        self._labelled = False
+
     def _set_theme(self, theme: Theme) -> None:
         self.theme = theme
         self._prompt_style = theme.prompt_style()
 
+    def replying(self) -> bool:
+        return self._turn is not None and not self._turn.done()
+
     def _prompt_message(self) -> StyleAndTextTuples:
-        glyph = "❯ " if banner.unicode_ok(self.console) else "> "
-        return [("class:prompt", glyph)]
+        """The input prompt, under a live `Working` line while the assistant replies."""
+        unicode = banner.unicode_ok(self.console)
+        prompt = ("class:prompt", "❯ " if unicode else "> ")
+        if not self.replying():
+            return [prompt]
+        frames = _SPINNER if unicode else _ASCII_SPINNER
+        frame = frames[int(time.monotonic() * 10) % len(frames)]
+        elapsed = int(time.monotonic() - self._turn_started)
+        dot = "·" if unicode else "|"
+        return [
+            ("class:working.spinner", f"{frame} "),
+            ("class:working", f"Working ({elapsed}s {dot} "),
+            ("class:working.key", "esc"),
+            ("class:working", " to interrupt)\n"),
+            prompt,
+        ]
+
+    def _echo(self, text: str) -> None:
+        """Redraw a sent message as a tinted band (the prompt erases its own line)."""
+        band = user_band(text, self.theme, unicode=banner.unicode_ok(self.console))
+        render.out(self.console, "")
+        render.out(self.console, band)
 
     def _banner(self) -> None:
         session = self.controller.session
@@ -287,19 +342,29 @@ class ChatApp:
     def _flush_stream(self, *, final: bool) -> None:
         while "\n" in self._stream:
             line, self._stream = self._stream.split("\n", 1)
-            self.say(safe(line))
-        while len(self._stream) > _WRAP and " " in self._stream[:_WRAP]:
-            cut = self._stream.rfind(" ", 0, _WRAP)
-            self.say(safe(self._stream[:cut]))
-            self._stream = self._stream[cut + 1 :]
-        if final and self._stream:
-            self.say(safe(self._stream))
-            self._stream = ""
+            self._reply_line(line, complete=True)
+        if self._stream:
+            self._stream = self._reply_line(self._stream, complete=final)
+        elif final:
+            self._reply.finish()
+
+    def _reply_line(self, text: str, *, complete: bool) -> str:
+        """Print what is ready of one reply line; return the part still streaming."""
+        lines, rest = self._reply.feed(text, self.console.width, complete=complete)
+        if lines and not self._labelled:
+            self._labelled = True
+            mark = "\u25c6" if banner.unicode_ok(self.console) else "*"
+            model = f" [{self.theme.dim}]{safe(self.provider.model)}[/]" if self.provider else ""
+            self.say(f"\n[bold {self.theme.accent}]{mark} BenchCraft[/]{model}")
+        for line in lines:
+            render.out(self.console, line)
+        return rest
 
     def _show_outcome(self, outcome: TurnOutcome, streamed: bool) -> None:
         self._flush_stream(final=True)
         if not streamed and outcome.text:
-            self.say(safe(outcome.text))
+            for line in outcome.text.split("\n"):
+                self._reply_line(line, complete=True)
         if outcome.presented_draft is not None:
             render.draft(self.console, outcome.presented_draft)
         self.say(f"[dim]({safe(outcome.status_line)})[/dim]")
@@ -310,6 +375,8 @@ class ChatApp:
         while True:
             text = await self._queue.get()
             self._streamed = False
+            self._new_reply()
+            self._turn_started = time.monotonic()
             self._turn = asyncio.ensure_future(
                 self.agent.handle_message(text, on_event=self._on_event)
             )
@@ -331,10 +398,14 @@ class ChatApp:
         suffix = f" Run {run} keeps going: /pause or /stop to control it." if run else ""
         self.say(f"[yellow]Reply interrupted.[/yellow]{suffix}")
 
-    def on_ctrl_c(self) -> None:
-        """Ctrl+C: interrupt the reply in progress; never a benchmark (§13)."""
+    def interrupt_reply(self) -> None:
+        """Esc or Ctrl+C: stop the assistant's reply in progress; never a benchmark (§13)."""
         if self._turn is not None and not self._turn.done():
             self._turn.cancel()
+
+    def on_ctrl_c(self) -> None:
+        if self.replying():
+            self.interrupt_reply()
             return
         run = self.controller.active_run()
         if run:
@@ -395,7 +466,7 @@ class ChatApp:
                 self._exit = True
             return
         if self._turn is not None and not self._turn.done():
-            self.say("[dim](queued: the assistant is still replying; Ctrl+C interrupts it)[/dim]")
+            self.say("[dim](queued: the assistant is still replying; Esc interrupts it)[/dim]")
         await self._queue.put(text)
 
     def themes(self, argument: str) -> None:
@@ -426,14 +497,33 @@ class ChatApp:
             f"[bold {chosen.accent}]{chosen.name}[/]{saved}"
         )
 
+    async def _animate(self, session: PromptSession[str]) -> None:
+        """Redraw the prompt while a reply is in progress, and once after, so the Working
+        line spins, counts seconds, and disappears when the reply ends."""
+        was_replying = False
+        while True:
+            await asyncio.sleep(_FRAME_SECONDS)
+            replying = self.replying()
+            if replying or was_replying:
+                session.app.invalidate()
+            was_replying = replying
+
     async def run(self) -> None:
+        bindings = key_bindings()
+
+        # Esc then Enter still adds a line: prompt_toolkit waits briefly for the second key.
+        @bindings.add("escape", filter=Condition(self.replying))
+        def _interrupt(event: KeyPressEvent) -> None:
+            self.interrupt_reply()
+
         session: PromptSession[str] = PromptSession(
             history=self.history,
             completer=SlashCompleter(),
-            key_bindings=key_bindings(),
+            key_bindings=bindings,
             style=DynamicStyle(lambda: self._prompt_style),
             bottom_toolbar=self.toolbar,
             refresh_interval=self.progress_interval,
+            erase_when_done=True,
             input=self.input,
             output=self.output,
         )
@@ -450,6 +540,7 @@ class ChatApp:
             self._banner()
             worker = asyncio.ensure_future(self._turn_worker())
             watcher = asyncio.ensure_future(self._watch())
+            animator = asyncio.ensure_future(self._animate(session))
             try:
                 while not self._exit:
                     try:
@@ -459,9 +550,11 @@ class ChatApp:
                         continue
                     except EOFError:
                         break
+                    if text.strip():
+                        self._echo(text.strip())
                     await self.handle_input(text)
             finally:
-                await self.shutdown(worker, watcher)
+                await self.shutdown(worker, watcher, animator)
 
     async def shutdown(self, *tasks: asyncio.Task[Any]) -> None:
         if self._turn is not None and not self._turn.done():

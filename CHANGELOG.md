@@ -5,6 +5,28 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased — DeepEval metrics for the assistant
+
+- `aibench-deepeval` 0.2.0rc1 wraps every DeepEval 4.2.5 single-turn metric aibench's
+  recorded data can feed (21, including G-Eval with plan-stated criteria), each with a
+  documented field mapping and not-applicable policy. A built-in `openai_compatible` judge
+  runs them on any Chat Completions endpoint (e.g. GLM on Z.ai) and counts its calls.
+- `aibench plugins install NAME` / `/plugins install NAME` create a plugin environment for
+  the project, record it and its judge default in `aibench.json`, and apply the policy
+  lines it needs after showing them (the old policy is kept as `.bak`). `aibench plugins
+  status` and `/plugins` show each optional plugin's state. The assistant's new
+  `list_optional_plugins` tool lets it explain a plugin and suggest the command; it cannot
+  install anything.
+- Chat sessions load the project's plugin environments. Planning knows new concepts
+  (relevancy, retrieval quality, bias, toxicity, privacy, misuse, advice, role adherence,
+  instruction following, summarization, task completion, tool arguments and permissions,
+  patterns, custom criteria) and fills project defaults such as the judge.
+- Evaluator manifests may declare `concepts` and `parameter_requirements` (fields a
+  parameter adds); a worker-run evaluator now receives the fields its parameters name.
+- Metric semantics: `deepeval.faithfulness@1` is unchanged; its plugin version moved to
+  0.2.0rc1, so strict comparisons against earlier faithfulness runs report a plugin
+  identity difference. Workspace: sessions gain `evaluator_defaults` (optional).
+
 ## Unreleased — terminal welcome screen and themes
 
 - `aibench chat` opens with a BENCHCRAFT block logo over a bordered panel showing the

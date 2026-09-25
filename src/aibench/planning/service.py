@@ -18,7 +18,7 @@ import json
 import os
 import re
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -35,7 +35,7 @@ from aibench.engine.compile import freeze_plan, load_plan
 from aibench.inspection.dataset_summary import summarize_dataset
 from aibench.inspection.profile import inspect_application
 from aibench.inspection.source import CodebaseInspector
-from aibench.planning.catalog import build_catalog
+from aibench.planning.catalog import build_catalog, with_default_params
 from aibench.planning.drafts import DraftContext, PlanDraft, draft_document
 from aibench.planning.planner import PlanningInputs, PlanningOutcome
 from aibench.registry import EvaluatorRegistry, RegistryError
@@ -184,7 +184,11 @@ def gather_inputs(
     run_ids: Iterable[str] = (),
     test_world: str | None = None,
     source_root: Path | None = None,
+    default_params: Mapping[str, Mapping[str, object]] | None = None,
 ) -> GatheredInputs:
+    """`default_params` are project-configured parameters by evaluator-ID pattern (e.g. a
+    judge for `deepeval.*`); they fill only parameters a metric accepts, and what the user
+    gave (`params`) wins."""
     effective = policy.with_trusted_local(trusted_local)
     out_dir = out.resolve().parent if out is not None else application.resolve().parent
     revision = next_revision(out)[0] if out is not None else 1
@@ -242,6 +246,10 @@ def gather_inputs(
         notes.extend(load_notes)
         context.plugin_problems = tuple(load_notes)  # blocking, as in the execution gate
     catalog = build_catalog(registry, profile, summary, effective)
+    if default_params:
+        context.user_params = with_default_params(
+            registry.manifests(), default_params, context.user_params
+        )
     context.registry = registry
     return GatheredInputs(PlanningInputs(objectives, profile, summary, catalog, context), notes)
 
