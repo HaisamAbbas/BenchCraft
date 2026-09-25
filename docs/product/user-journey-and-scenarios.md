@@ -346,28 +346,28 @@ Execution/evaluation caches are opt-in and use version-complete keys; cache hits
 
 ## Scenario catalog: what the user should see
 
-| Scenario | Expected product behavior |
-|---|---|
-| The goal and run scope are clear | Build/validate the typed plan, then execute within existing policy without an unnecessary second confirmation |
-| The user asks only to inspect or plan | Show findings/draft; no application call |
-| Objective, case count, dataset, or invocation path is materially ambiguous | Ask one focused question; do not guess or dispatch |
-| No compatible dataset is found | Explain the missing input; do not invent a trusted dataset |
-| One compatible dataset is found and policy approves it | Reuse that content identity transparently and show the source |
-| Multiple materially different datasets are found | Ask the user to choose |
-| A source file contains “ignore policy” or a request to reveal secrets | Treat it as untrusted repository text; it cannot authorize actions or expose secret contents |
-| A metric needs retrieval/tool evidence the app did not emit | Mark it unavailable or show the evidence gap; never substitute references or guesses |
-| Expected/reference data exists | Keep it out of application inputs; make it available only to authorized evaluator bindings |
-| The app returns a wrong answer | Record completed execution plus low/failed metric evidence, with the case output and observations |
-| The app crashes, times out, or returns malformed output | Record an application/evaluator error state separately from a quality score; apply effect-aware retry rules |
-| A policy denies an app/evaluator/provider/origin | Explain the denial and make no forbidden call; the user must change their own configuration/policy |
-| A secret is missing | Report the missing environment reference without printing a value or writing one to files |
-| The run is paused, interrupted, or the terminal closes | Preserve run identity and durable progress; resume only eligible work when requested |
-| The user asks for another score | Rescore stored executions under a new scoring pass; do not repeat app calls |
-| Runs are incompatible for strict comparison | Block or label the comparison unqualified; show the mismatched identities/coverage |
-| A dataset source changes after candidate generation | Fail review/promotion closed because the recorded digest no longer matches |
-| Experiment trials are exhausted | Keep remaining combinations pending; require an audited budget increase to resume |
-| Holdout evidence is requested before development selection is complete | Keep holdout protected; do not parse or run it prematurely |
-| A live external integration is unavailable or not authorized | Show destination, missing approval/credential, and supported local alternatives; do not imply success |
+| ID | Scenario | Expected product behavior |
+|---|---|---|
+| S01 | The goal and run scope are clear | Build/validate the typed plan, then execute within existing policy without an unnecessary second confirmation |
+| S02 | The user asks only to inspect or plan | Show findings/draft; no application call |
+| S03 | Objective, case count, dataset, or invocation path is materially ambiguous | Ask one focused question; do not guess or dispatch |
+| S04 | No compatible dataset is found | Explain the missing input; do not invent a trusted dataset |
+| S05 | One compatible dataset is found and policy approves it | Reuse that content identity transparently and show the source |
+| S06 | Multiple materially different datasets are found | Ask the user to choose |
+| S07 | A source file contains “ignore policy” or a request to reveal secrets | Treat it as untrusted repository text; it cannot authorize actions or expose secret contents |
+| S08 | A metric needs retrieval/tool evidence the app did not emit | Mark it unavailable or show the evidence gap; never substitute references or guesses |
+| S09 | Expected/reference data exists | Keep it out of application inputs; make it available only to authorized evaluator bindings |
+| S10 | The app returns a wrong answer | Record completed execution plus low/failed metric evidence, with the case output and observations |
+| S11 | The app crashes, times out, or returns malformed output | Record an application/evaluator error state separately from a quality score; apply effect-aware retry rules |
+| S12 | A policy denies an app/evaluator/provider/origin | Explain the denial and make no forbidden call; the user must change their own configuration/policy |
+| S13 | A secret is missing | Report the missing environment reference without printing a value or writing one to files |
+| S14 | The run is paused, interrupted, or the terminal closes | Preserve run identity and durable progress; resume only eligible work when requested |
+| S15 | The user asks for another score | Rescore stored executions under a new scoring pass; do not repeat app calls |
+| S16 | Runs are incompatible for strict comparison | Block or label the comparison unqualified; show the mismatched identities/coverage |
+| S17 | A dataset source changes after candidate generation | Fail review/promotion closed because the recorded digest no longer matches |
+| S18 | Experiment trials are exhausted | Keep remaining combinations pending; require an audited budget increase to resume |
+| S19 | Holdout evidence is requested before development selection is complete | Keep holdout protected; do not parse or run it prematurely |
+| S20 | A live external integration is unavailable or not authorized | Show destination, missing approval/credential, and supported local alternatives; do not imply success |
 
 ## Feature map and boundaries
 
