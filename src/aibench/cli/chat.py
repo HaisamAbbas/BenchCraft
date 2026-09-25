@@ -23,14 +23,14 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console
 
 from aibench.config.resolve import load_mapping_file, resolve_config
-from aibench.core.errors import AibenchError
+from aibench.core.errors import AibenchError, ConfigError
 from aibench.engine.compile import load_policy
 from aibench.inspection.candidates import (
     RepositoryCandidateInventory,
@@ -40,12 +40,16 @@ from aibench.inspection.candidates import (
 )
 from aibench.planning.planner import PlannerProvider
 from aibench.security.redaction import sanitize_value
+from aibench.services.plugins import session_plugins
 from aibench.sessions.controller import SessionController
 from aibench.sessions.store import SessionStore
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
 from aibench.tui.render import safe
+
+if TYPE_CHECKING:
+    from aibench.planning.openai_provider import OpenAICompatibleConfig
 
 console = Console(highlight=False, emoji=False)
 err_console = Console(stderr=True, highlight=False, emoji=False)
@@ -90,20 +94,26 @@ def project_settings(
     }
 
 
+def provider_config(config_path: Path) -> OpenAICompatibleConfig:
+    """An OpenAI-compatible provider config file; raises `ConfigError` when invalid."""
+    from aibench.planning.openai_provider import OpenAICompatibleConfig
+
+    try:
+        return OpenAICompatibleConfig.model_validate(load_mapping_file(config_path))
+    except (PydanticValidationError, AibenchError, OSError) as exc:
+        raise ConfigError(f"invalid provider config {config_path}: {exc}") from exc
+
+
 def open_provider(
     config_path: Path, policy_path: Path | None
 ) -> tuple[PlannerProvider | None, list[str]]:
     """The assistant model, or (None, reasons) when the policy does not permit it."""
-    from aibench.planning.openai_provider import (
-        OpenAICompatibleConfig,
-        OpenAICompatibleProvider,
-        provider_denials,
-    )
+    from aibench.planning.openai_provider import OpenAICompatibleProvider, provider_denials
 
     try:
-        config = OpenAICompatibleConfig.model_validate(load_mapping_file(config_path))
-    except (PydanticValidationError, AibenchError, OSError) as exc:
-        return None, [f"invalid provider config {config_path}: {exc}"]
+        config = provider_config(config_path)
+    except ConfigError as exc:
+        return None, [str(exc)]
     denials = provider_denials(config, load_policy(policy_path))
     if denials:
         return None, denials
@@ -269,6 +279,9 @@ def _create(
         )
         settings["dataset"] = dataset
     try:
+        # Optional plugins the project installed (`aibench plugins install`); the policy
+        # still decides whether they may load.
+        environments, defaults = session_plugins(root)
         return SessionController.create(
             storage=storage,
             artifacts=artifacts,
@@ -279,6 +292,8 @@ def _create(
             objectives=objectives,
             policy_path=settings["policy"],
             trusted_local=trusted,
+            plugin_environments=environments,
+            evaluator_defaults=defaults,
         )
     except AibenchError as exc:
         raise _fail(str(exc)) from exc

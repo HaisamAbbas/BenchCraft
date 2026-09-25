@@ -47,7 +47,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("plan", ("/plan", "/run", "/world", "/app")),
     ("run", ("/status", "/pause", "/resume", "/stop", "/budget")),
     ("results", ("/failures", "/case", "/report", "/compare")),
-    ("session", ("/sessions", "/new", "/integrations", "/themes", "/help", "/exit")),
+    ("session", ("/sessions", "/new", "/integrations", "/plugins", "/themes", "/help", "/exit")),
 )
 
 _UNICODE_PROBE = BLOCK_LOGO[0] + BLOCK_LOGO[-1] + "·❯◆•│─"

@@ -23,26 +23,27 @@ The core install ships the native evaluators: `native.exact_match`, `native.json
 and custom Python evaluators you trust. Evaluator frameworks are never imported into the
 aibench process. They run in their own environment, driven by a worker.
 
-**DeepEval faithfulness** (`deepeval.faithfulness@1`, pinned to `deepeval==4.2.5`). From
-the repository root:
+**DeepEval** (21 single-turn metrics, pinned to `deepeval==4.2.5`): faithfulness, answer
+relevancy, contextual precision/recall/relevancy, hallucination, bias, toxicity, PII
+leakage, misuse, non-advice, role violation, prompt alignment, summarization, task
+completion, argument and tool correctness, tool permission, exact and pattern match, and
+G-Eval with your own criteria. Install it for a project with `aibench plugins install
+deepeval --judge-provider PROVIDER.json`, or type `/plugins install deepeval` in the chat to
+use the assistant's model as judge. Either one shows its changes before making them:
 
-```bash
-python -m venv plugins/deepeval/.venv
-plugins/deepeval/.venv/Scripts/pip install -e . -e plugins/deepeval    # Windows
-plugins/deepeval/.venv/bin/pip install -e . -e plugins/deepeval        # Linux/macOS
-```
+- a plugin environment under `.aibench/plugins/deepeval/` (about 70 packages);
+- `plugin_environments` in `aibench.json`, with the judge as the default for `deepeval.*`;
+- the policy lines it needs: `allowed_plugin_environments` (that interpreter),
+  `allowed_evaluators: deepeval.*`, `allow_model_evaluators: true` and the judge's key
+  reference in `allowed_secret_refs`. The previous policy is kept as `policy.json.bak`.
 
-A plan uses it through `plugin_environments`, and the policy must allow each of these:
-
-- `allowed_plugin_environments`: that interpreter;
-- `allowed_evaluators`: `deepeval.*`;
-- `allow_model_evaluators`: `true`;
-- `allowed_secret_refs`: the judge's key reference.
-
-The judge model is a paid external call. The adapter's behaviour is described in
-`plugins/deepeval/README.md`. Faithfulness needs the app to report the passages it
-actually retrieved (`output_binding.retrieved_context`). The quickstart app does, so its
-dataset works with faithfulness once a judge is configured.
+Chat sessions then load it, and the assistant chooses its metrics from what you ask to
+measure ("answers must be relevant", "no bias", "must not leak personal data", "polite
+tone"). The assistant can only suggest the install; you type the command. `aibench plugins
+status` shows each optional plugin's state. The judge model is a paid external call; any
+OpenAI-compatible endpoint (such as GLM on Z.ai) works without code. Metrics, field mapping
+and judges are described in `plugins/deepeval/README.md`. Multi-turn conversational metrics
+and metrics that need images, audio, MCP servers or agent traces are not included.
 
 **Ragas faithfulness** (`ragas.faithfulness@1`, pinned to `ragas==0.4.3`) is the
 independent second ecosystem used by the Phase 2 comparison workflow. Install it separately:

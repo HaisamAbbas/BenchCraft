@@ -645,6 +645,9 @@ def test_the_assistant_has_no_terminal_file_or_network_tool(tmp_path: Path) -> N
         "list_evaluators",
         # Read-only: modes, destinations and availability; starts and contacts nothing.
         "list_integrations",
+        # Read-only: optional plugins and the command the *user* types to enable one; it
+        # installs nothing and cannot change the policy.
+        "list_optional_plugins",
         "describe_evaluator",
         "explain_metric",
         "propose_plan_patch",

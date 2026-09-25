@@ -46,10 +46,11 @@ from rich.console import Console
 
 from aibench.conversation.agent import ConversationAgent, TurnEvent, TurnLimits, TurnOutcome
 from aibench.planning.planner import PlannerProvider
+from aibench.services.plugins import judge_from_provider
 from aibench.services.runs import RunError
 from aibench.sessions.controller import SessionController
 from aibench.tui import banner, render
-from aibench.tui.commands import COMMANDS, CommandResult, Commands, NewSession
+from aibench.tui.commands import COMMANDS, CommandResult, Commands, JudgeSource, NewSession
 from aibench.tui.render import safe
 from aibench.tui.reply import ReplyFormatter, user_band
 from aibench.tui.themes import THEMES, Theme, load_theme, save_theme
@@ -153,6 +154,12 @@ def render_result(console: Console, result: CommandResult) -> None:
         render.application(console, data)
     elif kind == "integrations":
         render.integrations(console, data)
+    elif kind == "plugins":
+        render.plugins(console, data)
+    elif kind == "plugin_preview":
+        render.plugin_preview(console, data)
+    elif kind == "plugin_installed":
+        render.plugin_installed(console, data)
     elif kind == "report":
         render.report(console, data)
     elif kind == "comparison":
@@ -213,7 +220,12 @@ class ChatApp:
     def _use(self, controller: SessionController) -> None:
         self.controller = controller
         self.agent = ConversationAgent(controller, self.provider, self.limits)
-        self.commands = Commands(controller, self.new_session)
+        self.commands = Commands(
+            controller,
+            self.new_session,
+            judge=self._judge(),
+            progress=lambda line: self.say(f"[dim]{safe(line)}[/dim]"),
+        )
         self._seen_run: str | None = None
         self._last_sequence = 0
         self._last_state: str | None = None
@@ -224,6 +236,14 @@ class ChatApp:
 
     def say(self, text: str) -> None:
         render.out(self.console, text)
+
+    def _judge(self) -> JudgeSource | None:
+        """The assistant's own model, offered as the judge when a plugin is installed."""
+        config = getattr(self.provider, "config", None)
+        if config is None or not getattr(config, "base_url", None):
+            return None
+        api_key = str(config.api_key) if config.api_key else None
+        return judge_from_provider(config.base_url, config.model, api_key)
 
     def _new_reply(self) -> None:
         self._reply = ReplyFormatter(self.theme, unicode=banner.unicode_ok(self.console))

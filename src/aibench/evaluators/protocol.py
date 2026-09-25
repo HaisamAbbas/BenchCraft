@@ -235,7 +235,20 @@ class Evaluator(abc.ABC):
         )
 
     def required_fields(self, params: Mapping[str, Any]) -> tuple[FieldRequirement, ...]:
-        return self.manifest.requires
+        """The manifest's requirements plus those its `parameter_requirements` add for these
+        parameters (so a worker-run evaluator gets them too, and they are checked before
+        scoring)."""
+        extra: list[FieldRequirement] = []
+        declared = deep_unfreeze(self.manifest.parameter_requirements) or {}
+        for name, by_value in declared.items():
+            listed = params.get(name)
+            values = listed if isinstance(listed, (list, tuple)) else [listed]
+            for value in values:
+                requirement = by_value.get(value) if isinstance(value, str) else None
+                if requirement is not None:
+                    extra.append(FieldRequirement.model_validate(requirement))
+        paths = {r.path for r in self.manifest.requires}
+        return (*self.manifest.requires, *(r for r in extra if r.path not in paths))
 
     async def prepare(self, params: Mapping[str, Any]) -> None:
         self.params = dict(params)

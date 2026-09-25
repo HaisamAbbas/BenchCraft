@@ -10,13 +10,16 @@ manifest; eligibility is decided from evidence, never by a model:
 - required parameters the plan must supply are listed (the planner may not invent them).
 
 Concepts (what an objective asks about) are derived from what a metric *reads*, so a new
-evaluator is classified by its requirements, not by its name.
+evaluator is classified by its requirements, not by its name, unless its manifest declares
+them (a judged metric's requirements, e.g. input and output, do not say what it judges).
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 
 from aibench.core.models import EvaluatorManifest, FieldRequirement, deep_unfreeze
 from aibench.inspection.dataset_summary import DatasetSummary
@@ -32,6 +35,23 @@ CONCEPTS: dict[str, str] = {
     "task_outcome": "the application's actions had the intended effect: required tool calls "
     "succeeded and its test world ended in the expected state",
     "expectations": "the output satisfies per-case domain expectations",
+    "relevancy": "the answer addresses what was asked",
+    "retrieval_precision": "the retrieved passages that matter are ranked first",
+    "retrieval_recall": "the retrieved passages contain what the reference answer needs",
+    "retrieval_relevancy": "the retrieved passages are relevant to the question",
+    "bias": "the answer is free of biased opinions",
+    "toxicity": "the answer is free of toxic or harmful language",
+    "privacy": "the answer does not leak personal data",
+    "misuse": "the answer stays within the application's domain",
+    "advice": "the answer avoids kinds of advice it must not give",
+    "role_adherence": "the answer stays in the application's declared role",
+    "instruction_following": "the answer follows the instructions it was given",
+    "summarization": "the answer summarizes its input faithfully and completely",
+    "task_completion": "the answer accomplishes the task that was asked",
+    "tool_arguments": "the application called its tools with suitable arguments",
+    "tool_permissions": "the application called only the tools it is allowed to",
+    "pattern": "the answer matches a regular expression",
+    "custom_criteria": "a judge scores the answer against criteria you state (G-Eval)",
     "latency": "end-to-end response time",
     "reliability": "application errors, timeouts and failed calls",
 }
@@ -62,11 +82,69 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
         r"actually (?:booked|done|completed|happened)",
     ),
     "expectations": (r"expectations?", r"business rules?", r"policy rules?"),
+    "relevancy": (
+        r"(?<!contextual )(?<!context )(?<!retrieval )relevan(?:t|ce|cy)",
+        r"on[- ]topic",
+        r"off[- ]topic",
+        r"(?:answers?|address(?:es)?) the question",
+    ),
+    "retrieval_precision": (
+        r"(?:contextual|context|retrieval) precision",
+        r"(?:passage|chunk|context|retrieval) rank(?:ing|ed)",
+    ),
+    "retrieval_recall": (
+        r"(?:contextual|context|retrieval) recall",
+        r"missing (?:context|passages?)",
+    ),
+    "retrieval_relevancy": (
+        r"(?:contextual|context|retrieval) relevan(?:ce|cy)",
+        r"irrelevant (?:context|passages?|chunks?)",
+        r"retrieval quality",
+        r"retriever",
+    ),
+    "bias": (r"bias(?:ed)?", r"fair(?:ness)?", r"discriminat\w*", r"stereotyp\w*"),
+    "toxicity": (r"toxic(?:ity)?", r"offensive", r"harmful", r"abusive"),
+    "privacy": (r"pii", r"personal (?:data|information)", r"privacy", r"leak(?:s|ed|ing|age)?"),
+    "misuse": (r"misuse", r"out[- ]of[- ](?:scope|domain)"),
+    "advice": (r"advice",),
+    "role_adherence": (
+        r"stays? in (?:its |the )?(?:role|character)",
+        r"role (?:adherence|violations?)",
+        r"persona",
+        r"in character",
+    ),
+    "instruction_following": (r"instructions?", r"prompt alignment", r"system prompt"),
+    # Not the bare noun "summaries": "summaries stay faithful ..." asks about grounding.
+    "summarization": (r"summari[sz]ation", r"summari[sz]e[sd]?", r"summary quality"),
+    "task_completion": (
+        r"task completion",
+        r"completes? (?:the|its|their) tasks?",
+        r"accomplish\w*",
+    ),
+    "tool_arguments": (r"(?:tool|function) arguments?", r"argument correctness"),
+    "tool_permissions": (r"(?:allowed|forbidden|denied|permitted) tools?", r"tool permissions?"),
+    "pattern": (r"regex\w*", r"regular expressions?", r"match(?:es)? (?:a|the) pattern"),
+    "custom_criteria": (
+        r"criteri(?:a|on)",
+        r"rubric",
+        r"g-?eval",
+        r"polite(?:ness)?",
+        r"tone",
+        r"empath\w*",
+        r"professional\w*",
+        r"concise(?:ness)?",
+    ),
     "latency": (r"latency", r"response times?", r"slow", r"speed"),
     "reliability": (r"errors?", r"reliab\w*", r"crash\w*", r"timeouts?", r"failures?"),
 }
 # A keyword preceded (within three words) by one of these is not an objective.
 _NEGATIONS = r"(?:no|not|don't|dont|do not|never|without|ignore|except)"
+
+
+# Concepts about something to avoid: "no bias" or "must not leak personal data" names the
+# objective, so only a dismissal ("don't care about bias", "ignore toxicity") cancels them.
+_AVOIDANCE = frozenset({"groundedness", "bias", "toxicity", "privacy", "misuse", "advice"})
+_DISMISSALS = r"(?:care|cares|ignore|ignoring|except|skip|matter|matters|bother)"
 
 
 def concepts_in(text: str) -> tuple[str, ...]:
@@ -75,11 +153,12 @@ def concepts_in(text: str) -> tuple[str, ...]:
     lowered = text.lower()
     found = []
     for concept, patterns in _KEYWORDS.items():
+        cancel = _DISMISSALS if concept in _AVOIDANCE else _NEGATIONS
         for pattern in patterns:
             hit = False
             for match in re.finditer(rf"\b(?:{pattern})\b", lowered):
                 before = lowered[: match.start()].split()[-3:]
-                if not re.search(rf"\b{_NEGATIONS}\b", " ".join(before)):
+                if not re.search(rf"\b{cancel}\b", " ".join(before)):
                     hit = True
                     break
             if hit:
@@ -99,6 +178,10 @@ def concepts_for(
     manifest: EvaluatorManifest, requires: tuple[FieldRequirement, ...]
 ) -> tuple[str, ...]:
     found: list[str] = list(_DECLARED_CONCEPTS.get(manifest.evaluator_id, ()))
+    if manifest.concepts:
+        # Declared by the evaluator; names outside this vocabulary are ignored.
+        found += [c for c in manifest.concepts if c in CONCEPTS]
+        return tuple(dict.fromkeys(found))
     for requirement in requires:
         path = requirement.path
         if path == "case.reference.answer":
@@ -241,3 +324,24 @@ def build_catalog(
             )
         )
     return sorted(options, key=lambda o: (not o.evaluator_id.startswith("native."), o.metric))
+
+
+def with_default_params(
+    manifests: Iterable[EvaluatorManifest],
+    defaults: Mapping[str, Mapping[str, object]],
+    params: Mapping[str, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """User parameters over project defaults. A default (by evaluator-ID pattern, e.g.
+    `deepeval.*`) fills only parameters the evaluator's schema declares, so a judge default
+    never reaches a metric that takes no judge; parameters the user gave win."""
+    merged: dict[str, dict[str, object]] = {k: dict(v) for k, v in params.items()}
+    for manifest in manifests:
+        schema = deep_unfreeze(manifest.parameters_schema) or {}
+        accepted = set(schema.get("properties") or {})
+        filled: dict[str, object] = {}
+        for pattern, values in defaults.items():
+            if fnmatchcase(manifest.evaluator_id, pattern):
+                filled.update({k: v for k, v in values.items() if k in accepted})
+        if filled:
+            merged[manifest.evaluator_id] = {**filled, **merged.get(manifest.evaluator_id, {})}
+    return merged
