@@ -268,6 +268,23 @@ def test_chat_renders_streamed_text_and_tool_cards(tmp_path: Path) -> None:
     ctl.storage.db.close()
 
 
+def test_explicit_run_starts_unpresented_validated_draft_with_a_preview(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "hi"}, objectives=("catch wrong answers",))
+    assert ctl.session.presented_revision is None
+
+    async def scenario() -> None:
+        result = await Commands(ctl).run("/run")
+        assert result.kind == "action" and result.data["state"] == "done"
+        assert result.data["plan_preview"]["revision"] == 1
+        assert result.data["plan_preview"]["executable"] is True
+        await ctl.wait_for_run(result.data["run_id"])
+
+    asyncio.run(scenario())
+    assert h.count() == 1 and len(h.runs()) == 1
+    ctl.storage.db.close()
+
+
 def test_prompted_conversation_drafts_and_runs_a_real_benchmark(tmp_path: Path) -> None:
     h = SessionHarness(tmp_path)
     ctl = h.open_session({case: "answer" for case in "abcd"})

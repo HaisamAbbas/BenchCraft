@@ -33,10 +33,10 @@ import random
 import sqlite3
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, TypeVar
 
 from aibench.core.models import (
     ApplicationSpec,
@@ -76,6 +76,7 @@ TERMINAL = frozenset(
     }
 )
 _POLL_SECONDS = 0.1
+_T = TypeVar("_T")
 # Evaluations held by a quota that dispatch looks past per pass (bounded work per pass).
 _HELD_SCAN = 256
 # The runner bounds a reset by its lifecycle timeout; this only waits for an abort.
@@ -187,6 +188,12 @@ class RunController:
             self._early.append(action)  # a signal during setup: applied on bind
         else:
             self._loop.call_soon_threadsafe(getattr(self, action))
+
+    def next_change(self) -> asyncio.Task[bool]:
+        """A task that completes at the next control change (pause, resume, cancel,
+        interrupt)."""
+        self._wake.clear()
+        return asyncio.ensure_future(self._wake.wait())
 
     async def wait_for_change(self, timeout: float) -> None:
         self._wake.clear()
@@ -381,12 +388,32 @@ class RunEngine:
         try:
             if needs_runner:
                 assert self.runner is not None, "execution work remains but no runner was given"
-                await self.runner.prepare()
-            await self._open_scorers()
+                await self._while_starting(self.runner.prepare())
+            await self._while_starting(self._open_scorers())
             await self._loop()
         finally:
             await self._shutdown(needs_runner)
         return self._finish()
+
+    async def _while_starting(self, work: Awaitable[_T]) -> _T:
+        """Await start-up work (runner preparation, evaluator start-up) while keeping the
+        committed state in step with controls. A pause or cancel requested meanwhile shows
+        as `pausing`/`cancelling` at once (section 15), not only once start-up has ended;
+        nothing is dispatched until it has."""
+        task = asyncio.ensure_future(work)
+        try:
+            while True:
+                # Armed first: a change before this line is in the state recorded next,
+                # and one after it wakes the wait.
+                change = self.controller.next_change()
+                self._set_state(self._busy_state())
+                await asyncio.wait({task, change}, return_when=asyncio.FIRST_COMPLETED)
+                change.cancel()
+                if task.done():
+                    return task.result()
+        except BaseException:
+            task.cancel()
+            raise
 
     async def _open_scorers(self) -> None:
         wanted = {i.binding_hash for i in self._eval_queue} | {
@@ -810,7 +837,11 @@ class RunEngine:
         verdict = classify_execution(result)
         ctl = self.controller
         stopping = ctl.stopping
-        if ctl.interrupting and not ctl.cancelled and verdict.final_state is WorkItemState.CANCELLED:
+        if (
+            ctl.interrupting
+            and not ctl.cancelled
+            and verdict.final_state is WorkItemState.CANCELLED
+        ):
             # Aborted by a second interrupt with no effect possible: effect-free work stays
             # resumable. (An ambiguous effectful abort is UNKNOWN_EFFECT, handled below.)
             self._transition(

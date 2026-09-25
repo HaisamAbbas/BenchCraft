@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from aibench.core.errors import AibenchError
+from aibench.core.errors import AibenchError, PolicyError
 from aibench.core.models import DecisionRule, ExecutionResult, ResetPolicy
 from aibench.core.plans import (
     BudgetLimits,
@@ -34,6 +34,7 @@ from aibench.core.plans import (
 from aibench.engine.compile import freeze_plan, load_plan
 from aibench.inspection.dataset_summary import summarize_dataset
 from aibench.inspection.profile import inspect_application
+from aibench.inspection.source import CodebaseInspector
 from aibench.planning.catalog import build_catalog
 from aibench.planning.drafts import DraftContext, PlanDraft, draft_document
 from aibench.planning.planner import PlanningInputs, PlanningOutcome
@@ -170,7 +171,7 @@ def gather_inputs(
     application: Path,
     dataset: Path,
     objectives: list[str],
-    out: Path,
+    out: Path | None,
     policy: ExecutionPolicy,
     trusted_local: bool = False,
     plan_id: str | None = None,
@@ -182,13 +183,14 @@ def gather_inputs(
     executions: Iterable[ExecutionResult] = (),
     run_ids: Iterable[str] = (),
     test_world: str | None = None,
+    source_root: Path | None = None,
 ) -> GatheredInputs:
     effective = policy.with_trusted_local(trusted_local)
-    out_dir = out.resolve().parent
-    revision, _ = next_revision(out)
+    out_dir = out.resolve().parent if out is not None else application.resolve().parent
+    revision = next_revision(out)[0] if out is not None else 1
     concurrency, retry = state_limits(application)
     context = DraftContext(
-        plan_id=plan_id or out.stem,
+        plan_id=plan_id or (out.stem if out is not None else "opportunity-check"),
         out_dir=out_dir,
         dataset=dataset,
         application=application,
@@ -205,10 +207,34 @@ def gather_inputs(
         retry=retry,
         test_world=test_world,
     )
-    profile = inspect_application(application, executions=executions, run_ids=run_ids)
+    source_tree = None
+    source_note: str | None = None
+    if source_root is not None:
+        if not source_root.is_dir():
+            source_note = "Static repository inspection was not run because the project root is unavailable."
+        else:
+            try:
+                source_tree = CodebaseInspector(effective).inspect(source_root)
+            except PolicyError:
+                source_note = (
+                    "Static repository inspection was not run because the current policy does "
+                    "not approve this project root."
+                )
+    profile = inspect_application(
+        application,
+        executions=executions,
+        run_ids=run_ids,
+        source_tree=source_tree,
+    )
+    if source_note:
+        profile = profile.model_copy(
+            update={"limitations": (*profile.limitations, source_note)}
+        )
     summary = summarize_dataset(dataset)
     env_denials = plugin_denials(effective, plugin_environments, out_dir)
     notes = list(env_denials)
+    if source_note:
+        notes.append(source_note)
     if env_denials:  # never start a plugin the policy does not permit
         registry = EvaluatorRegistry.with_native()
     else:

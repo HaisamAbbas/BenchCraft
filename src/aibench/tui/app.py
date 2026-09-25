@@ -105,6 +105,8 @@ def render_result(console: Console, result: CommandResult) -> None:
         if kind == "confirm":
             render.out(console, f"[bold]{safe(data['note'])}[/bold]")
     elif kind == "action":
+        if data.get("plan_preview"):
+            render.draft(console, data["plan_preview"])
         verb = data["kind"].replace("_", " ")
         if data["state"] == "done":
             run = f" {data['run_id']}" if data.get("run_id") else ""

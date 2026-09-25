@@ -12,7 +12,8 @@
   with the reasons shown, unless the policy permits the endpoint; the session still opens
   and every slash command works without it.
 - Without a terminal, `chat` needs `--send TEXT`: one message or slash command, answered
-  non-interactively (`--json` for machine output). A run it starts is followed to its end.
+  non-interactively (`--json` for machine output). A run or controlled experiment it starts
+  is followed to its end.
 """
 
 from __future__ import annotations
@@ -31,6 +32,12 @@ from rich.console import Console
 from aibench.config.resolve import load_mapping_file, resolve_config
 from aibench.core.errors import AibenchError
 from aibench.engine.compile import load_policy
+from aibench.inspection.candidates import (
+    RepositoryCandidateInventory,
+    compatible_dataset_groups,
+    discover_repository_candidates,
+    select_unique_dataset,
+)
 from aibench.planning.planner import PlannerProvider
 from aibench.security.redaction import sanitize_value
 from aibench.sessions.controller import SessionController
@@ -176,6 +183,7 @@ def chat(
     storage = Storage(Database.open_workspace(workspace))
     artifacts = ArtifactStore(workspace.artifacts_dir)
     provider: PlannerProvider | None = None
+    dataset_notices: list[str] = []
     try:
         controller = _session(
             storage,
@@ -188,6 +196,8 @@ def chat(
             send,
             trust_local_app,
             tuple(objectives),
+            interactive=send is None,
+            dataset_notices=dataset_notices,
         )
         if provider_config is not None:
             provider, denials = open_provider(provider_config, settings["policy"])
@@ -196,11 +206,21 @@ def chat(
 
         def new_session() -> SessionController:
             return _create(
-                storage, artifacts, workspace, root, settings, trust_local_app, tuple(objectives)
+                storage,
+                artifacts,
+                workspace,
+                root,
+                settings,
+                trust_local_app,
+                tuple(objectives),
+                interactive=send is None,
+                dataset_notices=dataset_notices,
             )
 
         if send is not None:
-            code = asyncio.run(_send(controller, provider, send, json_output, new_session))
+            code = asyncio.run(
+                _send(controller, provider, send, json_output, new_session, dataset_notices)
+            )
             raise typer.Exit(code=code)
         from aibench.tui.app import ChatApp
 
@@ -228,14 +248,25 @@ def _create(
     settings: dict[str, Path | None],
     trusted: bool,
     objectives: tuple[str, ...] = (),
+    *,
+    interactive: bool = False,
+    dataset_notices: list[str] | None = None,
 ) -> SessionController:
     application, dataset = settings["application"], settings["dataset"]
-    if application is None or dataset is None:
+    if application is None:
         raise _fail(
-            "a new session needs an application config and a dataset: pass --app and "
-            "--dataset, or set application_target and dataset_path in "
+            "a new session needs an application config: pass --app, or set "
+            "application_target in "
             f"{root / 'aibench.json'}"
         )
+    if dataset is None:
+        dataset = _discover_session_dataset(
+            root,
+            settings["policy"],
+            interactive=interactive,
+            notices=dataset_notices,
+        )
+        settings["dataset"] = dataset
     try:
         return SessionController.create(
             storage=storage,
@@ -252,6 +283,79 @@ def _create(
         raise _fail(str(exc)) from exc
 
 
+def _discover_session_dataset(
+    root: Path,
+    policy_path: Path | None,
+    *,
+    interactive: bool,
+    notices: list[str] | None,
+) -> Path:
+    """Reuse only one compatible repository dataset inside the existing approved root."""
+    try:
+        policy = load_policy(policy_path)
+        inventory = discover_repository_candidates(root, policy)
+    except AibenchError as exc:
+        raise _fail(
+            "A new session needs a dataset. Repository discovery was not allowed by the "
+            f"current policy ({exc}); pass --dataset or approve this project in "
+            "inspection_roots."
+        ) from exc
+
+    decision = select_unique_dataset(inventory)
+    if decision.state == "selected":
+        assert decision.selected_path is not None
+        selected = (root / Path(*Path(decision.selected_path).parts)).resolve()
+        message = f"Using the only compatible dataset allowed by policy: {decision.selected_path}."
+        if decision.equivalent_paths and len(decision.equivalent_paths) > 1:
+            message += " Identical-content copies: " + ", ".join(decision.equivalent_paths) + "."
+        _dataset_notice(message, interactive=interactive, notices=notices)
+        return selected
+
+    if decision.state == "ambiguous" and interactive:
+        return _choose_dataset(inventory, root)
+
+    if decision.state == "ambiguous":
+        raise _fail(
+            f"{decision.question} For non-interactive chat, pass --dataset PATH or create "
+            "an explicit project dataset_path."
+        )
+    if interactive:
+        answer = input(
+            "No compatible approved dataset was found. Enter a dataset path (or leave blank to cancel): "
+        ).strip()
+        if answer:
+            chosen = Path(answer).expanduser()
+            return chosen.resolve() if chosen.is_absolute() else (root / chosen).resolve()
+    raise _fail(
+        "No compatible repository dataset is available under the current inspection policy. "
+        "Which dataset path should be used? Pass --dataset PATH (or set dataset_path in the "
+        "project config); policy-approved discovery requires this project in inspection_roots."
+    )
+
+
+def _dataset_notice(message: str, *, interactive: bool, notices: list[str] | None) -> None:
+    if interactive:
+        console.print(f"[dim]{safe(message)}[/dim]")
+    elif notices is not None:
+        notices.append(message)
+
+
+def _choose_dataset(inventory: RepositoryCandidateInventory, root: Path) -> Path:
+    groups = compatible_dataset_groups(inventory)
+    console.print("Compatible datasets with different content:")
+    for index, group in enumerate(groups, start=1):
+        paths = ", ".join(item.path for item in group)
+        console.print(safe(f"  [{index}] {paths} ({group[0].case_count} case(s))"))
+    while True:
+        answer = input("Which dataset should this session use? ").strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(groups):
+            chosen = groups[int(answer) - 1][0]
+            message = f"Using the dataset you selected: {chosen.path}."
+            _dataset_notice(message, interactive=True, notices=None)
+            return (root / Path(*Path(chosen.path).parts)).resolve()
+        console.print(f"Type a number from 1 to {len(groups)}.")
+
+
 def _session(
     storage: Storage,
     artifacts: ArtifactStore,
@@ -263,6 +367,9 @@ def _session(
     send: str | None,
     trusted: bool,
     objectives: tuple[str, ...] = (),
+    *,
+    interactive: bool = False,
+    dataset_notices: list[str] | None = None,
 ) -> SessionController:
     store = SessionStore(storage)
     if resume is not None:
@@ -274,7 +381,17 @@ def _session(
         )
     existing = [s for s in store.list_sessions() if Path(s.project_root) == root]
     if new or not existing:
-        return _create(storage, artifacts, workspace, root, settings, trusted, objectives)
+        return _create(
+            storage,
+            artifacts,
+            workspace,
+            root,
+            settings,
+            trusted,
+            objectives,
+            interactive=interactive,
+            dataset_notices=dataset_notices,
+        )
     if send is not None:
         if len(existing) > 1:
             raise _fail(
@@ -285,7 +402,17 @@ def _session(
     else:
         chosen = _choose(existing)
     if chosen is None:
-        return _create(storage, artifacts, workspace, root, settings, trusted, objectives)
+        return _create(
+            storage,
+            artifacts,
+            workspace,
+            root,
+            settings,
+            trusted,
+            objectives,
+            interactive=interactive,
+            dataset_notices=dataset_notices,
+        )
     return SessionController(
         chosen, storage=storage, artifacts=artifacts, workspace_root=workspace.root
     )
@@ -297,21 +424,24 @@ async def _send(
     text: str,
     json_output: bool,
     new_session: Any,
+    dataset_notices: list[str] | None = None,
 ) -> int:
-    """One non-interactive exchange. A run it starts is followed to its end (Ctrl+C
-    stops dispatch and leaves it resumable, as in `aibench run`).
+    """One non-interactive exchange. A run or controlled experiment it starts is followed
+    to its end (Ctrl+C stops dispatch and leaves it resumable, as in `aibench run`).
 
     Exit codes match the headless commands (11-T3): a run this exchange started exits as
     `aibench run` would (0, 1 gate failed, 3 incomplete, 130 interrupted); an action the
     policy denied exits 4; a refused or blocked action, a failed command or a failed model
     turn exits 2; anything else 0."""
     from aibench.conversation.agent import ConversationAgent
+    from aibench.experiments.service import experiment_report
     from aibench.services.reports import build_report
     from aibench.services.runs import run_exit_code
     from aibench.tui.app import render_result
     from aibench.tui.commands import Commands
 
     live_before = set(controller.live_runs())
+    experiment_tasks_before = controller.experiment_task_keys()
     command_code: int | None = None
     try:
         if text.strip().startswith("/"):
@@ -328,7 +458,9 @@ async def _send(
             outcome = await ConversationAgent(controller, provider).handle_message(text)
             payload = {"session_id": controller.session_id, "outcome": outcome.as_dict()}
             ok = outcome.stopped is None or outcome.stopped == "no assistant model is configured"
-            actions = list(outcome.actions)
+            actions = list(outcome.actions) + [
+                {"state": item.get("status", "rejected")} for item in outcome.rejected
+            ]
             if not json_output:
                 console.print(safe(outcome.text))
                 console.print(f"[dim]({safe(outcome.status_line)})[/dim]")
@@ -350,6 +482,20 @@ async def _send(
                     "exit_code": run_code,
                 }
             )
+        experiment_tasks_started = controller.experiment_task_keys() - experiment_tasks_before
+        experiment_ids_started = sorted(
+            {task_key.removesuffix(":holdout") for task_key in experiment_tasks_started}
+        )
+        for experiment_id in experiment_ids_started:
+            record = await controller.wait_for_experiment(experiment_id)
+            if record is not None:
+                payload.setdefault("experiments", []).append(
+                    experiment_report(
+                        experiment_id,
+                        storage=controller.storage,
+                        artifacts=controller.artifacts,
+                    )
+                )
     except KeyboardInterrupt:
         await controller.close()
         return 130
@@ -365,7 +511,12 @@ async def _send(
     else:
         code = EXIT_OK
     payload["exit_code"] = code
+    if dataset_notices:
+        payload["dataset_selection"] = dataset_notices
     if json_output:
         json_payload = json.loads(json.dumps(payload, default=str))
         print(json.dumps(sanitize_value(json_payload)))
+    elif dataset_notices:
+        for notice in dataset_notices:
+            console.print(f"[dim]{safe(notice)}[/dim]")
     return code

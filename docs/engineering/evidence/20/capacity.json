@@ -1,0 +1,395 @@
+{
+  "tool": "scripts/measure_capacity.py",
+  "measured_at": "2026-09-25T02:05:30+0500",
+  "machine": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "processor": "Intel64 Family 6 Model 170 Stepping 4, GenuineIntel",
+    "logical_cpus": 14,
+    "physical_memory_gb": 31.5
+  },
+  "cli_startup": {
+    "wall_seconds": 7.511,
+    "process_cpu_seconds": 1.828,
+    "system_cpu_busy_fraction": 0.857
+  },
+  "workload": {
+    "application": "examples/apps/rate_limited_app.py over loopback HTTP; quota far above load",
+    "metric": "native.exact_match (deterministic, in-process)",
+    "evaluation_concurrency": 4
+  },
+  "scenarios": [
+    {
+      "application_delay_seconds": 0.0,
+      "application_concurrency": 1,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 46.232,
+      "process_cpu_seconds": 13.812,
+      "peak_memory_mb": 61.6,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 1,
+      "database_bytes": 4739072,
+      "artifact_bytes": 174654,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 35.297,
+      "cases_per_second": 8.5,
+      "latency_bound_cases_per_second": null,
+      "harness_cpu_ms_per_case": 39.95,
+      "engine_cpu_fraction_of_wall": 0.34,
+      "repetition": 0
+    },
+    {
+      "application_delay_seconds": 0.0,
+      "application_concurrency": 1,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 48.598,
+      "process_cpu_seconds": 15.5,
+      "peak_memory_mb": 61.4,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 1,
+      "database_bytes": 4734976,
+      "artifact_bytes": 174654,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 39.438,
+      "cases_per_second": 7.61,
+      "latency_bound_cases_per_second": null,
+      "harness_cpu_ms_per_case": 45.57,
+      "engine_cpu_fraction_of_wall": 0.347,
+      "repetition": 1
+    },
+    {
+      "application_delay_seconds": 0.0,
+      "application_concurrency": 16,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 21.006,
+      "process_cpu_seconds": 16.391,
+      "peak_memory_mb": 62.1,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 4,
+      "database_bytes": 4739072,
+      "artifact_bytes": 174655,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 13.063,
+      "cases_per_second": 22.97,
+      "latency_bound_cases_per_second": null,
+      "harness_cpu_ms_per_case": 48.54,
+      "engine_cpu_fraction_of_wall": 1.115,
+      "repetition": 0
+    },
+    {
+      "application_delay_seconds": 0.0,
+      "application_concurrency": 16,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 24.388,
+      "process_cpu_seconds": 16.719,
+      "peak_memory_mb": 62.3,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 2,
+      "database_bytes": 4739072,
+      "artifact_bytes": 174655,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 13.516,
+      "cases_per_second": 22.2,
+      "latency_bound_cases_per_second": null,
+      "harness_cpu_ms_per_case": 49.64,
+      "engine_cpu_fraction_of_wall": 1.102,
+      "repetition": 1
+    },
+    {
+      "application_delay_seconds": 0.0,
+      "application_concurrency": 64,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 27.068,
+      "process_cpu_seconds": 19.078,
+      "peak_memory_mb": 62.0,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 5,
+      "database_bytes": 4800512,
+      "artifact_bytes": 181989,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 16.422,
+      "cases_per_second": 18.27,
+      "latency_bound_cases_per_second": null,
+      "harness_cpu_ms_per_case": 57.5,
+      "engine_cpu_fraction_of_wall": 1.05,
+      "repetition": 0
+    },
+    {
+      "application_delay_seconds": 0.0,
+      "application_concurrency": 64,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 23.592,
+      "process_cpu_seconds": 17.203,
+      "peak_memory_mb": 63.6,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 5,
+      "database_bytes": 4796416,
+      "artifact_bytes": 181221,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 13.187,
+      "cases_per_second": 22.75,
+      "latency_bound_cases_per_second": null,
+      "harness_cpu_ms_per_case": 51.25,
+      "engine_cpu_fraction_of_wall": 1.166,
+      "repetition": 1
+    },
+    {
+      "application_delay_seconds": 0.25,
+      "application_concurrency": 64,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 24.655,
+      "process_cpu_seconds": 17.969,
+      "peak_memory_mb": 63.7,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 18,
+      "database_bytes": 4849664,
+      "artifact_bytes": 185832,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 13.781,
+      "cases_per_second": 21.77,
+      "latency_bound_cases_per_second": 256.0,
+      "harness_cpu_ms_per_case": 53.8,
+      "engine_cpu_fraction_of_wall": 1.171,
+      "repetition": 0
+    },
+    {
+      "application_delay_seconds": 0.25,
+      "application_concurrency": 64,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 25.699,
+      "process_cpu_seconds": 18.672,
+      "peak_memory_mb": 63.5,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 18,
+      "database_bytes": 4853760,
+      "artifact_bytes": 185851,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 15.735,
+      "cases_per_second": 19.07,
+      "latency_bound_cases_per_second": 256.0,
+      "harness_cpu_ms_per_case": 56.15,
+      "engine_cpu_fraction_of_wall": 1.07,
+      "repetition": 1
+    },
+    {
+      "application_delay_seconds": 1.0,
+      "application_concurrency": 16,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 37.343,
+      "process_cpu_seconds": 17.125,
+      "peak_memory_mb": 61.7,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 16,
+      "database_bytes": 4739072,
+      "artifact_bytes": 174655,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 25.516,
+      "cases_per_second": 11.76,
+      "latency_bound_cases_per_second": 16.0,
+      "harness_cpu_ms_per_case": 50.99,
+      "engine_cpu_fraction_of_wall": 0.6,
+      "repetition": 0
+    },
+    {
+      "application_delay_seconds": 1.0,
+      "application_concurrency": 16,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 35.546,
+      "process_cpu_seconds": 18.094,
+      "peak_memory_mb": 61.7,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 16,
+      "database_bytes": 4739072,
+      "artifact_bytes": 174655,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 25.86,
+      "cases_per_second": 11.6,
+      "latency_bound_cases_per_second": 16.0,
+      "harness_cpu_ms_per_case": 54.22,
+      "engine_cpu_fraction_of_wall": 0.629,
+      "repetition": 1
+    },
+    {
+      "application_delay_seconds": 1.0,
+      "application_concurrency": 64,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 33.155,
+      "process_cpu_seconds": 21.062,
+      "peak_memory_mb": 63.6,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 38,
+      "database_bytes": 4857856,
+      "artifact_bytes": 185849,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 22.0,
+      "cases_per_second": 13.64,
+      "latency_bound_cases_per_second": 64.0,
+      "harness_cpu_ms_per_case": 64.11,
+      "engine_cpu_fraction_of_wall": 0.874,
+      "repetition": 0
+    },
+    {
+      "application_delay_seconds": 1.0,
+      "application_concurrency": 64,
+      "evaluation_concurrency": 4,
+      "cases": 300,
+      "exit_code": 0,
+      "wall_seconds": 33.86,
+      "process_cpu_seconds": 19.219,
+      "peak_memory_mb": 63.8,
+      "system_cpu_busy_fraction": 0.857,
+      "server_requests": 300,
+      "server_rejections": 0,
+      "server_peak_in_flight": 45,
+      "database_bytes": 4800512,
+      "artifact_bytes": 180827,
+      "state": "completed",
+      "counts": {
+        "execution": {
+          "succeeded": 300
+        },
+        "evaluation": {
+          "succeeded": 300
+        }
+      },
+      "engine_elapsed_seconds": 21.375,
+      "cases_per_second": 14.04,
+      "latency_bound_cases_per_second": 64.0,
+      "harness_cpu_ms_per_case": 57.97,
+      "engine_cpu_fraction_of_wall": 0.814,
+      "repetition": 1
+    }
+  ]
+}

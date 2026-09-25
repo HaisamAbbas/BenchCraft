@@ -12,13 +12,16 @@
     "dependency identity",
     "observation instrumentation",
     "scoring-pass completion",
-    "execution lineage"
+    "execution lineage",
+    "canonical result-level identity",
+    "frozen application artifact when declared"
   ],
   "statistics": {
     "point_estimate": "case-level macro mean of current minus baseline",
     "uncertainty": "seeded grouped cluster-bootstrap percentile interval",
-    "coverage": "complete numeric pairs over selected paired items; missing/error/NA remain visible",
-    "cross_framework": "decision matrix and side-only summaries; no combined score or scale equivalence"
+    "coverage": "complete numeric pairs over the most conservative selected-side denominator; missing/error/NA/unpaired items remain visible",
+    "cross_framework": "decision matrix and side-only summaries; no combined score or scale equivalence",
+    "judge_stability": "cached evaluation copies are missing repeats, not independent observations"
   },
   "privacy": "assistant projection removes case/group IDs, hashes, raw ledgers, and judge/rubric configuration",
   "evidence_tests": [

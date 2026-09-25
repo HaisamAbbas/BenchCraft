@@ -1,0 +1,281 @@
+{
+  "suite": "scripts/e2e_suite.py",
+  "started_at": "2026-09-25T20:40:17+0500",
+  "seconds": 212.6,
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "aibench_version": "0.1.0rc1",
+    "aibench_imported_from": "D:\\BenchCraft\\docs\\engineering\\evidence\\31\\clean-e2e\\venv\\Lib\\site-packages\\aibench\\__init__.py",
+    "wheel": "aibench-0.1.0rc1-py3-none-any.whl",
+    "wheel_sha256": "815863f261a35c2bc3047f90ddcdbe86b0155807d30afa9efdb0e138eb4717bf"
+  },
+  "pytest_exit_code": 0,
+  "journeys": {
+    "E2E-01": {
+      "claim": "Conversational loop from the first message to an evidence-linked report and follow-up discussion, inside the CLI",
+      "status": "passed",
+      "tests": {
+        "tests/test_e2e_cli_journey.py::test_a_user_benchmarks_an_app_from_the_first_message_to_evidence_in_the_cli": {
+          "status": "passed",
+          "seconds": 58.558,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_mvp_acceptance.py::test_a_fresh_user_completes_the_conversational_acceptance_journey": {
+          "status": "passed",
+          "seconds": 5.115,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    },
+    "E2E-02": {
+      "claim": "Steering a live run: questions, pause, resume, cancel",
+      "status": "passed",
+      "tests": {
+        "tests/test_engine.py::test_pause_stops_new_dispatch_until_resumed": {
+          "status": "passed",
+          "seconds": 3.918,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_engine.py::test_cancel_stops_dispatch_and_cancels_in_flight_work": {
+          "status": "passed",
+          "seconds": 1.265,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_parallel_execution.py::test_throttled_work_can_still_be_paused_and_cancelled_promptly": {
+          "status": "passed",
+          "seconds": 2.48,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_conversation_hardening.py::test_controls_work_during_a_provider_outage_and_stay_separate_from_replies": {
+          "status": "passed",
+          "seconds": 2.831,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    },
+    "E2E-03": {
+      "claim": "Interruption and recovery without duplicate application side effects",
+      "status": "passed",
+      "tests": {
+        "tests/test_mvp_acceptance.py::test_the_100_case_workflow_survives_a_kill_finds_the_injected_failures_and_rescores_offline": {
+          "status": "passed",
+          "seconds": 12.122,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_session_recovery.py::test_reopening_after_a_kill_shows_the_real_state_and_restarts_nothing": {
+          "status": "passed",
+          "seconds": 14.791,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_session_recovery.py::test_retrying_a_start_after_a_kill_never_starts_a_second_run": {
+          "status": "passed",
+          "seconds": 8.641,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_engine.py::test_interrupt_then_resume_completes_without_duplicates": {
+          "status": "passed",
+          "seconds": 3.03,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_engine_faults.py::test_crash_at_evaluation_commit_boundary_does_not_duplicate_results": {
+          "status": "passed",
+          "seconds": 0.718,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    },
+    "E2E-04": {
+      "claim": "Stored-output rescoring never invokes the application",
+      "status": "passed",
+      "tests": {
+        "tests/test_cli_run.py::test_interrupted_run_resumes_through_the_cli_and_rescoring_never_invokes": {
+          "status": "passed",
+          "seconds": 7.22,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_engine.py::test_manual_plan_runs_end_to_end_and_saved_executions_rescore": {
+          "status": "passed",
+          "seconds": 4.573,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    },
+    "E2E-05": {
+      "claim": "Invalid or denied plans make zero application and evaluator calls",
+      "status": "passed",
+      "tests": {
+        "tests/test_engine_policy.py::test_denied_actions_dispatch_nothing": {
+          "status": "passed",
+          "seconds": 0.885,
+          "detail": "",
+          "instances": 7
+        },
+        "tests/test_engine_policy.py::test_denied_http_target_and_secret_never_receive_a_request": {
+          "status": "passed",
+          "seconds": 0.135,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_cli_run.py::test_example_plan_runs_under_the_dev_policy_and_is_denied_by_default": {
+          "status": "passed",
+          "seconds": 3.64,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_cli_plan.py::test_plan_validate_reports_invalid_and_denied_plans": {
+          "status": "passed",
+          "seconds": 0.658,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    },
+    "E2E-06": {
+      "claim": "Reference isolation, and missing evidence as a gap rather than a score",
+      "status": "passed",
+      "tests": {
+        "tests/test_cli_runner.py::test_sentinel_reference_never_reaches_stdin_env_argv_or_captures": {
+          "status": "passed",
+          "seconds": 0.908,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_conversation.py::test_the_assistant_never_receives_reference_answers": {
+          "status": "passed",
+          "seconds": 2.777,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_mvp_acceptance.py::test_a_black_box_endpoint_yields_a_missing_evidence_gap_not_a_score": {
+          "status": "passed",
+          "seconds": 0.511,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_deepeval_adapter.py::test_missing_retrieval_is_never_filled_from_reference_context": {
+          "status": "passed",
+          "seconds": 37.542,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    },
+    "E2E-07": {
+      "claim": "Headless and interactive entry points share services; manual and generated plans measure identically",
+      "status": "passed",
+      "tests": {
+        "tests/test_plan_equivalence.py::test_manual_template_and_model_plans_measure_identically": {
+          "status": "passed",
+          "seconds": 4.408,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_tui.py::test_slash_commands_use_real_session_services_and_cover_the_contract": {
+          "status": "passed",
+          "seconds": 11.336,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_tui.py::test_explicit_run_starts_unpresented_validated_draft_with_a_preview": {
+          "status": "passed",
+          "seconds": 2.494,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_cli_chat.py::test_non_tty_chat_json_is_machine_readable_and_can_resume": {
+          "status": "passed",
+          "seconds": 1.356,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    },
+    "E2E-08": {
+      "claim": "A fresh repository-aware conversation sees bounded source evidence, runs the validated application, and reports stored results without duplicate calls",
+      "status": "passed",
+      "tests": {
+        "tests/test_e2e_repository_conversation.py::test_fresh_repository_inspection_runs_and_reports_with_evidence": {
+          "status": "passed",
+          "seconds": 2.367,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    }
+  },
+  "evidence": {
+    "e2e-01": {
+      "journey": "E2E-01",
+      "checkpoints": {
+        "paused_calls": [
+          1,
+          1
+        ]
+      },
+      "session_id": "ses-f463e83d4f51",
+      "run_id": "run-3ce0d95d1140",
+      "case_ids": [
+        "rag-001",
+        "rag-002",
+        "rag-003",
+        "rag-004",
+        "rag-005",
+        "rag-006",
+        "rag-007",
+        "rag-008",
+        "rag-009",
+        "rag-010",
+        "rag-011",
+        "rag-012",
+        "rag-013",
+        "rag-014",
+        "rag-015",
+        "rag-016",
+        "rag-017",
+        "rag-018",
+        "rag-019",
+        "rag-020"
+      ],
+      "application_calls_total": 20,
+      "application_calls_per_case_max": 1,
+      "assistant_requests": 16,
+      "failed_case_ids": [
+        "rag-003",
+        "rag-015"
+      ],
+      "report_work": {
+        "counts": {
+          "evaluation": {
+            "succeeded": 20
+          },
+          "execution": {
+            "succeeded": 20
+          }
+        },
+        "needs_attention": []
+      },
+      "report_metrics": [
+        {
+          "label": "native.exact_match@1.0.0"
+        },
+        {
+          "label": "native.exact_match@1.0.0"
+        }
+      ]
+    }
+  }
+}

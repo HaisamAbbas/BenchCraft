@@ -158,3 +158,73 @@ def test_chat_send_json_sanitizes_command_data(tmp_path: Path, monkeypatch) -> N
     payload = json.loads(result.stdout)
     assert payload["data"]["credential"] == "[redacted]"
     assert payload["data"]["message"] == "beforeafter"
+
+
+def test_new_chat_reuses_the_only_compatible_policy_approved_dataset(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    application = write_app(project)
+    (project / "datasets").mkdir()
+    dataset = write_dataset(
+        project,
+        [{"case_id": "one", "input": "private input", "reference": {"answer": "private answer"}}],
+        name="datasets/support.jsonl",
+    )
+    policy = project / "policy.json"
+    policy.write_text(json.dumps({"inspection_roots": ["."]}), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "chat",
+            "--project",
+            str(project),
+            "--app",
+            str(application),
+            "--policy",
+            str(policy),
+            "--new",
+            "--send",
+            "/help",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["command"] == "/help"
+    assert any("only compatible dataset" in item for item in payload["dataset_selection"])
+    assert str(dataset.resolve()) not in result.stdout
+    assert "private input" not in result.stdout and "private answer" not in result.stdout
+
+
+def test_noninteractive_new_chat_asks_for_material_dataset_ambiguity(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    application = write_app(project)
+    (project / "datasets").mkdir()
+    write_dataset(project, [{"case_id": "one", "input": "q1"}], name="datasets/first.jsonl")
+    write_dataset(project, [{"case_id": "two", "input": "q2"}], name="datasets/second.jsonl")
+    policy = project / "policy.json"
+    policy.write_text(json.dumps({"inspection_roots": ["."]}), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "chat",
+            "--project",
+            str(project),
+            "--app",
+            str(application),
+            "--policy",
+            str(policy),
+            "--new",
+            "--send",
+            "/help",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "Which dataset should be used?" in result.output
+    assert "datasets/first.jsonl" in result.output
+    assert "datasets/second.jsonl" in result.output
+    assert "--dataset PATH" in result.output

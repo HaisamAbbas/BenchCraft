@@ -1,15 +1,16 @@
-"""Static repository inspection (§8 "Architecture understanding", §18 step 4, 16-T1).
+"""Static repository inspection (16-T1, extended for Prompt 25).
 
 Reads an approved source tree and reports what it *suggests* about the application: which
 retrieval, model, tool or serving libraries it depends on or imports, each with the
 evidence location (`path:line`). Nothing is executed, imported or sent anywhere:
 
 - only roots the policy approves (`inspection_roots`) are read;
-- only manifests (`pyproject.toml`, `requirements*.txt`, `package.json`, `Dockerfile`)
-  and the import statements of Python (parsed with `ast`) and JavaScript/TypeScript
-  (matched line by line) are read; other content is not retained;
+- manifests (`pyproject.toml`, `requirements*.txt`, `package.json`, Dockerfiles), Python
+  imports/main guards, and bounded JavaScript/TypeScript import patterns are parsed;
+  dataset/test/evaluator files are path-only candidates;
 - secret-looking files (`.env`, keys, credentials), binaries, large files and vendored or
-  generated directories are skipped, and the skips are counted.
+  generated directories are skipped, and the skips are counted; file, byte, depth,
+  directory-entry and result budgets are explicit.
 
 Every finding is `inferred`. A dependency in a manifest or an import in code does not show
 that the application uses it at runtime: it may be unused, behind a flag, type-checking only
@@ -25,7 +26,7 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -77,9 +78,37 @@ LIBRARY_HINTS: dict[str, tuple[str, str]] = {
 }
 
 _SKIP_DIRS = frozenset(
-    {".git", ".hg", ".svn", ".venv", "venv", "env", "node_modules", "__pycache__", ".aibench",
-     "dist", "build", ".tox", ".mypy_cache", ".ruff_cache", ".pytest_cache", "site-packages"}
-)  # fmt: skip
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        "env",
+        "node_modules",
+        "__pycache__",
+        ".aibench",
+        "dist",
+        "build",
+        ".tox",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pytest_cache",
+        "site-packages",
+        "vendor",
+        "bower_components",
+        "target",
+        "coverage",
+        "out",
+        "generated",
+        ".next",
+        ".nuxt",
+        "__pypackages__",
+    }
+)
+_SENSITIVE_DIRS = frozenset(
+    {"secrets", "secret", "credentials", "credential", "private", "certificates"}
+)
 _SECRET_NAME = re.compile(
     r"(^\.env(\..*)?$|\.pem$|\.key$|\.p12$|\.pfx$|^id_(rsa|dsa|ed25519|ecdsa)|secret|credential"
     r"|\.keystore$|\.netrc$|\.npmrc$|\.pypirc$"
@@ -94,6 +123,7 @@ _JS_TYPE_IMPORT = re.compile(r"^\s*(?:import|export)\s+type\b")
 _JS_IMPORT = re.compile(r"""(?:^\s*import\s+(?:[^'"]+\s+from\s+)?|require\(\s*)['"]([^'"]+)['"]""")
 _MAX_FILES = 5_000
 _MAX_BYTES = 262_144
+_MAX_TOTAL_BYTES = 16 * 1024 * 1024
 
 
 class SourceEvidence(FrozenModel):
@@ -105,9 +135,63 @@ class SourceEvidence(FrozenModel):
     context: str = "code"
 
 
+class InspectionBudget(FrozenModel):
+    """Hard limits for deterministic repository inspection.
+
+    Upper bounds prevent a caller from turning inspection into an effectively unbounded
+    filesystem walk. Dataset candidate files are inventoried by name only and are not read.
+    """
+
+    max_files: int = Field(default=_MAX_FILES, gt=0, le=20_000)
+    max_file_bytes: int = Field(default=_MAX_BYTES, gt=0, le=1_048_576)
+    max_total_bytes: int = Field(default=_MAX_TOTAL_BYTES, gt=0, le=64 * 1024 * 1024)
+    max_directories: int = Field(default=2_000, gt=0, le=10_000)
+    max_entries_per_directory: int = Field(default=2_000, gt=0, le=10_000)
+    max_depth: int = Field(default=32, gt=0, le=128)
+    max_discoveries: int = Field(default=2_000, gt=0, le=10_000)
+
+
+class DiscoveryResult(FrozenModel):
+    """A bounded repository clue, not proof that a component works at runtime."""
+
+    kind: Literal[
+        "manifest",
+        "source_file",
+        "test_candidate",
+        "dataset_candidate",
+        "evaluator_candidate",
+        "invocation_candidate",
+        "unsupported_source",
+    ]
+    subject: str
+    provenance: ObservationState
+    confidence: Literal["high", "medium", "low"]
+    summary: str
+    evidence: tuple[SourceEvidence, ...]
+    limitations: tuple[str, ...] = ()
+
+
+class SupportedFormat(FrozenModel):
+    pattern: str
+    purpose: str
+    analysis: str
+
+
+SUPPORTED_FORMATS = (
+    SupportedFormat(pattern="pyproject.toml", purpose="Python project manifest", analysis="declared dependencies and entrypoint names"),
+    SupportedFormat(pattern="requirements*.txt", purpose="Python dependency manifest", analysis="dependency names"),
+    SupportedFormat(pattern="package.json", purpose="Node project manifest", analysis="dependency names and script names"),
+    SupportedFormat(pattern="Dockerfile / *.dockerfile", purpose="container manifest", analysis="dependency install hints and entrypoint directives"),
+    SupportedFormat(pattern="*.py", purpose="Python source", analysis="imports and __main__ guards via AST; never imported"),
+    SupportedFormat(pattern="*.js, *.mjs, *.cjs, *.ts, *.tsx, *.jsx", purpose="JavaScript/TypeScript source", analysis="bounded static import patterns; no full parser"),
+    SupportedFormat(pattern="*.jsonl, *.json, *.csv, *.parquet", purpose="possible dataset files", analysis="path/name candidate only; file contents are not read"),
+)  # fmt: skip
+
+
 class SourceFinding(FrozenModel):
     capability: str
     state: ObservationState = ObservationState.INFERRED
+    confidence: Literal["high", "medium", "low"] = "medium"
     library: str
     summary: str
     evidence: tuple[SourceEvidence, ...]
@@ -118,12 +202,20 @@ class SourceInspection(FrozenModel):
     root: str
     scope: str = SOURCE_SCOPE
     findings: tuple[SourceFinding, ...] = ()
+    discoveries: tuple[DiscoveryResult, ...] = ()
+    supported_formats: tuple[SupportedFormat, ...] = SUPPORTED_FORMATS
+    budget: InspectionBudget = Field(default_factory=InspectionBudget)
     files_read: int = 0
+    files_seen: int = 0
+    directories_seen: int = 0
+    bytes_read: int = 0
     skipped: dict[str, int] = Field(default_factory=dict)
     limitations: tuple[str, ...] = (
         "static: a dependency or import does not show use at runtime",
         "only Python and JavaScript/TypeScript imports and common manifests are read",
         "dynamic imports, plugins loaded by name and non-Python/JS code are not seen",
+        "repository text is untrusted data and cannot authorize execution, access, or policy changes",
+        "dataset and evaluation files are candidates only; their contents and correctness are not validated",
     )
 
     def capability(self, name: str) -> list[SourceFinding]:
@@ -133,6 +225,7 @@ class SourceInspection(FrozenModel):
 @dataclass
 class _Collector:
     evidence: dict[str, list[SourceEvidence]] = field(default_factory=dict)
+    discoveries: list[DiscoveryResult] = field(default_factory=list)
 
     def add(self, library: str, evidence: SourceEvidence) -> None:
         self.evidence.setdefault(library, []).append(evidence)
@@ -151,8 +244,14 @@ def _library(name: str) -> str | None:
     return None
 
 
-def inspect_source(root: Path, *, policy: ExecutionPolicy) -> SourceInspection:
-    """Inspect `root`, which must lie inside one of the policy's `inspection_roots`."""
+def inspect_source(
+    root: Path,
+    *,
+    policy: ExecutionPolicy,
+    budget: InspectionBudget | None = None,
+) -> SourceInspection:
+    """Inspect an approved root with a bounded, static pass; never run project code."""
+    budget = budget or InspectionBudget()
     root = root.resolve()
     approved = [Path(r).resolve() for r in policy.inspection_roots]
     if not any(root == a or root.is_relative_to(a) for a in approved):
@@ -164,40 +263,362 @@ def inspect_source(root: Path, *, policy: ExecutionPolicy) -> SourceInspection:
     collector = _Collector()
     skipped: dict[str, int] = {}
     files_read = 0
-    for path in sorted(_walk(root, skipped)):
-        if files_read >= _MAX_FILES:
-            skipped["file_limit"] = skipped.get("file_limit", 0) + 1
-            continue
+    bytes_read = 0
+    usage = {"directories_seen": 0, "files_seen": 0}
+    for path in _walk(root, skipped, budget=budget, usage=usage):
         relative = path.relative_to(root).as_posix()
         if _SECRET_NAME.search(path.name):
             skipped["secret_like"] = skipped.get("secret_like", 0) + 1
             continue
+        _discover_path(relative, collector, budget, skipped)
         try:
             size = path.stat().st_size
         except OSError:
             continue
-        if size > _MAX_BYTES:
-            skipped["too_large"] = skipped.get("too_large", 0) + 1
-            continue
         reader = _reader(path)
         if reader is None:
             continue
+        if size > budget.max_file_bytes:
+            skipped["too_large"] = skipped.get("too_large", 0) + 1
+            continue
+        remaining_bytes = budget.max_total_bytes - bytes_read
+        if remaining_bytes <= 0:
+            skipped["total_bytes_limit"] = skipped.get("total_bytes_limit", 0) + 1
+            continue
         try:
-            raw = path.read_bytes()
+            with path.open("rb") as stream:
+                raw = stream.read(min(budget.max_file_bytes, remaining_bytes) + 1)
         except OSError:
+            continue
+        if len(raw) > budget.max_file_bytes:
+            skipped["too_large"] = skipped.get("too_large", 0) + 1
+            continue
+        if len(raw) > remaining_bytes:
+            skipped["total_bytes_limit"] = skipped.get("total_bytes_limit", 0) + 1
             continue
         if b"\x00" in raw[:4096]:
             skipped["binary"] = skipped.get("binary", 0) + 1
             continue
         files_read += 1
+        bytes_read += len(raw)
         text = raw.decode("utf-8", errors="replace")
         reader(relative, text, collector)
+        _discover_manifest_invocations(
+            path.name.lower(), relative, text, collector, budget, skipped
+        )
+        if path.suffix.lower() == ".py":
+            _discover_python_invocations(relative, text, collector, budget, skipped)
     return SourceInspection(
         root=str(root),
         findings=tuple(_findings(collector)),
+        discoveries=tuple(
+            sorted(collector.discoveries, key=lambda item: (item.kind, item.subject))
+        ),
+        budget=budget,
         files_read=files_read,
+        files_seen=usage["files_seen"],
+        directories_seen=usage["directories_seen"],
+        bytes_read=bytes_read,
         skipped=dict(sorted(skipped.items())),
     )
+
+
+def _add_discovery(
+    collector: _Collector,
+    result: DiscoveryResult,
+    budget: InspectionBudget,
+    skipped: dict[str, int],
+) -> None:
+    if len(collector.discoveries) >= budget.max_discoveries:
+        skipped["discovery_limit"] = skipped.get("discovery_limit", 0) + 1
+        return
+    collector.discoveries.append(result)
+
+
+def _discovery(
+    kind: Literal[
+        "manifest",
+        "source_file",
+        "test_candidate",
+        "dataset_candidate",
+        "evaluator_candidate",
+        "invocation_candidate",
+        "unsupported_source",
+    ],
+    relative: str,
+    *,
+    summary: str,
+    provenance: ObservationState = ObservationState.OBSERVED,
+    confidence: Literal["high", "medium", "low"] = "high",
+    line: int | None = None,
+    detail: str = "file presence",
+    limitations: tuple[str, ...] = (),
+) -> DiscoveryResult:
+    return DiscoveryResult(
+        kind=kind,
+        subject=relative,
+        provenance=provenance,
+        confidence=confidence,
+        summary=summary,
+        evidence=(
+            SourceEvidence(
+                path=relative,
+                line=line,
+                kind=kind,
+                detail=detail,
+                context=provenance.value,
+            ),
+        ),
+        limitations=limitations,
+    )
+
+
+_SUPPORTED_SOURCE_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}
+_UNSUPPORTED_SOURCE_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".go",
+    ".java",
+    ".php",
+    ".rb",
+    ".rs",
+    ".swift",
+}
+_DATASET_SUFFIXES = {".csv", ".json", ".jsonl", ".parquet"}
+_DATA_DIRS = {"data", "dataset", "datasets", "benchmark", "benchmarks", "golden", "goldens"}
+_EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations", "evaluator", "evaluators", "metrics"}
+
+
+def _discover_path(
+    relative: str,
+    collector: _Collector,
+    budget: InspectionBudget,
+    skipped: dict[str, int],
+) -> None:
+    path = Path(relative)
+    name = path.name.lower()
+    suffix = path.suffix.lower()
+    parts = {part.lower() for part in path.parts[:-1]}
+    if (
+        name == "pyproject.toml"
+        or name == "package.json"
+        or name == "dockerfile"
+        or name.endswith(".dockerfile")
+        or (name.startswith("requirements") and name.endswith(".txt"))
+    ):
+        _add_discovery(
+            collector,
+            _discovery(
+                "manifest",
+                relative,
+                summary="Project manifest found; supported fields may be inspected if budgets allow.",
+            ),
+            budget,
+            skipped,
+        )
+    if suffix in _SUPPORTED_SOURCE_SUFFIXES:
+        _add_discovery(
+            collector,
+            _discovery(
+                "source_file",
+                relative,
+                summary="Supported source file found; supported patterns may be parsed if budgets allow.",
+                limitations=(
+                    "unsupported patterns remain unknown; budget limits may prevent parsing",
+                ),
+            ),
+            budget,
+            skipped,
+        )
+    if _TEST_PATH.search(relative) or ".test." in name or ".spec." in name:
+        _add_discovery(
+            collector,
+            _discovery(
+                "test_candidate",
+                relative,
+                summary="Test/spec file candidate found; it is not treated as a benchmark dataset or golden.",
+                confidence="medium",
+                limitations=("test intent and oracle quality are not validated",),
+            ),
+            budget,
+            skipped,
+        )
+    if parts & _EVAL_DIRS or any(token in name for token in ("eval", "metric")):
+        _add_discovery(
+            collector,
+            _discovery(
+                "evaluator_candidate",
+                relative,
+                summary="Evaluation-related path candidate found; compatibility is unknown.",
+                confidence="low",
+                limitations=(
+                    "the file is not imported or executed; evaluator semantics are not validated",
+                ),
+            ),
+            budget,
+            skipped,
+        )
+    if suffix in _DATASET_SUFFIXES and (
+        parts & _DATA_DIRS or any(token in name for token in ("dataset", "golden", "benchmark"))
+    ):
+        _add_discovery(
+            collector,
+            _discovery(
+                "dataset_candidate",
+                relative,
+                summary="Dataset-shaped path candidate found; contents and reference quality were not inspected.",
+                confidence="medium",
+                limitations=("candidate only; not loaded, validated, or promoted",),
+            ),
+            budget,
+            skipped,
+        )
+    if suffix in _UNSUPPORTED_SOURCE_SUFFIXES:
+        _add_discovery(
+            collector,
+            _discovery(
+                "unsupported_source",
+                relative,
+                summary=f"Source file type {suffix} is outside the tested parser support; code understanding is unknown.",
+                provenance=ObservationState.UNKNOWN,
+                confidence="low",
+                limitations=("file contents were not read or parsed",),
+                detail="unsupported source suffix",
+            ),
+            budget,
+            skipped,
+        )
+
+
+def _discover_manifest_invocations(
+    name: str,
+    relative: str,
+    text: str,
+    collector: _Collector,
+    budget: InspectionBudget,
+    skipped: dict[str, int],
+) -> None:
+    declarations: list[tuple[int | None, str]] = []
+    if name == "pyproject.toml":
+        try:
+            data = tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            return
+        project = data.get("project", {})
+        poetry = data.get("tool", {}).get("poetry", {})
+        scripts = project.get("scripts", {}) if isinstance(project, dict) else {}
+        if not scripts and isinstance(poetry, dict):
+            scripts = poetry.get("scripts", {})
+        if isinstance(scripts, dict):
+            for script_name in scripts:
+                safe_name = str(script_name)
+                if re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", safe_name):
+                    line = next(
+                        (
+                            i
+                            for i, row in enumerate(text.splitlines(), 1)
+                            if re.match(rf"\s*{re.escape(safe_name)}\s*=", row)
+                        ),
+                        None,
+                    )
+                    declarations.append((line, "project script name declared; command omitted"))
+    elif name == "package.json":
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return
+        scripts = data.get("scripts") if isinstance(data, dict) else None
+        if isinstance(scripts, dict) and scripts:
+            for script_name in scripts:
+                if re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", str(script_name)):
+                    lines = text.splitlines()
+                    scripts_line = next(
+                        (i for i, row in enumerate(lines) if '"scripts"' in row), None
+                    )
+                    line = next(
+                        (
+                            i + 1
+                            for i, row in enumerate(lines)
+                            if scripts_line is not None
+                            and i > scripts_line
+                            and f'"{script_name}"' in row
+                        ),
+                        None,
+                    )
+                    declarations.append((line, "package script name declared; command omitted"))
+    elif name == "dockerfile" or name.endswith(".dockerfile"):
+        for number, row in enumerate(text.splitlines(), 1):
+            if re.match(r"\s*(?:CMD|ENTRYPOINT)\b", row, re.IGNORECASE):
+                declarations.append((number, "container entrypoint directive; command omitted"))
+    for line, detail in declarations:
+        _add_discovery(
+            collector,
+            _discovery(
+                "invocation_candidate",
+                relative,
+                summary="Manifest declares a plausible invocation path; it is unvalidated and never executed during inspection.",
+                provenance=ObservationState.DECLARED,
+                confidence="medium",
+                line=line,
+                detail=detail,
+                limitations=(
+                    "candidate only; command, arguments, effects, and runtime success are not validated",
+                ),
+            ),
+            budget,
+            skipped,
+        )
+
+
+def _discover_python_invocations(
+    relative: str,
+    text: str,
+    collector: _Collector,
+    budget: InspectionBudget,
+    skipped: dict[str, int],
+) -> None:
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        compact = ast.unparse(node.test).replace(" ", "")
+        if re.fullmatch(r"__name__==(['\"])__main__\1", compact):
+            _add_discovery(
+                collector,
+                _discovery(
+                    "invocation_candidate",
+                    relative,
+                    summary="Python __main__ guard found; candidate invocation is not executed or validated.",
+                    provenance=ObservationState.INFERRED,
+                    confidence="medium",
+                    line=node.lineno,
+                    detail="__main__ guard",
+                    limitations=("candidate only; callable behavior and side effects are unknown",),
+                ),
+                budget,
+                skipped,
+            )
+
+
+class CodebaseInspector:
+    """Policy-bound facade for bounded static repository inspection."""
+
+    def __init__(
+        self,
+        policy: ExecutionPolicy,
+        *,
+        budget: InspectionBudget | None = None,
+    ) -> None:
+        self.policy = policy
+        self.budget = budget or InspectionBudget()
+
+    def inspect(self, root: Path) -> SourceInspection:
+        return inspect_source(root, policy=self.policy, budget=self.budget)
 
 
 def _is_link(entry: Path) -> bool:
@@ -206,18 +627,33 @@ def _is_link(entry: Path) -> bool:
     return entry.is_symlink() or bool(is_junction and is_junction())
 
 
-def _walk(root: Path, skipped: dict[str, int]) -> list[Path]:
-    """Every file under `root`, never leaving it: links are skipped, and so is any entry
-    that resolves outside the root (a junction or mount on an older Python)."""
-    found = []
-    stack = [root]
+def _walk(
+    root: Path,
+    skipped: dict[str, int],
+    *,
+    budget: InspectionBudget,
+    usage: dict[str, int],
+):
+    """Yield a deterministic bounded subset of files and never follow links."""
+    from itertools import islice
+
+    stack = [(root, 0)]
     while stack:
-        directory = stack.pop()
+        directory, depth = stack.pop()
+        if usage["directories_seen"] >= budget.max_directories:
+            skipped["directory_limit"] = skipped.get("directory_limit", 0) + 1
+            continue
+        usage["directories_seen"] += 1
         try:
-            entries = list(directory.iterdir())
+            iterator = directory.iterdir()
+            entries = list(islice(iterator, budget.max_entries_per_directory + 1))
+            iterator.close()
         except OSError:
             continue
-        for entry in entries:
+        if len(entries) > budget.max_entries_per_directory:
+            skipped["directory_entry_limit"] = skipped.get("directory_entry_limit", 0) + 1
+            entries = entries[: budget.max_entries_per_directory]
+        for entry in sorted(entries):
             try:
                 outside = _is_link(entry) or not entry.resolve().is_relative_to(root)
             except OSError:
@@ -226,13 +662,25 @@ def _walk(root: Path, skipped: dict[str, int]) -> list[Path]:
                 skipped["symlink"] = skipped.get("symlink", 0) + 1  # never leave the root
                 continue
             if entry.is_dir():
+                if entry.name.lower() in _SENSITIVE_DIRS:
+                    skipped["sensitive_directory"] = skipped.get("sensitive_directory", 0) + 1
+                    continue
                 if entry.name in _SKIP_DIRS or entry.name.startswith("."):
                     skipped["directory"] = skipped.get("directory", 0) + 1
                     continue
-                stack.append(entry)
+                if depth >= budget.max_depth:
+                    skipped["depth_limit"] = skipped.get("depth_limit", 0) + 1
+                    continue
+                if usage["directories_seen"] + len(stack) >= budget.max_directories:
+                    skipped["directory_limit"] = skipped.get("directory_limit", 0) + 1
+                    continue
+                stack.append((entry, depth + 1))
             elif entry.is_file():
-                found.append(entry)
-    return found
+                if usage["files_seen"] >= budget.max_files:
+                    skipped["file_limit"] = skipped.get("file_limit", 0) + 1
+                    return
+                usage["files_seen"] += 1
+                yield entry
 
 
 def _reader(path: Path) -> Any:
@@ -459,6 +907,7 @@ def _findings(collector: _Collector) -> list[SourceFinding]:
         findings.append(
             SourceFinding(
                 capability=capability,
+                confidence="medium" if live else "low",
                 library=library,
                 summary=summary,
                 evidence=tuple(evidence[:20]),

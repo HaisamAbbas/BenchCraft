@@ -436,11 +436,11 @@ def compare(
         else:
             err_console.print(f"[red]{safe(message)}[/red]")
         raise typer.Exit(code=EXIT_INVALID)
-    storage = Storage(Database.open_workspace(ws))
+    storage = Storage(Database.open_readonly(ws.db_path))
     try:
         report = compare_runs(
             storage,
-            ArtifactStore(ws.artifacts_dir),
+            ArtifactStore(ws.artifacts_dir, create=False),
             baseline,
             current,
             baseline_scoring_id=baseline_scoring,
@@ -453,7 +453,12 @@ def compare(
     except ComparisonError as exc:
         if json_output:
             console.print_json(
-                data={"status": "error", "baseline": baseline, "current": current, "message": str(exc)}
+                data={
+                    "status": "error",
+                    "baseline": baseline,
+                    "current": current,
+                    "message": str(exc),
+                }
             )
         else:
             err_console.print(f"[red]{safe(str(exc))}[/red]")

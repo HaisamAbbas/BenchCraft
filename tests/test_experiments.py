@@ -289,7 +289,14 @@ def test_interrupted_holdout_resumes_same_frozen_plan_and_run_ids(
 def test_experiment_conversation_tools_are_read_only_proposals() -> None:
     from aibench.conversation.agent import SYSTEM_PROMPT, TOOL_NAMES, tool_specs
 
-    assert {"list_experiments", "get_experiment_report", "propose_experiment_adoption"} <= TOOL_NAMES
+    assert {
+        "list_experiments",
+        "run_controlled_experiment",
+        "resume_controlled_experiment",
+        "evaluate_experiment_holdout",
+        "get_experiment_report",
+        "propose_experiment_adoption",
+    } <= TOOL_NAMES
     assert "Never edit source files, deploy, or change production settings" in SYSTEM_PROMPT
     tools = {item["function"]["name"]: item for item in tool_specs()}
     assert "never applies changes" in tools["propose_experiment_adoption"]["function"]["description"]

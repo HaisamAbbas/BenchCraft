@@ -38,6 +38,7 @@ from aibench.engine.compile import (
     load_policy,
 )
 from aibench.planning.drafts import PlanDraft, estimate_spend
+from aibench.planning.opportunities import OpportunityReport, discover_opportunities
 from aibench.planning.planner import PlannerLimits, plan_with_model, plan_with_template
 from aibench.planning.service import gather_inputs, write_draft
 
@@ -256,6 +257,7 @@ def plan(
             plugin_environments=_plugin_environments(plugin_env, plugin_secret, plugin_path),
             params=_keyed_json(params, "--params"),
             rules=_rules(rule),
+            source_root=Path.cwd(),
         )
     except AibenchError as exc:
         raise _fail(str(exc), EXIT_INVALID) from exc
@@ -299,6 +301,89 @@ def plan(
         err_console.print("the model planner was not contacted; the draft uses the template")
         raise typer.Exit(code=EXIT_DENIED)
     raise typer.Exit(code=_exit_for(findings))
+
+
+@plan_app.command("opportunities")
+def show_opportunities(
+    app: Path = typer.Option(..., "--app", help="Application config file."),  # noqa: B008
+    dataset: Path = typer.Option(..., "--dataset", help="JSONL dataset."),  # noqa: B008
+    objectives: list[str] = typer.Option(  # noqa: B008
+        [], "--objective", help="What the benchmark should check (repeatable)."
+    ),
+    policy: Path | None = _POLICY,
+    trust_local_app: bool = typer.Option(
+        False, "--trust-local-app", help="Grant trusted-local mode for a CLI application."
+    ),
+    plugin_env: Path | None = _PLUGIN_ENV_OPTION,
+    plugin_secret: list[str] = _PLUGIN_SECRET_OPTION,
+    plugin_path: list[Path] = _PLUGIN_PATH_OPTION,
+    params: list[str] = typer.Option(  # noqa: B008
+        [], "--params", help="Metric parameters you supply: EVALUATOR_ID=JSON (repeatable)."
+    ),
+    rule: list[str] = typer.Option(  # noqa: B008
+        [], "--rule", help="Pass/fail rules you supply: EVALUATOR_ID=JSON (repeatable)."
+    ),
+    json_output: bool = _JSON,
+) -> None:
+    """Show evidence- and policy-aware metric opportunities; write no plan and run nothing."""
+    supplied_params = _keyed_json(params, "--params")
+    if any(not isinstance(value, dict) for value in supplied_params.values()):
+        raise _fail("--params values must be JSON objects", EXIT_INVALID)
+    try:
+        gathered = gather_inputs(
+            application=app,
+            dataset=dataset,
+            objectives=list(objectives),
+            out=None,
+            policy=load_policy(policy),
+            trusted_local=trust_local_app,
+            plugin_environments=_plugin_environments(plugin_env, plugin_secret, plugin_path),
+            params=supplied_params,
+            rules=_rules(rule),
+            source_root=Path.cwd(),
+        )
+    except AibenchError as exc:
+        raise _fail(str(exc), EXIT_INVALID) from exc
+    for note in gathered.notes:
+        err_console.print(f"[yellow]note:[/yellow] {escape(note)}")
+    report = discover_opportunities(gathered.inputs)
+    if json_output:
+        console.print_json(data=json.loads(report.model_dump_json()))
+        return
+    _print_opportunities(report)
+
+
+def _print_opportunities(report: OpportunityReport) -> None:
+    console.print(f"dataset {report.dataset_hash}: {report.dataset_cases} case(s)")
+    for objective in report.objectives:
+        console.print(
+            f"objective {escape(objective.objective_id)} ({objective.state}): "
+            f"{escape(objective.objective)}"
+        )
+        for concept in objective.concepts:
+            console.print(f"  {escape(concept.concept)}: {concept.state}")
+            if concept.recommended_metric:
+                console.print(f"    recommended: {escape(concept.recommended_metric)}")
+            if concept.note:
+                console.print(f"    {escape(concept.note)}")
+            if concept.gap:
+                console.print(f"    gap: {escape(concept.gap)}")
+            for metric in concept.metrics:
+                label = "recommended" if metric.recommended else metric.state
+                console.print(f"    {escape(metric.metric)} ({label})")
+                for requirement in metric.requirements:
+                    console.print(
+                        f"      {escape(requirement.path)}: {requirement.state} — "
+                        f"{escape(requirement.detail)}"
+                    )
+                for reason in metric.reasons:
+                    console.print(f"      reason: {escape(reason)}")
+        for question in objective.questions:
+            console.print(f"  question: {escape(question)}")
+    for question in report.questions:
+        console.print(f"question: {escape(question)}")
+    for limitation in report.limitations:
+        console.print(f"  limit: {escape(limitation)}")
 
 
 # --------------------------------------------------------------------------- validate

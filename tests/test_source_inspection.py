@@ -183,6 +183,8 @@ def test_a_directory_junction_or_link_never_leads_outside_the_root(tmp_path: Pat
     tree = inspect_source(root, policy=ExecutionPolicy(inspection_roots=(str(root),)))
     assert tree.files_read == 0 and not tree.findings
     assert tree.skipped == {"symlink": 1}
+    with pytest.raises(PolicyError, match="not approved"):
+        inspect_source(link, policy=ExecutionPolicy(inspection_roots=(str(root),)))
 
 
 def test_import_contexts_that_do_not_show_runtime_use(tmp_path: Path) -> None:

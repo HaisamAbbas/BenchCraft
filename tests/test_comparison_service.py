@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from aibench.core.hashes import content_hash
+from aibench.core.hashes import bytes_hash, content_hash
 from aibench.core.models import (
     BenchmarkCase,
     DatasetManifest,
@@ -29,10 +29,20 @@ from aibench.core.models import (
     WorkItemState,
     deep_unfreeze,
 )
+from aibench.core.plans import ExecutablePlan
 from aibench.services.comparison import ComparisonError, compare_runs, comparison_exit_code
-from aibench.storage.artifacts import ArtifactStore
+from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.db import Database
 from aibench.storage.repositories import Storage
+
+_TEST_ARTIFACTS: ArtifactStore | None = None
+
+
+@pytest.fixture(autouse=True)
+def _comparison_artifacts(tmp_path: Path) -> None:
+    """Use the same test workspace artifact root as the comparison calls."""
+    global _TEST_ARTIFACTS
+    _TEST_ARTIFACTS = ArtifactStore(tmp_path / "artifacts")
 
 
 def _profile(
@@ -52,8 +62,10 @@ def _profile(
     dependency_lock_hash: str | None = None,
     uses_models: bool = False,
 ) -> tuple[str, dict[str, Any]]:
-    binding = binding_hash or content_hash({"metric": metric_id, "version": "1.0.0"})
-    judge = judge or {"kind": "not_used", "digest": "sha256:native-judge", "verified": True}
+    binding = binding_hash or content_hash(
+        {"evaluator_id": metric_id, "version": "1.0.0", "params": {}, "rule": None}
+    )
+    judge = judge or {"kind": "not_used", "digest": None, "verified": True}
     rubric = rubric or {
         "kind": "framework_internal",
         "digest": "sha256:native-rubric",
@@ -78,6 +90,7 @@ def _profile(
         "description": f"test {metric_id}",
     }
     compatibility = {
+        "schema_version": "aibench.evaluation-identity/1",
         "metric_id": metric_id,
         "metric_version": "1.0.0",
         "value_kind": value_kind,
@@ -97,15 +110,10 @@ def _profile(
         "instrumentation": instrumentation,
         "required_fields": [],
         "final_attempt_rule": "highest_attempt_id_per_case_and_repetition",
-        "compatibility_hash": content_hash(
-            {
-                "binding": binding,
-                "judge": judge,
-                "rubric": rubric,
-                "instrumentation": instrumentation,
-            }
-        ),
     }
+    compatibility["compatibility_hash"] = content_hash(
+        {key: value for key, value in compatibility.items() if key != "schema_version"}
+    )
     return binding, {
         "metric": metric_id,
         "manifest": manifest,
@@ -128,6 +136,7 @@ def _result(
     status: ExecutionStatus = ExecutionStatus.OK,
     decision: Decision = Decision.PASS,
     execution_suffix: str | None = None,
+    compatibility: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     execution_id = execution_suffix or f"{run_id}:{case_id}:r{repetition}:a0"
     return EvaluationResult(
@@ -149,6 +158,7 @@ def _result(
             "plugin_id": "aibench-native",
             "plugin_version": "1.0.0",
             "binding": {"metric": metric_id, "params": {}},
+            **({"compatibility": compatibility} if compatibility is not None else {}),
         },
     )
 
@@ -166,6 +176,8 @@ def _seed_run(
     extra_passes: list[tuple[str, dict[tuple[str, int], float | None]]] | None = None,
     execution_ids: dict[tuple[str, int], str] | None = None,
     result_execution_ids: dict[tuple[str, int], str] | None = None,
+    missing_execution_keys: set[tuple[str, int]] | None = None,
+    cached_pass_ids: set[str] | None = None,
 ) -> tuple[str, str]:
     scoring_id = scoring_id or f"engine-{run_id}"
     binding, metric_profile = profile or _profile()
@@ -181,15 +193,26 @@ def _seed_run(
         )
     )
     storage.commit_cases(dataset_hash, cases)
+    assert _TEST_ARTIFACTS is not None
+    plan = ExecutablePlan(
+        plan_id=f"plan-{run_id}",
+        dataset="dataset.jsonl",
+        application="application.json",
+        repetitions=repetitions,
+    )
+    plan_bytes = plan.model_dump_json().encode("utf-8")
+    plan_ref = _TEST_ARTIFACTS.write_bytes(plan_bytes, mime_type="application/json")
+    commit_verified_artifact(_TEST_ARTIFACTS, storage, plan_ref)
     storage.commit_run(
         RunManifest(
             run_id=run_id,
             dataset_hash=dataset_hash,
             application_hash=application_hash,
-            plan_hash=f"sha256:plan-{run_id}",
+            plan_hash=bytes_hash(plan_bytes),
             parameters={
                 "scoring_id": scoring_id,
                 "repetitions": repetitions,
+                "plan_artifact_id": plan_ref.artifact_id,
                 "metric_profiles": {binding: metric_profile},
             },
         ),
@@ -239,10 +262,51 @@ def _seed_run(
         },
     )
     for (case_id, repetition), value in values.items():
-        storage.commit_metric_result(
-            _result(
+        result = _result(
+            run_id,
+            scoring_id,
+            case_id,
+            repetition,
+            value,
+            binding_hash=binding,
+            metric_id=metric_id,
+            decision=(
+                Decision.NOT_EVALUATED
+                if value is None
+                else (Decision.PASS if value >= 0.5 else Decision.FAIL)
+            ),
+            execution_suffix=result_execution_ids.get((case_id, repetition)),
+            compatibility=metric_profile.get("compatibility"),
+        )
+        if (case_id, repetition) in (missing_execution_keys or set()):
+            result = result.model_copy(
+                update={
+                    "execution_id": None,
+                    "status": ExecutionStatus.SKIPPED,
+                    "decision": Decision.NOT_EVALUATED,
+                    "value": None,
+                }
+            )
+        if scoring_id in (cached_pass_ids or set()):
+            result = result.model_copy(
+                update={
+                    "provenance": {
+                        **deep_unfreeze(result.provenance),
+                        "cache": {"key": "test-cache"},
+                    }
+                }
+            )
+        storage.commit_metric_result(result)
+    for pass_id, pass_values in extra_passes or []:
+        storage.append_run_event(
+            run_id,
+            "scoring_pass",
+            {"scoring_id": pass_id, "kind": "rescore", "metric_profiles": {binding: metric_profile}},
+        )
+        for (case_id, repetition), value in pass_values.items():
+            result = _result(
                 run_id,
-                scoring_id,
+                pass_id,
                 case_id,
                 repetition,
                 value,
@@ -254,32 +318,18 @@ def _seed_run(
                     else (Decision.PASS if value >= 0.5 else Decision.FAIL)
                 ),
                 execution_suffix=result_execution_ids.get((case_id, repetition)),
+                compatibility=metric_profile.get("compatibility"),
             )
-        )
-    for pass_id, pass_values in extra_passes or []:
-        storage.append_run_event(
-            run_id,
-            "scoring_pass",
-            {"scoring_id": pass_id, "kind": "rescore", "metric_profiles": {binding: metric_profile}},
-        )
-        for (case_id, repetition), value in pass_values.items():
-            storage.commit_metric_result(
-                _result(
-                    run_id,
-                    pass_id,
-                    case_id,
-                    repetition,
-                    value,
-                    binding_hash=binding,
-                    metric_id=metric_id,
-                    decision=(
-                        Decision.NOT_EVALUATED
-                        if value is None
-                        else (Decision.PASS if value >= 0.5 else Decision.FAIL)
-                    ),
-                    execution_suffix=result_execution_ids.get((case_id, repetition)),
+            if pass_id in (cached_pass_ids or set()):
+                result = result.model_copy(
+                    update={
+                        "provenance": {
+                            **deep_unfreeze(result.provenance),
+                            "cache": {"key": "test-cache"},
+                        }
+                    }
                 )
-            )
+            storage.commit_metric_result(result)
         storage.append_run_event(
             run_id,
             "scoring_pass_completed",
@@ -360,6 +410,9 @@ def test_missing_and_status_losses_are_coverage_not_zero_and_gate_exit_is_one(tm
         ).fetchone()["data"]
     ).binding_hash
     assert binding is not None
+    current_record = storage.get_run("current")
+    assert current_record is not None
+    current_profile = deep_unfreeze(current_record.manifest.parameters)["metric_profiles"][binding]
     storage.commit_metric_result(
         _result(
             "current",
@@ -370,6 +423,7 @@ def test_missing_and_status_losses_are_coverage_not_zero_and_gate_exit_is_one(tm
             binding_hash=binding,
             status=ExecutionStatus.ERROR,
             decision=Decision.NOT_EVALUATED,
+            compatibility=current_profile["compatibility"],
         )
     )
 
@@ -405,6 +459,50 @@ def test_changed_case_content_is_never_paired(tmp_path: Path) -> None:
     diagnostic = report["exploratory_diagnostics"][0]
     assert diagnostic["denominators"]["paired_selected"] == 1
     assert diagnostic["cases"][0]["case_id"] == "a1"
+
+
+def test_coverage_gate_includes_unpaired_selected_units() -> None:
+    from aibench.services.comparison import _coverage_gate
+
+    gate = _coverage_gate(
+        {
+            "denominators": {
+                "baseline_selected": 2,
+                "current_selected": 1,
+                "paired_selected": 1,
+                "complete_numeric_pairs": 1,
+                "coverage": {
+                    "complete_numeric_pairs_over_paired_selected": 1.0,
+                    "complete_numeric_pairs_over_baseline_selected": 0.5,
+                    "complete_numeric_pairs_over_current_selected": 1.0,
+                },
+            }
+        },
+        0.95,
+    )
+
+    assert gate["status"] == "fail"
+    assert gate["complete_numeric_pairs_over_required_selected"] == 0.5
+    assert gate["required_selected_denominator"] == 2
+
+
+def test_undispatched_result_is_coverage_loss_not_lineage_corruption(tmp_path: Path) -> None:
+    storage = Storage(Database.open_in_memory())
+    cases = _cases("a1")
+    _seed_run(storage, "baseline", cases=cases, values=_values(("a1", 0, 1)))
+    _seed_run(
+        storage,
+        "current",
+        cases=cases,
+        values=_values(("a1", 0, 2)),
+        missing_execution_keys={("a1", 0)},
+    )
+
+    report = compare_runs(storage, ArtifactStore(tmp_path / "artifacts"), "baseline", "current")
+
+    assert report["status"] == "qualified"
+    assert report["identity_checks"]["lineage"]["compatible"] is True
+    assert report["coverage_gate"]["status"] == "fail"
 
 
 def test_same_metric_label_with_different_binding_blocks_strict(tmp_path: Path) -> None:
@@ -578,6 +676,27 @@ def test_judge_stability_groups_all_passes_and_reports_missing_repeats(tmp_path:
     assert "missing_repeats" in baseline
 
 
+def test_cached_evaluation_is_not_counted_as_an_independent_judge_repeat(tmp_path: Path) -> None:
+    storage = Storage(Database.open_in_memory())
+    cases = _cases("a1")
+    _seed_run(
+        storage,
+        "baseline",
+        cases=cases,
+        values=_values(("a1", 0, 1)),
+        extra_passes=[("repeat-b", _values(("a1", 0, 2)))],
+        cached_pass_ids={"repeat-b"},
+    )
+    _seed_run(storage, "current", cases=cases, values=_values(("a1", 0, 3)))
+
+    report = compare_runs(storage, ArtifactStore(tmp_path / "artifacts"), "baseline", "current")
+    baseline = next(row for row in report["judge_stability"] if row["run_id"] == "baseline")
+
+    assert set(baseline["scoring_ids"]) == {"engine-baseline", "repeat-b"}
+    assert baseline["denominators"]["observed_pass_count"] == 1
+    assert baseline["denominators"]["missing_repeat_count"] == 1
+
+
 def test_cross_framework_matrix_has_no_cross_framework_score(tmp_path: Path) -> None:
     storage = Storage(Database.open_in_memory())
     left_binding, left = _profile(
@@ -738,6 +857,34 @@ def test_missing_frozen_plan_artifact_blocks_strict_comparison(tmp_path: Path) -
     assert exploratory["qualified"] is False
 
 
+def test_missing_frozen_application_artifact_blocks_strict(tmp_path: Path) -> None:
+    storage = Storage(Database.open_in_memory())
+    cases = _cases("a1")
+    _seed_run(storage, "baseline", cases=cases, values=_values(("a1", 0, 1)))
+    _seed_run(storage, "current", cases=cases, values=_values(("a1", 0, 2)))
+    _set_run_parameter(storage, "current", "application_artifact_id", "missing-application")
+
+    report = compare_runs(storage, ArtifactStore(tmp_path / "artifacts"), "baseline", "current")
+
+    assert report["status"] == "blocked"
+    assert report["identity_checks"]["application_artifact"]["compatible"] is False
+
+
+def test_legacy_run_without_frozen_plan_cannot_qualify_strict(tmp_path: Path) -> None:
+    storage = Storage(Database.open_in_memory())
+    cases = _cases("a1")
+    _seed_run(storage, "baseline", cases=cases, values=_values(("a1", 0, 1)))
+    _seed_run(storage, "current", cases=cases, values=_values(("a1", 0, 2)))
+    _set_run_parameter(storage, "baseline", "plan_artifact_id", None)
+    _set_run_parameter(storage, "current", "plan_artifact_id", None)
+
+    report = compare_runs(storage, ArtifactStore(tmp_path / "artifacts"), "baseline", "current")
+
+    assert report["status"] == "blocked"
+    assert report["identity_checks"]["repetition_policy"]["compatible"] is False
+    assert "repetition_policy_changed_or_unknown" in report["warning_codes"]
+
+
 def test_case_ids_with_colons_are_parsed_from_the_right_edge(tmp_path: Path) -> None:
     storage = Storage(Database.open_in_memory())
     cases = _cases("tenant:alpha:r1")
@@ -764,6 +911,34 @@ def test_unfinished_runs_block_strict_comparison(tmp_path: Path) -> None:
     assert report["status"] == "blocked"
     assert report["identity_checks"]["run_state"]["compatible"] is False
     assert "run_not_finished" in report["warning_codes"]
+
+
+def test_compact_profile_hash_is_exploratory_only(tmp_path: Path) -> None:
+    storage = Storage(Database.open_in_memory())
+    cases = _cases("a1")
+    binding, profile = _profile()
+    compact = dict(profile)
+    compact["compatibility"] = dict(profile["compatibility"])
+    compact["compatibility"].pop("schema_version")
+    _seed_run(
+        storage,
+        "baseline",
+        cases=cases,
+        profile=(binding, compact),
+        values=_values(("a1", 0, 1)),
+    )
+    _seed_run(
+        storage,
+        "current",
+        cases=cases,
+        profile=(binding, compact),
+        values=_values(("a1", 0, 2)),
+    )
+
+    report = compare_runs(storage, ArtifactStore(tmp_path / "artifacts"), "baseline", "current")
+
+    assert report["status"] == "blocked"
+    assert "unknown_compatibility_identity" in report["warning_codes"]
 
 
 def test_legacy_profile_without_compatibility_identity_is_exploratory_only(tmp_path: Path) -> None:

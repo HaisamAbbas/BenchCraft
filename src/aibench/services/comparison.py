@@ -131,6 +131,9 @@ class _MetricSpec:
     binding_verified: bool
     identity_recorded: bool = False
     identity_verified: bool = False
+    result_identity_recorded: bool = False
+    result_binding_recorded: bool = False
+    profile_identity_consistent: bool = True
     results: list[EvaluationResult] = field(default_factory=list)
     profile_present: bool = False
 
@@ -155,6 +158,9 @@ class _MetricSpec:
             "binding_verified": self.binding_verified,
             "identity_recorded": self.identity_recorded,
             "identity_verified": self.identity_verified,
+            "result_identity_recorded": self.result_identity_recorded,
+            "result_binding_recorded": self.result_binding_recorded,
+            "profile_identity_consistent": self.profile_identity_consistent,
             "parameters_hash": _identity_label(self.parameters_hash, "unknown")
             if self.parameters_hash is not None
             else None,
@@ -714,12 +720,11 @@ def _plan_facts(
 
     # Without a frozen plan, an inferred repetition count is useful context but
     # cannot satisfy a strict comparison's repetition-policy identity.
-    verified = (
-        repetitions is not None
+    verified = bool(
+        artifact_expected
+        and repetitions is not None
         and plan_hash_verified
         and plan_content_verified
-        if artifact_expected
-        else repetitions is not None and source in {"run_manifest_parameters", "run_event"}
     )
     return (
         {
@@ -743,10 +748,20 @@ def _application_facts(
     raw: dict[str, Any] | None = None
     source = "unknown"
     artifact_id = params.get("application_artifact_id")
+    artifact_declared = "application_artifact_id" in params
+    if artifact_declared and (not isinstance(artifact_id, str) or not artifact_id):
+        return {
+            "available": False,
+            "source": "frozen_application_artifact",
+            "code": "application_artifact_invalid",
+            "application_id": manifest.application_id,
+            "application_hash": manifest.application_hash,
+            "manifest_hash_verified": False,
+        }
     raw, problem, _raw_digest = _artifact_json(storage, artifacts, artifact_id)
     if raw is not None:
         source = "frozen_application_artifact"
-    elif artifact_id:
+    elif artifact_declared:
         # An expected frozen artifact is authoritative.  Never replace a missing,
         # unreadable, or tampered artifact with the mutable application catalog: doing
         # so would let a run qualify against a different observation contract.
@@ -1016,11 +1031,24 @@ def _profile_value(
     binding = provenance.get("binding") if isinstance(provenance, Mapping) else {}
     if not isinstance(binding, Mapping):
         binding = {}
-    compatibility = raw.get("compatibility")
+    result_binding_recorded = bool(binding)
+    profile_compatibility = raw.get("compatibility")
+    profile_recorded = isinstance(profile_compatibility, Mapping) and bool(profile_compatibility)
+    result_compatibility = (
+        provenance.get("compatibility") if isinstance(provenance, Mapping) else None
+    )
+    result_recorded = isinstance(result_compatibility, Mapping) and bool(result_compatibility)
+    # The result provenance is the identity of the observation that will be compared;
+    # the pass profile is only a fallback for legacy records and must not mask a
+    # different identity written by the scorer.
+    compatibility = result_compatibility if result_recorded else profile_compatibility
     compatibility_recorded = isinstance(compatibility, Mapping) and bool(compatibility)
-    if compatibility is None and isinstance(provenance, Mapping):
-        compatibility = provenance.get("compatibility")
-        compatibility_recorded = isinstance(compatibility, Mapping) and bool(compatibility)
+    result_identity_recorded = result_recorded
+    profile_identity_consistent = bool(profile_recorded)
+    if profile_recorded and result_recorded:
+        profile_hash = _text(profile_compatibility.get("compatibility_hash"))  # type: ignore[union-attr]
+        result_hash = _text(result_compatibility.get("compatibility_hash"))  # type: ignore[union-attr]
+        profile_identity_consistent = profile_hash is not None and profile_hash == result_hash
     if compatibility is None:
         compatibility = {
             key: raw[key]
@@ -1190,8 +1218,19 @@ def _profile_value(
     )
     identity_recorded = bool(compatibility_recorded and compatibility_hash and binding_hash)
     binding_verified = bool(binding_hash)
-    identity_verified = identity_recorded
+    profile_only = result.result_id.startswith("profile:")
+    # A compact/legacy profile is useful for exploratory display, but only a canonical
+    # identity (and, when observations exist, one copied into each result) can qualify a
+    # strict comparison.  A profile-only pass may establish identity for an empty
+    # comparison, while still producing no quality claim.
+    identity_verified = bool(
+        identity_recorded
+        and ((result_identity_recorded and result_binding_recorded) or profile_only)
+        and profile_identity_consistent
+    )
     canonical_identity = compatibility.get("schema_version") == "aibench.evaluation-identity/1"
+    if not canonical_identity:
+        identity_verified = False
     if canonical_identity:
         expected_binding = content_hash(
             {
@@ -1232,6 +1271,8 @@ def _profile_value(
         }
         identity_verified = (
             identity_recorded
+            and ((result_identity_recorded and result_binding_recorded) or profile_only)
+            and profile_identity_consistent
             and set(identity_payload) >= {
                 "metric_id",
                 "metric_version",
@@ -1247,6 +1288,31 @@ def _profile_value(
                 "final_attempt_rule",
             }
             and _digest(identity_payload) == compatibility_hash
+        )
+        expected_payload = {
+            "metric_id": metric_id,
+            "metric_version": metric_version,
+            "value_kind": value_kind,
+            "direction": direction,
+            "scope": scope,
+            "aggregation": aggregation,
+            "binding_hash": binding_hash,
+            "parameters_hash": parameters_hash,
+            "rule": rule,
+            "plugin_id": plugin_id,
+            "plugin_version": plugin_version,
+            "package_name": package_name,
+            "package_version": package_version,
+            "dependency_lock_hash": dependency,
+            "judge": judge,
+            "rubric": rubric,
+            "instrumentation": instrumentation,
+            "required_fields": required_paths,
+            "final_attempt_rule": identity_payload.get("final_attempt_rule"),
+        }
+        identity_verified = identity_verified and all(
+            _plain(compatibility.get(key)) == _plain(value)
+            for key, value in expected_payload.items()
         )
         if not binding_verified:
             identity_verified = False
@@ -1266,6 +1332,9 @@ def _profile_value(
         "compatibility_hash": compatibility_hash,
         "identity_recorded": identity_recorded,
         "identity_verified": identity_verified,
+        "result_identity_recorded": result_identity_recorded,
+        "result_binding_recorded": result_binding_recorded,
+        "profile_identity_consistent": profile_identity_consistent,
         "uses_models": uses_models,
         "profile_present": profile is not None,
     }
@@ -1296,6 +1365,32 @@ def _specs_for_pass(run: _RunFacts, selected: _Pass) -> list[_MetricSpec]:
             values = _profile_value(
                 result_profile, result, manifest=run.manifest, application=run.application
             )
+            result_compatibilities = [
+                deep_unfreeze(item.provenance).get("compatibility")
+                if isinstance(deep_unfreeze(item.provenance), Mapping)
+                else None
+                for item in results
+            ]
+            values["result_identity_recorded"] = all(
+                isinstance(item, Mapping) and bool(item) for item in result_compatibilities
+            )
+            result_hashes = {
+                _text(item.get("compatibility_hash"))
+                for item in result_compatibilities
+                if isinstance(item, Mapping)
+            }
+            values["result_binding_recorded"] = all(
+                isinstance(deep_unfreeze(item.provenance).get("binding"), Mapping)
+                and bool(deep_unfreeze(item.provenance).get("binding"))
+                for item in results
+            )
+            if (
+                len(result_hashes) != 1
+                or not values["result_identity_recorded"]
+                or not values["result_binding_recorded"]
+            ):
+                values["identity_verified"] = False
+                values["profile_identity_consistent"] = False
         else:
             profile_only = selected.profiles[binding]
             values = _profile_from_profile(
@@ -1327,6 +1422,9 @@ def _specs_for_pass(run: _RunFacts, selected: _Pass) -> list[_MetricSpec]:
                 binding_verified=values["binding_verified"],
                 identity_recorded=values["identity_recorded"],
                 identity_verified=values["identity_verified"],
+                result_identity_recorded=values["result_identity_recorded"],
+                result_binding_recorded=values["result_binding_recorded"],
+                profile_identity_consistent=values["profile_identity_consistent"],
                 results=results,
                 profile_present=values["profile_present"],
             )
@@ -1515,16 +1613,31 @@ def _spec_component_checks(left: _MetricSpec, right: _MetricSpec) -> list[dict[s
                 )
             )
 
-    identity_known = left.identity_recorded and right.identity_recorded
+    identity_known = (
+        left.identity_recorded
+        and right.identity_recorded
+        and (not left.results or (left.result_identity_recorded and left.result_binding_recorded))
+        and (not right.results or (right.result_identity_recorded and right.result_binding_recorded))
+        and left.identity_verified
+        and right.identity_verified
+        and left.profile_identity_consistent
+        and right.profile_identity_consistent
+    )
     add(
         "compatibility_identity",
         {
             "recorded": left.identity_recorded,
             "verified": left.identity_verified,
+            "result_recorded": left.result_identity_recorded,
+            "binding_recorded": left.result_binding_recorded,
+            "profile_consistent": left.profile_identity_consistent,
         },
         {
             "recorded": right.identity_recorded,
             "verified": right.identity_verified,
+            "result_recorded": right.result_identity_recorded,
+            "binding_recorded": right.result_binding_recorded,
+            "profile_consistent": right.profile_identity_consistent,
         },
         unknown=not identity_known,
         code="unknown_compatibility_identity",
@@ -1668,8 +1781,8 @@ def _global_identity(
     )
     baseline_app = baseline.application
     current_app = current.application
-    baseline_app_expected = bool((deep_unfreeze(baseline.manifest.parameters) or {}).get("application_artifact_id"))
-    current_app_expected = bool((deep_unfreeze(current.manifest.parameters) or {}).get("application_artifact_id"))
+    baseline_app_expected = "application_artifact_id" in (deep_unfreeze(baseline.manifest.parameters) or {})
+    current_app_expected = "application_artifact_id" in (deep_unfreeze(current.manifest.parameters) or {})
     app_evidence_ok = (
         (not baseline_app_expected or baseline_app.get("manifest_hash_verified") is True)
         and (not current_app_expected or current_app.get("manifest_hash_verified") is True)
@@ -1825,6 +1938,13 @@ def _lineage_mismatch_count(run: _RunFacts, spec: _MetricSpec) -> int:
         # dispatched (for example, budget exhaustion).  It is a coverage loss, not a
         # lineage mismatch; the selected work-item key keeps it in the denominator.
         if not result.execution_id:
+            if result.status in {
+                ExecutionStatus.SKIPPED,
+                ExecutionStatus.NOT_APPLICABLE,
+                ExecutionStatus.CANCELLED,
+            }:
+                continue
+            mismatches += 1
             continue
         final_execution = final.get((result.case_id, result.repetition_id))
         if final_execution is None or result.execution_id != final_execution.execution_id:
@@ -2528,7 +2648,7 @@ def compare_runs(
                     gate.get("reason_code") == "no_complete_numeric_pairs"
                     for gate in gates
                 )
-                else "paired_coverage_below_minimum"
+                else "selected_coverage_below_minimum"
             ),
             "metric_count": len(gates),
             "failed_metric_count": sum(gate.get("passed") is not True for gate in gates),

@@ -54,16 +54,21 @@ release.
 4. **Frozen compatibility identity.** Every scoring pass now freezes an additive
    `EvaluationCompatibilityIdentity` and each result carries a copy. It separates metric
    semantics/binding, plugin/package implementation, judge, rubric, dependency lock and
-   observation-extraction identities. Historical records without it remain usable only in
-   explicitly exploratory mode. The worker request is projected to the manifest's declared
+   observation-extraction identities. The result-level copy, not merely the pass profile, is
+   authoritative; compact or legacy profiles remain usable only in explicitly exploratory
+   mode. Historical records without a frozen plan cannot satisfy strict repetition identity;
+   when a frozen application artifact is declared, a missing or unreadable one likewise
+   fails closed. Legacy records with no artifact reference may use catalog context only as
+   historical compatibility input. The worker request is projected to the manifest's declared
    fields before crossing the process boundary, so an adapter cannot accidentally receive
    reference answers, unrelated fixtures, traces or tool events.
 5. **Strict qualified comparison.** A normal comparison pairs `(case_id, repetition_id)` and
-   checks dataset/case content, repetition policy, application instrumentation, evaluator
-   binding and implementation, rule, judge and rubric identities. A changed or unknown
-   required identity blocks an unqualified regression/improvement claim. An application
-   implementation/target change is not itself a mismatch when its observation contract is
-   unchanged.
+   checks dataset/case content, repetition policy, the frozen application artifact,
+   application instrumentation, evaluator binding and implementation, rule, judge and rubric
+   identities. A changed, unknown, or unverifiable required identity blocks an unqualified
+   regression/improvement claim. A missing artifact is never replaced by the mutable
+   application catalog. An application implementation/target change is not itself a mismatch
+   when its observation contract is unchanged.
 6. **Exploratory diagnostic.** `--mode exploratory` may show explicitly non-qualified paired
    diagnostics when identities differ. It cannot emit a qualified verdict. Different metrics
    are never averaged.
@@ -71,16 +76,26 @@ release.
    separate IDs, scales, rules and raw semantics. A report may show their decision
    disagreement and separate distributions, but it must not treat the scores as equivalent
    votes.
-8. **Coverage before claims.** Missing, failed, cancelled and not-applicable observations stay
-   in the denominator. Paired means are case-level macro averages; uncertainty resamples
-   independent case groups and reports its assumptions and sample size.
+8. **Coverage before claims.** Missing, failed, cancelled, not-applicable and
+   planned-but-undispatched observations stay in the denominator. The gate uses the most
+   conservative selected-side ratio, so an unpaired selected unit cannot disappear behind a
+   complete intersection. Paired means are case-level macro averages; uncertainty resamples
+   independent case groups and reports its assumptions and sample size. Cached evaluator
+   results remain visible as missing judge repeats rather than being counted as independent
+   observations.
 9. **Stored reads only.** Comparison invokes no application, evaluator or judge. Selecting a
    rescore pass is distinct from fresh execution, and the report states the selected scoring
-   passes and whether paired execution identities are the same.
+   passes and whether paired execution identities are the same. The public CLI opens the
+   existing database and artifact store in read-only/query-only mode, so opening a workspace
+   for comparison does not create directories or apply migrations.
 10. **Conversation ownership.** CLI can compare any two runs in one workspace. Conversation
    comparison uses the same service but remains restricted to runs started by that session;
    this preserves the existing authorization boundary while still supporting conversational
    comparison of the session's baseline and current run.
+11. **Bounded plugin startup is configuration, not a test-only escape hatch.** Each
+    `PluginEnvironmentRef` carries `startup_timeout_seconds`, normal plan/evaluate loading
+    propagates it, and `aibench score --plugin-startup-timeout` exposes the same bound. The
+    default is 120 seconds; the Ragas contract tests use a bounded 600-second allowance.
 
 ## Scope discrepancy
 

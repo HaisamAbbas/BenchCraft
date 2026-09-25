@@ -84,6 +84,9 @@ class ApplicationProfile(FrozenModel):
     # What an approved source tree suggests (16-T1). Always `inferred`: it never makes a
     # capability available; `claims` stay declared/observed/unknown.
     source_findings: tuple[SourceFinding, ...] = ()
+    # Static repository inventory and supported-format/budget record, when `--source` is
+    # supplied. Kept alongside the legacy findings projection for schema compatibility.
+    repository_inspection: SourceInspection | None = None
 
     def claim(self, capability: str) -> ObservationClaim | None:
         return next((c for c in self.claims if c.capability == capability), None)
@@ -267,7 +270,27 @@ def inspect_application(
         evidence_runs=tuple(run_ids),
         always_empty=tuple(always_empty),
         source_findings=source_tree.findings if source_tree is not None else (),
+        repository_inspection=source_tree,
     )
+
+
+class ApplicationProfiler:
+    """Build an evidence-backed profile using declarations and saved observations only."""
+
+    def profile(
+        self,
+        config_path: Path,
+        *,
+        executions: Iterable[ExecutionResult] = (),
+        run_ids: Iterable[str] = (),
+        source_tree: SourceInspection | None = None,
+    ) -> ApplicationProfile:
+        return inspect_application(
+            config_path,
+            executions=executions,
+            run_ids=run_ids,
+            source_tree=source_tree,
+        )
 
 
 def _source_gaps(source: SourceInspection | None, claims: list[ObservationClaim]) -> list[str]:

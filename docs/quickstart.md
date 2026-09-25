@@ -172,6 +172,37 @@ run again. It shows:
 `--no-content` withholds case excerpts and per-case metric values while keeping aggregate
 summaries. A report of an unfinished run is labelled a partial snapshot.
 
+## 7. Connect a JSON HTTP API without its repository
+
+When you have an API endpoint and a local JSONL benchmark dataset but not the application's
+repository, configure the narrow JSON POST runner explicitly:
+
+```bash
+aibench connect http --project support-api-bench \
+  --url https://api.example.com/v1/answer \
+  --authorize-origin https://api.example.com \
+  --dataset ./support-cases.jsonl \
+  --app-id support-api --effects none \
+  --bearer-secret-ref env:SUPPORT_API_TOKEN
+cd support-api-bench
+aibench doctor
+aibench chat --new --objective "answers are correct"
+```
+
+Use `--effects none` only if the endpoint is read-only for these requests; choose the
+declared effect level that matches the API. The setup validates the dataset and writes
+`application.http.json`, `policy.json`, and `aibench.json`; it does not probe or call the
+endpoint and refuses to overwrite those files. Remote HTTPS requires authorizing that exact
+origin. Plain HTTP is allowed only for loopback fixtures. A bearer token is read from the
+named environment variable when a benchmark runs; the token value is never written to project
+files.
+
+The bindings default to sending each case's `input` at `/question` and reading `/answer` from
+the response. Use `--input-path`, `--input-field`, and `--output-path` when the API uses
+different JSON pointers. This command does not discover API schemas, import conversation
+history, or automate browser actions. Without a configured assistant model, the slash
+commands still work; natural-language conversation uses the provider setup in section 4.
+
 ## Next steps
 
 - **Your own app:** copy `support.app.json` and change the transport (`cli` or `http`) and the input and output bindings. See [runner-protocol.md](runner-protocol.md).

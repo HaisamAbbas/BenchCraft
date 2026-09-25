@@ -1,0 +1,64 @@
+# cProfile of one 300-case run, delay 0, application concurrency 64 (main thread; start-up included)
+# command: python -m cProfile -o prof64.out -m aibench run --plan plan.json --policy policy.json --workspace . --json (engine elapsed 27.5 s under profiling)
+   11.99 s   29.7%  file I/O and paths
+    7.74 s   19.2%  sqlite (execute/commit incl. fsync)
+    6.74 s   16.7%  other
+    4.54 s   11.2%  http client
+    4.18 s   10.4%  imports
+    1.68 s    4.2%  event loop / wait
+    1.58 s    3.9%  aibench own code
+    1.11 s    2.7%  pydantic validation/serialization
+    0.45 s    1.1%  json
+    0.35 s    0.9%  artifact fsync/rename
+   40.37 s  total
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    20138    7.589    0.000    7.601    0.000 {method 'execute' of 'sqlite3.Connection' objects}
+ 1163/939    4.685    0.004    4.598    0.005 {method 'read' of '_io.BufferedReader' objects}
+      525    2.830    0.005    2.830    0.005 {built-in method _io.open_code}
+   129922    1.898    0.000    2.879    0.000 <frozen importlib._bootstrap_external>:96(_path_join)
+        1    1.546    1.546    1.546    1.546 {method 'load_verify_locations' of '_ssl._SSLContext' objects}
+30947/28925    1.332    0.000    1.289    0.000 {built-in method nt.stat}
+    25981    0.597    0.000    5.852    0.000 <frozen importlib._bootstrap_external>:1597(find_spec)
+2576/1799    0.578    0.000    0.396    0.000 {built-in method nt._getfinalpathname}
+ 1328/804    0.547    0.000    0.411    0.001 {built-in method _io.open}
+835542/829357    0.349    0.000    0.432    0.000 {built-in method builtins.isinstance}
+   1276/1    0.321    0.000   40.410   40.410 {built-in method builtins.exec}
+     1696    0.320    0.000    5.397    0.003 D:\BenchCraft\.venv\Lib\site-packages\httpcore\_async\connection_pool.py:270(_assign_requests_to_connections)
+    12484    0.300    0.000    0.315    0.000 {built-in method select.select}
+1826/1661    0.299    0.000    0.281    0.000 {method '__exit__' of '_io._IOBase' objects}
+       39    0.295    0.008    0.299    0.008 {method 'read' of '_io.TextIOWrapper' objects}
+  619/389    0.292    0.000    0.212    0.001 {method 'flush' of '_io.BufferedWriter' objects}
+   397500    0.264    0.000    0.264    0.000 {method 'endswith' of 'str' objects}
+   291031    0.252    0.000    0.252    0.000 {method 'startswith' of 'str' objects}
+  621/471    0.241    0.000    0.192    0.000 {built-in method nt.replace}
+   391566    0.240    0.000    0.240    0.000 {method 'rstrip' of 'str' objects}
+
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      145    0.007    0.000   11.421    0.079 D:\BenchCraft\src\aibench\services\runs.py:564(execute_run)
+      145    0.003    0.000    8.170    0.056 D:\BenchCraft\src\aibench\services\runs.py:633(_execute_leased)
+      948    0.048    0.000    8.056    0.008 D:\BenchCraft\src\aibench\services\execution.py:70(_record)
+      145    0.002    0.000    7.248    0.050 D:\BenchCraft\src\aibench\engine\engine.py:370(execute)
+     1232    0.032    0.000    7.175    0.006 D:\BenchCraft\src\aibench\engine\engine.py:281(_transition)
+      129    0.013    0.000    6.997    0.054 D:\BenchCraft\src\aibench\engine\engine.py:420(_loop)
+      616    0.014    0.000    6.209    0.010 D:\BenchCraft\src\aibench\engine\engine.py:746(_complete)
+     1854    0.018    0.000    6.042    0.003 D:\BenchCraft\src\aibench\storage\repositories.py:92(_commit_idempotent)
+     2154    0.050    0.000    5.767    0.003 D:\BenchCraft\src\aibench\storage\repositories.py:117(_commit_idempotent_composite)
+      948    0.039    0.000    5.129    0.005 D:\BenchCraft\src\aibench\services\execution.py:83(_commit_captures)
+     1232    0.026    0.000    3.629    0.003 D:\BenchCraft\src\aibench\storage\repositories.py:902(transition_work_item)
+      634    0.016    0.000    3.497    0.006 D:\BenchCraft\src\aibench\storage\repositories.py:1400(commit_artifact_unverified)
+      300    0.014    0.000    3.483    0.012 D:\BenchCraft\src\aibench\engine\engine.py:879(_complete_evaluation)
+     1250    0.009    0.000    3.385    0.003 D:\BenchCraft\src\aibench\engine\engine.py:278(_event)
+      300    0.007    0.000    3.355    0.011 D:\BenchCraft\src\aibench\services\scoring.py:476(score)
+     1251    0.021    0.000    2.869    0.002 D:\BenchCraft\src\aibench\storage\repositories.py:989(append_run_event)
+      300    0.011    0.000    2.557    0.009 D:\BenchCraft\src\aibench\storage\repositories.py:1277(commit_evaluation_attempt)
+        1    0.000    0.000    2.472    2.472 D:\BenchCraft\src\aibench\engine\compile.py:1(<module>)
+      129    0.004    0.000    2.242    0.017 D:\BenchCraft\src\aibench\engine\engine.py:615(_dispatch_evaluations)
+      316    0.008    0.000    2.126    0.007 D:\BenchCraft\src\aibench\storage\repositories.py:1228(commit_execution_attempt)
+        1    0.001    0.001    2.038    2.038 D:\BenchCraft\src\aibench\services\runs.py:130(create_run)
+      129    0.016    0.000    2.035    0.016 D:\BenchCraft\src\aibench\engine\engine.py:488(_dispatch_executions)
+      316    0.008    0.000    1.695    0.005 D:\BenchCraft\src\aibench\engine\engine.py:769(_complete_execution)
+      129    0.017    0.000    1.664    0.013 D:\BenchCraft\src\aibench\engine\engine.py:628(_dispatch_evaluations_past)
+      300    0.006    0.000    1.661    0.006 D:\BenchCraft\src\aibench\services\scoring.py:549(finalize)
+
+

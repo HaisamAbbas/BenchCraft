@@ -217,6 +217,7 @@ def planning_inputs(
         params={k: deep_unfreeze(v) for k, v in choices.params.items()},
         rules=dict(choices.rules),
         test_world=choices.test_world,
+        source_root=Path(session.project_root),
     )
     inputs = gathered.inputs
     inputs.context = replace(inputs.context, revision=revision)

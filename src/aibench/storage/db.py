@@ -67,6 +67,25 @@ class Database:
         return cls.open(workspace.db_path)
 
     @classmethod
+    def open_readonly(cls, db_path: Path) -> Database:
+        """Open an existing workspace without creating files or applying migrations.
+
+        Reporting commands use this path so their storage/artifact setup is genuinely
+        read-only.  ``query_only`` is set before any repository call; callers must not
+        use this connection for lifecycle writes.
+        """
+        if not db_path.is_file():
+            raise FileNotFoundError(db_path)
+        conn = sqlite3.connect(
+            f"{db_path.resolve().as_uri()}?mode=ro", uri=True, isolation_level=None
+        )
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+        conn.row_factory = sqlite3.Row
+        return cls(conn)
+
+    @classmethod
     def open_in_memory(cls) -> Database:
         """An in-memory database: no filesystem I/O at all, not even a temp directory. For
         tests that exercise pure repository/migration logic and have no need to prove

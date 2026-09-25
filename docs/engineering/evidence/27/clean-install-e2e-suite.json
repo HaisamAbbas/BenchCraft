@@ -1,0 +1,125 @@
+{
+  "suite": "scripts/e2e_suite.py",
+  "started_at": "2026-09-25T16:49:29+0500",
+  "seconds": 110.3,
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "aibench_version": "0.1.0rc1",
+    "aibench_imported_from": "D:\\BenchCraft\\.pytest-tmp\\prompt27-clean-install\\venv\\Lib\\site-packages\\aibench\\__init__.py",
+    "wheel": "aibench-0.1.0rc1-py3-none-any.whl",
+    "wheel_sha256": "2f1a09e61a72c65de2e744b8b520ae5a987e0574a4c2568d66f95873c538134d"
+  },
+  "pytest_exit_code": 0,
+  "journeys": {
+    "E2E-01": {
+      "claim": "Conversational loop from the first message to an evidence-linked report and follow-up discussion, inside the CLI",
+      "status": "passed",
+      "tests": {
+        "tests/test_e2e_cli_journey.py::test_a_user_benchmarks_an_app_from_the_first_message_to_evidence_in_the_cli": {
+          "status": "passed",
+          "seconds": 66.791,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_mvp_acceptance.py::test_a_fresh_user_completes_the_conversational_acceptance_journey": {
+          "status": "passed",
+          "seconds": 8.1,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    },
+    "E2E-07": {
+      "claim": "Headless and interactive entry points share services; manual and generated plans measure identically",
+      "status": "passed",
+      "tests": {
+        "tests/test_plan_equivalence.py::test_manual_template_and_model_plans_measure_identically": {
+          "status": "passed",
+          "seconds": 10.196,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_tui.py::test_slash_commands_use_real_session_services_and_cover_the_contract": {
+          "status": "passed",
+          "seconds": 10.271,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_tui.py::test_explicit_run_starts_unpresented_validated_draft_with_a_preview": {
+          "status": "passed",
+          "seconds": 1.72,
+          "detail": "",
+          "instances": 1
+        },
+        "tests/test_cli_chat.py::test_non_tty_chat_json_is_machine_readable_and_can_resume": {
+          "status": "passed",
+          "seconds": 0.891,
+          "detail": "",
+          "instances": 1
+        }
+      }
+    }
+  },
+  "evidence": {
+    "e2e-01": {
+      "journey": "E2E-01",
+      "checkpoints": {
+        "paused_calls": [
+          1,
+          1
+        ]
+      },
+      "session_id": "ses-24350dd50b9e",
+      "run_id": "run-da6993845867",
+      "case_ids": [
+        "rag-001",
+        "rag-002",
+        "rag-003",
+        "rag-004",
+        "rag-005",
+        "rag-006",
+        "rag-007",
+        "rag-008",
+        "rag-009",
+        "rag-010",
+        "rag-011",
+        "rag-012",
+        "rag-013",
+        "rag-014",
+        "rag-015",
+        "rag-016",
+        "rag-017",
+        "rag-018",
+        "rag-019",
+        "rag-020"
+      ],
+      "application_calls_total": 20,
+      "application_calls_per_case_max": 1,
+      "assistant_requests": 16,
+      "failed_case_ids": [
+        "rag-003",
+        "rag-015"
+      ],
+      "report_work": {
+        "counts": {
+          "evaluation": {
+            "succeeded": 20
+          },
+          "execution": {
+            "succeeded": 20
+          }
+        },
+        "needs_attention": []
+      },
+      "report_metrics": [
+        {
+          "label": "native.exact_match@1.0.0"
+        },
+        {
+          "label": "native.exact_match@1.0.0"
+        }
+      ]
+    }
+  }
+}

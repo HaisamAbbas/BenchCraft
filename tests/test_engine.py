@@ -225,6 +225,51 @@ def test_pause_stops_new_dispatch_until_resumed(tmp_path: Path) -> None:
     assert outcome.state is RunState.COMPLETED and h.count() == 4
 
 
+def test_a_pause_while_the_run_is_starting_is_committed_as_pausing_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 22-T3 regression: a pause during start-up (runner preparation, evaluator start-up)
+    # dispatched nothing, but the committed status stayed "running" until start-up ended,
+    # so /status contradicted the pause (section 15; seen as an intermittent acceptance
+    # failure on a loaded machine).
+    from aibench.runners.base import BaseRunner
+
+    original = BaseRunner.prepare
+
+    async def slow_prepare(self: BaseRunner) -> None:
+        await asyncio.sleep(1.5)
+        await original(self)
+
+    monkeypatch.setattr(BaseRunner, "prepare", slow_prepare)
+    h = Harness(tmp_path)
+    plan = h.plan(dataset=h.dataset({"c0": "hi", "c1": "hi"}), application=h.cli_app())
+    run_id = h.create(plan)
+    seen: dict[str, Any] = {}
+
+    def committed() -> str:
+        storage, _ = h.storage()
+        try:
+            return str(run_status(storage, run_id)["status"])
+        finally:
+            storage.db.close()
+
+    async def during(ctl: RunController, harness: Harness) -> None:
+        while ctl.state is not RunState.RUNNING:
+            await asyncio.sleep(0.01)
+        ctl.pause()  # while the runner is still being prepared
+        await asyncio.sleep(0.3)
+        seen["while_starting"] = (committed(), harness.count())
+        while ctl.state is not RunState.PAUSED:
+            await asyncio.sleep(0.02)
+        seen["paused"] = (committed(), harness.count())
+        ctl.resume()
+
+    outcome = h.execute(run_id, during=during)
+    assert seen["while_starting"] == ("pausing", 0)
+    assert seen["paused"] == ("paused", 0)  # nothing was dispatched while paused
+    assert outcome.state is RunState.COMPLETED and h.count() == 2
+
+
 def test_cancel_stops_dispatch_and_cancels_in_flight_work(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     plan = h.plan(

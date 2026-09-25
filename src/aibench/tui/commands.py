@@ -4,9 +4,9 @@ failing or absent. Each command returns structured data (printed by the terminal
 JSON by `aibench chat --send`) and is recorded as a command turn with the decisions and
 actions it produced.
 
-`/run` starts the revision the user was shown: if the current revision has not been
-displayed yet, `/run` displays it and asks for `/run` again (§8: "Run it" authorizes the
-displayed plan).
+`/run` is an explicit request to start the current validated draft under the session's
+existing policy. It displays that draft as a preview in the same response and does not ask
+the user to repeat the command.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from aibench.sessions.controller import SessionController
 COMMANDS: dict[str, str] = {
     "/help": "explain benchmark tasks and commands",
     "/plan": "show the draft: metrics, gaps, missing inputs, coverage and estimate",
-    "/run": "start the displayed draft (within the policy you opened the session with)",
+    "/run": "start the current validated draft (within the policy you opened the session with)",
     "/status": "committed state of the current run (no model involved)",
     "/pause": "stop new dispatch; in-flight work finishes",
     "/resume": "continue the paused or interrupted run",
@@ -123,22 +123,16 @@ class Commands:
 
     async def _run(self, _: str) -> CommandResult:
         session = self.controller.session
-        if session.presented_revision != session.revision:
-            state = self.controller.state()
-            self.controller.mark_presented(state["revision"])
-            return CommandResult(
-                "/run",
-                "confirm",
-                {
-                    **state["draft"],
-                    "note": f"This is revision {state['revision']}; type /run again to start it.",
-                },
-            )
+        preview = self.controller.state()["draft"]
+        self.controller.mark_presented(session.revision)
         action = await self.controller.start_run(
             action_id=self._action_id(), expected_revision=session.revision
         )
         return CommandResult(
-            "/run", "action", action.model_dump(mode="json"), ok=action.state.value == "done"
+            "/run",
+            "action",
+            {**action.model_dump(mode="json"), "plan_preview": preview},
+            ok=action.state.value == "done",
         )
 
     async def _control(self, name: str, kind: ActionKind) -> CommandResult:

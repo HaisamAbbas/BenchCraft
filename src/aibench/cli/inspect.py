@@ -18,10 +18,14 @@ from rich.markup import escape
 from aibench.core.errors import AibenchError
 from aibench.core.hashes import content_hash
 from aibench.engine.compile import load_policy
+from aibench.inspection.candidates import (
+    RepositoryCandidateInventory,
+    discover_repository_candidates,
+)
 from aibench.inspection.dataset_summary import summarize_dataset
 from aibench.inspection.probe import ProbeRefused, probe_application, probe_denials
-from aibench.inspection.profile import inspect_application
-from aibench.inspection.source import inspect_source
+from aibench.inspection.profile import ApplicationProfiler
+from aibench.inspection.source import CodebaseInspector
 from aibench.runners import load_application
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
@@ -130,8 +134,13 @@ def inspect(
                 f"probed {len(probed.results)} case(s) in run {probed.run_id} (developer "
                 "smoke: no retries, no evaluation)"
             )
-        tree = inspect_source(source, policy=loaded_policy) if source is not None else None
-        profile = inspect_application(
+        tree = CodebaseInspector(loaded_policy).inspect(source) if source is not None else None
+        candidates = (
+            discover_repository_candidates(source, loaded_policy, inspection=tree)
+            if source is not None and tree is not None
+            else None
+        )
+        profile = ApplicationProfiler().profile(
             app_file, executions=executions, run_ids=used, source_tree=tree
         )
         summary = summarize_dataset(dataset) if dataset is not None else None
@@ -144,6 +153,9 @@ def inspect(
     data = {
         "profile": json.loads(profile.model_dump_json()),
         "dataset": json.loads(summary.model_dump_json()) if summary else None,
+        "repository_candidates": (
+            json.loads(candidates.model_dump_json()) if candidates is not None else None
+        ),
         "notes": notes,
     }
     if out is not None:
@@ -173,6 +185,8 @@ def inspect(
         )
         for caveat in finding.caveats[1:]:
             console.print(f"    [dim]{escape(caveat)}[/dim]")
+    if candidates is not None:
+        _print_repository_candidates(candidates)
     for gap in profile.gaps:
         console.print(f"  [yellow]gap:[/yellow] {escape(gap)}")
     if summary is not None:
@@ -190,3 +204,23 @@ def inspect(
         err_console.print(f"[yellow]note:[/yellow] {escape(note)}")
     if out is not None:
         console.print(f"wrote {escape(str(out))}")
+
+
+def _print_repository_candidates(candidates: RepositoryCandidateInventory) -> None:
+    """Display repository clues without emitting dataset values or reference text."""
+    console.print("  repository candidates (paths and field counts only):")
+    for candidate in candidates.datasets:
+        detail = f", {candidate.case_count} case(s)" if candidate.case_count is not None else ""
+        console.print(f"    dataset {escape(candidate.path)}: {candidate.state}{detail}")
+        console.print(f"      {escape(candidate.summary)}")
+    for label, items in (
+        ("test", candidates.tests),
+        ("evaluator", candidates.evaluators),
+        ("invocation", candidates.invocations),
+    ):
+        for clue in items:
+            console.print(
+                f"    {label} {escape(clue.subject)}: candidate ({clue.provenance.value})"
+            )
+    for reason, count in candidates.skipped.items():
+        console.print(f"    skipped {count} candidate(s): {escape(reason)}")

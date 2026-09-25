@@ -25,7 +25,18 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 17 | Phase 2 | OpenAI evaluation bridges and one platform connector | COMPLETE | `docs/engineering/reports/17.md` |
 | 18 | Phase 3 | Reviewed dataset generation and advanced episodes | COMPLETE | `docs/engineering/reports/18.md` |
 | 19 | Phase 3 | Controlled optimization experiments | COMPLETE | `docs/engineering/reports/19.md` |
-| 20–21 | Phase 3 | Optional expansion | NOT_STARTED | — |
+| 20 | Phase 3 | Distributed execution after measured need | DEFERRED | `docs/engineering/reports/20.md` |
+| 21 | Phase 3 | Optional dashboard and curated plugin catalog | NOT_STARTED | — |
+| 22 | MVP closeout | End-to-end acceptance and ticket-value audit | COMPLETE (local technical scope; external validation not started) | `docs/engineering/reports/22.md` |
+| 23 | Final acceptance audit | Satisfied by Prompt 22 (user confirmed numbering mismatch; no duplicate audit) | COMPLETE (alias of 22; local technical scope only) | `docs/engineering/reports/22.md` |
+| 24 | V4 alignment checkpoint | Product alignment and repository delta map | COMPLETE (84 targeted tests passed; 3 skipped; full suite not rerun) | `docs/engineering/reports/24.md` |
+| 25 | V4 repository-aware MVP | Bounded codebase inspector and evidence-backed profile | COMPLETE (29 focused tests passed; Windows/Python 3.12) | `docs/engineering/reports/25.md` |
+| 26 | V4 repository-aware MVP | Evaluation opportunities and candidate dataset discovery | COMPLETE (114 passed, 2 environment-dependent skips; full suite not rerun) | `docs/engineering/reports/26.md` |
+| 27 | V4 repository-aware MVP | Complete conversational evaluation loop | COMPLETE (deterministic scripted local loop; live model/human validation not run) | `docs/engineering/reports/27.md` |
+| 28 | Optional Phase 2 | Black-box HTTP evaluation | COMPLETE (existing configured HTTP API contract audited; broad URL/browser scope remains deferred) | `docs/engineering/reports/28.md` |
+| 29 | V4 acceptance | Product acceptance and value review | COMPLETE for deterministic local scope (32 clean-install E2E tests, E2E-01..08; all 12 mapped journeys pass) | `docs/engineering/reports/31.md` (supersedes partial snapshot in report 29) |
+| 30 | V4 acceptance follow-up | Conversational repository-inspection acceptance gap | COMPLETE (fresh repository findings flow through chat; E2E-08) | `docs/engineering/reports/30.md` |
+| 31 | v3-derived local-scope closure | Bounded onboarding, hybrid evidence continuity, conversational experiment control, final value review | COMPLETE for deterministic local scope; live/human/PMF validation remains unrun | `docs/engineering/reports/31.md` |
 
 ## Prompt 18 prerequisite subset
 

@@ -1,0 +1,30 @@
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/test_runner_transports.py::test_python_callable_runs_end_to_end_through_the_cli
+  D:\BenchCraft\.venv\Lib\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored in: <function BaseSubprocessTransport.__del__ at 0x0000020344660F40>
+  
+  Traceback (most recent call last):
+    File "C:\Users\haisam.abbas\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_subprocess.py", line 126, in __del__
+      self.close()
+    File "C:\Users\haisam.abbas\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_subprocess.py", line 104, in close
+      proto.pipe.close()
+    File "C:\Users\haisam.abbas\AppData\Local\Programs\Python\Python312\Lib\asyncio\proactor_events.py", line 109, in close
+      self._loop.call_soon(self._call_connection_lost, None)
+    File "C:\Users\haisam.abbas\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 799, in call_soon
+      self._check_closed()
+    File "C:\Users\haisam.abbas\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 545, in _check_closed
+      raise RuntimeError('Event loop is closed')
+  RuntimeError: Event loop is closed
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+SKIPPED [1] tests\test_candidate_workflow.py:127: the test filesystem is case-insensitive
+SKIPPED [1] tests\test_deepeval_adapter.py:303: live-provider smoke needs AIBENCH_LIVE_DEEPEVAL=1 and OPENAI_API_KEY (one small judge call budget)
+SKIPPED [1] tests\test_mvp_acceptance.py:382: about 4 minutes; set AIBENCH_WORKLOAD_TESTS=1 to run the 1,000-case workload
+984 passed, 3 skipped, 2 warnings in 4123.17s (1:08:43)

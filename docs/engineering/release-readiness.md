@@ -56,3 +56,74 @@ unobserved. No package was published and no pilot user was contacted.
 Review the combined Prompts 14 and 15 implementation and build a fresh candidate before
 making a release decision. External pilot validation, live-provider checks, and any
 cross-platform release claim require their own observed evidence.
+
+## Prompt 22 audit: technical readiness and external validation (2026-09-25)
+
+These are two separate statuses. Neither implies the other.
+
+### Technical readiness (local, Windows): READY FOR REVIEW
+
+- **Clean install.** The deterministic journeys E2E-01–07 pass from a clean install of a
+  freshly built wheel: 30/30 tests (`evidence/22/e2e-suite.json`, `scripts/e2e_suite.py`).
+- **The conversational loop.** It is now exercised through the installed `aibench chat`
+  in a real terminal (`tests/test_e2e_cli_journey.py`):
+  - first natural-language message → clarification → revised draft → run on a local
+    fixture;
+  - a question mid-run → pause, with no new dispatch → resume;
+  - evidence-grounded failure discussion → report → close and reopen.
+
+  The application received exactly 20 calls, one per case.
+- **One defect fixed.** A pause during run start-up was not reflected in the committed
+  status. It is fixed, with a regression test.
+- **The full suite.** It was run once for this audit; the result is in report 22 §2.
+- **Limits of this readiness.**
+  - Only Windows 11 and Python 3.12 were observed. Linux and macOS CI has never been
+    observed, and Python 3.11 was last observed at Prompt 13.
+  - The version is still `0.1.0rc1`. The Prompt 13 artifacts predate Prompts 14–22, so a
+    release needs a fresh build and review.
+
+### External validation: NOT STARTED
+
+| Gate | Status |
+|---|---|
+| Live assistant, planner or judge provider | Not run. No key or budget was authorized. Every conversational check uses a scripted model |
+| Human review of planner and judge fixture labels | Not done |
+| Planner quality | 17/21 recall, against a 0.85 target (Prompt 12). The model planner is not used by chat |
+| Installed-agent trials (a real model operating the CLI) | Not run |
+| Repeated-trial coverage with a real model | Not run |
+| Real pilot teams and time-saved study | Not run. No pilot user was contacted |
+| Hosted OpenAI Evals, live Langfuse | Not run (local contract stand-ins only) |
+| Cost limits against real provider billing | Not observed. Monetary caps are soft limits over estimates |
+| Public release authorization | Not requested. Nothing was published |
+
+No official leaderboard score, model-quality claim or public release is made.
+
+## Prompt 29 v4 acceptance update — 2026-09-25
+
+The clean-installed deterministic suite passed 31 tests across E2E-01–07. Current inspector,
+discovery/conversation and pinned real-package adapter checks also passed, with the documented
+symlink skip and live-provider exclusions. See docs/engineering/reports/29.md and
+docs/engineering/evidence/29/.
+
+Repository-aware local-pilot readiness is **NOT READY**: one required journey is not proven,
+namely fresh chat receiving static source findings before plan/run/report. Follow-up 30-T1 is
+open. Full v3-derived readiness is also **NOT READY**; generic browser automation is deferred,
+hybrid repository/trace transition is missing, and the source v3 pack is unavailable. No
+live provider, paid endpoint, human review or pilot was exercised.
+
+## Prompt 31 final v4 local-scope acceptance — 2026-09-25
+
+The earlier Prompt 29 partial status is superseded for deterministic local acceptance by
+`docs/engineering/reports/31.md`. The current wheel was built, installed into an isolated
+Windows/Python 3.12.10 virtual environment, and passed **32 tests across E2E-01..08** with
+zero skips. E2E-08 exercises repository findings in a fresh conversation through a stored
+report and rescore. The changed-path batch passed 16 tests; Ruff, `mypy src` and CLI help
+passed. Pinned DeepEval/Ragas package evidence remains separately recorded in
+`docs/engineering/evidence/29/`; neither adapter changed in this follow-up.
+
+**Declared deterministic local scope: READY FOR TECHNICAL REVIEW.** This is not authorization
+to publish a release or claim broad v3 coverage. Generic website/browser execution, wide parser
+support, live model/judge behavior, human review, real-agent trials, product-market fit and
+public release authorization remain unverified or deferred. No model API credential was
+needed for these local tests. A live smoke would need the configured provider secret and an
+approved cost budget.

@@ -125,6 +125,7 @@ def benchmark(
             out=out,
             policy=loaded_policy,
             trusted_local=trust_local_app,
+            source_root=Path.cwd(),
         )
         outcome = plan_with_template(gathered.inputs)
         document = write_draft(outcome, gathered.inputs, out, revise=revise)

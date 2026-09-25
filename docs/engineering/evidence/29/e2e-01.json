@@ -1,0 +1,59 @@
+{
+  "journey": "E2E-01",
+  "checkpoints": {
+    "paused_calls": [
+      1,
+      1
+    ]
+  },
+  "session_id": "ses-b8a0c13658e6",
+  "run_id": "run-a6c600417813",
+  "case_ids": [
+    "rag-001",
+    "rag-002",
+    "rag-003",
+    "rag-004",
+    "rag-005",
+    "rag-006",
+    "rag-007",
+    "rag-008",
+    "rag-009",
+    "rag-010",
+    "rag-011",
+    "rag-012",
+    "rag-013",
+    "rag-014",
+    "rag-015",
+    "rag-016",
+    "rag-017",
+    "rag-018",
+    "rag-019",
+    "rag-020"
+  ],
+  "application_calls_total": 20,
+  "application_calls_per_case_max": 1,
+  "assistant_requests": 16,
+  "failed_case_ids": [
+    "rag-003",
+    "rag-015"
+  ],
+  "report_work": {
+    "counts": {
+      "evaluation": {
+        "succeeded": 20
+      },
+      "execution": {
+        "succeeded": 20
+      }
+    },
+    "needs_attention": []
+  },
+  "report_metrics": [
+    {
+      "label": "native.exact_match@1.0.0"
+    },
+    {
+      "label": "native.exact_match@1.0.0"
+    }
+  ]
+}

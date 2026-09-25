@@ -15,6 +15,9 @@ This creates a 10-case local project with a fixture app and opens the benchmark
 conversation. See [docs/quickstart.md](docs/quickstart.md)
 and, for what is and isn't supported, [docs/support.md](docs/support.md).
 
+To connect a configured JSON HTTP endpoint without its repository, see the bounded
+`aibench connect http` flow in the quickstart; setup does not contact the endpoint.
+
 ## Development setup
 
 ```bash

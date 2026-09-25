@@ -59,6 +59,7 @@ from aibench.core.sessions import (
 )
 from aibench.engine.compile import PlanInvalid, PolicyDenied, compile_plan, load_policy
 from aibench.engine.engine import RunController, RunOutcome
+from aibench.planning.opportunities import discover_opportunities
 from aibench.planning.planner import PlanningInputs
 from aibench.reporting.aggregation import reason_code
 from aibench.runners import load_application
@@ -71,6 +72,7 @@ from aibench.services.runs import (
     RESUMABLE_STATES,
     RunError,
     create_run,
+    evaluate_run,
     execute_run,
     lease_state,
     run_budget,
@@ -173,8 +175,10 @@ def _comparison_for_assistant(value: Any, *, key: str = "") -> Any:
         }
     if isinstance(value, list):
         return [_comparison_for_assistant(item, key=key) for item in value]
-    if isinstance(value, str) and value.startswith("sha256:"):
-        return None
+    if isinstance(value, str):
+        lowered = value.lower()
+        if value.startswith("sha256:") or "case_id" in lowered or "group_id" in lowered:
+            return None
     return value
 
 
@@ -239,6 +243,7 @@ class SessionController:
         self.workspace_root = workspace_root
         self.environ = environ
         self._live: dict[str, _LiveRun] = {}
+        self._live_experiments: dict[str, asyncio.Task[Any]] = {}
         self._inputs: tuple[int, PlanningInputs] | None = None
         if self.store.get_session(session_id) is None:
             raise SessionError(f"no session {session_id!r}")
@@ -311,6 +316,12 @@ class SessionController:
         for live in list(self._live.values()):
             with contextlib.suppress(Exception):
                 await live.task
+        experiments = list(self._live_experiments.values())
+        for task in experiments:
+            if not task.done():
+                task.cancel()
+        if experiments:
+            await asyncio.gather(*experiments, return_exceptions=True)
 
     # ------------------------------------------------------------------ state
 
@@ -364,6 +375,14 @@ class SessionController:
             self._inputs = (decision.revision, inputs)
         return self._inputs[1]
 
+    def opportunities(self) -> dict[str, Any]:
+        """Current objective-to-metric opportunities from the shared planner inputs.
+
+        The report is read-only and contains field counts and evidence references, never
+        dataset values. Unsupported or unobserved requirements stay unavailable/unknown.
+        """
+        return discover_opportunities(self.inputs()).model_dump(mode="json")
+
     def session_runs(self) -> list[str]:
         """Runs this session started, oldest first."""
         return [
@@ -371,6 +390,133 @@ class SessionController:
             for a in self.store.list_actions(self.session_id)
             if a.kind is ActionKind.START_RUN and a.run_id
         ]
+
+    def session_experiments(self) -> list[Any]:
+        """Controlled experiments created through this session only."""
+        prefix = f"{self.session_id}-exp-"
+        return [
+            record
+            for record in self.storage.list_experiments()
+            if record.experiment_id.startswith(prefix)
+        ]
+
+    def has_active_experiment_task(self) -> bool:
+        """Whether this controller is currently dispatching any experiment work."""
+        return any(not task.done() for task in self._live_experiments.values())
+
+    def experiment_task_keys(self) -> set[str]:
+        """Task keys created by this controller, including tasks that have finished."""
+        return set(self._live_experiments)
+
+    def start_experiment(self, experiment_id: str) -> dict[str, Any]:
+        """Start or resume one experiment owned by this conversation, without blocking the
+        turn. The immutable experiment record is the progress source if the process exits.
+        """
+        prefix = f"{self.session_id}-exp-"
+        if not experiment_id.startswith(prefix):
+            raise SessionError("this conversation can start only its own controlled experiments")
+        record = self.storage.get_experiment(experiment_id)
+        if record is None:
+            raise SessionError(f"no experiment {experiment_id!r} belongs to this session")
+        current = self._live_experiments.get(experiment_id)
+        if current is not None and not current.done():
+            return {"experiment_id": experiment_id, "status": "running", "already_running": True}
+        from aibench.experiments.service import execute_experiment
+
+        task = asyncio.create_task(
+            execute_experiment(
+                experiment_id,
+                storage=self.storage,
+                artifacts=self.artifacts,
+                environ=self.environ,
+            )
+        )
+        self._live_experiments[experiment_id] = task
+        return {
+            "experiment_id": experiment_id,
+            "status": "running",
+            "already_running": False,
+            # execute_experiment starts READY records and continues RUNNING records.
+            # Both entry paths are valid, but only the latter is a resume.
+            "resume": record.status.value != "ready",
+        }
+
+    def start_experiment_holdout(self, experiment_id: str) -> dict[str, Any]:
+        """Start the selected experiment's separately authorized protected evaluation."""
+        prefix = f"{self.session_id}-exp-"
+        if not experiment_id.startswith(prefix):
+            raise SessionError("this conversation can evaluate only its own experiments")
+        record = self.storage.get_experiment(experiment_id)
+        if record is None:
+            raise SessionError(f"no experiment {experiment_id!r} belongs to this session")
+        current = self._live_experiments.get(experiment_id)
+        if current is not None and not current.done():
+            raise SessionError("the development experiment is still running")
+        task_key = f"{experiment_id}:holdout"
+        current = self._live_experiments.get(task_key)
+        if current is not None and not current.done():
+            return {"experiment_id": experiment_id, "status": "holdout_running", "already_running": True}
+        from aibench.experiments.service import evaluate_protected_holdout
+
+        task = asyncio.create_task(
+            evaluate_protected_holdout(
+                experiment_id,
+                storage=self.storage,
+                artifacts=self.artifacts,
+                environ=self.environ,
+            )
+        )
+        self._live_experiments[task_key] = task
+        return {
+            "experiment_id": experiment_id,
+            "status": "holdout_running",
+            "already_running": False,
+            "resume": record.status.value == "holdout_running",
+        }
+
+    async def wait_for_experiment(self, experiment_id: str) -> Any:
+        """Wait for an in-process experiment task, then return its committed record."""
+        tasks = [
+            self._live_experiments[key]
+            for key in (experiment_id, f"{experiment_id}:holdout")
+            if key in self._live_experiments
+        ]
+        task = next((item for item in tasks if not item.done()), tasks[-1] if tasks else None)
+        if task is not None:
+            await task
+        return self.storage.get_experiment(experiment_id)
+
+    def trace_evidence(self, run_id: str | None = None) -> dict[str, Any]:
+        """Return imported trace totals for a run owned by this session.
+
+        This is deliberately a read-only summary. Raw trace artifacts stay in the restricted
+        artifact store and never enter the assistant briefing. Importing additional spans
+        enriches the same stored run; it does not restart the application.
+        """
+        runs = self.session_runs()
+        selected = run_id or (self.session.active_run_id if self.session.active_run_id in runs else None)
+        if selected is None and runs:
+            selected = runs[-1]
+        if selected is None:
+            return {
+                "session_id": self.session_id,
+                "run_id": None,
+                "available": False,
+                "reason": "this session has no stored application run yet",
+                "trace_summary": None,
+            }
+        if selected not in runs:
+            raise SessionError("trace evidence can only be read for a run started in this session")
+        from aibench.services.traces import traces_summary
+
+        summary = traces_summary(self.storage, selected)
+        return {
+            "session_id": self.session_id,
+            "run_id": selected,
+            "available": summary is not None,
+            "reason": None if summary is not None else "no trace import is stored for this run",
+            "trace_summary": summary,
+        }
 
     def state(self, *, for_assistant: bool = False) -> dict[str, Any]:
         """The session as a person (or the assistant) reviews it; read from storage every
@@ -1065,6 +1211,38 @@ class SessionController:
             for name, value in (deep_unfreeze(turn.outcome) or {}).get("usage", {}).items():
                 usage[name] = usage.get(name, 0) + int(value)
         return {**run_budget(self.storage, self.artifacts, target), "conversation": usage}
+
+    async def rescore(self, run_id: str | None = None) -> dict[str, Any]:
+        """Rescore this session's stored executions with its current validated draft.
+
+        This delegates to the same policy-checked service as `aibench evaluate`; that
+        service reads stored executions and cannot invoke the application runner.
+        """
+        target = run_id
+        if target is None:
+            runs = self.session_runs()
+            if not runs:
+                raise RunError("this session has not started a run")
+            target = runs[-1]
+        target = self._run_id(target)
+        condition = self.run_condition(target)["condition"]
+        if condition in LIVE_CONDITIONS:
+            raise RunError(f"run {target} is still active; rescore it after execution stops")
+        decision = self.current_decision()
+        report = await evaluate_run(
+            target,
+            self.directory / decision.plan_file,
+            storage=self.storage,
+            artifacts=self.artifacts,
+            policy=self.policy().with_trusted_local(self.session.trusted_local),
+        )
+        return {
+            "run_id": report.run_id,
+            "scoring_id": report.scoring_id,
+            "summaries": [summary.as_dict() for summary in report.summaries],
+            "warnings": report.warnings,
+            "application_invoked": False,
+        }
 
     def report(self, run_id: str | None = None, *, for_assistant: bool = False) -> dict[str, Any]:
         """The run's report document, from stored facts only (services.reports): nothing

@@ -20,23 +20,35 @@
   "observed_checks": [
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_comparison_statistics.py tests/test_comparison_service.py tests/test_scoring_service.py tests/test_registry.py tests/test_models.py",
-      "result": "102 passed in 31.72s"
+      "result": "128 passed in 32.58s"
     },
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_cross_ecosystem.py",
-      "result": "1 passed in 349.92s"
+      "result": "2 passed in 480.95s; the combined real-package diagnostic and the real-RunEngine DeepEval/Ragas no-reexecution check"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -rs -p no:cacheprovider tests/test_cross_ecosystem.py::test_real_engine_stored_deepeval_and_ragas_scoring_does_not_invoke_the_application",
+      "result": "1 passed in 171.98s; a real RunEngine execution was followed by stored-output DeepEval/Ragas scoring with the application invocation count and execution IDs unchanged"
     },
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_ragas_adapter.py",
-      "result": "9 passed in 351.77s"
+      "result": "9 passed in 257.77s"
     },
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_cli_project.py tests/test_tui.py tests/test_conversation.py tests/test_session_controller.py",
-      "result": "53 passed in 198.20s"
+      "result": "52 passed, 1 deselected in 206.40s; the deselected test is a concurrent Prompt 18 assistant-tool inventory assertion, not a Prompt 14 path"
     },
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_worker_evaluator.py",
-      "result": "13 passed in 202.43s"
+      "result": "13 passed in 174.12s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_engine.py tests/test_engine_faults.py tests/test_engine_policy.py tests/test_engine_review_regressions.py",
+      "result": "51 passed in 129.77s"
+    },
+    {
+      "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_cli_score.py",
+      "result": "6 passed in 28.39s; includes refusal of a missing frozen application artifact"
     },
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider --ignore=tests/test_ragas_adapter.py --ignore=tests/test_cross_ecosystem.py --ignore=tests/test_deepeval_adapter.py",
@@ -52,11 +64,11 @@
     },
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_deepeval_adapter.py -k 'not blocking_judge'",
-      "result": "17 passed, 1 skipped (live provider), 1 deselected in 798.33s"
+      "result": "17 passed, 1 skipped (live provider), 1 deselected in 734.87s"
     },
     {
       "command": ".venv/Scripts/python -m pytest -q -p no:cacheprovider tests/test_deepeval_adapter.py::test_blocking_judge_is_killed_and_the_next_case_runs_in_a_fresh_worker",
-      "result": "1 passed in 259.85s"
+      "result": "1 passed in 147.55s"
     },
     {
       "command": ".venv/Scripts/python -m build --outdir .worktmp/prompt14-dist-final .; .venv/Scripts/python -m build --outdir .worktmp/prompt14-dist-final plugins/deepeval; .venv/Scripts/python -m build --outdir .worktmp/prompt14-dist-final plugins/ragas",
@@ -68,7 +80,7 @@
     },
     {
       "command": ".venv/Scripts/python -m mypy src",
-      "result": "Success: no issues found in 110 source files"
+      "result": "Success: no issues found in 126 source files"
     },
     {
       "command": "plugins/ragas/.venv/Scripts/python -m pip check",
@@ -80,16 +92,18 @@
     },
     {
       "command": "AIBENCH_RAGAS_PYTHON=.worktmp/ragas-wheel-venv-final/Scripts/python.exe .venv/Scripts/python -m pytest -q -rs -p no:cacheprovider tests/test_ragas_adapter.py",
-      "result": "9 passed in 406.41s using the final built wheels"
+      "result": "9 passed in 406.41s using the pre-audit built wheels; those wheels predate the subsequent comparison/identity hardening and are not claimed as the current artifact"
     }
   ],
   "build_notes": [
-    "An initial wheel test used an artifact built before the final core schema changes and failed with an ExecutionResult extra-field validation error; that stale artifact was discarded. The final wheel build/install/test result is recorded separately and is the only built-artifact result claimed."
+    "An initial wheel test used an artifact built before the final core schema changes and failed with an ExecutionResult extra-field validation error; that stale artifact was discarded. The later wheel result is retained as pre-audit adapter evidence, but a clean post-audit rebuild is pending because the shared worktree now includes concurrent Prompt 17/18 changes."
   ],
   "pending_or_unobserved": [
     "Live DeepEval or Ragas provider calls",
     "Ragas on Python 3.11, Linux, or macOS",
     "A patched Ragas release for GHSA-95ww-475f-pr4f / CVE-2026-6587",
+    "A clean wheel rebuild/test after the audit hardening; the current shared worktree also contains concurrent Prompt 17/18 changes",
+    "Source-code identity for a custom python_factory judge behind an unchanged import path (use a pinned adapter/package or exploratory mode)",
     "Phase 2 real-team time-saved study",
     "A combined full-suite run including every optional plugin test"
   ],

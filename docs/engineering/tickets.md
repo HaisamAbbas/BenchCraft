@@ -188,8 +188,8 @@ Gates: 13-G1..G5. See `docs/engineering/reports/13.md`. Decisions: ADR 0012.
 | Ticket | Description | Status | Evidence |
 |---|---|---|---|
 | 14-T1 | Add one independent ecosystem, pin and verify its official API, and score stored outputs without re-running the application | DONE | Chosen Ragas over Promptfoo in `docs/adr/0013-ragas-adapter-and-comparison-compatibility.md`; `plugins/ragas/` pins `ragas==0.4.3`; real-package mapping, applicability, raw-artifact, version-drift and worker tests in `tests/test_ragas_adapter.py`; `tests/test_cross_ecosystem.py` uses both real adapters over one stored execution set |
-| 14-T2 | Implement comparable run accounting: pair case/content/repetition, freeze metric/judge/rubric/plugin/instrumentation/dependency identity, distinguish rescore from execution, and refuse incompatible strict comparisons | DONE | `src/aibench/services/comparison.py`; `EvaluationCompatibilityIdentity` and frozen profiles in `core/models.py`/`services/scoring.py`; lineage, plan, pass-completion, compatibility and coverage checks in `tests/test_comparison_service.py` |
-| 14-T3 | Add coverage gates, paired/grouped uncertainty, repeated-judge stability, and one shared CLI/chat/TUI comparison service | DONE | `src/aibench/reporting/statistics.py`; `aibench compare`, `/compare`, session `compare_runs`; constructed interval/denominator tests and CLI/TUI/conversation integration tests |
+| 14-T2 | Implement comparable run accounting: pair case/content/repetition, freeze metric/judge/rubric/plugin/instrumentation/dependency identity, distinguish rescore from execution, and refuse incompatible strict comparisons | DONE | `src/aibench/services/comparison.py`; `EvaluationCompatibilityIdentity` and frozen profiles in `core/models.py`/`services/scoring.py`; result-level identity, frozen-plan/application fail-closed checks, lineage, pass-completion, compatibility and coverage checks in `tests/test_comparison_service.py` |
+| 14-T3 | Add coverage gates, paired/grouped uncertainty, repeated-judge stability, and one shared CLI/chat/TUI comparison service | DONE | `src/aibench/reporting/statistics.py`; `aibench compare` read-only path, `/compare`, session `compare_runs`; selected-side coverage, cached-repeat exclusion, interval/denominator tests and CLI/TUI/conversation integration tests |
 | 14-T4 | Check independence/calibration against the same outputs, preserve framework semantics, and report disagreement without averaging | DONE (local deterministic judges) | Real DeepEval-versus-Ragas same-output test (`tests/test_cross_ecosystem.py`); cross-framework matrix and no-combined-score assertions; live provider/calibration and time-saved pilot remain explicitly pending |
 
 Gates: 14-G1..G4. See `docs/engineering/reports/14.md`. Decision: ADR 0013. Ragas 0.4.3's open multi-modal SSRF advisory is tracked as a residual risk; the adapter exposes only validated text Faithfulness and runs in an isolated worker.
@@ -260,3 +260,173 @@ Gates: 18-G1..G4 PASS. Report: `docs/engineering/reports/18.md`. Decision: ADR 0
 | 19-T3 | Expose experiment state, tradeoffs and a non-applying adoption proposal in CLI and conversation; require separate authorization for source/deployment/production changes | DONE | `cli/experiments.py`, `conversation/agent.py`, `docs/experiments/controlled-experiments.md`; `tests/test_experiments.py::test_experiment_conversation_tools_are_read_only_proposals` |
 
 Gates: 19-G1..G4 PASS. Report: `docs/engineering/reports/19.md`. Decision: ADR 0018.
+
+## Prompt 20 — Distributed execution after measured need
+
+Status: DEFERRED (20-T1's optional-scope condition). The local bottleneck was measured and is
+real, but it is a single-process bookkeeping cost that distribution would not remove, and no
+declared workload exceeds it. No distributed component is implemented or claimed.
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 20-T1 | Measure the local bottleneck; define target workload, resource budget and failure model; defer if no distribution need is demonstrated | DONE (finding: need not demonstrated) | `scripts/measure_capacity.py`; `docs/engineering/evidence/20/capacity.json`, `capacity-3000.json`, `profile-300-c64.txt`; ADR 0019; `tests/test_capacity_measurement.py::test_capacity_measurement_records_the_run_it_actually_executed` |
+| 20-T2 | Distributed coordinator: durable queue, PostgreSQL leases/fencing, object storage, stable task keys, deduplicated commits | DEFERRED | Not implemented. Contract recorded in ADR 0019 ("Failure model") |
+| 20-T3 | Distributed recovery: duplicate delivery, expired leases, late workers, node failure, partial uploads, remote-authoritative session controls | DEFERRED | Not implemented or exercised. Depends on 20-T2 |
+| 20-T4 | Honest scale evidence: hardware, traces, costs, queue behaviour, mock versus real application throughput | PARTIAL: single host, local mock only | ADR 0019 measurement table and profile; `docs/support.md` known limits. Measured: hardware, a CPU profile, server-side in-flight concurrency and workspace growth. Not measured: real application throughput and monetary cost (no authorized application or provider). No distributed throughput is claimed |
+
+Gates: 20-G1, 20-G2, 20-G3 are NOT APPLICABLE while deferred, and are not reported as passed.
+20-G4 and 20-G5 PASS. Report: `docs/engineering/reports/20.md`. Decision: ADR 0019.
+
+## Prompt 21 — Optional dashboard and curated plugin catalog
+
+Not started. No tickets were opened, and nothing was implemented or claimed.
+
+## Prompt 22 — End-to-end acceptance and ticket-value audit
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 22-T1 | Reconcile every implemented ticket to code, specification, gates and executed checks; detect orphans, duplicates, missing requirements, untested tickets, contradictions | DONE | `docs/engineering/ticket-test-matrix.md` (82 rows: 81 tickets plus `17-P18`), with per-prompt and consolidated findings |
+| 22-T2 | Complete the ticket-test matrix; map cross-component features to E2E-01–07; label evidence kinds | DONE | `ticket-test-matrix.md` journey table and evidence-kind legend. The journey definitions were derived because the repository pack does not define them (report 22 §4) |
+| 22-T3 | Run and fix the deterministic vertical suite from a clean environment | DONE | `scripts/e2e_suite.py`; `examples/e2e/scripted_assistant.py`; `tests/test_e2e_cli_journey.py`; engine fix, a pause during start-up is now committed as `pausing` (`engine/engine.py`, `tests/test_engine.py::test_a_pause_while_the_run_is_starting_is_committed_as_pausing_at_once`); clean-install run 30/30 (`evidence/22/e2e-suite.json`) |
+| 22-T4 | Check critical safety and reproducibility flows with side-effect counters | DONE | E2E-03–E2E-07 in the clean-install run. E2E-01 checks 20 application calls, at most 1 per case, across pause, resume and reopen |
+| 22-T5 | Classify ticket value; judge the conversational loop; record recommendations without deleting code | DONE | The value-class column of the matrix; report 22 §4 (recommendations and decisions for the user) |
+| 22-T6 | Separate technical readiness from external validation | DONE | `docs/engineering/release-readiness.md` (Prompt 22 section); report 22 §3 |
+
+Gates: 22-G1..G7 PASS for local technical scope. External validation (human review, live
+providers, installed-agent trials, pilots, public release) is NOT STARTED and is not claimed.
+Report: `docs/engineering/reports/22.md`.
+
+### Ledger corrections recorded by the Prompt 22 audit (history kept)
+
+- **05-T1:** the cited test `test_deepeval_is_imported_only_inside_its_plugin_package` was
+  renamed in commit `df5937b5` to
+  `tests/test_dependency_boundaries.py::test_evaluator_framework_imports_stay_inside_their_adapter_packages`.
+- **11-T3:** "compare explicitly deferred" was true at Prompt 11. Compare was implemented in
+  Prompt 14 (`cli/project.py`, `tests/test_cli_project.py::test_compare_uses_stored_runs_and_reports_paired_coverage`).
+- **07-T3:** the bounded model planner is implemented, but it is reachable only through
+  `aibench plan`. Chat and `benchmark` use the template. The requirements matrix's
+  "Partial" is the accurate status for the conversational product.
+- **02-T2:** `services/execution.py` records captures with `commit_artifact_unverified`
+  after an inline verification. So "every production path uses `commit_verified_artifact`"
+  is no longer literally true, although it remains true that no result references an
+  unverified artifact.
+- **Prompt 17 status:** ADR 0016 and report 18 describe Prompt 17 as not started. That was
+  true when they were written. Prompt 17 is COMPLETE (report 17).
+
+## Prompt 24 — Product alignment and repository delta map
+
+Status: COMPLETE. Product contracts were mapped and follow-up work was numbered. The user
+confirmed Prompt 22 is the intended Prompt 23 final acceptance audit, satisfying the
+prerequisite without a duplicate report. The targeted tests passed with elevated sandbox
+permissions; the full suite was not rerun. See `reports/24.md` and `product-alignment-v4.md`.
+
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 24-T1 | Map all v4 §2–9 and §11 product requirements to real paths, executed evidence, honest status, contract impact, and a scoped next ticket | DONE | `docs/engineering/product-alignment-v4.md` (24 requirement rows, with Prompt 22 artifact citations and Prompt 24 targeted test result: 84 passed, 3 skipped) |
+| 24-T2 | Record Prompt 22 as the user-confirmed Prompt 23 numbering equivalent, v3 conflicts, release-scope verdicts, and reuse/duplicate decisions without changing product behavior | DONE | `product-alignment-v4.md` §§Audit basis, V3 conflicts, Duplicate work, Scope verdicts; user confirmed Prompt 22 is the intended final audit; no standalone v3 pack found |
+| 24-T3 | Convert verified gaps into dependency-ordered numbered follow-up tickets with definitions of done, gates, dependencies, exact tests, and report entries | DONE | Prompt 25–30 ticket sections below; dependencies 25 → 26 → 27 → optional 28 → 29 acceptance → 30-T1 gap closure |
+
+Gates: 24-G1 PASS (all v4 feature-preservation rows mapped); 24-G2 PASS (targeted current
+test set: 84 passed, 3 skipped with elevated sandbox permissions; full suite not rerun);
+24-G3 PASS (contract conflicts and staged black-box scope explicit); 24-G4 PASS (real gaps
+have numbered tickets and satisfied work is not duplicated). Prompt 22 is accepted as Prompt
+23 and satisfies the prerequisite; current worktree validation remains pending. Report:
+`reports/24.md`.
+
+## Prompt 25 — Bounded codebase inspector and evidence-backed profile
+
+Status: COMPLETE. The existing source inspector was extended with explicit budgets,
+path-only discovery candidates, and profile provenance. See `reports/25.md`.
+
+| Ticket | Description | Status | Definition of done, gates, dependencies, tests, report entry |
+|---|---|---|---|
+| 25-T1 | Define supported file/language types, inspection budget, root/symlink/size boundaries, secret/generated exclusions, and no-execution inspection | DONE | Depends on the existing Prompt 16 source inspector and `ExecutionPolicy`; DoD: bounded static inventory/parsing and unknown for unsupported source. Gate 25-G1. Exact tests: `tests/test_source_inspection.py::test_secret_files_are_skipped_and_never_echoed`, `::test_reading_source_needs_an_approved_root`, `::test_a_directory_junction_or_link_never_leads_outside_the_root`; `tests/test_application_profile_discovery.py::test_inspection_budgets_report_file_size_total_bytes_and_discovery_truncation`, `::test_file_size_limit_and_unsupported_files_are_reported_without_reading`, `::test_credential_and_vendored_directories_are_excluded_by_default`, `::test_directory_depth_and_entry_budgets_are_enforced`, `::test_repository_profile_has_bounded_provenance_without_execution_or_content_leaks`. Report: `reports/25.md` |
+| 25-T2 | Produce application profile findings with evidence references, observed/declared/inferred/unknown labels, confidence/limits | DONE | Depends on 25-T1. DoD: typed repository result is attached to the compatible application profile; evidence and limitations remain visible. Gates 25-G2/G3. Paths: `src/aibench/inspection/profile.py` (`ApplicationProfiler`, `ApplicationProfile.repository_inspection`), `src/aibench/inspection/__init__.py`, `src/aibench/cli/inspect.py`; fixture `examples/inspection/repository_profile/`. Exact tests: `tests/test_application_profile_discovery.py::test_repository_profile_has_bounded_provenance_without_execution_or_content_leaks`, `tests/test_inspection.py::test_declared_config_gives_declared_or_unknown_with_evidence_and_recipes`, `::test_inspect_cli_uses_only_runs_of_the_same_app_config`, `tests/test_dependency_boundaries.py::test_core_imports_only_stdlib_pydantic_and_core`, `::test_no_first_party_module_imports_an_evaluator_framework`, `tests/test_cli_app.py`. Report: `reports/25.md` |
+
+Gates: 25-G1 PASS (bounded, no-execution scan; secrets, roots/symlinks, file/byte,
+directory/depth/entry budgets and untrusted text covered); 25-G2 PASS (typed
+evidence/provenance/confidence, unknown unsupported source, candidate-only dataset/test/eval);
+25-G3 PASS (core dependency boundary and existing CLI profiles). Tests: 29 passed; Ruff and
+targeted mypy passed. Report: `reports/25.md`.
+
+## Prompt 26 — Evaluation opportunities and candidate dataset discovery
+
+Status: COMPLETE for bounded opportunity reporting and repository candidate discovery.
+Repository test/evaluator paths remain candidates; no path or generated case is promoted to a golden.
+
+| Ticket | Description | Status | Definition of done, gates, dependencies, tests, report entry |
+|---|---|---|---|
+| 26-T1 | Map objectives to compatible metrics only when observed/required evidence and metric semantics fit; report coverage gaps | DONE | DoD met: RAG and native tool-call fixtures expose available vs missing evidence; unknown objectives ask a focused concept question. Gate 26-G1 PASS: no unavailable metric is recommended. Depends on 25-T2. Exact tests: `tests/test_opportunity_discovery.py::test_rag_opportunity_uses_application_retrieval_and_reports_case_coverage`, `::test_reference_context_does_not_make_unobserved_retrieval_available`, `::test_native_tool_call_opportunity_requires_declared_events`, `::test_unrecognized_objective_remains_unknown_and_requests_clarification`, `::test_opportunities_cli_emits_json_without_writing_a_plan_or_running_app`; reuse `tests/test_plan_validation.py`, `tests/test_planner_fixture_set.py`. Report `reports/26.md`. |
+| 26-T2 | Discover candidate datasets, test/evaluation suites and invocation references with provenance; preserve review/promotion boundaries | DONE | DoD met: bounded JSONL validation is path-backed; both inspection roots and optional policy data roots are enforced before reading; test/evaluator/invocation clues remain path-only; generated unreviewed cases are incompatible and candidate workflow remains explicit; references never enter discovery output or app projection. Gate 26-G2 PASS: no auto-promotion or reference leakage. Depends on 25-T1/T2. Exact tests: `tests/test_dataset_discovery.py::test_valid_jsonl_inventory_reports_field_counts_and_never_returns_values`, `::test_test_and_evaluation_paths_stay_path_only_and_are_not_datasets`, `::test_unsupported_format_and_oversized_dataset_remain_unknown`, `::test_generated_unreviewed_references_are_not_compatible_sources`, `::test_selection_reuses_only_one_content_identity`, `::test_policy_data_roots_block_content_reads_and_automatic_selection`, `::test_inventory_refuses_unapproved_root_and_symlinked_candidate`, `::test_distinct_candidates_report_review_boundary_without_auto_promotion`, `::test_inspect_json_includes_path_only_repository_candidate_inventory`; reuse `tests/test_candidate_workflow.py::test_unreviewed_synthetic_references_cannot_be_promoted`, `tests/test_runner_bindings.py::test_input_binding_cannot_reach_judge_only_data`. Report `reports/26.md`. |
+| 26-T3 | Select/reuse one compatible repository dataset transparently under the existing policy and ask one focused question for material ambiguity | DONE | DoD met: only a sole compatible content identity inside `inspection_roots` and any configured `data_roots` is reused; identical copies collapse to one choice; non-interactive chat reports the competing paths and asks for `--dataset`; plan-only opportunity inspection writes no plan and runs no app. Gate 26-G3 PASS. Depends on 26-T1/T2. Exact tests: `tests/test_dataset_discovery.py::test_selection_reuses_only_one_content_identity`, `::test_policy_data_roots_block_content_reads_and_automatic_selection`, `tests/test_cli_chat.py::test_new_chat_reuses_the_only_compatible_policy_approved_dataset`, `::test_noninteractive_new_chat_asks_for_material_dataset_ambiguity`, `tests/test_opportunity_discovery.py::test_opportunities_cli_emits_json_without_writing_a_plan_or_running_app`; reuse `tests/test_conversation.py`, `tests/test_plan_validation.py`. Report `reports/26.md`. All 114 focused tests passed; two environment-dependent cases skipped; see JUnit and report 26. |
+
+## Prompt 27 — Complete conversational evaluation loop
+
+Status: COMPLETE for the deterministic local loop with configured runners. The provider is
+scripted; live-model quality and human usability remain unverified. Reuses shared services and
+preserves v1.1 run, policy and evidence contracts. See `reports/27.md`.
+
+| Ticket | Description | Status | Definition of done, gates, dependencies, tests, report entry |
+|---|---|---|---|
+| 27-T1 | Connect grounded profile/opportunity results to conversation and a validated executable plan | DONE | DoD met: conversation reads the same profile, dataset summary and `discover_opportunities` result as headless planning; the current objective's evidence and gaps are exposed without dataset values. Gate 27-G1 PASS. Depends on 25 and 26. Exact tests: `tests/test_conversation.py::test_conversational_evaluation_plan_progress_failure_report_and_rescore`, `tests/test_conversation.py::test_clear_evaluation_request_starts_the_current_unpresented_plan`, `tests/test_session_controller.py`, `tests/test_plan_validation.py`. Report `reports/27.md`. |
+| 27-T2 | Apply v4 §3 intent/authorization semantics: clear bounded request starts inside existing policy; plan-only request does not run; clarify only material ambiguity/blockers | DONE | DoD met: a clear evaluation or exact case-count request starts once under the existing policy; case-count text must match the validated draft; plan-only, questions, negations, denied policy and mismatched scope dispatch nothing. Explicit `/run` now starts the current validated draft and shows a preview without a repeat-command gate. Gate 27-G2 PASS. Depends on 26-T3. Exact tests: `tests/test_conversation.py::test_clear_evaluation_request_starts_the_current_unpresented_plan`, `::test_clear_case_count_request_cannot_run_a_different_draft_scope`, `::test_vague_negated_or_questioning_words_do_not_start_a_run`, `::test_a_run_the_policy_does_not_permit_dispatches_nothing`, `tests/test_engine_policy.py`, `tests/test_conversation_hardening.py`, `tests/test_tui.py::test_explicit_run_starts_unpresented_validated_draft_with_a_preview`, and `tests/test_e2e_cli_journey.py::test_a_user_benchmarks_an_app_from_the_first_message_to_evidence_in_the_cli`. Report `reports/27.md`. |
+| 27-T3 | Complete progress and evidence-linked failure analysis with observations distinct from hypotheses | DONE | DoD met: active progress is a partial snapshot; stored failures/case evidence remain read-only; reports expose run/dataset/application/plan provenance and metric provenance; the assistant labels causal explanations as hypotheses. Gate 27-G3 PASS. Depends on 27-T1. Exact tests: `tests/test_conversation.py::test_conversational_evaluation_plan_progress_failure_report_and_rescore`, `::test_a_question_during_execution_leaves_the_run_running`, `tests/test_session_controller.py::test_failures_and_case_evidence_come_from_committed_results`, `tests/test_reports.py::test_report_facts_copy_numbers_without_recomputing`, and the E2E-01 terminal journey. Report `reports/27.md`. |
+| 27-T4 | Add next-experiment and rescore follow-up using stored executions and existing experiment/comparison contracts | DONE | DoD met: `rescore_run` delegates to policy-checked `evaluate_run` on the session's validated draft; it preserves the stored run ID and makes no application calls. The assistant gets evidence gaps and report provenance to state a reviewable next experiment; no source/app change is applied. Gate 27-G4 PASS. Depends on 27-T3. Exact tests: `tests/test_conversation.py::test_conversational_evaluation_plan_progress_failure_report_and_rescore`, `tests/test_comparison_service.py::test_explicit_rescore_selection_and_same_stored_execution_ids`, `tests/test_experiments.py::test_experiment_conversation_tools_are_read_only_proposals`, and `tests/test_reports.py`. Report `reports/27.md`. |
+
+27-G5 PASS: deterministic complete-loop fixture includes one passing and one failing score,
+tool-use unavailable for missing `execution.tool_events`, failure discussion, plan-only, scope
+clarification, direct clear-run, policy denial, progress, session resume and stored-output
+rescore. The source regression batch passed 125 tests. The clean-installed E2E-01 journey and
+direct slash-run regressions are recorded in `reports/27.md`. Scripted-model results are not
+live-agent evidence; no live provider or human evaluation was run.
+
+## Prompt 28 — Optional black-box HTTP evaluation
+
+Status: COMPLETE for the existing configured JSON HTTP API contract. The user's Prompt 28
+request explicitly started the optional phase. Audit found the required narrow runner,
+policy, budget, session and evidence behavior already implemented; no duplicate runtime code
+was added. Generic URL discovery and browser automation remain deferred.
+
+| Ticket | Description | Status | Definition of done, gates, dependencies, tests, report entry |
+|---|---|---|---|
+| 28-T1 | Audit and reuse the narrow configured HTTP request/response contract: secret references/redaction, timeout, retry, quota, budget, cancellation, egress, effects and local fixture integration | DONE | DoD met by existing typed `HttpTransport`/bindings, `HttpRunner`, policy and shared run/session/report services. Gates 28-G1..G4 PASS. Depends on Prompt 27 service contracts and explicit phase start (provided with this request). Exact tests and skips: `reports/28.md`; `docs/engineering/evidence/28/focused-junit.xml`. No browser or arbitrary website behavior is claimed. |
+
+Gates: **28-G1 PASS** (configured local HTTP API flows through the conversation/session/run/report path; clean-installed E2E-01); **28-G2 PASS** (secret redaction, request isolation, endpoint policy and denied requests); **28-G3 PASS** (timeout/cancel/effect truth, effect-aware retries, app quotas and hard/estimated-cost budgets); **28-G4 PASS** (typed configured API only; browser and arbitrary URL automation remain deferred). Exact results and limitations: `docs/engineering/reports/28.md`.
+
+## Prompt 29 — v4 product acceptance and value review
+
+Status: COMPLETE for the declared deterministic local scope after the Prompt 30/31 closure.
+The original acceptance snapshot remains in reports/29.md; final gates and its superseding
+result are recorded in reports/31.md.
+
+| Ticket | Description | Status | Definition of done, gates, dependencies, tests, report entry |
+|---|---|---|---|
+| 29-T1 | Reconcile every in-scope requirement/ticket to code and executed evidence; run deterministic journeys; distinguish scripted fixtures, real packages and live checks; record both scope verdicts | DONE | Final gates 29-G1..G4 PASS after E2E-08 closed journey 1. Clean-installed wheel suite: 32 passed across E2E-01..08; focused changed-path batch: 16 passed. Pinned real-package evidence is retained from report 29 (DeepEval 4.2.5: 18 passed/1 live deselected; Ragas 0.4.3: 9 passed); no adapter code changed. Repository-aware deterministic local scope READY FOR REVIEW; live/human/PMF scope remains unvalidated. Final evidence: docs/engineering/evidence/31/ and docs/engineering/reports/31.md. |
+
+Gates:
+
+- **29-G1 PASS:** all 24 v4 requirements have paths, executed evidence, honest status, contract impact and next action; matrix, tickets and report agree.
+- **29-G2 PASS:** the repository-defined clean-install suite passes 32 tests across E2E-01..08, including fresh-repository E2E-08. The wheel imports from isolated site-packages.
+- **29-G3 PASS:** all twelve required acceptance journeys pass under the local deterministic scope. Journey 1 is exercised in E2E-08 and the report-31 journey map.
+- **29-G4 PASS:** pinned real-package runs are separate from fixtures: DeepEval 4.2.5 passed 18 tests (live smoke deselected); Ragas 0.4.3 passed 9. Those adapter packages and adapters were not modified in this closure. No live provider was called.
+
+## Prompt 30 — Close Prompt 29 acceptance gap
+
+Status: COMPLETE. See `docs/engineering/reports/30.md` and the final acceptance in report 31.
+
+| Ticket | Description | Status | Definition of done, gates, dependencies, tests, report entry |
+|---|---|---|---|
+| 30-T1 | Surface approved-root static repository findings in a fresh conversational evaluation path, using the existing bounded inspector and profile services | DONE | DoD met by path/line findings, unknown unsupported source, denied-root behavior, injection/secret isolation, configured run, stored report, session reopen and zero-call rescore. Gates 30-G1..G4 PASS. Exact tests: `tests/test_conversation.py::test_repository_findings_are_available_to_a_fresh_conversation`; `tests/test_conversation.py::test_repository_findings_stay_unknown_when_inspection_is_not_approved`; `tests/test_e2e_repository_conversation.py::test_fresh_repository_inspection_runs_and_reports_with_evidence` (also clean-installed E2E-08). Dependencies 25-T1/T2, 26-T1/T2/T3 and 27-T1/T2/T3/T4. Report `reports/30.md`. |
+
+## Prompt 31 — Close remaining in-scope v3 gaps and rerun acceptance
+
+Status: COMPLETE for the declared, bounded local product scope. Generic browser automation,
+unsupported parser breadth, live-provider quality and human/market validation remain deferred
+or unvalidated; see `reports/31.md`.
+
+| Ticket | Description | Status | Definition of done, gates, dependencies, tests, report entry |
+|---|---|---|---|
+| 31-T1 | Provide bounded no-repository HTTP setup that writes typed config/policy without probing the endpoint and validates local JSONL cases | DONE | Gate 31-G1 PASS. DoD: generated project config is schema-valid, validates selected local JSONL, stores only secret references, has exact-origin/effect/call policy and performs zero setup requests; refuses unsafe URL parts and overwrite. Depends on existing 26-T2 dataset validation and 28-T1 HTTP contract. Exact tests: `tests/test_cli_connect.py::test_http_setup_creates_a_bounded_no_repository_project_without_network_calls`; `::test_remote_http_setup_requires_exact_origin_authorization`; `::test_loopback_setup_needs_no_remote_authorization`; `::test_http_setup_rejects_url_credentials_queries_and_secret_literals`; `::test_http_setup_never_overwrites_existing_project_files`. The sixth test, integrated fixture, is under 31-T2. Existing HTTP runner is reused. |
+| 31-T2 | Preserve one session/run while a configured HTTP app gains imported OpenTelemetry evidence and approved repository profile findings | DONE | Gate 31-G2 PASS. DoD: one loopback app call, one persisted run ID, imported trace summary and inferred `rag.py` finding are visible in the same session; raw trace file is not exposed. Depends on 16-T2 trace import, 25-T2 profile, 30-T1 conversational integration and 31-T1 setup. Exact test: `tests/test_cli_connect.py::test_generated_http_project_runs_through_session_evidence_and_report_services`. No auto-instrumentation or hosted trace connector is claimed. |
+| 31-T3 | Expose bounded conversational controlled experiment start, progress, stored-state resume, and separate protected-holdout authorization through the existing experiment service | DONE | Gate 31-G3 PASS. DoD: user-grounded values, finite budgets, session-owned experiment, stored progress/resume, and separate holdout authorization all pass. Depends on 19-T1..T3 frozen experiment services and 27-T3 session evidence/recovery. Exact tests: `tests/test_conversational_experiments.py::test_conversation_runs_experiment_reports_progress_and_separately_evaluates_holdout`; `::test_conversational_experiment_rejects_question_and_ungrounded_values`; `::test_conversational_experiment_holdout_must_be_inside_configured_data_roots`; `::test_noninteractive_chat_waits_for_a_controlled_experiment_it_started`; `::test_conversation_resumes_a_stored_running_experiment`; reuse `tests/test_experiments.py::test_experiment_conversation_tools_are_read_only_proposals`. App-exposed values only; no source repair/adoption. |
+| 31-T4 | Rerun final acceptance, reconcile v3 conflicts, verify sourced product-capability statements and publish readiness limits | DONE | Gates 31-G4..G6 PASS. DoD: all in-scope tickets and 12 journeys mapped to executable evidence; declared readiness scope and unrun live/human checks are explicit. Depends on 30-T1 and 31-T1..T3. Clean-installed script: 32 passed across E2E-01..08, zero skipped, `pytest_exit_code=0`; changed-path batch: 16 passed. Ruff, `mypy src` (129 files), and `aibench --help` passed. Real-package results are reused from report 29 because adapter code and pinned environments did not change; live tests stay deselected. Full report/artifacts: `docs/engineering/reports/31.md`, `docs/engineering/evidence/31/`. |

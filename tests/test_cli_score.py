@@ -87,6 +87,36 @@ def test_score_recorded_run_end_to_end(tmp_path: Path) -> None:
     assert refund["value_summary"]["counts"] == {"correct": 2}
 
 
+def test_score_refuses_a_missing_frozen_application_artifact(tmp_path: Path) -> None:
+    from aibench.core.models import deep_unfreeze
+    from aibench.storage.db import Database, Workspace
+    from aibench.storage.repositories import Storage
+
+    run_id = _smoke(tmp_path)
+    storage = Storage(Database.open_workspace(Workspace.at(tmp_path)))
+    try:
+        record = storage.get_run(run_id)
+        assert record is not None
+        parameters = dict(deep_unfreeze(record.manifest.parameters) or {})
+        parameters["application_artifact_id"] = "missing-application"
+        manifest = record.manifest.model_copy(update={"parameters": parameters})
+        storage.conn.execute(
+            "UPDATE runs SET data = ? WHERE run_id = ?",
+            (manifest.model_dump_json(), run_id),
+        )
+        storage.conn.commit()
+    finally:
+        storage.db.close()
+
+    result = cli.invoke(
+        app,
+        ["score", run_id, "--metrics", METRICS, "--workspace", str(tmp_path), "--json"],
+    )
+
+    assert result.exit_code == 2
+    assert "frozen application artifact" in result.output
+
+
 def test_score_rejects_bad_bindings_before_evaluating(tmp_path: Path) -> None:
     run_id = _smoke(tmp_path)
     metrics = tmp_path / "bad.metrics.json"

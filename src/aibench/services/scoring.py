@@ -231,7 +231,6 @@ def declared_dependency_identity(metrics: Sequence[ResolvedMetric]) -> str | Non
                 "python": str(worker_spec.python),
                 "target": worker_spec.target,
                 "extra_paths": [str(path) for path in worker_spec.extra_paths],
-                "startup_timeout_seconds": worker_spec.startup_timeout_seconds,
             }
         entries.append(
             {
@@ -308,6 +307,36 @@ def decide(
     return Decision.PASS if passed else Decision.FAIL
 
 
+def _application_for_scoring(
+    storage: Storage, artifacts: ArtifactStore, record: Any
+) -> ApplicationSpec | None:
+    """Load the run's frozen application, never silently substituting the catalog.
+
+    Runs created by the engine carry an application artifact.  A missing or tampered
+    artifact is a hard scoring error: using the mutable catalog would change the
+    observation contract without changing the run identity.  Catalog lookup remains only
+    for older runs that have no frozen artifact reference at all.
+    """
+
+    manifest = record.manifest
+    params = deep_unfreeze(manifest.parameters) or {}
+    artifact_id = params.get("application_artifact_id")
+    if "application_artifact_id" not in params:
+        return storage.get_application(manifest.application_id) if manifest.application_id else None
+    if not isinstance(artifact_id, str) or not artifact_id:
+        raise ScoringError("the run's frozen application artifact reference is invalid")
+    ref = storage.get_artifact(artifact_id)
+    if ref is None:
+        raise ScoringError("the run's frozen application artifact is missing")
+    try:
+        raw = artifacts.read_bytes(ref)
+        spec = ApplicationSpec.model_validate_json(raw)
+    except Exception as exc:
+        raise ScoringError("the run's frozen application artifact failed verification") from exc
+    if content_hash(spec.model_dump(mode="json")) != manifest.application_hash:
+        raise ScoringError("the run's frozen application does not match its manifest")
+    return spec
+
 
 async def score_recorded_run(
     *,
@@ -325,10 +354,12 @@ async def score_recorded_run(
     record = storage.get_run(run_id)
     if record is None:
         raise ScoringError(f"no run committed with run_id={run_id!r}")
-    application_id = record.manifest.application_id
-    if application is None and application_id:
-        application = storage.get_application(application_id)
+    if application is None:
+        application = _application_for_scoring(storage, artifacts, record)
     resolved = registry.validate(bindings, application=application)  # raises on any problem
+    # A direct rescore may use a different plugin environment from the original run.
+    # Freeze the identity of the metrics/environment actually resolved for this pass.
+    dependency_lock_hash = declared_dependency_identity(resolved)
 
     executions = select_final_executions(storage.list_execution_attempts(run_id))
     if not executions:
@@ -347,7 +378,7 @@ async def score_recorded_run(
             "metric_profiles": metric_profiles(
                 resolved,
                 application=application,
-                dependency_lock_hash=record.manifest.dependency_lock_hash,
+                dependency_lock_hash=dependency_lock_hash,
             ),
             "repeat_reason": "explicit_stored_output_rescore",
             "independent_judge_repeat": "not_proven",
@@ -363,7 +394,7 @@ async def score_recorded_run(
             cancel,
             prepare_timeout_seconds=prepare_timeout_seconds,
             application=application,
-            dependency_lock_hash=record.manifest.dependency_lock_hash,
+            dependency_lock_hash=dependency_lock_hash,
         )
         metric_results = await scorer.score_all(executions, cases, report.warnings)
         report.results.extend(metric_results)

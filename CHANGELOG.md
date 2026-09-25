@@ -5,6 +5,29 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased v4 local-scope work — Prompts 30/31
+
+- Fresh conversational planning can include the existing bounded, policy-approved repository
+  profile. Findings retain evidence and unknown states; inspection does not execute project
+  code.
+- Added `aibench connect http` for bounded no-repository setup of the configured JSON HTTP
+  runner. Setup validates a selected local JSONL dataset and writes typed config and policy
+  without contacting the endpoint.
+- Conversations can read imported trace summaries alongside approved repository findings for
+  one stored run and can start/resume bounded experiments through the existing experiment
+  service. Protected holdout evaluation remains a separate explicitly requested action.
+- The clean-installed deterministic suite now includes E2E-08 for a fresh repository-aware
+  conversation. No metric semantics or workspace schema changed.
+
+## Unreleased Phase 3 working tree — Prompt 20
+
+- Added `scripts/measure_capacity.py`. It runs the real CLI against the local rate-limited
+  fixture, and records throughput, process-tree CPU, peak memory, system load, server-side
+  concurrency and workspace growth per case.
+- Measured the local single-process ceiling, and recorded the distributed-execution
+  decision in ADR 0019. Distributed workers are deferred, because no distribution need was
+  demonstrated. No coordinator, queue, object store or worker service was added.
+
 ## Unreleased Phase 3 working tree — Prompt 19
 
 - Added optional controlled parameter experiments over finite, app-exposed environment

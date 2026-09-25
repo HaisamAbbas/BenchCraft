@@ -18,8 +18,8 @@ outside the model before anything changes:
 - an action must quote the user's words, which must ask for that action: an action verb,
   not negated or later withdrawn, not inside a question ("Looks interesting" is not authorization, §8). A bare
   affirmation ("yes") counts only when the previous reply offered exactly that plan. A run
-  starts only on a revision the user was shown, or one this same turn created at the
-  user's request;
+  starts on a revision the user was shown, one this same turn created at their request, or
+  the current validated revision for a clear evaluate/benchmark request;
 - action IDs are derived from the user turn, so a retried turn cannot start a second run,
   and a redelivered message returns the stored outcome without calling the model.
 
@@ -43,12 +43,21 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import ValidationError as PydanticValidationError
 
 from aibench.core.errors import AibenchError, ConflictError
-from aibench.core.models import deep_unfreeze
+from aibench.core.models import (
+    EffectLevel,
+    ExperimentBudget,
+    ExperimentDefinition,
+    ExperimentObjective,
+    ExperimentParameterValues,
+    ExperimentStatus,
+    deep_unfreeze,
+)
 from aibench.core.sessions import (
     ActionKind,
     ActionState,
@@ -56,8 +65,18 @@ from aibench.core.sessions import (
     PendingQuestion,
     PlanPatch,
 )
-from aibench.experiments.service import experiment_report, propose_adoption
+from aibench.engine.compile import load_plan
+from aibench.experiments.service import (
+    ExperimentError,
+    experiment_report,
+    prepare_experiment,
+    propose_adoption,
+)
+from aibench.experiments.service import (
+    create_experiment as create_experiment_record,
+)
 from aibench.planning.planner import ModelReply, PlannerProvider, ToolCall
+from aibench.runners import load_application
 from aibench.security.redaction import sanitize
 from aibench.services.runs import RunError
 from aibench.sessions.controller import SessionController
@@ -202,11 +221,30 @@ def patch_problems(patch: PlanPatch, quote: str, message: str) -> list[str]:
 # refusal only means the assistant has to ask again, while a false acceptance acts without
 # consent.
 _VERBS = {
-    ActionKind.START_RUN: r"\b(run|start|execute|launch|kick\s+off|begin)",
+    ActionKind.START_RUN: r"\b(run|start|execute|launch|kick\s+off|begin|evaluate|benchmark)",
     ActionKind.PAUSE_RUN: r"\b(pause|suspend)",
     ActionKind.RESUME_RUN: r"\b(resume|continue|unpause)",
     ActionKind.CANCEL_RUN: r"\b(cancel|stop|abort|halt)",
 }
+_CLEAR_EVALUATION_REQUEST = re.compile(
+    r"^\s*(?:(?:please|let's)\s+)?(?:evaluate|benchmark)\b|"
+    r"^\s*i\s+(?:want|need)\s+to\s+(?:evaluate|benchmark)\b|"
+    r"^\s*i'd\s+like\s+to\s+(?:evaluate|benchmark)\b|"
+    r"^\s*(?:start|run|begin)\s+with\s+(?:(?:the\s+)?first\s+\d+\s+cases|all\s+\d+\s+cases)|"
+    r"^\s*(?:run|start|begin)\s+(?:the\s+)?all\s+\d+\s+cases\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_CASE_COUNT = re.compile(
+    r"^\s*(?:start|run|begin)\s+with\s+(?:(?:the\s+)?first\s+(\d+)\s+cases|all\s+(\d+)\s+cases)|"
+    r"^\s*(?:run|start|begin)\s+(?:the\s+)?all\s+(\d+)\s+cases\b",
+    re.IGNORECASE,
+)
+_RESCORE_REQUEST = re.compile(
+    r"^\s*(?:(?:please|now)\s+)?(?:re-?score)\b|"
+    r"^\s*(?:please\s+)?score\s+(?:(?:this|that|the|my)\s+)?(?:run|evaluation)\s+again\b|"
+    r"^\s*i\s+(?:want|need)\s+to\s+(?:re-?score)\b",
+    re.IGNORECASE,
+)
 # What a control verb must be about: the run, not "explaining" or "the results".
 _RUN_OBJECT = (
     r"(it|this|that|them|(the|this|that|a|my|our)\s+(\w+\s+)?"
@@ -243,9 +281,32 @@ def asks_for(kind: ActionKind, sentence: str) -> bool:
     the verb applied to the run ("run it", "cancel the benchmark")."""
     verb = _VERBS[kind]
     text = sentence.strip()
+    if kind is ActionKind.START_RUN and _CLEAR_EVALUATION_REQUEST.search(text):
+        return True
     bare = rf"^(please\s+)?{verb}\w*(\s+(please|now))*\s*[.!]*$"
     applied = rf"{verb}\w*\s+(\w+\s+)?{_RUN_OBJECT}"
     return bool(re.search(bare, text, re.IGNORECASE) or re.search(applied, text, re.IGNORECASE))
+
+
+def experiment_authorization_problem(quote: str, message: str, *, resume: bool = False) -> str | None:
+    """A controlled experiment starts only on an explicit, non-negated user request."""
+    if len(_norm(quote)) < 2 or _norm(quote) not in _norm(message):
+        return "the quoted authorization is not in the user's message"
+    sentence = _sentence_with(message, quote)
+    if sentence.strip().endswith("?"):
+        return "a question is not authorization to run an experiment"
+    if _refusal_from_quote_onward(message, quote):
+        return "the user's words hold back or refuse this experiment"
+    verb = r"resume|continue" if resume else r"run|start|execute|launch"
+    action = re.search(
+        rf"\b(?:{verb})\w*\b.{{0,100}}\bexperiment\b|"
+        rf"\bexperiment\b.{{0,100}}\b(?:{verb})\w*\b",
+        sentence,
+        re.IGNORECASE,
+    )
+    if action is None:
+        return "the quoted words do not explicitly request this experiment action"
+    return None
 
 
 def authorization_problem(
@@ -265,6 +326,20 @@ def authorization_problem(
     if re.search(_VERBS[kind], quote, re.IGNORECASE) and asks_for(kind, sentence):
         return None
     return f"the quoted words do not ask to {kind.value.replace('_', ' ')}"
+
+
+def rescore_authorization_problem(quote: str, message: str) -> str | None:
+    """Require an explicit, non-questioning request before invoking a judge again."""
+    if len(_norm(quote)) < 2 or _norm(quote) not in _norm(message):
+        return "the quoted rescore request is not in the user's message"
+    sentence = _sentence_with(message, quote)
+    if sentence.strip().endswith("?"):
+        return "a question is not a request to rescore"
+    if _refusal_from_quote_onward(message, quote):
+        return "the user's words hold back or refuse this rescore"
+    if not _RESCORE_REQUEST.search(sentence):
+        return "the user's words do not explicitly ask to rescore stored executions"
+    return None
 
 
 # --------------------------------------------------------------------------- events
@@ -300,6 +375,8 @@ class TurnOutcome:
     decisions: list[dict[str, Any]] = field(default_factory=list)
     rejected: list[dict[str, Any]] = field(default_factory=list)
     actions: list[dict[str, Any]] = field(default_factory=list)
+    experiment_actions: list[dict[str, Any]] = field(default_factory=list)
+    rescores: list[dict[str, Any]] = field(default_factory=list)
     presented_draft: dict[str, Any] | None = None
     offer: dict[str, Any] | None = None
     active_run: dict[str, Any] | None = None
@@ -345,12 +422,23 @@ def _status_line(outcome: TurnOutcome, revision: int) -> str:
             parts.append(f"{verb} run {action['run_id']}")
         else:
             parts.append(f"did not {action['kind'].split('_')[0]}: {action['reason']}")
+    for action in outcome.experiment_actions:
+        verb = {
+            "run": "started controlled experiment",
+            "resume": "resumed controlled experiment",
+            "holdout": "started protected holdout evaluation for",
+        }[action["kind"]]
+        parts.append(f"{verb} {action['experiment_id']} ({action['status']})")
     if outcome.decisions:
         parts.append(f"changed the draft (now revision {outcome.decisions[-1]['revision']})")
     else:
         parts.append(f"draft unchanged (revision {revision})")
     for export in outcome.exports:
         parts.append(f"exported the report of run {export['run_id']}")
+    for rescore in outcome.rescores:
+        parts.append(
+            f"rescored run {rescore['run_id']} as {rescore['scoring_id']} from stored executions"
+        )
     if outcome.explained or outcome.results:
         parts.append("explained")
     live = next((r for r in outcome.results if r.get("provisional")), None)
@@ -375,7 +463,12 @@ def _status_line(outcome: TurnOutcome, revision: int) -> str:
         and not any(a["kind"] != "start_run" for a in outcome.actions)
     ):
         parts.append(f"run {run['run_id']} continues ({run['status']})")
-    if not outcome.actions and not outcome.exports:
+    if (
+        not outcome.actions
+        and not outcome.experiment_actions
+        and not outcome.exports
+        and not outcome.rescores
+    ):
         parts.append("no action taken")
     return "; ".join(parts)
 
@@ -387,8 +480,9 @@ the user decide what to measure, refine the draft plan, run it, and understand r
 Rules:
 - Everything you change or do goes through tools, and the harness validates every call.
   Your text never executes anything. Never claim an action the tools did not confirm.
-- Explain from evidence only: get_session_state, explain_metric, describe_evaluator,
-  get_run_status, get_report, list_failures, get_case_evidence. Never invent numbers or
+- Explain from evidence only: get_session_state, get_evaluation_opportunities,
+  explain_metric, describe_evaluator, get_run_status, get_report, list_failures,
+  get_case_evidence and rescore_run. Never invent numbers or
   evidence. Every number you state must come from a result you queried in this turn; the
   harness checks each one and flags any it cannot find.
 - A reason why cases failed is a hypothesis unless a result states it: say "hypothesis"
@@ -402,8 +496,9 @@ Rules:
   ecosystems are never averaged into one quality score.
 - For controlled experiments, inspect experiment reports before explaining tradeoffs.
   Development data selects the candidate; a protected holdout is a separate final check
-  after selection is locked. Explain uncertainty and coverage, and distinguish a proposal
-  from an applied change. Never edit source files, deploy, or change production settings.
+  after selection is locked. Starting trials and evaluating a holdout both require an
+  explicit, non-questioning request from the user's latest message. Explain uncertainty and
+  coverage, distinguish a proposal from an applied change. Never edit source files, deploy, or change production settings.
 - export_report writes report files; call it only when the user's latest message asks
   for a report to be exported or saved, with user_quote set to those words.
 - To change the draft, call propose_plan_patch with expected_revision set to the current
@@ -412,7 +507,13 @@ Rules:
   come from the user's words; never invent a threshold, schema, objective or path. A sample
   seed may be omitted; the harness records a stable one.
 - To start, pause, resume or cancel a run, call request_action with user_quote set to the
-  user's exact words asking for it. Vague remarks and questions are not requests to act.
+  user's exact words asking for it. A clear "evaluate/benchmark this app" request authorizes
+  its bounded executable plan under the current policy; start in that turn without asking
+  "run it?" again. Vague remarks and questions are not requests to act.
+- Use get_evaluation_opportunities after reading the current objective. An unavailable metric
+  stays a coverage gap; never describe it as measured. A plan-only request must not run.
+- Use rescore_run only when the latest user message explicitly asks to rescore a stored run;
+  it uses this session's validated current draft and stored executions.
 - Ask a question (ask_user) only when the answer changes the benchmark; at most two.
 - While a run is active, questions and explanations never affect it. A change to the
   dataset, metrics, thresholds or sampling creates a new draft revision; the active run
@@ -452,11 +553,17 @@ def tool_specs() -> list[dict[str, Any]]:
         _tool("get_session_state", "Current revision, draft, questions and runs.", _NO_ARGS),
         _tool(
             "show_plan",
-            "Show the user the current draft (metrics, gaps, coverage, estimate). Required "
-            "before the user can run it.",
+            "Show the user the current draft (metrics, gaps, coverage, estimate). Useful as "
+            "a preview; a clear evaluation request does not need a second confirmation.",
             _NO_ARGS,
         ),
         _tool("read_profile", "The application's evidence profile.", _NO_ARGS),
+        _tool(
+            "get_evaluation_opportunities",
+            "Evidence-aware metric choices, missing requirements and objective unknowns for "
+            "the current draft. Reads no case values and changes nothing.",
+            _NO_ARGS,
+        ),
         _tool(
             "describe_application",
             "The application's runner: what it observes, what evidence is missing and what "
@@ -520,9 +627,74 @@ def tool_specs() -> list[dict[str, Any]]:
             _object({"run_id": _RUN_ID}, []),
         ),
         _tool(
+            "get_trace_evidence",
+            "Read stored trace counts, completeness, usage bounds and tool totals for a run "
+            "owned by this session. Raw spans and artifacts are not returned; no app call is made.",
+            _object({"run_id": {"type": "string"}}, []),
+        ),
+        _tool(
+            "rescore_run",
+            "Rescore stored executions with this session's current validated plan; the "
+            "application is never invoked and the run identity is preserved.",
+            _object({"user_quote": quote, "run_id": _RUN_ID}, ["user_quote"]),
+        ),
+        _tool(
             "list_experiments",
             "List controlled experiments, lifecycle state, selected trial and split digests.",
             _NO_ARGS,
+        ),
+        _tool(
+            "run_controlled_experiment",
+            "Run a user-requested finite experiment only over parameters the app explicitly "
+            "exposes and values inside their declared domains. The current session plan and "
+            "development dataset are frozen; holdout must be an explicitly named local file. "
+            "This starts a background task so the user can query progress. Never invent the "
+            "holdout, parameter values, intended change, objective or run authorization.",
+            _object(
+                {
+                    "user_quote": quote,
+                    "holdout_dataset": {"type": "string"},
+                    "intended_change": {"type": "string"},
+                    "parameters": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 5,
+                        "items": _object(
+                            {
+                                "name": {"type": "string"},
+                                "values": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 16,
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            ["name", "values"],
+                        ),
+                    },
+                    "objective_metric": {"type": "string"},
+                },
+                ["user_quote", "holdout_dataset", "intended_change", "parameters"],
+            ),
+        ),
+        _tool(
+            "resume_controlled_experiment",
+            "Resume an interrupted experiment owned by this session. Requires the user's "
+            "explicit resume request; it does not extend an exhausted trial budget.",
+            _object(
+                {"user_quote": quote, "experiment_id": {"type": "string"}},
+                ["user_quote", "experiment_id"],
+            ),
+        ),
+        _tool(
+            "evaluate_experiment_holdout",
+            "Evaluate the protected holdout only after development selection is locked. This "
+            "is a separate, explicitly requested bounded application run; it never reopens "
+            "candidate selection.",
+            _object(
+                {"user_quote": quote, "experiment_id": {"type": "string"}},
+                ["user_quote", "experiment_id"],
+            ),
         ),
         _tool(
             "get_experiment_report",
@@ -741,12 +913,14 @@ class _Turn:
         self.outcome = outcome
         self.offered_revision = offered_revision
         self.created_revisions: set[int] = set()
+        self.rescored_runs: set[str] = set()
         self.decision_refs: list[str] = []
         self.action_refs: list[str] = []
         self.handlers: dict[str, Callable[[dict[str, Any]], Awaitable[Any]]] = {
             "get_session_state": self._state,
             "show_plan": self._show_plan,
             "read_profile": self._read(lambda i: json.loads(i.profile.model_dump_json())),
+            "get_evaluation_opportunities": self._opportunities,
             "describe_application": self._describe_application,
             "summarize_dataset": self._read(lambda i: json.loads(i.dataset.model_dump_json())),
             "list_evaluators": self._read(lambda i: [o.as_dict() for o in i.catalog]),
@@ -759,7 +933,12 @@ class _Turn:
             "list_failures": self._failures,
             "get_case_evidence": self._case,
             "get_report": self._report,
+            "get_trace_evidence": self._trace_evidence,
+            "rescore_run": self._rescore,
             "list_experiments": self._list_experiments,
+            "run_controlled_experiment": self._run_controlled_experiment,
+            "resume_controlled_experiment": self._resume_controlled_experiment,
+            "evaluate_experiment_holdout": self._evaluate_experiment_holdout,
             "get_experiment_report": self._experiment_report,
             "propose_experiment_adoption": self._experiment_adoption,
             "compare_runs": self._compare,
@@ -806,6 +985,13 @@ class _Turn:
             return pick(self.controller.inputs())
 
         return handler
+
+    async def _opportunities(self, _: dict[str, Any]) -> Any:
+        report = self.controller.opportunities()
+        self.outcome.explained.append(
+            {"tool": "get_evaluation_opportunities", "objectives": len(report["objectives"])}
+        )
+        return report
 
     async def _integrations(self, _: dict[str, Any]) -> Any:
         self.outcome.explained.append({"tool": "list_integrations", "subject": "integrations"})
@@ -861,13 +1047,58 @@ class _Turn:
                 "status": facts["status"],
                 "provisional": facts["provisional"],
                 "partial": facts["partial"],
+                "metrics": facts["metrics"],
+                "provenance": facts["provenance"],
             }
         )
         return facts
 
+    async def _trace_evidence(self, args: dict[str, Any]) -> Any:
+        summary = self.controller.trace_evidence(args.get("run_id"))
+        self.outcome.results.append(
+            {
+                "tool": "get_trace_evidence",
+                "session_id": summary["session_id"],
+                "run_id": summary["run_id"],
+                "available": summary["available"],
+            }
+        )
+        return summary
+
+    async def _rescore(self, args: dict[str, Any]) -> Any:
+        quote = str(args.get("user_quote", ""))
+        problem = rescore_authorization_problem(quote, self.message)
+        if problem is not None:
+            return self._reject("rescore_run", [problem])
+        requested_run = args.get("run_id")
+        if requested_run is None and self.controller.session_runs():
+            requested_run = self.controller.session_runs()[-1]
+        if requested_run in self.rescored_runs:
+            return self._reject("rescore_run", ["this turn already rescored that run"])
+        try:
+            result = await self._complete_despite_interrupt(
+                self.controller.rescore(requested_run)
+            )
+        except AibenchError as exc:
+            return self._reject("rescore_run", [str(exc)])
+        self.rescored_runs.add(result["run_id"])
+        self.outcome.rescores.append(result)
+        self.outcome.results.append(
+            {
+                "tool": "rescore_run",
+                "run_id": result["run_id"],
+                "scoring_id": result["scoring_id"],
+                "metrics": result["summaries"],
+                "application_invoked": False,
+            }
+        )
+        if self.interrupted:
+            raise asyncio.CancelledError
+        return result
+
     async def _list_experiments(self, args: dict[str, Any]) -> Any:
         del args
-        records = self.controller.storage.list_experiments()
+        records = self.controller.session_experiments()
         result = [
             {
                 "experiment_id": record.experiment_id,
@@ -883,8 +1114,256 @@ class _Turn:
         self.outcome.results.append({"tool": "list_experiments", "count": len(result)})
         return result
 
+    def _owned_experiment(self, experiment_id: str) -> Any:
+        prefix = f"{self.controller.session_id}-exp-"
+        if not experiment_id.startswith(prefix):
+            raise ExperimentError("this conversation can access only its own experiments")
+        record = self.controller.storage.get_experiment(experiment_id)
+        if record is None:
+            raise ExperimentError(f"no experiment {experiment_id!r} belongs to this session")
+        return record
+
+    async def _run_controlled_experiment(self, args: dict[str, Any]) -> Any:
+        quote = str(args.get("user_quote", ""))
+        problem = experiment_authorization_problem(quote, self.message)
+        if problem is not None:
+            return self._reject("run_controlled_experiment", [problem])
+        decision = self.controller.current_decision()
+        if not decision.executable:
+            return self._reject(
+                "run_controlled_experiment", ["the current validated plan is not executable"]
+            )
+        if self.controller.active_run() is not None:
+            return self._reject(
+                "run_controlled_experiment", ["a benchmark run is active in this session"]
+            )
+        if self.controller.has_active_experiment_task():
+            return self._reject(
+                "run_controlled_experiment", ["a controlled experiment is already active"]
+            )
+
+        try:
+            application = load_application(Path(decision.choices.application))
+            if application.spec.effects is EffectLevel.IRREVERSIBLE:
+                raise ExperimentError(
+                    "controlled trials are unavailable for an application declared irreversible"
+                )
+            exposures = {item.name: item for item in application.spec.exposed_parameters}
+            if not exposures:
+                raise ExperimentError("the application exposes no controlled experiment parameters")
+            raw_parameters = args.get("parameters")
+            if not isinstance(raw_parameters, list) or not raw_parameters:
+                raise ExperimentError("at least one exposed parameter and finite value set is required")
+            parameters = tuple(
+                ExperimentParameterValues.model_validate(item) for item in raw_parameters
+            )
+            if len({item.name for item in parameters}) != len(parameters):
+                raise ExperimentError("parameter names must be unique")
+            for parameter in parameters:
+                if parameter.name not in exposures:
+                    raise ExperimentError(f"{parameter.name!r} is not exposed by this application")
+                if not (
+                    _phrase_in(parameter.name.replace("_", " "), self.message)
+                    or _phrase_in(parameter.name, self.message)
+                ):
+                    raise ExperimentError(
+                        f"the user did not name parameter {parameter.name!r}"
+                    )
+                if any(not _phrase_in(value, self.message) for value in parameter.values):
+                    raise ExperimentError(
+                        f"every value for parameter {parameter.name!r} must appear in the user's message"
+                    )
+
+            intended_change = str(args.get("intended_change", "")).strip()
+            if not intended_change or not _phrase_in(intended_change, self.message):
+                raise ExperimentError("the intended change must come from the user's exact words")
+            holdout_text = str(args.get("holdout_dataset", "")).strip()
+            if not holdout_text or not _phrase_in(holdout_text.replace("\\", "/"), self.message):
+                raise ExperimentError("the holdout path must be explicitly named by the user")
+            holdout_candidate = Path(holdout_text).expanduser()
+            if not holdout_candidate.is_absolute():
+                holdout_candidate = self.controller.project_root / holdout_candidate
+            holdout_path = holdout_candidate.resolve(strict=True)
+            project_root = self.controller.project_root.resolve()
+            policy = self.controller.policy()
+            approved_roots = []
+            for root in policy.data_roots:
+                candidate = Path(root).expanduser()
+                approved_roots.append(
+                    (candidate if candidate.is_absolute() else project_root / candidate).resolve()
+                )
+            if not approved_roots:
+                approved_roots = [project_root]
+            if not any(holdout_path.is_relative_to(root) for root in approved_roots):
+                raise ExperimentError("the named holdout is outside the project's approved data scope")
+            if not holdout_path.is_file():
+                raise ExperimentError("the named holdout must be a local file")
+
+            plan_path = self.controller.directory / decision.plan_file
+            plan = load_plan(plan_path)
+            metric_names = [binding.metric for binding in plan.metrics]
+            requested_metric = args.get("objective_metric")
+            if requested_metric is None:
+                if len(metric_names) != 1:
+                    raise ExperimentError(
+                        "the current plan has multiple metrics; name the experiment objective metric"
+                    )
+                binding_index = 0
+            else:
+                metric_name = str(requested_metric)
+                if not _phrase_in(metric_name, self.message):
+                    raise ExperimentError("the objective metric must be named by the user")
+                if metric_name not in metric_names:
+                    raise ExperimentError("the objective metric is not a binding in the current plan")
+                binding_index = metric_names.index(metric_name)
+
+            combinations = 1
+            for parameter in parameters:
+                combinations *= len(parameter.values)
+            if combinations > 128:
+                raise ExperimentError("the finite experiment exceeds 128 parameter combinations")
+            estimate = deep_unfreeze(decision.draft).get("estimate") or {}
+            app_calls = int(estimate.get("application_calls_upper_bound", 0)) * combinations
+            eval_calls = int(estimate.get("evaluations", 0)) * combinations
+            if app_calls <= 0 or app_calls > 1_000 or eval_calls > 1_000:
+                raise ExperimentError(
+                    "the experiment's planned total exceeds the 1,000-call conversational safety bound"
+                )
+
+            experiment_id = (
+                f"{self.controller.session_id}-exp-"
+                f"{hashlib.sha256(self.user_turn.turn_id.encode()).hexdigest()[:12]}"
+            )
+            existing = self.controller.storage.get_experiment(experiment_id)
+            if existing is not None:
+                started = self.controller.start_experiment(experiment_id)
+            else:
+                definition = ExperimentDefinition(
+                    experiment_id=experiment_id,
+                    plan=str(plan_path.resolve()),
+                    development_dataset=str(Path(decision.choices.dataset).resolve()),
+                    holdout_dataset=str(holdout_path),
+                    intended_change=intended_change,
+                    parameters=parameters,
+                    objective=ExperimentObjective(binding_index=binding_index),
+                    budget=ExperimentBudget(max_trials=combinations),
+                )
+                self.controller.directory.mkdir(parents=True, exist_ok=True)
+                spec_path = self.controller.directory / f"{experiment_id}.json"
+                with spec_path.open("x", encoding="utf-8", newline="\n") as stream:
+                    stream.write(definition.model_dump_json(indent=2) + "\n")
+                try:
+                    prepared = prepare_experiment(
+                        spec_path,
+                        policy=self.controller.policy(),
+                        trusted_local=self.controller.session.trusted_local,
+                    )
+                    create_experiment_record(
+                        prepared,
+                        storage=self.controller.storage,
+                        artifacts=self.controller.artifacts,
+                        actor=f"conversation:{self.controller.session_id}",
+                    )
+                    started = self.controller.start_experiment(experiment_id)
+                except Exception:
+                    spec_path.unlink(missing_ok=True)
+                    raise
+            self.outcome.results.append(
+                {
+                    "tool": "run_controlled_experiment",
+                    "experiment_id": experiment_id,
+                    "status": started["status"],
+                    "parameter_combinations": combinations,
+                    "planned_application_calls_upper_bound": app_calls,
+                    "planned_evaluator_calls_upper_bound": eval_calls,
+                    "background": True,
+                }
+            )
+            self.outcome.experiment_actions.append(
+                {"kind": "run", "experiment_id": experiment_id, "status": started["status"]}
+            )
+            return {**started, "parameter_combinations": combinations, "report_tool": "get_experiment_report"}
+        except (AibenchError, OSError, ValueError, PydanticValidationError) as exc:
+            return self._reject("run_controlled_experiment", [str(exc)])
+
+    async def _resume_controlled_experiment(self, args: dict[str, Any]) -> Any:
+        quote = str(args.get("user_quote", ""))
+        problem = experiment_authorization_problem(quote, self.message, resume=True)
+        if problem is not None:
+            return self._reject("resume_controlled_experiment", [problem])
+        try:
+            experiment_id = str(args.get("experiment_id", ""))
+            record = self._owned_experiment(experiment_id)
+            if not _phrase_in(experiment_id, self.message) and len(
+                [r for r in self.controller.session_experiments()
+                 if r.status is ExperimentStatus.RUNNING]
+            ) != 1:
+                raise ExperimentError("name the experiment to resume when this session has more than one")
+            if record.status is not ExperimentStatus.RUNNING:
+                raise ExperimentError(
+                    f"only an interrupted running experiment can resume; current state is {record.status.value}"
+                )
+            if self.controller.active_run() is not None:
+                raise ExperimentError("a benchmark run is active in this session")
+            if self.controller.has_active_experiment_task():
+                raise ExperimentError("an experiment task is already active")
+            started = self.controller.start_experiment(experiment_id)
+            self.outcome.results.append(
+                {"tool": "resume_controlled_experiment", **started, "background": True}
+            )
+            self.outcome.experiment_actions.append(
+                {"kind": "resume", "experiment_id": experiment_id, "status": started["status"]}
+            )
+            return started
+        except (AibenchError, OSError, ValueError) as exc:
+            return self._reject("resume_controlled_experiment", [str(exc)])
+
+    async def _evaluate_experiment_holdout(self, args: dict[str, Any]) -> Any:
+        quote = str(args.get("user_quote", ""))
+        if (
+            len(_norm(quote)) < 2
+            or _norm(quote) not in _norm(self.message)
+            or _sentence_with(self.message, quote).strip().endswith("?")
+            or _refusal_from_quote_onward(self.message, quote)
+            or not re.search(r"\b(evaluate|run|start)\b.{0,100}\b(holdout|experiment)\b|"
+                             r"\b(holdout|experiment)\b.{0,100}\b(evaluate|run|start)\b",
+                             _sentence_with(self.message, quote), re.IGNORECASE)
+        ):
+            return self._reject(
+                "evaluate_experiment_holdout",
+                ["the user's exact words must explicitly request protected holdout evaluation"],
+            )
+        try:
+            experiment_id = str(args.get("experiment_id", ""))
+            record = self._owned_experiment(experiment_id)
+            if not _phrase_in(experiment_id, self.message):
+                raise ExperimentError("the requested experiment ID must appear in the user's message")
+            if record.status not in {ExperimentStatus.SELECTED, ExperimentStatus.HOLDOUT_RUNNING,
+                                     ExperimentStatus.COMPLETED}:
+                raise ExperimentError(
+                    "protected holdout evaluation requires a locked development selection"
+                )
+            if self.controller.active_run() is not None:
+                raise ExperimentError("a benchmark run is active in this session")
+            if self.controller.has_active_experiment_task():
+                raise ExperimentError("another experiment task is active")
+            started = self.controller.start_experiment_holdout(experiment_id)
+            self.outcome.results.append(
+                {"tool": "evaluate_experiment_holdout", **started, "background": True}
+            )
+            self.outcome.experiment_actions.append(
+                {"kind": "holdout", "experiment_id": experiment_id, "status": started["status"]}
+            )
+            return started
+        except (AibenchError, OSError, ValueError) as exc:
+            return self._reject("evaluate_experiment_holdout", [str(exc)])
+
     async def _experiment_report(self, args: dict[str, Any]) -> Any:
         experiment_id = str(args.get("experiment_id", ""))
+        try:
+            self._owned_experiment(experiment_id)
+        except ExperimentError as exc:
+            return {"error": str(exc)}
         report = experiment_report(
             experiment_id,
             storage=self.controller.storage,
@@ -903,6 +1382,10 @@ class _Turn:
 
     async def _experiment_adoption(self, args: dict[str, Any]) -> Any:
         experiment_id = str(args.get("experiment_id", ""))
+        try:
+            self._owned_experiment(experiment_id)
+        except ExperimentError as exc:
+            return {"error": str(exc)}
         proposal = propose_adoption(
             experiment_id,
             storage=self.controller.storage,
@@ -1049,8 +1532,29 @@ class _Turn:
         if problem is None and kind is ActionKind.START_RUN:
             if not isinstance(target, int):
                 problem = "start_run needs the reviewed revision to run"
-            elif target not in self.created_revisions and session.presented_revision != target:
+            elif (
+                target not in self.created_revisions
+                and session.presented_revision != target
+                and not (
+                    target == session.revision
+                    and _CLEAR_EVALUATION_REQUEST.search(_sentence_with(self.message, quote))
+                )
+            ):
                 problem = f"revision {target} has not been shown to the user; show the plan first"
+            elif target == session.revision:
+                sentence = _sentence_with(self.message, quote)
+                requested = _EXPLICIT_CASE_COUNT.search(sentence)
+                if requested is not None:
+                    count = int(next(value for value in requested.groups() if value is not None))
+                    estimate = deep_unfreeze(self.controller.current_decision().draft).get(
+                        "estimate", {}
+                    )
+                    selected = estimate.get("selected_cases") if isinstance(estimate, dict) else None
+                    if selected != count:
+                        problem = (
+                            f"the current draft selects {selected} cases, but the user's "
+                            f"request names {count}; revise the case scope before starting"
+                        )
         if problem is not None:
             return self._reject("request_action", [problem])
         action_id = self.agent.action_id(self.user_turn, kind, target, args.get("run_id"))

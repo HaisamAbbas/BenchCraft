@@ -1,0 +1,106 @@
+.......................F......                                           [100%]
+================================== FAILURES ===================================
+______ test_a_fresh_user_completes_the_conversational_acceptance_journey ______
+
+tmp_path = WindowsPath('D:/BenchCraft/.pytest-tmp/6ace6bd8/test_a_fresh_user_completes_th0')
+service = <rag_service.RagService object at 0x000002395CFF1A90>
+
+    def test_a_fresh_user_completes_the_conversational_acceptance_journey(
+        tmp_path: Path, service: Any
+    ) -> None:
+        root = _project(tmp_path, service.url)
+        workspace = Workspace.at(root)
+        workspace.ensure_directories()
+    
+        def open_controller(session_id: str | None = None) -> SessionController:
+            storage = Storage(Database.open_workspace(workspace))
+            artifacts = ArtifactStore(workspace.artifacts_dir)
+            if session_id is not None:
+                return SessionController(
+                    session_id, storage=storage, artifacts=artifacts, workspace_root=workspace.root
+                )
+            return SessionController.create(
+                storage=storage,
+                artifacts=artifacts,
+                workspace_root=workspace.root,
+                project_root=root,
+                application=root / "rag.app.json",
+                dataset=root / "rag100.jsonl",
+            )
+    
+        ctl = open_controller()
+        provider = ScriptedProvider(
+            [
+                # 1. the goal, in the user's words; one material clarification
+                patch_step("check that answers are correct", add_objectives=["answers are correct"]),
+                call(
+                    "ask_user",
+                    prompt="Run all 100 cases, or start with a smaller pilot?",
+                    required_fields=["selection"],
+                    choices=["all 100", "a pilot"],
+                ),
+                say("I added a correctness check. Run all 100 cases, or start with a pilot?"),
+            ]
+        )
+        agent = ConversationAgent(ctl, provider)
+    
+        async def journey() -> dict[str, Any]:
+            seen: dict[str, Any] = {}
+            seen["goal"] = await agent.handle_message(
+                "Benchmark the support RAG app and check that answers are correct."
+            )
+            [question] = ctl.store.questions(ctl.session_id, status="open")
+            # 2. the answer revises the draft (a 20-case pilot), and the revision is shown
+            provider.add(
+                patch_step("Start with the first 20 cases", limit=20, answers=[question.question_id]),
+                call("show_plan"),
+                say("Updated the draft to the first 20 cases. Run it?"),
+            )
+            seen["revision"] = await agent.handle_message("Start with the first 20 cases.")
+            # 3. run it; the application is slow, so the run is live for a while
+            service.delay = 0.25
+            provider.add(start_step("Run it"), say("Started the pilot."))
+            seen["start"] = await agent.handle_message("Run it.")
+            run_id = seen["start"].actions[0]["run_id"]
+            # 4. a question during execution: explained, and the run is untouched
+            await asyncio.sleep(0.5)
+            provider.add(
+                call("explain_metric", metric="native.exact_match"),
+                say("Exact match compares the answer with the reviewed reference answer."),
+            )
+            before = ctl.run_condition(run_id)["condition"]
+            seen["question"] = await agent.handle_message("What does exact match measure?")
+            seen["during"] = (before, ctl.run_condition(run_id)["condition"])
+            # 5. pause and resume through slash controls
+            commands = Commands(ctl)
+            seen["pause"] = await commands.run("/pause")
+            await asyncio.sleep(0.6)
+            paused_calls = service.total_calls()
+            await asyncio.sleep(0.6)
+            seen["paused_calls"] = (paused_calls, service.total_calls())
+            seen["paused_status"] = (await commands.run("/status")).data
+            service.delay = 0.0
+            seen["resume"] = await commands.run("/resume")
+            finished = await ctl.wait_for_run(run_id)
+            seen["finished"] = finished.state.value if finished else None
+            seen["run_id"] = run_id
+            await ctl.close()
+            return seen
+    
+        seen = asyncio.run(journey())
+        run_id = seen["run_id"]
+        try:
+            assert seen["goal"].decisions and seen["goal"].questions
+            assert seen["revision"].decisions and seen["revision"].presented_draft is not None
+            assert seen["revision"].presented_draft["revision"] == 3
+            assert seen["start"].actions[0]["state"] == "done"
+            assert seen["question"].actions == [] and seen["question"].explained
+            assert seen["during"] == ("running_here", "running_here")
+            assert seen["pause"].data["state"] == "done"
+            # paused: in-flight work finishes, nothing new is dispatched
+            assert seen["paused_calls"][0] == seen["paused_calls"][1]
+>           assert seen["paused_status"]["status"] in ("paused", "pausing")
+E           AssertionError: assert 'running' in ('paused', 'pausing')
+
+tests\test_mvp_acceptance.py:338: AssertionError
+1 failed, 29 passed in 284.31s (0:04:44)

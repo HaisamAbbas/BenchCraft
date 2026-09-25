@@ -781,6 +781,13 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
                     "cancelled": s["cancelled"],
                     "pending": s["pending"],
                     "completed_coverage": s["completed_coverage"],
+                    "provenance": {
+                        "evaluator_id": m["profile"]["evaluator_id"],
+                        "version": m["profile"]["version"],
+                        "plugin": m["profile"]["plugin"],
+                        "source": m["profile"]["source"],
+                        "limitations": m["profile"]["limitations"],
+                    },
                 }
             )
     app = report["application"]
@@ -792,6 +799,18 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
         "partial": run["partial"],
         "as_of_event_sequence": report["as_of_event_sequence"],
         "basis": report["basis"],
+        "provenance": {
+            key: run[key]
+            for key in (
+                "plan_hash",
+                "dataset_hash",
+                "application_id",
+                "application_hash",
+                "runner",
+                "effects",
+                "policy_hash",
+            )
+        },
         "gates": [
             {
                 k: g.get(k)

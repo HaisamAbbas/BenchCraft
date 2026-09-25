@@ -68,10 +68,17 @@ class ArtifactStore:
     """Content-addressed artifact storage under `<workspace>/artifacts/`, sharded by the
     first two hex digest characters to avoid one huge flat directory."""
 
-    def __init__(self, artifacts_dir: Path, *, max_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES) -> None:
+    def __init__(
+        self,
+        artifacts_dir: Path,
+        *,
+        max_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
+        create: bool = True,
+    ) -> None:
         self.artifacts_dir = artifacts_dir
         self.max_bytes = max_bytes
-        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        if create:
+            self.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     def _path_for_digest(self, digest: str) -> Path:
         hex_digest = digest.split(":", 1)[1] if ":" in digest else digest

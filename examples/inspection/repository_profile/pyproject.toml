@@ -1,0 +1,6 @@
+[project]
+name = "support-demo"
+dependencies = ["chromadb>=0.5", "fastapi>=0.100"]
+
+[project.scripts]
+support-demo = "app:main"

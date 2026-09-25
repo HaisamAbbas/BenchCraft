@@ -1,0 +1,62 @@
+﻿                                                                               
+ Usage: python -m aibench [OPTIONS] COMMAND [ARGS]...                          
+                                                                               
+ Conversational CLI for AI application benchmarking (working name:             
+ BenchCraft).                                                                  
+                                                                               
++- Options -------------------------------------------------------------------+
+| --version                     Show the aibench version and exit.            |
+| --install-completion          Install completion for the current shell.     |
+| --show-completion             Show completion for the current shell, to     |
+|                               copy it or customize the installation.        |
+| --help                        Show this message and exit.                   |
++-----------------------------------------------------------------------------+
++- Commands ------------------------------------------------------------------+
+| score              Score a run's recorded outputs. Never invokes the        |
+|                    application.                                             |
+| inspect            Build an evidence-backed application profile: declared   |
+|                    config, recorded runs, an                                |
+|                    approved source tree (inferred findings only) and        |
+|                    optional policy-checked probes.                          |
+| run                Execute a plan: validate, freeze, run, evaluate.         |
+| resume             Continue eligible unfinished work under the run's frozen |
+|                    plan and identities.                                     |
+| evaluate           Rescore stored executions without rerunning the          |
+|                    application.                                             |
+| chat               Open the benchmark conversation for a project.           |
+| init               Create a quickstart project: config, 10-case dataset,    |
+|                    fixture app, plan and policy.                            |
+| doctor             Check the environment, the project and credential        |
+|                    availability. The application                            |
+|                    is never run; a plan's plugin environments start only if |
+|                    the policy permits them.                                 |
+| benchmark          Guided inspect -> plan -> validate -> run composition.   |
+| report             Render a run's report (JSON, Markdown or HTML) without   |
+|                    rerunning anything.                                      |
+| compare            Compare stored runs; no application, evaluator or judge  |
+|                    is invoked.                                              |
+| dataset            Dataset validation and inspection commands.              |
+| experiments        Run controlled parameter experiments against development |
+|                    data.                                                    |
+| runs               Inspect committed runs.                                  |
+| sessions           Inspect persistent benchmark sessions.                   |
+| traces             Import OpenTelemetry traces into a run and inspect them. |
+| connect            Connect an application without providing its repository. |
+| cache              Inspect or invalidate the opt-in execution and           |
+|                    evaluation caches.                                       |
+| openai-evals-oss   openai/evals (open-source framework): run an allowlisted |
+|                    eval live against your application through a             |
+|                    completion-function bridge.                              |
+| openai-evals-api   Hosted OpenAI Evals API: grade a run's recorded outputs  |
+|                    as a remote job (submit, status, resume, cancel, fetch). |
+| langfuse           Langfuse: import a dataset or traces, export recorded    |
+|                    results as scores.                                       |
+| integrations       External integrations: modes, data destinations and      |
+|                    availability.                                            |
+| app                Describe and smoke-test a configured application.        |
+| evaluators         List and inspect available evaluators.                   |
+| plan               Draft (`aibench plan --app ... --dataset ...`) or        |
+|                    validate executable plans.                               |
+| plugins            Inspect installed plugin kinds.                          |
++-----------------------------------------------------------------------------+
+
