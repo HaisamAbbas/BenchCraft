@@ -61,11 +61,19 @@ def test_wide_banner_shows_block_logo_panel_and_hint() -> None:
     assert "Type /help for commands" in shown
 
 
-def test_narrow_banner_skips_logo_and_legacy_code_page_gets_ascii() -> None:
-    narrow = _welcome(Console(file=io.StringIO(), width=60))
+def test_narrow_banner_stacks_the_logo_then_drops_it() -> None:
+    narrow = _welcome(Console(file=io.StringIO(), width=75))
     assert banner.BLOCK_LOGO[0].rstrip() not in narrow
+    bench, craft = banner.STACKED_LOGO[0].rstrip(), banner.STACKED_LOGO[6].rstrip()
+    assert narrow.index(bench) < narrow.index(craft)
     assert "Type /help for commands" in narrow
 
+    tiny = _welcome(Console(file=io.StringIO(), width=40))
+    assert bench not in tiny
+    assert "Type /help for commands" in tiny
+
+
+def test_legacy_code_page_gets_ascii_logo() -> None:
     legacy = _welcome(Console(file=_Cp1252(), width=120), model=None)
     assert banner.ASCII_LOGO[1].rstrip() in legacy
     legacy.encode("cp1252")  # every character printable on the code page
