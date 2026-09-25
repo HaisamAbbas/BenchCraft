@@ -229,6 +229,7 @@ def chat(
             provider=provider,
             new_session=new_session,
             history_path=workspace.root / "chat_history",
+            theme_path=workspace.root / "ui.json",
         )
         asyncio.run(chat_app.run())
     finally:

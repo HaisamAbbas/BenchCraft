@@ -4,6 +4,7 @@ assistant turns, run progress and the engine, each independently cancellable.
 - Input stays editable at all times: the prompt is asynchronous (`prompt_toolkit`), and
   output is printed above it (`patch_stdout`). Enter sends; Esc then Enter adds a line.
   History is kept per workspace; slash commands complete with Tab.
+- The welcome screen and chrome follow a colour theme (`/themes`), saved per workspace.
 - Slash commands run at once, even while the assistant is replying, and never wait for a
   model (09-G2, 09-G3). Messages go to a turn worker, one at a time, in order.
 - Replies stream: text fragments are shown as they arrive, grouped into whole lines so
@@ -30,25 +31,34 @@ from typing import Any
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.history import FileHistory, History, InMemoryHistory
 from prompt_toolkit.input import Input
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.output import Output
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.styles import DynamicStyle
 from rich.console import Console
 
 from aibench.conversation.agent import ConversationAgent, TurnEvent, TurnLimits, TurnOutcome
 from aibench.planning.planner import PlannerProvider
 from aibench.services.runs import RunError
 from aibench.sessions.controller import SessionController
-from aibench.tui import render
+from aibench.tui import banner, render
 from aibench.tui.commands import COMMANDS, CommandResult, Commands, NewSession
 from aibench.tui.render import safe
+from aibench.tui.themes import THEMES, Theme, load_theme, save_theme
 
 _WRAP = 88  # stream a partial line once it grows this long, at a word boundary
 
 
 MAX_REPLAYED = 10  # notable missed events shown on reopening; the rest are counted
+
+# Commands of the interactive terminal itself: they change only how it looks, so they are
+# handled here rather than recorded in the session like the benchmark controls.
+TERMINAL_COMMANDS: dict[str, str] = {
+    "/themes": "/themes [NAME] - list colour themes, or switch (saved for this project)",
+}
 
 
 def notable_event(event: dict[str, Any]) -> str | None:
@@ -77,9 +87,16 @@ class SlashCompleter(Completer):
     ) -> Iterable[Completion]:
         text = document.text_before_cursor
         if text.startswith("/") and " " not in text:
-            for name, meaning in COMMANDS.items():
+            for name, meaning in {**COMMANDS, **TERMINAL_COMMANDS}.items():
                 if name.startswith(text.lower()):
                     yield Completion(name, start_position=-len(text), display_meta=meaning)
+        elif text.lower().startswith("/themes ") and text.count(" ") == 1:
+            typed = text.split(" ", 1)[1].lower()
+            for theme in THEMES.values():
+                if theme.name.startswith(typed):
+                    yield Completion(
+                        theme.name, start_position=-len(typed), display_meta=theme.description
+                    )
 
 
 def key_bindings() -> KeyBindings:
@@ -157,6 +174,7 @@ class ChatApp:
         console: Console | None = None,
         new_session: NewSession | None = None,
         history_path: Path | None = None,
+        theme_path: Path | None = None,
         limits: TurnLimits | None = None,
         input: Input | None = None,
         output: Output | None = None,
@@ -172,6 +190,8 @@ class ChatApp:
         )
         self.input = input
         self.output = output
+        self.theme_path = theme_path
+        self._set_theme(load_theme(theme_path))
         self.progress_interval = progress_interval
         self.coalesce_seconds = coalesce_seconds
         self._queue: asyncio.Queue[str] = asyncio.Queue()
@@ -197,13 +217,23 @@ class ChatApp:
     def say(self, text: str) -> None:
         render.out(self.console, text)
 
+    def _set_theme(self, theme: Theme) -> None:
+        self.theme = theme
+        self._prompt_style = theme.prompt_style()
+
+    def _prompt_message(self) -> StyleAndTextTuples:
+        glyph = "❯ " if banner.unicode_ok(self.console) else "> "
+        return [("class:prompt", glyph)]
+
     def _banner(self) -> None:
         session = self.controller.session
-        model = self.provider.model if self.provider else "none (commands only)"
-        self.say(
-            f"[bold]BenchCraft[/bold] project {safe(session.project_root)}\n"
-            f"session {session.session_id}, draft revision {session.revision}; assistant "
-            f"model: {safe(model)}. Type /help for commands; Enter sends, Esc Enter adds a line."
+        banner.welcome(
+            self.console,
+            self.theme,
+            project=str(session.project_root),
+            session_id=session.session_id,
+            revision=session.revision,
+            model=self.provider.model if self.provider else None,
         )
         # Reopened: the authoritative picture from storage (10-T1). Missed run events are
         # summarized once and acknowledged; nothing is dispatched or repeated.
@@ -349,8 +379,15 @@ class ChatApp:
         if not text:
             return
         if text.startswith("/"):
+            name, _, argument = text.partition(" ")
+            if name.lower() == "/themes":
+                self.themes(argument)
+                return
             result = await self.commands.run(text)
             render_result(self.console, result)
+            if result.kind == "help":
+                for command, meaning in TERMINAL_COMMANDS.items():
+                    self.say(f"  {command:<10} {safe(meaning)}")
             if result.switch_to is not None:
                 self._use(result.switch_to)
                 self._banner()
@@ -361,11 +398,40 @@ class ChatApp:
             self.say("[dim](queued: the assistant is still replying; Ctrl+C interrupts it)[/dim]")
         await self._queue.put(text)
 
+    def themes(self, argument: str) -> None:
+        """`/themes` lists the themes; `/themes NAME` switches now and saves the choice."""
+        name = argument.strip().lower()
+        if not name:
+            for theme in THEMES.values():
+                mark = "*" if theme.name == self.theme.name else " "
+                self.say(
+                    f" {mark} {banner.swatch(self.console, theme)} "
+                    f"[bold {theme.accent}]{theme.name:<8}[/] {safe(theme.description)}"
+                )
+            self.say("[dim]/themes NAME switches; the choice is saved for this project.[/dim]")
+            return
+        chosen = THEMES.get(name)
+        if chosen is None:
+            self.say(f"[red]unknown theme {safe(name)}; one of: {', '.join(THEMES)}[/red]")
+            return
+        self._set_theme(chosen)
+        saved = ""
+        if self.theme_path is not None:
+            try:
+                save_theme(self.theme_path, chosen)
+            except OSError as exc:
+                saved = f" [yellow](not saved: {safe(str(exc))})[/yellow]"
+        self.say(
+            f"{banner.swatch(self.console, chosen)} theme "
+            f"[bold {chosen.accent}]{chosen.name}[/]{saved}"
+        )
+
     async def run(self) -> None:
         session: PromptSession[str] = PromptSession(
             history=self.history,
             completer=SlashCompleter(),
             key_bindings=key_bindings(),
+            style=DynamicStyle(lambda: self._prompt_style),
             bottom_toolbar=self.toolbar,
             refresh_interval=self.progress_interval,
             input=self.input,
@@ -387,7 +453,7 @@ class ChatApp:
             try:
                 while not self._exit:
                     try:
-                        text = await session.prompt_async("> ")
+                        text = await session.prompt_async(self._prompt_message)
                     except KeyboardInterrupt:
                         self.on_ctrl_c()
                         continue

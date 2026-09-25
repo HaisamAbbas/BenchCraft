@@ -83,6 +83,7 @@ Inside the chat:
 | `/failures` | The failed case and the application failure |
 | `/case support-004` | The question, the reference answer, the app's answer and what it retrieved |
 | `/report` | Report summary in the terminal, plus `report.html` and `report.json` under `.aibench/reports/RUN_ID/` |
+| `/themes` | Lists the colour themes (red `crimson` by default). `/themes ocean` switches and saves the choice in `.aibench/ui.json` |
 | `/exit` | Leave. Reopening with `aibench` restores the session and never restarts a run |
 
 Without an assistant model, messages are not interpreted, but every slash command works.
@@ -101,6 +102,15 @@ lists:
 "allowed_planner_origins": ["https://api.openai.com"],
 "allowed_secret_refs": ["env:OPENAI_API_KEY"]
 ```
+
+For native Z.ai GLM 4.6, use
+[`examples/planner/zai-glm-4.6.provider.json`](../examples/planner/zai-glm-4.6.provider.json).
+Add `https://api.z.ai` to `allowed_planner_origins` and `env:ZAI_API_KEY` to
+`allowed_secret_refs`, then set `ZAI_API_KEY` in the shell or secret store. The configured
+base URL uses Z.ai's Chat Completions API; the application appends `/chat/completions`.
+Z.ai's documented model name is `glm-4.6`. In PowerShell, set the variable for the current
+terminal with `$env:ZAI_API_KEY = "<your Z.ai key>"`, then start chat with
+`aibench --provider-config examples/planner/zai-glm-4.6.provider.json`.
 
 Set the key in your environment, never in a file. Then run:
 
