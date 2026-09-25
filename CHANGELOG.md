@@ -5,6 +5,16 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased — terminal welcome screen and themes
+
+- `aibench chat` opens with a BENCHCRAFT block logo over a bordered panel showing the
+  project, session, assistant model and grouped slash commands. Consoles that cannot encode
+  block characters get an ASCII logo; terminals narrower than the logo skip it.
+- New `/themes` command lists colour themes (`crimson` red by default, plus `ember`, `gold`,
+  `ocean`, `forest`, `violet`, `mono`, and `paper` for light backgrounds). `/themes NAME`
+  switches immediately and saves the choice in `.aibench/ui.json`. No metric semantics or
+  workspace schema changed.
+
 ## Unreleased v4 local-scope work — Prompts 30/31
 
 - Fresh conversational planning can include the existing bounded, policy-approved repository
