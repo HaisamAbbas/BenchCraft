@@ -29,6 +29,7 @@ class Theme:
     toolbar_fg: str
     menu_bg: str
     menu_selected_bg: str
+    user_bg: str  # band behind the user's own messages
 
     def prompt_style(self) -> Style:
         return Style.from_dict(
@@ -39,6 +40,9 @@ class Theme:
                 "completion-menu.completion.current": f"bg:{self.menu_selected_bg} {self.title}",
                 "completion-menu.meta.completion": f"bg:{self.menu_bg} {self.dim}",
                 "completion-menu.meta.completion.current": f"bg:{self.menu_selected_bg} {self.text}",
+                "working": self.dim,
+                "working.spinner": f"bold {self.accent}",
+                "working.key": f"bold {self.text}",
             }
         )
 
@@ -61,6 +65,7 @@ THEMES: dict[str, Theme] = {
             toolbar_fg="#F1D0D0",
             menu_bg="#2A0E0E",
             menu_selected_bg="#5C1A1A",
+            user_bg="#4A2629",
         ),
         Theme(
             "ember",
@@ -75,6 +80,7 @@ THEMES: dict[str, Theme] = {
             toolbar_fg="#F5D6BC",
             menu_bg="#261409",
             menu_selected_bg="#5A2C12",
+            user_bg="#46301F",
         ),
         Theme(
             "gold",
@@ -89,6 +95,7 @@ THEMES: dict[str, Theme] = {
             toolbar_fg="#C0C0C0",
             menu_bg="#1A1A2E",
             menu_selected_bg="#333355",
+            user_bg="#3D3522",
         ),
         Theme(
             "ocean",
@@ -103,6 +110,7 @@ THEMES: dict[str, Theme] = {
             toolbar_fg="#C9DBEE",
             menu_bg="#0E1A2E",
             menu_selected_bg="#1E3A5F",
+            user_bg="#1F3148",
         ),
         Theme(
             "forest",
@@ -117,6 +125,7 @@ THEMES: dict[str, Theme] = {
             toolbar_fg="#C8E6D1",
             menu_bg="#0D1F14",
             menu_selected_bg="#1D4A2E",
+            user_bg="#1E3A28",
         ),
         Theme(
             "violet",
@@ -131,6 +140,7 @@ THEMES: dict[str, Theme] = {
             toolbar_fg="#DCCBEB",
             menu_bg="#1C1029",
             menu_selected_bg="#3E2360",
+            user_bg="#352545",
         ),
         Theme(
             "mono",
@@ -145,6 +155,7 @@ THEMES: dict[str, Theme] = {
             toolbar_fg="#C9D1D9",
             menu_bg="#1F1F1F",
             menu_selected_bg="#464646",
+            user_bg="#3A3A3A",
         ),
         Theme(
             "paper",
@@ -159,6 +170,7 @@ THEMES: dict[str, Theme] = {
             toolbar_fg="#3B1F1F",
             menu_bg="#FBF3F3",
             menu_selected_bg="#F2CFCF",
+            user_bg="#F7DCDC",
         ),
     )
 }

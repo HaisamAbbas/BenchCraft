@@ -50,11 +50,11 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("session", ("/sessions", "/new", "/integrations", "/themes", "/help", "/exit")),
 )
 
-_UNICODE_PROBE = BLOCK_LOGO[0] + BLOCK_LOGO[-1] + "·❯"
+_UNICODE_PROBE = BLOCK_LOGO[0] + BLOCK_LOGO[-1] + "·❯◆•│─"
 
 
 def unicode_ok(console: Console) -> bool:
-    """Whether the console can print the block logo, middle dot and prompt glyph."""
+    """Whether the console can print the block logo and the terminal's other glyphs."""
     try:
         _UNICODE_PROBE.encode(console.encoding)
     except (UnicodeEncodeError, LookupError):
