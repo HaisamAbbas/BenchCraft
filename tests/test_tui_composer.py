@@ -120,23 +120,64 @@ def test_every_theme_paints_the_box_in_its_own_colours() -> None:
         assert theme.text != theme.composer_bg
 
 
-def test_the_box_is_pinned_above_the_status_bar() -> None:
-    """Spare rows go to a filler before the input, not under it; it is gone once accepted."""
+def test_the_box_is_pinned_above_the_status_bar_and_the_menu_opens_above_it() -> None:
+    """Spare rows go to a filler before the input, inside the container the completion menu
+    floats in, so typing `/` opens the menu in those rows; the filler is gone once accepted."""
     from prompt_toolkit import PromptSession
     from prompt_toolkit.input import create_pipe_input
-    from prompt_toolkit.layout.containers import ConditionalContainer
+    from prompt_toolkit.layout.containers import ConditionalContainer, FloatContainer
     from prompt_toolkit.output import DummyOutput
+
+    from aibench.tui.app import SlashCompleter
 
     with create_pipe_input() as pipe:
         session: PromptSession[str] = PromptSession(
-            input=pipe, output=DummyOutput(), bottom_toolbar="status"
+            input=pipe, output=DummyOutput(), bottom_toolbar="status", completer=SlashCompleter()
         )
-        before = len(session.app.layout.container.children)
+        floats = session.app.layout.container.children[0].alternative_content
+        assert isinstance(floats, FloatContainer)
+        before = len(floats.content.children)
         composer.pin_to_bottom(session)
-        children = session.app.layout.container.children
+        children = floats.content.children
         assert len(children) == before + 1
         filler = children[0]
         assert isinstance(filler, ConditionalContainer)
         assert filler.filter() is True  # shown while the prompt is open
         dimension = filler.content.preferred_height(80, 40)
         assert dimension.weight > 1 and dimension.min == 0
+        assert floats.floats  # the completion menus float over the filler's rows
+
+
+def test_the_box_has_a_padding_row_above_and_below_and_a_gap_before_the_status_bar() -> None:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.layout import walk
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe:
+        session: PromptSession[str] = PromptSession(
+            input=pipe, output=DummyOutput(), bottom_toolbar="status"
+        )
+        composer.pin_to_bottom(session, _box())
+        rows = session.app.layout.container.children[0].alternative_content.content.children
+        window = session.app.layout.current_window
+        at = next(i for i, row in enumerate(rows) if window in walk(row))
+        above, below, gap = rows[at - 1], rows[at + 1], rows[at + 2]
+        for pad in (above, below):
+            bar = pad.content.children[0]
+            assert bar.char == "▌" and bar.style == "class:composer-bar"
+            assert pad.content.children[1].style == "class:composer-band"
+        assert gap.content.char is None  # a plain blank row, clear of the status bar
+
+
+def test_ascii_terminals_get_no_padding_rows() -> None:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe:
+        session: PromptSession[str] = PromptSession(input=pipe, output=DummyOutput())
+        rows = session.app.layout.container.children[0].alternative_content.content.children
+        before = len(rows)
+        composer.pin_to_bottom(session, composer.ComposerBand(get_theme(None), unicode=False))
+        assert len(rows) == before + 1  # only the filler

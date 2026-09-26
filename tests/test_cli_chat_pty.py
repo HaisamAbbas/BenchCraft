@@ -102,6 +102,10 @@ def test_bare_aibench_opens_chat_and_accepts_terminal_controls(tmp_path: Path) -
         terminal.expect("Type /help for commands", timeout=STARTUP_SECONDS)
         # The input is drawn as a box across the bottom, marked and with its hint in it.
         terminal.expect("▌ ❯ Ask BenchCraft to do anything")
+        # Typing "/" opens the command menu above the box (it floats in the rows above it).
+        terminal.process.write("/")
+        terminal.expect("committed state of the current run")  # /status's description
+        terminal.process.write("")  # backspace: back to an empty box
         terminal.send("/help")
         terminal.expect("Anything else is a message")
         terminal.exit()
@@ -133,6 +137,21 @@ def test_themes_switch_is_saved_and_shown_on_the_next_launch(tmp_path: Path) -> 
         reopened.exit()
     finally:
         reopened.close()
+
+
+def test_slash_menu_opens_in_a_short_terminal(tmp_path: Path) -> None:
+    """A short terminal has no free rows above the box; typing "/" must still list the
+    commands (the prompt grows to fit a shorter menu) and never blank the prompt."""
+    terminal = _Terminal(_project(tmp_path), dimensions=(10, 100))
+    try:
+        terminal.expect("Ask BenchCraft to do anything", timeout=STARTUP_SECONDS)
+        terminal.process.write("/")
+        terminal.expect("explain benchmark tasks and commands")  # /help, first in the menu
+        assert not terminal.shows("Window too small")
+        terminal.process.write("")
+        terminal.exit()
+    finally:
+        terminal.close()
 
 
 def test_resizing_the_terminal_keeps_the_chat_working(tmp_path: Path) -> None:

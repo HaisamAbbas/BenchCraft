@@ -545,7 +545,7 @@ class ChatApp:
             prompt_continuation=self.composer.continuation,
             input_processors=[self.composer],
         )
-        composer.pin_to_bottom(session)
+        composer.pin_to_bottom(session, self.composer)
         self._session = session
         # A real terminal needs patch_stdout so asynchronous Rich/progress output is
         # rendered above the editable prompt. Injected input/output pairs (used by PTY

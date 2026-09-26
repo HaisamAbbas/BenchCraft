@@ -19,7 +19,14 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.formatted_text.utils import fragment_list_width
-from prompt_toolkit.layout.containers import ConditionalContainer, HSplit, Window
+from prompt_toolkit.layout import walk
+from prompt_toolkit.layout.containers import (
+    ConditionalContainer,
+    FloatContainer,
+    HSplit,
+    VSplit,
+    Window,
+)
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.processors import Processor, Transformation, TransformationInput
 
@@ -29,25 +36,71 @@ PLACEHOLDER = "Ask BenchCraft to do anything"  # what the box says while it is e
 
 _LAST_COLUMN = 1  # the buffer's own trailing space; see the module docstring
 _FILLER_WEIGHT = 1_000  # takes nearly all spare rows, so the input's own window takes none
+_MENU_ROWS = 10  # rows kept for the completion menu while it is open
+_CHROME_ROWS = 8  # the Working line, the box, the gap and the status bar, with a margin
 
 
-def pin_to_bottom(session: PromptSession[str]) -> None:
-    """Keep the box on the last rows of the terminal, just above the status bar.
+def _pad_row() -> VSplit:
+    """A row of the box with no text: its edge, then the band out to where the input line's
+    band ends (one column short of the right edge, as the input line is)."""
+    return VSplit(
+        [
+            Window(width=1, height=1, char="▌", style="class:composer-bar"),
+            Window(height=1, char=" ", style="class:composer-band"),
+            Window(width=_LAST_COLUMN, height=1),
+        ]
+    )
+
+
+def pin_to_bottom(session: PromptSession[str], box: ComposerBand | None = None) -> None:
+    """Keep the box on the last rows of the terminal, just above the status bar; with `box`
+    (and glyphs the terminal can print), give it a padding row above and below the input and
+    a blank row before the status bar, so the box stands clear of what surrounds it.
 
     Outside full-screen mode prompt_toolkit fills every row from the cursor to the bottom of
     the screen (that is what keeps the status bar on the last row), and gives the spare rows to
     the input's window, which leaves them empty *under* the box. An empty row that stretches,
     put first, takes those rows instead, so they sit *above* the box: the Working line, the box
-    and the status bar stay together at the bottom while replies print above. The filler is
-    dropped once the input is accepted, so the finished prompt takes no extra rows.
+    and the status bar stay together at the bottom while replies print above.
+
+    The filler goes inside the input's float container, not above it: the completion menu
+    floats within that container, so the spare rows above the box are where the menu for `/`
+    opens. The filler is dropped once the input is accepted, so the finished prompt takes no
+    extra rows.
     """
     root = session.app.layout.container
-    if not isinstance(root, HSplit):
+    main = root.children[0] if isinstance(root, HSplit) and root.children else None
+    floats = getattr(main, "alternative_content", None)  # the unframed input container
+    inner = getattr(floats, "content", None)
+    if not isinstance(floats, FloatContainer) or not isinstance(inner, HSplit):
+        return  # an unexpected layout: keep prompt_toolkit's own
+    open_ = Condition(lambda: not session.app.is_done)
+
+    def filler_height() -> Dimension:
+        # While completions are listed, the rows above the box are where the menu opens, so
+        # claim enough of them; on a short terminal prompt_toolkit then scrolls to make room.
+        # Never more than the rows left beside the box and the bars: a layout taller than the
+        # terminal makes prompt_toolkit blank the prompt ("Window too small").
+        state = session.default_buffer.complete_state
+        if not (state and state.completions):
+            return Dimension(min=0, weight=_FILLER_WEIGHT)
+        free = max(session.app.output.get_size().rows - _CHROME_ROWS, 0)
+        rows = min(len(state.completions), _MENU_ROWS, free)
+        return Dimension(min=rows, weight=_FILLER_WEIGHT)
+
+    filler = Window(height=filler_height, always_hide_cursor=True)
+    inner.children.insert(0, ConditionalContainer(filler, filter=open_))
+    if box is None or not box.unicode:
         return
-    filler = Window(height=Dimension(min=0, weight=_FILLER_WEIGHT), always_hide_cursor=True)
-    root.children.insert(
-        0, ConditionalContainer(filler, filter=Condition(lambda: not session.app.is_done))
-    )
+    input_window = session.app.layout.current_window
+    row = next((i for i, child in enumerate(inner.children) if input_window in walk(child)), None)
+    if row is None:
+        return
+    inner.children[row + 1 : row + 1] = [
+        ConditionalContainer(_pad_row(), filter=open_),
+        ConditionalContainer(Window(height=1), filter=open_),  # clear of the status bar
+    ]
+    inner.children.insert(row, ConditionalContainer(_pad_row(), filter=open_))
 
 
 class ComposerBand(Processor):
