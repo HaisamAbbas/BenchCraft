@@ -5,6 +5,25 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased — install like any terminal tool
+
+- One-line installers (`install.ps1`, `install.sh`) install BenchCraft from a GitHub Release
+  with uv, verifying the wheel against the release's `SHA256SUMS`. The command is now
+  `benchcraft`; `aibench` remains as an alias. A tag push (`.github/workflows/release.yml`)
+  runs the release check and publishes the wheels, sdists and checksums only if it passes.
+- First-run setup (`benchcraft setup`, or asked on the first chat) saves the assistant's
+  model for the user in `~/.benchcraft/config.json` (`BENCHCRAFT_HOME`), with the key's
+  environment variable name only; on Windows it can save the key as a user environment
+  variable. Projects without a policy use that model; `connect http` allows it in the
+  policy it writes. A project policy still decides.
+- `/plugins install` and `aibench plugins install` work from an installed package: without a
+  source checkout they install the release's adapter wheel (verified against `SHA256SUMS`,
+  never looked up by name on a public index); `BENCHCRAFT_RELEASES` points at another
+  release folder or URL.
+- `connect http` gains `--context-path` and `--context-text-path` for the retrieved
+  documents, so RAG metrics apply to connected endpoints. A repo with no connected app now
+  explains how to connect one instead of failing on a missing config.
+
 ## Unreleased — traces and rescoring in the chat
 
 - `/traces import FILE [RUN_ID]` attaches an OpenTelemetry (OTLP/JSON) export to a run the

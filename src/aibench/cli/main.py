@@ -1,8 +1,12 @@
-"""aibench CLI entry point. Bare `aibench` in an interactive terminal opens the project's
-benchmark conversation (`aibench chat`); without a terminal it prints command guidance
-instead of starting an unusable chat (§13)."""
+"""BenchCraft CLI entry point (`benchcraft`, also installed as `aibench`). Bare
+`benchcraft` in an interactive terminal opens the project's benchmark conversation
+(`chat`); without a terminal it prints command guidance instead of starting an unusable
+chat (§13)."""
 
 from __future__ import annotations
+
+import sys
+from pathlib import Path
 
 import typer
 
@@ -31,7 +35,7 @@ from aibench.core.errors import WorkspaceTooNew
 
 app = typer.Typer(
     name="aibench",
-    help="Conversational CLI for AI application benchmarking (working name: BenchCraft).",
+    help="BenchCraft: evaluate AI applications in conversation. Run `benchcraft` in a project.",
     no_args_is_help=False,
 )
 app.add_typer(dataset_cli.app, name="dataset")
@@ -63,13 +67,27 @@ app.add_typer(project_cli.plugins_app, name="plugins")
 runs_cli.app.command("status")(run_cli.status)
 
 
+@app.command("setup")
+def setup() -> None:
+    """Choose the assistant's model (saved for your user account; the key is not)."""
+    from aibench import userconfig
+
+    userconfig.run_setup(typer.echo)
+
+
+def _program() -> str:
+    """The name the user typed: `benchcraft` or `aibench`."""
+    name = Path(sys.argv[0]).stem.lower()
+    return name if name in ("benchcraft", "aibench") else "benchcraft"
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     version: bool = typer.Option(False, "--version", help="Show the aibench version and exit."),
 ) -> None:
     if version:
-        typer.echo(f"aibench {__version__}")
+        typer.echo(f"{_program()} {__version__}")
         raise typer.Exit(code=0)
     if ctx.invoked_subcommand is None:
         if chat_cli.interactive_terminal():

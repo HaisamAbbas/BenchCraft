@@ -98,7 +98,7 @@ def test_chat_closes_provider_when_command_finishes(tmp_path: Path, monkeypatch)
             self.closed = True
 
     provider = Provider()
-    monkeypatch.setattr(chat_cli, "open_provider", lambda *_: (provider, []))
+    monkeypatch.setattr(chat_cli, "open_provider", lambda *_, **__: (provider, []))
     result = runner.invoke(
         app,
         [

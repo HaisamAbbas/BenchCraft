@@ -1,0 +1,54 @@
+name: Release
+
+# Pushing a version tag publishes a GitHub Release with the wheels, sdists and SHA256SUMS
+# that install.ps1 / install.sh and `/plugins install` download:
+#
+#   git tag v0.1.0rc1 && git push origin v0.1.0rc1
+#
+# The tag must match `aibench.__version__`. Nothing is published unless the release check
+# (build, install from the wheel, quickstart, acceptance workflow, plugin contract tests)
+# passes every step.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: The tag matches the package version
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('src/aibench/__init__.py').read()).group(1))")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+
+      - name: Build and check the release (wheels, quickstart, acceptance, plugins)
+        run: |
+          python -m pip install build
+          python scripts/release_check.py --out "$RUNNER_TEMP/release" --plugin
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *rc*|*a*|*b*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/dist/* \
+            --title "BenchCraft $GITHUB_REF_NAME" --generate-notes --verify-tag $prerelease
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-check
+          path: |
+            ${{ runner.temp }}/release/release-check.json
+            ${{ runner.temp }}/release/logs/

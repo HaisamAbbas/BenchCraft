@@ -175,6 +175,8 @@ def plugin_preview(console: Console, data: dict[str, Any]) -> None:
     where = "create" if data["creates_environment"] else "use"
     out(console, f"[bold]install {safe(data['plugin'])}[/bold] ({safe(data['package'])})")
     out(console, f"  {where} environment: {safe(data['environment'])}")
+    if data["creates_environment"]:
+        out(console, f"  installs from: {safe(data['installs_from'])}")
     out(console, f"  metrics: {safe(', '.join(data['metrics']))}")
     if data["judge"]:
         out(console, f"  judge: {safe(data['judge'])} (paid calls to that provider)")

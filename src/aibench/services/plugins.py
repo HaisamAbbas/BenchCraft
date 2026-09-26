@@ -20,11 +20,13 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
+from aibench import __version__
 from aibench.config.model import PluginEnvironmentConfig
 from aibench.config.resolve import resolve_config
 from aibench.core.errors import AibenchError
 from aibench.core.plans import PluginEnvironmentRef
 from aibench.security.policy import ExecutionPolicy
+from aibench.services.releases import checksums, fetch, release_source, wheel_name
 
 CONFIG_NAMES = ("aibench.json", "aibench.toml")
 
@@ -205,7 +207,8 @@ class InstallPlan:
     project_root: Path
     python: Path  # the plugin environment's interpreter
     create: Path | None  # the environment to create, or None to adopt an existing one
-    source: Path  # the aibench checkout the adapter installs from
+    source: Path | None  # the aibench checkout the adapter installs from, if any
+    release: str | None  # otherwise the release (URL or directory) its wheels come from
     config_path: Path
     config: dict[str, Any]  # the project config after the change
     policy_path: Path | None
@@ -220,6 +223,9 @@ class InstallPlan:
             "package": self.plugin.package,
             "environment": str(self.python),
             "creates_environment": self.create is not None,
+            "installs_from": (
+                f"source checkout {self.source}" if self.source else f"release {self.release}"
+            ),
             "config": str(self.config_path),
             "policy": str(self.policy_path) if self.policy_path else None,
             "policy_changes": self.policy_changes,
@@ -254,10 +260,13 @@ def judge_from_provider(
     return judge, ({JUDGE_KEY_ENV: api_key} if api_key else {})
 
 
-def _source_checkout() -> Path:
+def _source_checkout(plugin: OptionalPlugin) -> Path | None:
+    """The aibench checkout this copy runs from, when it has the adapter's source (a
+    developer install); None for an installed package, which uses release wheels."""
     import aibench
 
-    return Path(aibench.__file__).resolve().parents[2]  # src/aibench -> the checkout
+    root = Path(aibench.__file__).resolve().parents[2]  # src/aibench -> the checkout
+    return root if (root / plugin.source / "pyproject.toml").is_file() else None
 
 
 def _venv_python(root: Path) -> Path:
@@ -290,12 +299,8 @@ def plan_install(
             f"{name} metrics are judged by a model: open the chat with --provider-config to "
             "use the assistant's model as judge, or pass --judge-provider"
         )
-    source = _source_checkout()
-    if not (source / plugin.source / "pyproject.toml").is_file():
-        raise PluginInstallError(
-            f"the {plugin.distribution} adapter source is not available at "
-            f"{source / plugin.source}; install from a clone of the aibench repository"
-        )
+    source = _source_checkout(plugin)
+    release = None if source is not None or existing_python is not None else release_source()
     path = config_path(project_root)
     config: dict[str, Any] = {}
     if path is None:
@@ -355,6 +360,7 @@ def plan_install(
         python=python,
         create=create,
         source=source,
+        release=release,
         config_path=path,
         config=config,
         policy_path=policy_path,
@@ -381,10 +387,7 @@ def install(plan: InstallPlan, progress: Callable[[str], None]) -> dict[str, Any
                 "pip",
                 "install",
                 "--disable-pip-version-check",
-                "-e",
-                str(plan.source),
-                "-e",
-                str(plan.source / plan.plugin.source),
+                *_adapter_requirements(plan, progress),
             ],
             progress,
         )
@@ -410,6 +413,22 @@ def install(plan: InstallPlan, progress: Callable[[str], None]) -> dict[str, Any
         _write_json(plan.policy_path, plan.policy)
         progress(f"policy updated; the previous one is {backup.name}")
     return {**plan.summary(), "evaluators": found}
+
+
+def _adapter_requirements(plan: InstallPlan, progress: Callable[[str], None]) -> list[str]:
+    """What pip installs: the checkout's sources (editable), or this aibench version's and
+    the adapter's wheels from the release, verified against its SHA256SUMS. The framework
+    the adapter pins (e.g. deepeval) and its dependencies come from the package index."""
+    if plan.source is not None:
+        return ["-e", str(plan.source), "-e", str(plan.source / plan.plugin.source)]
+    assert plan.release is not None and plan.create is not None
+    listed = checksums(plan.release)
+    names = [
+        wheel_name(listed, "aibench", __version__),
+        wheel_name(listed, plan.plugin.distribution),
+    ]
+    wheels = fetch(plan.release, names, plan.create.parent / "wheels", listed, progress)
+    return [str(p) for p in wheels]
 
 
 _PROGRESS = ("Collecting", "Successfully", "ERROR", "error:", "Installing collected")

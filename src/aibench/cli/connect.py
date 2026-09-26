@@ -75,6 +75,12 @@ def setup_http(
     input_path: str = typer.Option("/question", "--input-path", help="Request JSON pointer for case input."),
     output_path: str = typer.Option("/answer", "--output-path", help="Response JSON pointer for the answer."),
     input_field: str = typer.Option("input", "--input-field", help="Top-level case field sent as the question."),
+    context_path: str | None = typer.Option(
+        None, "--context-path", help="Response JSON pointer for the retrieved documents (RAG), e.g. /sources."
+    ),
+    context_text_path: str | None = typer.Option(
+        None, "--context-text-path", help="Pointer to each document's text when they are objects, e.g. /text."
+    ),
     effect: str | None = typer.Option(None, "--effects", help="Required declaration: none, reversible, or irreversible."),
     authorize_origin: str | None = typer.Option(
         None,
@@ -151,7 +157,14 @@ def setup_http(
         from aibench.runners.bindings import InputBinding, OutputBinding
 
         InputBinding.from_spec({"fields": {input_path: f"/{input_field}"}})
-        OutputBinding.from_spec({"output": output_path})
+        output_binding: dict[str, str] = {"output": output_path}
+        if context_path:
+            output_binding["retrieved_context"] = context_path
+            if context_text_path:
+                output_binding["retrieved_context_item"] = context_text_path
+        elif context_text_path:
+            raise ValueError("--context-text-path needs --context-path")
+        OutputBinding.from_spec(output_binding)
         transport = HttpTransport(
             url=endpoint,
             method="POST",
@@ -167,13 +180,20 @@ def setup_http(
             effects=declared_effect,
             transport=transport,
             input_binding={"fields": {input_path: f"/{input_field}"}},
-            output_binding={"output": output_path},
+            output_binding=output_binding,
         )
+        # The assistant model chosen in `benchcraft setup` was approved by the user; the
+        # project policy written here allows it so the chat can use it (reported below).
+        from aibench import userconfig
+
+        assistant = userconfig.saved_provider()
+        assistant_refs = (assistant.api_key,) if assistant and assistant.api_key else ()
         policy_fields: dict[str, object] = {
+            "allowed_planner_origins": (assistant.base_url,) if assistant else (),
             "allowed_applications": (app_name,),
             "allowed_http_origins": (origin,),
             "allowed_egress_origins": (origin,),
-            "allowed_secret_refs": allowed_secret_refs,
+            "allowed_secret_refs": (*allowed_secret_refs, *assistant_refs),
             "max_effects": declared_effect,
             "allowed_evaluators": ("native.*",),
             "ceilings": BudgetLimits(
@@ -209,6 +229,9 @@ def setup_http(
             "max_application_calls": max_calls,
             "secret_value_stored": False,
             "network_requests_during_setup": 0,
-            "next": "aibench doctor; then aibench chat --new --objective 'evaluate answer quality'",
+            "assistant_model_allowed": (
+                f"{assistant.model} at {assistant.base_url}" if assistant else None
+            ),
+            "next": "benchcraft doctor; then benchcraft (and say what to check)",
         }
     )

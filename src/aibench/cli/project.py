@@ -491,6 +491,11 @@ def install_preview(summary: dict[str, Any]) -> list[str]:
     lines = [
         f"[bold]install {safe(summary['plugin'])}[/bold] ({safe(summary['package'])})",
         f"  {where} environment: {safe(summary['environment'])}",
+        *(
+            [f"  installs from: {safe(summary['installs_from'])}"]
+            if summary["creates_environment"]
+            else []
+        ),
         f"  metrics: {safe(', '.join(summary['metrics']))}",
     ]
     if summary["judge"]:
