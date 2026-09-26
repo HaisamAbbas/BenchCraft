@@ -7,7 +7,8 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 
 ## Metrics
 
-Every DeepEval 4.2.5 single-turn metric that aibench's recorded data can feed. Each is an
+Every DeepEval 4.2.5 single-turn and conversation metric that aibench's recorded data can
+feed (33). Each is an
 evaluator `deepeval.<name>@1`, scores 0 to 1 with higher better (DeepEval normalizes bias,
 toxicity and the other safety metrics that way), and is decided by the plan's rule
 (default `>= 0.5`), not by DeepEval's own `success` flag.
@@ -45,10 +46,35 @@ non-blank passage, no reference tools, no readable tool call for argument correc
 any field G-Eval is asked to read that the case or execution does not have. Faithfulness
 also treats an answer with no claims as not applicable (upstream scores a vacuous 1.0).
 
-Not included: multi-turn conversational metrics (they need a conversation test case), and
-metrics that need data aibench does not record: images, audio, MCP servers, or agent traces
-(step efficiency, plan quality and adherence, agent loop detection). DAG and arena metrics
-need objects a plan cannot declare.
+### Conversation metrics
+
+For multi-turn applications: an episode is the cases sharing a `group_id`, run in order
+against a stateful app. Each turn is scored on the conversation **up to and including it**,
+built from what the run recorded (each turn's input as the user, its answer as the
+assistant), so an episode's last turn carries the whole conversation's score. A case in no
+episode is not applicable, and so is a turn whose conversation has an earlier turn that did
+not complete.
+
+| Metric | Reads per turn | Needs from the plan |
+|---|---|---|
+| `conversation_completeness` | question, answer | judge; optional `window_size` |
+| `knowledge_retention` | question, answer | judge |
+| `role_adherence` | question, answer | judge, `chatbot_role` |
+| `goal_accuracy` | question, answer | judge |
+| `topic_adherence` | question, answer | judge, `relevant_topics` |
+| `tool_use` | question, answer, reported tool calls | judge, `available_tools` |
+| `turn_relevancy` | question, answer | judge; optional `window_size` |
+| `turn_faithfulness` | answer, retrieved passages | judge |
+| `turn_contextual_precision`, `turn_contextual_recall` | retrieved passages; this turn's reference answer as the expected outcome | judge |
+| `turn_contextual_relevancy` | retrieved passages | judge |
+| `conversational_g_eval` | what `evaluation_params` names (default role and content) | judge, `name`, `criteria` or `evaluation_steps` |
+
+A score outside 0..1 (a judge answer DeepEval did not bound) is an evaluator error, never a
+recorded score.
+
+Not included: metrics that need data aibench does not record: images, audio, MCP servers,
+or agent traces (step efficiency, plan quality and adherence, agent loop detection). DAG
+and arena metrics need objects a plan cannot declare.
 
 ## Judges
 

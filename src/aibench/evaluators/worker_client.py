@@ -232,11 +232,13 @@ class WorkerEvaluator(Evaluator):
         case, execution = project_worker_view(
             view.case, view.execution, self.required_fields(self.params)
         )
-        request = {
+        request: dict[str, Any] = {
             "op": "evaluate",
             "case": case.model_dump(mode="json"),
             "execution": execution.model_dump(mode="json"),
         }
+        if view.episode is not None:  # assembled only for a metric that reads it
+            request["episode"] = list(view.episode)
         try:
             response = await self._call(request)
         except WorkerError as exc:

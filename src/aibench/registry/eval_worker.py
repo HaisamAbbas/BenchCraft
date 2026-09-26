@@ -8,8 +8,9 @@ File descriptor 1 is redirected to stderr at startup, so anything the plugin pri
 from C extensions — goes to stderr and can never corrupt the protocol stream.
 
     {"op": "prepare", "params": {...}}               -> {"ok": true}
-    {"op": "evaluate", "case": {...}, "execution": {...}}
+    {"op": "evaluate", "case": {...}, "execution": {...}, "episode": [...]?}
         -> {"ok": true, "outcome": {...}, "usage": [...]}
+    (`episode`, the conversation so far, is sent only to a metric requiring `episode.turns`)
     {"op": "close"}                                   -> {"ok": true}   (then exits)
     any failure                                       -> {"ok": false, "error": "..."}
 
@@ -99,9 +100,11 @@ def main(argv: list[str]) -> int:
             elif op == "evaluate":
                 if evaluator is None:
                     raise RuntimeError("evaluate before prepare")
+                episode = request.get("episode")
                 view = EvaluationView(
                     case=BenchmarkCase.model_validate(request["case"]),
                     execution=ExecutionResult.model_validate(request["execution"]),
+                    episode=None if episode is None else tuple(episode),
                 )
                 ctx = EvaluatorContext(run_id=view.execution.run_id, scoring_id="worker")
                 outcome = loop.run_until_complete(evaluator.evaluate(view, ctx))

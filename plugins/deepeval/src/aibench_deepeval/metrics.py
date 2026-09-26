@@ -344,6 +344,14 @@ def _text(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
 
 
+def out_of_range(score: Any) -> EvaluationOutcome | None:
+    """An error for a score outside 0..1: every metric here is normalized, so anything
+    else is a judge answer DeepEval did not bound, never a score to record."""
+    if isinstance(score, (int, float)) and 0.0 <= float(score) <= 1.0:
+        return None
+    return EvaluationOutcome.error(f"judge_out_of_range: DeepEval returned {score!r}, not 0..1")
+
+
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
@@ -459,6 +467,9 @@ class DeepEvalMetric(Evaluator):
         finally:
             if judge is not None:
                 report_judge_usage(ctx, metric, judge)
+        bad = out_of_range(score)
+        if bad is not None:
+            return bad
         raw: dict[str, Any] = {
             "deepeval_version": PINNED_DEEPEVAL,
             "metric": self.spec.upstream,

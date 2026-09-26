@@ -132,7 +132,7 @@ def test_plan_install_previews_every_change_and_writes_nothing(tmp_path: Path) -
         "allow_model_evaluators: false -> true (its metrics call a judge)",
         "allowed_secret_refs: + env:ZAI_API_KEY",
     ]
-    assert len(summary["metrics"]) == 21
+    assert len(summary["metrics"]) == 33
     assert _files(root) == before and not (root / "policy.json.bak").exists()
 
 
@@ -203,7 +203,7 @@ def test_cli_install_writes_config_and_policy_with_a_backup(tmp_path: Path) -> N
     )
     assert result.exit_code == 0, result.output
     done = json.loads(result.stdout)
-    assert len(done["evaluators"]) == 21 and "deepeval.g_eval" in done["evaluators"]
+    assert len(done["evaluators"]) == 33 and "deepeval.knowledge_retention" in done["evaluators"]
     assert (root / "policy.json.bak").read_text(encoding="utf-8") == original_policy
     [entry] = json.loads((root / "aibench.json").read_text(encoding="utf-8"))["plugin_environments"]
     assert entry["name"] == "deepeval" and entry["secret_env"] == SECRETS

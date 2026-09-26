@@ -52,6 +52,15 @@ CONCEPTS: dict[str, str] = {
     "tool_permissions": "the application called only the tools it is allowed to",
     "pattern": "the answer matches a regular expression",
     "custom_criteria": "a judge scores the answer against criteria you state (G-Eval)",
+    "conversation_completeness": "the conversation satisfied what the user set out to do",
+    "knowledge_retention": "the assistant remembers what the user said earlier in the conversation",
+    "goal_accuracy": "the assistant achieved the user's goal over the conversation",
+    "topic_adherence": "the assistant stays within the conversation's relevant topics",
+    "turn_relevancy": "each assistant turn is relevant to the conversation so far",
+    "turn_groundedness": "each assistant turn is supported by the passages retrieved for it",
+    "turn_retrieval_precision": "each turn's relevant passages are ranked first",
+    "turn_retrieval_recall": "each turn's passages support the expected outcome",
+    "turn_retrieval_relevancy": "each turn's retrieved passages are relevant",
     "latency": "end-to-end response time",
     "reliability": "application errors, timeouts and failed calls",
 }
@@ -124,6 +133,28 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "tool_arguments": (r"(?:tool|function) arguments?", r"argument correctness"),
     "tool_permissions": (r"(?:allowed|forbidden|denied|permitted) tools?", r"tool permissions?"),
     "pattern": (r"regex\w*", r"regular expressions?", r"match(?:es)? (?:a|the) pattern"),
+    "conversation_completeness": (
+        r"conversation completeness",
+        r"(?:user'?s? )?(?:needs|requests|intentions) (?:are |were )?(?:met|satisfied|fulfilled)",
+    ),
+    # Explicit phrasing only: "remembers earlier turns" is a v1 planner fixture labelled as a
+    # gap, and the benchmark's targets are not relabelled.
+    "knowledge_retention": (
+        r"knowledge retention",
+        r"remembers? what (?:the user|i|they|you) (?:said|told|mentioned)",
+        r"retains? (?:what|the) (?:context|details|user said)",
+    ),
+    "goal_accuracy": (r"goal accuracy", r"(?:achieves?|reach(?:es)?) (?:the )?user'?s? goals?"),
+    "topic_adherence": (
+        r"topic adherence",
+        r"relevant topics",
+        r"stays? (?:within|on) (?:the |its )?(?:allowed |relevant )?topics",
+    ),
+    "turn_relevancy": (r"turn relevan(?:ce|cy)", r"(?:each|every) turn is relevant"),
+    "turn_groundedness": (r"turn faithfulness", r"(?:each|every) turn is (?:faithful|grounded)"),
+    "turn_retrieval_precision": (r"turn contextual precision",),
+    "turn_retrieval_recall": (r"turn contextual recall",),
+    "turn_retrieval_relevancy": (r"turn contextual relevan(?:ce|cy)",),
     "custom_criteria": (
         r"criteri(?:a|on)",
         r"rubric",

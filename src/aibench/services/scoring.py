@@ -18,7 +18,7 @@ import json
 import math
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,6 +44,8 @@ from aibench.core.models import (
 )
 from aibench.engine.cache import evaluation_from_cache, evaluation_key
 from aibench.evaluators.protocol import (
+    EPISODE_TURNS,
+    MISSING,
     EvaluationOutcome,
     EvaluationView,
     Evaluator,
@@ -365,8 +367,10 @@ async def score_recorded_run(
     if not executions:
         raise ScoringError(f"run {run_id!r} has no recorded executions to score")
     cases: dict[str, list[BenchmarkCase]] = {}
-    for stored in storage.list_cases(record.manifest.dataset_hash):
+    stored_cases = storage.list_cases(record.manifest.dataset_hash)
+    for stored in stored_cases:
         cases.setdefault(stored.case_id, []).append(stored)
+    episodes = episode_prefixes(stored_cases)
 
     report = ScoringReport(scoring_id=f"score-{uuid.uuid4().hex[:12]}", run_id=run_id)
     # Recorded first, so a report can interpret this pass's results even if it is cut short.
@@ -395,6 +399,7 @@ async def score_recorded_run(
             prepare_timeout_seconds=prepare_timeout_seconds,
             application=application,
             dependency_lock_hash=dependency_lock_hash,
+            episodes=episodes,
         )
         metric_results = await scorer.score_all(executions, cases, report.warnings)
         report.results.extend(metric_results)
@@ -419,6 +424,20 @@ async def score_recorded_run(
         },
     )
     return report
+
+
+def episode_prefixes(cases: Iterable[BenchmarkCase]) -> dict[str, tuple[BenchmarkCase, ...]]:
+    """For each case in an episode (cases sharing a `group_id`), that episode's cases up to
+    and including it, in dataset order: the conversation a conversational metric scores."""
+    groups: dict[str, list[BenchmarkCase]] = {}
+    prefixes: dict[str, tuple[BenchmarkCase, ...]] = {}
+    for case in cases:
+        if case.group_id is None:
+            continue
+        group = groups.setdefault(case.group_id, [])
+        group.append(case)
+        prefixes[case.case_id] = tuple(group)
+    return prefixes
 
 
 @dataclass(frozen=True)
@@ -451,8 +470,13 @@ class BindingScorer:
         prepare_timeout_seconds: float = DEFAULT_PREPARE_TIMEOUT_SECONDS,
         application: ApplicationSpec | None = None,
         dependency_lock_hash: str | None = None,
+        episodes: Mapping[str, tuple[BenchmarkCase, ...]] | None = None,
     ) -> None:
         self.storage = storage
+        # Only a metric that reads the conversation gets one assembled (`episode.turns`).
+        self.episodes = episodes or {}
+        self._paths = {requirement.path for requirement in metric.requirements}
+        self._conversational = EPISODE_TURNS in self._paths
         self.artifacts = artifacts
         self.scoring_id = scoring_id
         self.metric = metric
@@ -505,6 +529,7 @@ class BindingScorer:
             self.cache_policy_hash is None
             or len(candidates) != 1
             or execution.status is not ExecutionStatus.OK
+            or self._conversational  # the result depends on earlier turns, not in the key
         ):
             return None
         manifest = self.manifest
@@ -621,6 +646,11 @@ class BindingScorer:
                 ),
             )
         view = EvaluationView(case=case, execution=execution)
+        if self._conversational:
+            turns, incomplete = self._episode_turns(case, execution)
+            if incomplete is not None:
+                return self._result(execution, EvaluationOutcome.not_applicable(incomplete))
+            view = EvaluationView(case=case, execution=execution, episode=turns)
         for requirement in self.metric.requirements:
             state = view.state(requirement.path)
             if state == "missing" or (state == "empty" and requirement.non_empty):
@@ -671,6 +701,44 @@ class BindingScorer:
             return self._result(execution, outcome, ctx=ctx, latency_ms=latency_ms, raw=raw)
         latency_ms = round((time.perf_counter() - started) * 1000, 3)
         return self._result(execution, outcome, ctx=ctx, latency_ms=latency_ms)
+
+    def _episode_turns(
+        self, case: BenchmarkCase, execution: ExecutionResult
+    ) -> tuple[tuple[dict[str, Any], ...] | None, str | None]:
+        """The conversation up to and including this turn, from this run's final recorded
+        executions of the same repetition; or the reason it cannot be scored. A case in no
+        episode gets None (the metric's `episode.turns` requirement makes it not
+        applicable). A conversation with an earlier turn that did not complete is not
+        scored: judging it without that turn would judge a conversation that never took
+        place."""
+        prefix = self.episodes.get(case.case_id)
+        if not prefix:
+            return None, None
+        turns = []
+        for turn_case in prefix:
+            if turn_case.case_id == case.case_id:
+                recorded: ExecutionResult | None = execution
+            else:
+                attempts = self.storage.list_execution_attempts(
+                    execution.run_id, turn_case.case_id
+                )
+                same = [a for a in attempts if a.repetition_id == execution.repetition_id]
+                final = select_final_executions(same)
+                recorded = final[0] if final else None
+            if recorded is None or recorded.status is not ExecutionStatus.OK:
+                return None, f"episode_incomplete:{turn_case.case_id}"
+            turn: dict[str, Any] = {
+                "case_id": turn_case.case_id,
+                "input": deep_unfreeze(turn_case.input),
+                "output": deep_unfreeze(recorded.output),
+            }
+            earlier = EvaluationView(case=turn_case, execution=recorded)
+            for name in ("retrieved_context", "tool_events"):
+                if f"execution.{name}" in self._paths:
+                    value = earlier.get(f"execution.{name}")
+                    turn[name] = None if value is MISSING else value
+            turns.append(turn)
+        return tuple(turns), None
 
     @staticmethod
     def _serialize_raw(outcome: EvaluationOutcome) -> bytes | None:

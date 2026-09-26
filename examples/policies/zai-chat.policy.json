@@ -1,0 +1,14 @@
+{
+  "allowed_applications": ["example-python-chatbot"],
+  "allow_trusted_local": true,
+  "max_effects": "none",
+  "allowed_evaluators": ["native.*"],
+  "allow_model_evaluators": false,
+  "allowed_planner_origins": ["https://api.z.ai"],
+  "allowed_secret_refs": ["env:ZAI_API_KEY"],
+  "data_roots": [".."],
+  "ceilings": {
+    "max_application_calls": 1000,
+    "max_wall_seconds": 3600
+  }
+}

@@ -62,7 +62,7 @@ from aibench.engine.retry import (
 from aibench.registry import ResolvedMetric
 from aibench.runners.base import BaseRunner, ResetReport, race
 from aibench.services.execution import invoke_and_record
-from aibench.services.scoring import BindingScorer, MissingExecution
+from aibench.services.scoring import BindingScorer, MissingExecution, episode_prefixes
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import Storage
 
@@ -430,6 +430,7 @@ class RunEngine:
                     self.controller.abort_event,
                     application=self.application,
                     dependency_lock_hash=self.dependency_lock_hash,
+                    episodes=episode_prefixes(self.cases.values()),
                 )
                 scorer.cache_policy_hash = self.evaluation_cache_policy
                 await scorer.open()
