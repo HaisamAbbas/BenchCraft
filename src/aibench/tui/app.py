@@ -161,6 +161,12 @@ def render_result(console: Console, result: CommandResult) -> None:
         render.plugin_preview(console, data)
     elif kind == "plugin_installed":
         render.plugin_installed(console, data)
+    elif kind == "traces":
+        render.traces(console, data)
+    elif kind == "traces_imported":
+        render.traces_imported(console, data)
+    elif kind == "rescored":
+        render.rescored(console, data)
     elif kind == "report":
         render.report(console, data)
     elif kind == "comparison":

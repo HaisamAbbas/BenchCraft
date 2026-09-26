@@ -104,6 +104,23 @@ def template_proposal(
     )
 
 
+_GAP_REASON_LIMIT = 1000  # Gap.reason's bound
+
+
+def _unmeasurable(concept: str, candidates: list[MetricOption]) -> str:
+    """Why no candidate can measure `concept`: each candidate and its reasons, as many as
+    fit the gap's bound (a plugin can add dozens of candidates), then how many more."""
+    head = f"{concept} cannot be measured: "
+    parts = [f"{o.metric} {', '.join(o.reasons)}" for o in candidates]
+    for shown in range(len(parts), 0, -1):
+        more = len(parts) - shown
+        reason = head + "; ".join(parts[:shown]) + (f"; and {more} more" if more else "")
+        if len(reason) <= _GAP_REASON_LIMIT:
+            return reason
+    reason = head + f"{len(parts)} candidate metrics are not eligible"
+    return reason[:_GAP_REASON_LIMIT]
+
+
 def _plan_concept(
     objective: Objective,
     concept: str,
@@ -125,10 +142,7 @@ def _plan_concept(
         return
     eligible = [o for o in candidates if o.eligible]
     if not eligible:
-        reasons = "; ".join(f"{o.metric} {', '.join(o.reasons)}" for o in candidates)
-        gaps.append(
-            Gap(subject=objective.objective_id, reason=f"{concept} cannot be measured: {reasons}")
-        )
+        gaps.append(Gap(subject=objective.objective_id, reason=_unmeasurable(concept, candidates)))
         return
     for option in eligible:
         params = supplied.get(option.evaluator_id, {})

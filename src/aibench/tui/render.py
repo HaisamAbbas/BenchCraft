@@ -199,6 +199,69 @@ def plugin_installed(console: Console, data: dict[str, Any]) -> None:
     out(console, '  ask for what to measure, e.g. "check relevancy and bias", or /plan')
 
 
+def traces(console: Console, data: dict[str, Any]) -> None:
+    """`/traces`: what a run's imported traces add."""
+    if data["run_id"] is None or not data["available"]:
+        out(console, safe(data["reason"]))
+        if data["run_id"] is not None:
+            out(console, "  attach an OpenTelemetry export: /traces import FILE")
+        return
+    summary = data["trace_summary"]
+    usage = summary["usage"]
+    out(
+        console,
+        f"run {safe(data['run_id'])}: {summary['traces']} trace(s), "
+        f"{summary['matched_to_executions']} matched to executions, "
+        f"{summary['complete']} complete, {summary['partial']} partial",
+    )
+    if summary["partial_reasons"]:
+        reasons = ", ".join(f"{k} {v}" for k, v in summary["partial_reasons"].items())
+        out(console, f"  [yellow]partial:[/yellow] {safe(reasons)}")
+    bound = usage["bound"].replace("_", " ")
+    out(console, f"  usage from traces: {usage['total_tokens']} tokens ({safe(bound)})")
+    out(console, f"  tool spans: {summary['tool_spans']} ({summary['tool_errors']} failed)")
+
+
+def traces_imported(console: Console, data: dict[str, Any]) -> None:
+    """`/traces import FILE`: what the import attached."""
+    out(
+        console,
+        f"imported {data['traces']} trace(s) from {safe(data['file'])} into run "
+        f"{safe(data['run_id'])}: {data['matched']} matched to executions, "
+        f"{data['unmatched']} unmatched, {data['partial']} partial",
+    )
+    if data["partial_reasons"]:
+        reasons = ", ".join(f"{k} {v}" for k, v in data["partial_reasons"].items())
+        out(console, f"  [yellow]partial:[/yellow] {safe(reasons)} (not scored by trace metrics)")
+    if not data["added"]:
+        out(console, "  already imported; nothing added")
+    else:
+        out(console, "  score the draft's trace metrics on it: /rescore")
+
+
+def rescored(console: Console, data: dict[str, Any]) -> None:
+    """`/rescore`: one line per metric of the new scoring pass."""
+    out(
+        console,
+        f"rescored run {safe(data['run_id'])} as {safe(data['scoring_id'])} "
+        "[dim](stored outputs; the application was not called)[/dim]",
+    )
+    for summary in data["summaries"]:
+        mean = summary["value_summary"].get("mean")
+        value = f" mean {_number(mean)}" if mean is not None else ""
+        line = (
+            f"  {safe(summary['metric_id'])}:{value} completed {summary['completed']}/"
+            f"{summary['selected']}, not applicable {summary['not_applicable']}, "
+            f"errors {summary['errors']}"
+        )
+        out(console, line)
+        if summary["reasons"]:
+            top = sorted(summary["reasons"].items(), key=lambda item: -item[1])[:3]
+            out(console, f"    [dim]{safe(', '.join(f'{k} {v}' for k, v in top))}[/dim]")
+    for warning in data["warnings"]:
+        out(console, f"  [yellow]warning:[/yellow] {safe(warning)}")
+
+
 def status(console: Console, snapshot: dict[str, Any]) -> None:
     out(console, safe(status_line(snapshot)) + f" [dim]as of {safe(snapshot['as_of'])}[/dim]")
     for item in snapshot.get("needs_attention", [])[:10]:

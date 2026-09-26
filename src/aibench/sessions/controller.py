@@ -527,6 +527,39 @@ class SessionController:
             "trace_summary": summary,
         }
 
+    def import_traces(self, file: str, run_id: str | None = None) -> dict[str, Any]:
+        """Attach an OTLP/JSON trace export to a run this session started (the latest by
+        default), as `aibench traces import` does: nothing is re-executed. The file must be
+        inside the project or one of the policy's data roots; a relative path is read from
+        the project."""
+        from aibench.observations.otel import TraceFormatError
+        from aibench.services.traces import import_traces
+
+        runs = self.session_runs()
+        selected = run_id or (runs[-1] if runs else None)
+        if selected is None:
+            raise SessionError("this session has no stored application run yet")
+        if selected not in runs:
+            raise SessionError("traces can only be imported into a run started in this session")
+        path = Path(file)
+        path = (path if path.is_absolute() else self.project_root / path).resolve()
+        roots = (
+            self.project_root.resolve(),
+            *(Path(r).resolve() for r in self.policy().data_roots),
+        )
+        if not any(path.is_relative_to(root) for root in roots):
+            raise SessionError(
+                f"{file} is outside the project and the policy's data roots; "
+                "copy the export into the project or add its folder to data_roots"
+            )
+        if not path.is_file():
+            raise SessionError(f"no trace file at {path}")
+        try:
+            summary = import_traces(self.storage, self.artifacts, selected, path)
+        except (TraceFormatError, OSError) as exc:
+            raise SessionError(f"could not import {path.name}: {exc}") from exc
+        return {"run_id": selected, **summary}
+
     def state(self, *, for_assistant: bool = False) -> dict[str, Any]:
         """The session as a person (or the assistant) reviews it; read from storage every
         time, so a resumed session shows actual project and run state."""

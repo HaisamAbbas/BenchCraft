@@ -34,6 +34,8 @@ COMMANDS: dict[str, str] = {
     "/resume": "continue the paused or interrupted run",
     "/stop": "cancel the current run (partial results are kept)",
     "/failures": "failed and errored results of the current run",
+    "/traces": "/traces [import FILE] [RUN_ID] - a run's imported traces, or attach an export",
+    "/rescore": "/rescore [RUN_ID] - score stored outputs with the current draft (no app calls)",
     "/case": "/case CASE_ID - one case's evidence",
     "/budget": "ceilings, committed spend and unknown accounting",
     "/app": "the application's runner: what it observes, missing evidence, resets, test worlds",
@@ -242,6 +244,37 @@ class Commands:
             },
             ok=result.status == "applied",
         )
+
+    async def _traces(self, argument: str) -> CommandResult:
+        """`/traces [RUN_ID]`: what the run's imported traces add. `/traces import FILE
+        [RUN_ID]`: attach an OpenTelemetry (OTLP/JSON) export to the run, so metrics that
+        read traces (DeepEval's agent metrics) can score it with `/rescore`."""
+        words = shlex.split(argument, posix=False)
+        if not words or words[0] != "import":
+            if len(words) > 1:
+                return CommandResult(
+                    "/traces", "error", {"error": "usage: /traces [import FILE] [RUN_ID]"}, ok=False
+                )
+            evidence = self.controller.trace_evidence(words[0] if words else None)
+            return CommandResult("/traces", "traces", evidence)
+        if len(words) not in (2, 3):
+            return CommandResult(
+                "/traces", "error", {"error": "usage: /traces import FILE [RUN_ID]"}, ok=False
+            )
+        file = words[1].strip('"')
+        summary = self.controller.import_traces(file, words[2] if len(words) == 3 else None)
+        return CommandResult("/traces", "traces_imported", summary)
+
+    async def _rescore(self, argument: str) -> CommandResult:
+        """Score the run's stored outputs with the current draft: the same policy-checked
+        path as the assistant's rescore. The application is never called."""
+        words = argument.split()
+        if len(words) > 1:
+            return CommandResult(
+                "/rescore", "error", {"error": "usage: /rescore [RUN_ID]"}, ok=False
+            )
+        report = await self.controller.rescore(words[0] if words else None)
+        return CommandResult("/rescore", "rescored", report)
 
     async def _app(self, _: str) -> CommandResult:
         return CommandResult("/app", "application", self.controller.describe_application())

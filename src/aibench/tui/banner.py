@@ -46,7 +46,7 @@ ASCII_LOGO = (
 COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("plan", ("/plan", "/run", "/world", "/app")),
     ("run", ("/status", "/pause", "/resume", "/stop", "/budget")),
-    ("results", ("/failures", "/case", "/report", "/compare")),
+    ("results", ("/failures", "/case", "/traces", "/rescore", "/report", "/compare")),
     ("session", ("/sessions", "/new", "/integrations", "/plugins", "/themes", "/help", "/exit")),
 )
 
