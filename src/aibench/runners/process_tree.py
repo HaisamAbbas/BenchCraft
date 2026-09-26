@@ -115,30 +115,31 @@ class ProcessTree:
             self.contained = True  # the child leads its own process group
 
     def _attach_job(self) -> None:
-        if sys.platform != "win32":
-            return
-        job = _k32.CreateJobObjectW(None, None)
-        if not job:
-            return
-        info = _ExtendedLimitInformation()
-        info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        process = _k32.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, self.pid)
-        ok = bool(process) and bool(
-            _k32.SetInformationJobObject(
-                job,
-                _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
-                ctypes.byref(info),
-                ctypes.sizeof(info),
+        # An explicit platform block (not an early return) so type checkers on POSIX
+        # treat the Windows API calls below as unreachable.
+        if sys.platform == "win32":
+            job = _k32.CreateJobObjectW(None, None)
+            if not job:
+                return
+            info = _ExtendedLimitInformation()
+            info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            process = _k32.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, self.pid)
+            ok = bool(process) and bool(
+                _k32.SetInformationJobObject(
+                    job,
+                    _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                    ctypes.byref(info),
+                    ctypes.sizeof(info),
+                )
             )
-        )
-        ok = ok and bool(_k32.AssignProcessToJobObject(job, process))
-        if process:
-            _k32.CloseHandle(process)
-        if ok:
-            self._job = job
-            self.contained = True
-        else:
-            _k32.CloseHandle(job)
+            ok = ok and bool(_k32.AssignProcessToJobObject(job, process))
+            if process:
+                _k32.CloseHandle(process)
+            if ok:
+                self._job = job
+                self.contained = True
+            else:
+                _k32.CloseHandle(job)
 
     def kill(self) -> None:
         """Kill the whole tree now. Safe to call repeatedly; a no-op after `close()`.
