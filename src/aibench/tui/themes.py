@@ -1,6 +1,6 @@
-"""Colour themes for the interactive terminal's chrome: the welcome banner, prompt, bottom
-toolbar and completion menu. Status colours inside cards (pass/fail/warning) stay semantic
-and do not change with the theme.
+"""Colour themes for the interactive terminal's chrome: the welcome banner, the input box, the
+bottom toolbar and the completion menu. Status colours inside cards (pass/fail/warning) stay
+semantic and do not change with the theme.
 
 The choice is saved per project in the workspace (`/themes NAME`); a missing, unreadable or
 unknown saved value falls back to the default without failing the session.
@@ -30,6 +30,7 @@ class Theme:
     menu_bg: str
     menu_selected_bg: str
     user_bg: str  # band behind the user's own messages
+    composer_bg: str  # band behind the input being typed
 
     def prompt_style(self) -> Style:
         return Style.from_dict(
@@ -43,6 +44,11 @@ class Theme:
                 "working": self.dim,
                 "working.spinner": f"bold {self.accent}",
                 "working.key": f"bold {self.text}",
+                "composer-band": f"noreverse bg:{self.composer_bg}",
+                "composer-gutter": f"bold {self.accent}",
+                "composer-bar": f"bold {self.border}",
+                "composer-placeholder": f"noreverse bg:{self.composer_bg} {self.dim}",
+                "prompt-continuation": "noreverse",
             }
         )
 
@@ -66,6 +72,7 @@ THEMES: dict[str, Theme] = {
             menu_bg="#2A0E0E",
             menu_selected_bg="#5C1A1A",
             user_bg="#4A2629",
+            composer_bg="#2A2124",
         ),
         Theme(
             "ember",
@@ -81,6 +88,7 @@ THEMES: dict[str, Theme] = {
             menu_bg="#261409",
             menu_selected_bg="#5A2C12",
             user_bg="#46301F",
+            composer_bg="#2A2320",
         ),
         Theme(
             "gold",
@@ -96,6 +104,7 @@ THEMES: dict[str, Theme] = {
             menu_bg="#1A1A2E",
             menu_selected_bg="#333355",
             user_bg="#3D3522",
+            composer_bg="#26262E",
         ),
         Theme(
             "ocean",
@@ -111,6 +120,7 @@ THEMES: dict[str, Theme] = {
             menu_bg="#0E1A2E",
             menu_selected_bg="#1E3A5F",
             user_bg="#1F3148",
+            composer_bg="#1E242E",
         ),
         Theme(
             "forest",
@@ -126,6 +136,7 @@ THEMES: dict[str, Theme] = {
             menu_bg="#0D1F14",
             menu_selected_bg="#1D4A2E",
             user_bg="#1E3A28",
+            composer_bg="#1E2620",
         ),
         Theme(
             "violet",
@@ -141,6 +152,7 @@ THEMES: dict[str, Theme] = {
             menu_bg="#1C1029",
             menu_selected_bg="#3E2360",
             user_bg="#352545",
+            composer_bg="#241E2A",
         ),
         Theme(
             "mono",
@@ -156,6 +168,7 @@ THEMES: dict[str, Theme] = {
             menu_bg="#1F1F1F",
             menu_selected_bg="#464646",
             user_bg="#3A3A3A",
+            composer_bg="#262626",
         ),
         Theme(
             "paper",
@@ -171,6 +184,7 @@ THEMES: dict[str, Theme] = {
             menu_bg="#FBF3F3",
             menu_selected_bg="#F2CFCF",
             user_bg="#F7DCDC",
+            composer_bg="#EFE9E9",
         ),
     )
 }

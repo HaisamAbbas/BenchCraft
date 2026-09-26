@@ -27,6 +27,18 @@ Workspace schema changes are listed under "Workspace". Upgrade steps are in
   0.2.0rc1, so strict comparisons against earlier faithfulness runs report a plugin
   identity difference. Workspace: sessions gain `evaluator_defaults` (optional).
 
+## Unreleased — chat input box
+
+- The message being typed is now drawn as a box across the bottom of the terminal: a tinted
+  band in the theme's colour, a marker on its left edge and the hint `Ask BenchCraft to do
+  anything` while it is empty. It stays on the last rows, just above the status bar, with spare
+  rows above it instead of under it. The box follows the terminal's width, and every further line of
+  a multiline message (or a line that wraps) keeps the same left edge. It is drawn by the
+  prompt itself, so streamed replies and run progress still print above it, and it takes its
+  colour from the active theme (`/themes`). A terminal that cannot print the marker's block
+  character gets a plain ASCII marker on unbanded text. No metric semantics or workspace
+  schema changed.
+
 ## Unreleased — terminal welcome screen and themes
 
 - `aibench chat` opens with a BENCHCRAFT block logo over a bordered panel showing the

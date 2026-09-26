@@ -17,6 +17,13 @@ CLI and asynchronous session/run services. A full-screen UI or daemon is not req
   small slash-command completer and `Esc` then `Enter` for a newline. `Enter` submits the
   message. The REPL remains line-oriented and can be replaced without changing session or
   run services.
+- Draw the input being typed as a box across the bottom, the way a chat terminal is expected
+  to look, without giving up a prompt that stays editable under live output. The box is part
+  of the prompt's own rendering — its left edge is the prompt's line prefix (repeated for
+  every line of the input) and one input processor tints the line and fills it to the right
+  edge — so nothing is printed, nothing is erased, and the conversation above it is untouched.
+  Its colours come from the active theme, and a terminal that cannot print the marker's glyph
+  falls back to an unbanded ASCII prompt.
 - Keep the terminal input loop, assistant task and run scheduler on the existing asyncio
   loop. Blocking provider calls stay in worker threads. Deterministic slash controls call
   `SessionController` directly; they never use model intent inference.

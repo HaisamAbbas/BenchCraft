@@ -100,6 +100,8 @@ def test_bare_aibench_opens_chat_and_accepts_terminal_controls(tmp_path: Path) -
     terminal = _Terminal(_project(tmp_path))
     try:
         terminal.expect("Type /help for commands", timeout=STARTUP_SECONDS)
+        # The input is drawn as a box across the bottom, marked and with its hint in it.
+        terminal.expect("▌ ❯ Ask BenchCraft to do anything")
         terminal.send("/help")
         terminal.expect("Anything else is a message")
         terminal.exit()
@@ -145,6 +147,7 @@ def test_resizing_the_terminal_keeps_the_chat_working(tmp_path: Path) -> None:
         terminal.send("/resized" + "x" * 70)  # wraps at 40 columns
         terminal.expect("type /help")  # the unknown-command reply
         assert terminal.shows("unknown command /resized" + "x" * 70)  # read whole
+        terminal.expect("▌ ❯ Ask BenchCraft to do anything")  # the box follows the width
         terminal.process.setwinsize(50, 200)
         terminal.send("/help")
         terminal.expect("Anything else is a message")
