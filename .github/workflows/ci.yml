@@ -140,7 +140,11 @@ jobs:
 
       - name: Built evaluator plugin contract checks (Prompt 14)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        run: python scripts/release_check.py --out "$RUNNER_TEMP/plugin-release-check" --plugin --no-acceptance
+        # The contract tests run from this checkout with this interpreter: it needs pytest
+        # and the core's test dependencies (the plugin itself installs in a clean venv).
+        run: |
+          python -m pip install -e ".[dev]"
+          python scripts/release_check.py --out "$RUNNER_TEMP/plugin-release-check" --plugin --no-acceptance
 
       - uses: actions/upload-artifact@v4
         if: always()
