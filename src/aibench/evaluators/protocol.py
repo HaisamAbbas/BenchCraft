@@ -35,17 +35,24 @@ FieldState = Literal["present", "empty", "missing"]
 
 _EXECUTION_FIELDS = ("output", "retrieved_context", "tool_events", "usage", "cost", "world_state")
 _REFERENCE_FIELDS = ("answer", "context", "tools")
+EPISODE_TURNS = "episode.turns"
 
 
 @dataclass(frozen=True)
 class EvaluationView:
     """Read-only view of one case and its recorded execution. Field paths:
-    `case.input`, `case.case_id`, `case.reference.<answer|context|tools>`,
+    `case.input`, `case.case_id`, `case.group_id`, `case.reference.<answer|context|tools>`,
     `case.expectations.<key>...`, `case.metadata.<key>...`, `case.fixtures.<name>`,
-    `execution.<output|retrieved_context|tool_events|usage|cost|world_state>`."""
+    `execution.<output|retrieved_context|tool_events|usage|cost|world_state>`, and
+    `episode.turns`: for a case in an episode, the conversation up to and including it.
+
+    `episode` is filled by the scorer only for a metric that requires `episode.turns`: one
+    dict per turn, in dataset order, with the turn's `case_id`, `input` and recorded `output`
+    (and its `retrieved_context` and `tool_events` when the metric requires those)."""
 
     case: BenchmarkCase
     execution: ExecutionResult
+    episode: tuple[Any, ...] | None = None
 
     def get(self, path: str) -> Any:
         head, _, rest = path.partition(".")
@@ -63,6 +70,8 @@ class EvaluationView:
                 # application's answer, not missing evidence.
                 return deep_unfreeze(value)
             return MISSING if value is None else deep_unfreeze(value)
+        if path == EPISODE_TURNS:
+            return MISSING if self.episode is None else [dict(turn) for turn in self.episode]
         return case_field(self.case, path)
 
     @staticmethod
@@ -78,7 +87,12 @@ class EvaluationView:
         parts = rest.split(".") if rest else []
         valid = (
             (head == "execution" and len(parts) == 1 and parts[0] in _EXECUTION_FIELDS)
-            or (head == "case" and parts[:1] in (["input"], ["case_id"]) and len(parts) == 1)
+            or path == EPISODE_TURNS
+            or (
+                head == "case"
+                and parts[:1] in (["input"], ["case_id"], ["group_id"])
+                and len(parts) == 1
+            )
             or (
                 head == "case"
                 and len(parts) == 2
@@ -111,6 +125,8 @@ def case_field(case: BenchmarkCase, path: str) -> Any:
     first, remainder = parts[0], parts[1:]
     if first in ("input", "case_id") and not remainder:
         return deep_unfreeze(getattr(case, first))
+    if first == "group_id" and not remainder:
+        return MISSING if case.group_id is None else case.group_id
     if first == "reference" and len(remainder) == 1 and remainder[0] in _REFERENCE_FIELDS:
         reference = case.reference
         if reference is None:

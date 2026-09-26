@@ -27,6 +27,22 @@ Workspace schema changes are listed under "Workspace". Upgrade steps are in
   0.2.0rc1, so strict comparisons against earlier faithfulness runs report a plugin
   identity difference. Workspace: sessions gain `evaluator_defaults` (optional).
 
+## Unreleased — DeepEval conversation metrics
+
+- `aibench-deepeval` adds DeepEval 4.2.5's 12 conversational metrics (conversation
+  completeness, knowledge retention, role adherence, goal accuracy, topic adherence, tool
+  use, turn relevancy, turn faithfulness, turn contextual precision/recall/relevancy and
+  conversational G-Eval). Each turn of an episode (cases sharing a `group_id`) is scored on
+  the conversation up to and including it, built from the run's recorded executions of the
+  same repetition; the episode's last turn carries the whole conversation's score.
+- The evaluation view gains `episode.turns` and `case.group_id`. A metric requiring
+  `episode.turns` gets the conversation assembled by the scorer (retrieved passages and tool
+  calls only if it requires them), is not applicable outside an episode or after an earlier
+  turn that did not complete, and bypasses the evaluation cache (earlier turns change it).
+- DeepEval scores outside 0..1 are evaluator errors, never recorded scores.
+- Dataset summaries list `case.group_id` only for datasets with episodes. No metric
+  semantics of existing evaluators changed.
+
 ## Unreleased — chat input box
 
 - The message being typed is now drawn as a box across the bottom of the terminal: a tinted

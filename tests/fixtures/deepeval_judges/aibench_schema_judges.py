@@ -18,6 +18,8 @@ from typing import Any
 from deepeval.models import DeepEvalBaseLLM
 from pydantic import BaseModel
 
+_TEN_POINT = [False]  # G-Eval's schemas score 0..10; every other metric's score 0..1
+
 
 def _value(annotation: Any, name: str) -> Any:
     origin = typing.get_origin(annotation)
@@ -38,16 +40,21 @@ def _value(annotation: Any, name: str) -> Any:
             return next(iter(annotation))
         if issubclass(annotation, bool):
             return True
+        top = "score" in name and _TEN_POINT[0]
         if issubclass(annotation, int):
-            return 10 if "score" in name else 1
+            return 10 if top else 1
         if issubclass(annotation, float):
-            return 10.0 if "score" in name else 1.0
+            return 10.0 if top else 1.0
     if name == "verdict":
         return "yes"
     return f"{name} (schema judge)"
 
 
 def build(schema: type[BaseModel]) -> BaseModel:
+    if "g_eval" in schema.__module__:
+        _TEN_POINT[0] = True
+    elif "deepeval" in schema.__module__:
+        _TEN_POINT[0] = False
     return schema(
         **{name: _value(field.annotation, name) for name, field in schema.model_fields.items()}
     )

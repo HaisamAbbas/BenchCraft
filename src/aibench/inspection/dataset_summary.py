@@ -64,6 +64,8 @@ def _paths(cases: list[BenchmarkCase]) -> list[str]:
         extra.update(f"case.expectations.{key}" for key in case.expectations)
         extra.update(f"case.metadata.{key}" for key in case.metadata)
         extra.update(f"case.fixtures.{fixture.name}" for fixture in case.fixtures)
+        if case.group_id is not None:
+            extra.add("case.group_id")  # only datasets with episodes gain this field
     return [*_BASE_PATHS, *sorted(extra)]
 
 

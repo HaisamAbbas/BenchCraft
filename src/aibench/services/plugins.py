@@ -50,7 +50,7 @@ OPTIONAL_PLUGINS: dict[str, OptionalPlugin] = {
         evaluators="deepeval.*",
         source="plugins/deepeval",
         uses_models=True,
-        summary="DeepEval's single-turn metrics, judged by a model you choose",
+        summary="DeepEval's single-turn and conversation metrics, judged by a model you choose",
         metrics=(
             "faithfulness",
             "answer_relevancy",
@@ -73,9 +73,21 @@ OPTIONAL_PLUGINS: dict[str, OptionalPlugin] = {
             "exact_match",
             "pattern_match",
             "g_eval",
+            "conversation_completeness",
+            "knowledge_retention",
+            "role_adherence",
+            "goal_accuracy",
+            "topic_adherence",
+            "tool_use",
+            "turn_relevancy",
+            "turn_faithfulness",
+            "turn_contextual_precision",
+            "turn_contextual_recall",
+            "turn_contextual_relevancy",
+            "conversational_g_eval",
         ),
-        not_included="multi-turn conversational metrics, and metrics needing images, audio, "
-        "MCP servers or agent traces",
+        not_included="metrics needing images, audio, MCP servers or agent traces, and DAG "
+        "and arena metrics",
     ),
     "ragas": OptionalPlugin(
         name="ragas",
