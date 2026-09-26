@@ -32,7 +32,7 @@ def test_setup_saves_the_model_and_the_key_reference_never_the_key(tmp_path: Pat
     said: list[str] = []
     config = userconfig.run_setup(
         said.append,
-        ask=_scripted(["1", ""]),  # Z.ai, the suggested model
+        ask=_scripted(["1"]),  # Z.ai: its model is known, so only the choice is asked
         secret=_scripted(["zai-secret-key"]),
         persist=lambda name, value: saved.setdefault(name, value) is not None,
     )
@@ -180,3 +180,44 @@ def test_piped_answers_starting_with_a_byte_order_mark_are_understood() -> None:
         persist=lambda *_: False,
     )
     assert config is None and userconfig.decided()
+
+
+def test_the_chat_in_a_folder_without_a_project_explains_and_creates_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Typed in the home or a system folder: guidance to connect an app, no .aibench/."""
+    from typer.testing import CliRunner
+
+    from aibench.cli.main import app
+
+    folder = tmp_path / "not-a-project"
+    folder.mkdir()
+    result = CliRunner().invoke(app, ["chat", "--project", str(folder), "--send", "/help"])
+    assert result.exit_code != 0
+    assert "no application is connected" in result.output
+    assert "benchcraft connect http" in result.output
+    assert not (folder / ".aibench").exists()
+
+
+def test_a_folder_benchcraft_cannot_write_to_gets_a_message_not_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from aibench.cli.main import app
+    from aibench.storage.db import Database
+
+    def denied(_workspace: object) -> None:
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(Database, "open_workspace", classmethod(lambda cls, w: denied(w)))
+    folder = tmp_path / "locked"
+    folder.mkdir()
+    app_config = folder / "app.json"
+    app_config.write_text("{}", encoding="utf-8")
+    result = CliRunner().invoke(
+        app, ["chat", "--project", str(folder), "--app", str(app_config), "--send", "/help"]
+    )
+    assert result.exit_code != 0
+    assert "cannot create its folder" in result.output and "Access is denied" in result.output
+    assert "Traceback" not in result.output

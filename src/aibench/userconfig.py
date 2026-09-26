@@ -30,14 +30,14 @@ HOME_ENV = "BENCHCRAFT_HOME"
 class Preset:
     label: str
     base_url: str
-    model: str | None  # suggested model; None: the user types one
+    model: str | None  # the model used; None: the user types one
     key_env: str
 
 
 PRESETS: dict[str, Preset] = {
-    # GLM-4.7-Flash is free on Z.ai's API (a free Z.ai key is still needed); glm-4.6 is paid.
+    # GLM-4.7-Flash is free on Z.ai's API, but Z.ai still needs a (free) key; glm-4.6 is paid.
     "1": Preset(
-        "Z.ai GLM-4.7-Flash (free model)",
+        "Z.ai GLM-4.7-Flash (free model; needs a free API key from z.ai)",
         "https://api.z.ai/api/paas/v4",
         "glm-4.7-flash",
         "ZAI_API_KEY",
@@ -142,9 +142,8 @@ def run_setup(
     else:
         preset = PRESETS[choice]
         base_url = preset.base_url
-        suggested = preset.model
-        prompt = f"Model [{suggested}]: " if suggested else "Model name: "
-        model = ask(prompt).strip() or suggested or _ask_required(ask, "Model name: ")
+        # A preset with a known model does not ask (option 4 takes any model).
+        model = preset.model or _ask_required(ask, "Model name: ")
         key_env = preset.key_env
     if not os.environ.get(key_env):
         key = secret(f"API key (saved as the user environment variable {key_env}; hidden): ")

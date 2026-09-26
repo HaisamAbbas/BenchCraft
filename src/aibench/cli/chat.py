@@ -216,7 +216,17 @@ def chat(
         raise _fail(str(exc)) from exc
     chosen = _assistant_model(provider_config, interactive=send is None)
     workspace = Workspace.at(root)
-    storage = Storage(Database.open_workspace(workspace))
+    if settings["application"] is None and not workspace.db_path.is_file():
+        # Not a BenchCraft project (e.g. the home or a system folder): explain how to
+        # connect an app instead of creating .aibench/ here.
+        raise _fail(_not_connected(root))
+    try:
+        storage = Storage(Database.open_workspace(workspace))
+    except OSError as exc:
+        raise _fail(
+            f"BenchCraft cannot create its folder in {root} ({exc.strerror or exc}). "
+            "Open a terminal in your project folder and run `benchcraft` there."
+        ) from exc
     artifacts = ArtifactStore(workspace.artifacts_dir)
     provider: PlannerProvider | None = None
     dataset_notices: list[str] = []
@@ -279,6 +289,16 @@ def chat(
             storage.db.close()
 
 
+def _not_connected(root: Path) -> str:
+    return (
+        f"no application is connected in {root}. Run `benchcraft` in your app's project "
+        "folder, and connect the app once (it is not called during setup):\n"
+        "  benchcraft connect http --url http://localhost:8000/chat --dataset cases.jsonl "
+        "--input-path /question --output-path /answer --effects none\n"
+        "To try BenchCraft on a sample app first: benchcraft init demo; cd demo; benchcraft"
+    )
+
+
 def _assistant_model(
     provider_config: Path | None, *, interactive: bool
 ) -> Path | OpenAICompatibleConfig | None:
@@ -307,14 +327,7 @@ def _create(
 ) -> SessionController:
     application, dataset = settings["application"], settings["dataset"]
     if application is None:
-        raise _fail(
-            f"no application is connected in {root} yet. Connect the app to evaluate "
-            "(it is not called during setup):\n"
-            "  benchcraft connect http --url http://localhost:8000/chat --dataset cases.jsonl "
-            "--input-path /question --output-path /answer --effects none\n"
-            "then run `benchcraft` again. To try BenchCraft on a sample app first: "
-            "benchcraft init demo; cd demo; benchcraft"
-        )
+        raise _fail(_not_connected(root))
     if dataset is None:
         dataset = _discover_session_dataset(
             root,
