@@ -94,6 +94,50 @@ print(json.dumps([deepeval_trace(tree(1)), deepeval_trace(several)]))
     assert several["children"][1]["error"]
 
 
+def test_a_trace_without_text_takes_the_task_and_answer_from_the_case() -> None:
+    """OpenTelemetry often records no message content: DeepEval would then judge an agent
+    whose task is unknown. The root takes the case input and recorded answer; recorded
+    text is never replaced."""
+    result = plugin_python(
+        _SETUP
+        + """
+bare = {"format": "aibench-span-tree/1", "spans": [{"name": "agent.run", "kind": "agent",
+    "children": [{"name": "lookup", "kind": "tool", "children": []}]}]}
+several = {"format": "aibench-span-tree/1", "spans": [
+    {"name": "a", "kind": "llm", "children": []}, {"name": "b", "kind": "tool", "children": []}]}
+print(json.dumps([deepeval_trace(bare, "Where is A17?", "Tomorrow."),
+    deepeval_trace(tree(1), "other task", "other answer"),
+    deepeval_trace(several, "Where is A17?", "Tomorrow."), deepeval_trace(bare)]))
+"""
+    )
+    bare, recorded, several, untouched = result
+    assert (bare["input"], bare["output"]) == ("Where is A17?", "Tomorrow.")
+    assert (recorded["input"], recorded["output"]) == ("Where is order A17?", "It ships tomorrow.")
+    assert several["type"] == "base" and several["input"] == "Where is A17?"
+    assert "input" not in untouched and "output" not in untouched
+
+
+def test_a_trace_with_no_plan_is_not_applicable_for_the_plan_metrics() -> None:
+    """DeepEval scores 1 when it finds no plan; that is no evidence, so not applicable."""
+    result = plugin_python(
+        _SETUP
+        + """
+async def main():
+    judge = {"judge": {"kind": "python_factory",
+                       "factory": "aibench_schema_judges:planless_judge"}}
+    report = {}
+    for name in ("plan_quality", "plan_adherence", "step_efficiency"):
+        result = await outcome("deepeval." + name, judge, tree(1))
+        report[name] = [result.status.value, result.reason]
+    return report
+print(json.dumps(asyncio.run(main())))
+"""
+    )
+    assert result["plan_quality"] == ["not_applicable", "no_plan_in_trace"]
+    assert result["plan_adherence"] == ["not_applicable", "no_plan_in_trace"]
+    assert result["step_efficiency"][0] == "ok"  # needs no plan
+
+
 def test_agent_metrics_score_through_the_real_package_and_loops_are_detected() -> None:
     result = plugin_python(
         _SETUP
