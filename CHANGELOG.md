@@ -5,6 +5,16 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc3 — plan changes in conversation
+
+- An objective worded with a negation ("never invent fines", "no hallucinated penalties")
+  was read as the user refusing the change. Negations inside the objective being added no
+  longer count; refusals around it ("don't add that", "actually, don't") still do.
+- A bare "yes"/"yeah" can confirm values the assistant's previous message asked about
+  (that message must end with a question); anything not offered is still refused.
+- Planning recognises "invent", "make up", "fabricate" (groundedness) and "expected /
+  reference answers" (correctness).
+
 ## 0.1.0rc2 — first-run fixes
 
 - `benchcraft` in a folder that is not a project (the home folder, a system folder) explains

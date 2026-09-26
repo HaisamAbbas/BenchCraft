@@ -207,12 +207,22 @@ def ungrounded(patch: PlanPatch, message: str) -> list[str]:
     return problems
 
 
-def patch_problems(patch: PlanPatch, quote: str, message: str) -> list[str]:
+def patch_problems(
+    patch: PlanPatch, quote: str, message: str, *, offer: str | None = None
+) -> list[str]:
     """Why an assistant's patch may not be applied: its quote is not the user's words,
-    the quoted sentence or a later correction refuses the change, or a value is not stated."""
+    the quoted sentence or a later correction refuses the change, or a value is not stated.
+
+    `offer` is the assistant's previous message. When it asked a question and the user's
+    whole reply is a bare yes ("yeah", "ok, go ahead"), the values must be stated in that
+    question instead: the user accepted exactly what was offered."""
     if len(_norm(quote)) < 2 or _norm(quote) not in _norm(message):
         return ["the quoted request is not in the user's message"]
-    if _refusal_from_quote_onward(message, quote):
+    if offer and offer.rstrip().endswith("?") and _AFFIRMATION.match(message.strip()):
+        return ungrounded(patch, offer)
+    # Negations inside the objectives being added ("never invent fines") describe what to
+    # check; they are not the user holding back the change.
+    if _refusal_from_quote_onward(message, quote, ignore=patch.add_objectives):
         return ["the user's words hold back or refuse this change"]
     return ungrounded(patch, message)
 
@@ -267,12 +277,21 @@ def _sentence_with(message: str, quote: str) -> str:
     return message
 
 
-def _refusal_from_quote_onward(message: str, quote: str) -> bool:
-    """A later refusal in the same message overrides an earlier request or correction."""
+def _refusal_from_quote_onward(message: str, quote: str, *, ignore: tuple[str, ...] = ()) -> bool:
+    """A later refusal in the same message overrides an earlier request or correction.
+    Text in `ignore` (the content being added, such as an objective) is not searched."""
+
+    def without_ignored(sentence: str) -> str:
+        text = _norm(sentence)
+        for phrase in ignore:
+            if len(_norm(phrase)) >= 2:
+                text = text.replace(_norm(phrase), " ")
+        return text
+
     sentences = re.split(r"(?<=[.!?;\n])\s+", message)
     for index, sentence in enumerate(sentences):
         if _norm(quote) in _norm(sentence):
-            return any(_NEGATIONS.search(later) for later in sentences[index:])
+            return any(_NEGATIONS.search(without_ignored(later)) for later in sentences[index:])
     return True  # a quote that does not fit one sentence is ambiguous; fail closed
 
 
@@ -922,8 +941,10 @@ class _Turn:
         outcome: TurnOutcome,
         offered_revision: int | None,
         on_event: EventSink | None = None,
+        previous_reply: str | None = None,
     ) -> None:
         self.on_event = on_event
+        self.previous_reply = previous_reply  # what a bare "yes" from the user accepts
         self.interrupted = False
         self.agent = agent
         self.controller = agent.controller
@@ -1478,7 +1499,7 @@ class _Turn:
             patch = PlanPatch.model_validate(args.get("patch", {}))
         except PydanticValidationError as exc:
             return self._reject("propose_plan_patch", [e["msg"] for e in exc.errors()][:10])
-        problems = patch_problems(patch, quote, self.message)
+        problems = patch_problems(patch, quote, self.message, offer=self.previous_reply)
         if problems:
             return self._reject("propose_plan_patch", problems)
         try:
@@ -1703,7 +1724,14 @@ class ConversationAgent:
             return replay  # a redelivered message: nothing runs again
 
         outcome = TurnOutcome(turn_id=f"turn-{uuid.uuid4().hex[:12]}", replies_to=user_turn.turn_id)
-        turn = _Turn(self, user_turn, outcome, self._offered_before(user_turn), on_event)
+        turn = _Turn(
+            self,
+            user_turn,
+            outcome,
+            self._offered_before(user_turn),
+            on_event,
+            previous_reply=self._previous_reply(user_turn),
+        )
         if self.provider is None:
             outcome.stopped = "no assistant model is configured"
             outcome.text = (
@@ -1733,6 +1761,17 @@ class ConversationAgent:
             if turn.role == "assistant":
                 offer = deep_unfreeze(turn.outcome or {}).get("offer")
                 return offer["revision"] if offer else None
+        return None
+
+    def _previous_reply(self, user_turn: ConversationTurn) -> str | None:
+        """The assistant's reply just before this user message, if that was the last turn."""
+        earlier = [
+            t
+            for t in self.controller.store.turns(self.controller.session_id)
+            if t.sequence < user_turn.sequence
+        ]
+        if earlier and earlier[-1].role == "assistant":
+            return earlier[-1].content
         return None
 
     def _messages(self, user_turn: ConversationTurn) -> list[dict[str, Any]]:
