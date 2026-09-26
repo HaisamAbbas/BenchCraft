@@ -73,3 +73,35 @@ def test_yes_to_the_assistants_question_applies_its_proposal(tmp_path: Path) -> 
         assert "correctness" in ctl.state()["draft"]["objectives"]
     finally:
         ctl.storage.db.close()
+
+
+GEVAL_MESSAGE = (
+    "Add a G-Eval check named traffic correctness with criteria: the answer gives the same "
+    "fine amounts, speed limits and conditions as the expected answer, and says the "
+    "information is not available when the Tamil Nadu rules do not cover the question. "
+    "Evaluation params: input, actual_output, expected_output"
+)
+CRITERIA = (
+    "the answer gives the same fine amounts, speed limits and conditions as the expected "
+    "answer, and says the information is not available when the Tamil Nadu rules do not "
+    "cover the question"
+)
+
+
+def test_negations_inside_copied_g_eval_criteria_are_what_to_check() -> None:
+    patch = PlanPatch(
+        add_objectives=("G-Eval check named traffic correctness",),
+        params={
+            "deepeval.g_eval": {
+                "name": "traffic correctness",
+                "criteria": CRITERIA,
+                "evaluation_params": ["input", "actual_output", "expected_output"],
+            }
+        },
+    )
+    assert patch_problems(patch, "Add a G-Eval check", GEVAL_MESSAGE) == []
+    # The same criteria followed by a real refusal is still refused.
+    refused = GEVAL_MESSAGE + ". Actually, don't add it yet."
+    assert patch_problems(patch, "Add a G-Eval check", refused) == [
+        "the user's words hold back or refuse this change"
+    ]

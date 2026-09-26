@@ -5,6 +5,13 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc4 — G-Eval criteria in conversation
+
+- Negations inside any text copied into the plan (G-Eval criteria such as "says the
+  information is not available") no longer read as the user refusing the change.
+- The assistant's patch tool now says how metrics are configured: no field adds a metric;
+  metrics follow from objectives, and settings go in `params` keyed by evaluator ID.
+
 ## 0.1.0rc3 — plan changes in conversation
 
 - An objective worded with a negation ("never invent fines", "no hallucinated penalties")
