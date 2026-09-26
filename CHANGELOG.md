@@ -5,6 +5,14 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc2 — first-run fixes
+
+- `benchcraft` in a folder that is not a project (the home folder, a system folder) explains
+  how to connect an app and creates nothing there; a folder it cannot write to gets a clear
+  message instead of a traceback.
+- Setup no longer asks for the model when the choice has a known one (Z.ai GLM-4.7-Flash),
+  and says that Z.ai needs a free API key.
+
 ## Unreleased — install like any terminal tool
 
 - One-line installers (`install.ps1`, `install.sh`) install BenchCraft from a GitHub Release
