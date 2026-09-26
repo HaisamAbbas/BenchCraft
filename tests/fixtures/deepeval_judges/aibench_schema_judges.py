@@ -96,3 +96,18 @@ class RecordingJudge(AgreeingJudge):
 
 def recording_judge() -> RecordingJudge:
     return RecordingJudge()
+
+
+class PlanlessJudge(AgreeingJudge):
+    """Finds no plan in any trace (every `plan` list empty), as for an agent that records
+    no planning or reasoning; otherwise agrees."""
+
+    def generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
+        answer = super().generate(prompt, schema)
+        if isinstance(answer, BaseModel) and isinstance(getattr(answer, "plan", None), list):
+            answer = answer.model_copy(update={"plan": []})
+        return answer
+
+
+def planless_judge() -> PlanlessJudge:
+    return PlanlessJudge()

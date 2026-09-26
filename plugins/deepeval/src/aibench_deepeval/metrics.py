@@ -102,6 +102,10 @@ _TRACE_LIMITS = (
     ),
     "The trace's span inputs and outputs are sent to the judge, each cut to 4000 characters.",
 )
+_PLAN_LIMITS = (
+    *_TRACE_LIMITS,
+    "Not applicable when the judge finds no plan in the trace (DeepEval would score it 1).",
+)
 
 SPECS: tuple[Spec, ...] = (
     Spec(
@@ -279,7 +283,7 @@ SPECS: tuple[Spec, ...] = (
         "how sound the plan the agent made for the task was (from its trace)",
         ("input", "actual_output", "trace"),
         ("plan_quality",),
-        limitations=_TRACE_LIMITS,
+        limitations=_PLAN_LIMITS,
     ),
     Spec(
         "plan_adherence",
@@ -287,7 +291,7 @@ SPECS: tuple[Spec, ...] = (
         "how closely the agent followed its own plan (from its trace)",
         ("input", "actual_output", "trace"),
         ("plan_adherence",),
-        limitations=_TRACE_LIMITS,
+        limitations=_PLAN_LIMITS,
     ),
     Spec(
         "agent_loop_detection",
@@ -405,10 +409,16 @@ def out_of_range(score: Any) -> EvaluationOutcome | None:
 _SPAN_TYPES = {"agent": "agent", "llm": "llm", "tool": "tool", "retriever": "retriever"}
 
 
-def deepeval_trace(tree: dict[str, Any]) -> dict[str, Any]:
+def deepeval_trace(
+    tree: dict[str, Any], task: str | None = None, answer: str | None = None
+) -> dict[str, Any]:
     """aibench's span tree (`observations.otel.span_tree`) as the nested trace dict DeepEval's
     agent metrics read: each span's `name`, `type`, `input`, `output`, `model`, `error` and
-    `children`. Several root spans hang under one `base` span, as DeepEval expects one root."""
+    `children`. Several root spans hang under one `base` span, as DeepEval expects one root.
+
+    DeepEval reads the agent's task from the root's input. OpenTelemetry instrumentation
+    often leaves message content out (GenAI content capture is off by default), so a root
+    without input or output takes the case's input as `task` and the recorded answer."""
 
     def span(node: dict[str, Any]) -> dict[str, Any]:
         converted: dict[str, Any] = {
@@ -424,9 +434,19 @@ def deepeval_trace(tree: dict[str, Any]) -> dict[str, Any]:
         return converted
 
     roots = [span(root) for root in tree["spans"]]
-    if len(roots) == 1:
-        return roots[0]
-    return {"name": "trace", "type": "base", "children": roots}
+    root = roots[0] if len(roots) == 1 else {"name": "trace", "type": "base", "children": roots}
+    if task and not root.get("input"):
+        root["input"] = task
+    if answer and not root.get("output"):
+        root["output"] = answer
+    return root
+
+
+def no_plan(metric: Any) -> bool:
+    """DeepEval's plan metrics score 1 when the trace holds no plan at all; that is no
+    evidence of a good plan, so the harness reports it as not applicable. The upstream
+    signal is only the reason text (pinned version), checked in both its wordings."""
+    return "no plans to evaluate" in str(getattr(metric, "reason", "") or "").lower()
 
 
 def _jsonable(value: Any) -> Any:
@@ -543,7 +563,9 @@ class DeepEvalMetric(Evaluator):
         metric = self._new_metric(judge)
         test_case = LLMTestCase(**values)
         if "trace" in self._fields():
-            test_case._trace_dict = deepeval_trace(view.get("execution.trace"))
+            test_case._trace_dict = deepeval_trace(
+                view.get("execution.trace"), values["input"], values["actual_output"]
+            )
         try:
             score = await metric.a_measure(test_case, _show_indicator=False)
         finally:
@@ -552,6 +574,8 @@ class DeepEvalMetric(Evaluator):
         bad = out_of_range(score)
         if bad is not None:
             return bad
+        if self.spec.name in ("plan_quality", "plan_adherence") and no_plan(metric):
+            return EvaluationOutcome.not_applicable("no_plan_in_trace")
         raw: dict[str, Any] = {
             "deepeval_version": PINNED_DEEPEVAL,
             "metric": self.spec.upstream,

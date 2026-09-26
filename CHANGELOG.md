@@ -35,6 +35,11 @@ Workspace schema changes are listed under "Workspace". Upgrade steps are in
   span tree (`observations.otel.span_tree`: agent, llm, tool and retriever spans with inputs,
   outputs, model and errors, from `gen_ai.*` and OpenInference attributes, text cut to 4000
   characters) and the adapter converts to DeepEval's trace.
+- A trace root without recorded input or output takes the case's input (the agent's task)
+  and the recorded answer. `plan_quality` and `plan_adherence` report `no_plan_in_trace`
+  (not applicable) where DeepEval would score a trace with no plan 1. Found in a live check
+  with GLM-4.6: both metrics scored 1 on traces with no plan, and step efficiency judged
+  the agent "with the task unknown".
 - The evaluation view gains `execution.trace`. A metric requiring it is not applicable
   without an imported trace, with a partial trace, or with more than one trace for the
   execution, and bypasses the evaluation cache. Planning does not rule such metrics out up

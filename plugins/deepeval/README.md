@@ -89,7 +89,10 @@ the `gen_ai.*` and OpenInference attributes the spans carry; each input and outp
 
 An execution with no imported trace, a partial trace (a missing parent or root, unsampled or
 dropped spans) or more than one trace is not applicable. The trace's span contents are sent
-to the judge.
+to the judge. A trace whose root records no input or output (OpenTelemetry often leaves
+message content out) takes the case's input as the agent's task and the recorded answer.
+`plan_quality` and `plan_adherence` are not applicable (`no_plan_in_trace`) when the judge
+finds no plan in the trace: DeepEval would score that 1, which is no evidence of a good plan.
 
 Not included: metrics that need data aibench does not record: images, audio, MCP servers.
 DAG and arena metrics need objects a plan cannot declare.
