@@ -45,6 +45,7 @@ from aibench.core.models import (
 from aibench.engine.cache import evaluation_from_cache, evaluation_key
 from aibench.evaluators.protocol import (
     EPISODE_TURNS,
+    EXECUTION_TRACE,
     MISSING,
     EvaluationOutcome,
     EvaluationView,
@@ -52,6 +53,7 @@ from aibench.evaluators.protocol import (
     EvaluatorContext,
     rule_for,
 )
+from aibench.observations.otel import TREE_FORMAT, Trace, parse_otlp, span_tree
 from aibench.registry import EvaluatorRegistry, ResolvedMetric
 from aibench.reporting.aggregation import MetricSummary, summarize
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
@@ -59,6 +61,8 @@ from aibench.storage.repositories import Storage
 
 FINAL_ATTEMPT_RULE = "highest_attempt_id_per_case_and_repetition"
 DEFAULT_EVALUATION_TIMEOUT_SECONDS = 60.0
+# A model-judged metric's per-case budget (see `ExecutablePlan.model_evaluation_timeout_seconds`).
+DEFAULT_MODEL_EVALUATION_TIMEOUT_SECONDS = 300.0
 # Evaluator startup (prepare, and rebuilding a worker after a timeout) has its own bound, so
 # a slow framework import never eats into a case's evaluation budget.
 DEFAULT_PREPARE_TIMEOUT_SECONDS = 300.0
@@ -348,6 +352,7 @@ async def score_recorded_run(
     run_id: str,
     bindings: Sequence[MetricBinding],
     timeout_seconds: float = DEFAULT_EVALUATION_TIMEOUT_SECONDS,
+    model_timeout_seconds: float = DEFAULT_MODEL_EVALUATION_TIMEOUT_SECONDS,
     prepare_timeout_seconds: float = DEFAULT_PREPARE_TIMEOUT_SECONDS,
     cancel: asyncio.Event | None = None,
     application: ApplicationSpec | None = None,
@@ -394,7 +399,7 @@ async def score_recorded_run(
             artifacts,
             report.scoring_id,
             metric,
-            timeout_seconds,
+            model_timeout_seconds if metric.manifest.uses_models else timeout_seconds,
             cancel,
             prepare_timeout_seconds=prepare_timeout_seconds,
             application=application,
@@ -477,6 +482,9 @@ class BindingScorer:
         self.episodes = episodes or {}
         self._paths = {requirement.path for requirement in metric.requirements}
         self._conversational = EPISODE_TURNS in self._paths
+        self._traced = EXECUTION_TRACE in self._paths
+        self._observations: dict[str, list[dict[str, Any]]] = {}  # run_id -> trace rows
+        self._parsed: dict[str, list[Trace]] = {}  # raw artifact id -> its traces
         self.artifacts = artifacts
         self.scoring_id = scoring_id
         self.metric = metric
@@ -530,6 +538,7 @@ class BindingScorer:
             or len(candidates) != 1
             or execution.status is not ExecutionStatus.OK
             or self._conversational  # the result depends on earlier turns, not in the key
+            or self._traced  # likewise the imported trace
         ):
             return None
         manifest = self.manifest
@@ -651,6 +660,13 @@ class BindingScorer:
             if incomplete is not None:
                 return self._result(execution, EvaluationOutcome.not_applicable(incomplete))
             view = EvaluationView(case=case, execution=execution, episode=turns)
+        if self._traced:
+            tree, unusable = self._trace_for(execution)
+            if unusable is not None:
+                return self._result(execution, EvaluationOutcome.not_applicable(unusable))
+            view = EvaluationView(
+                case=case, execution=execution, episode=view.episode, trace=tree
+            )
         for requirement in self.metric.requirements:
             state = view.state(requirement.path)
             if state == "missing" or (state == "empty" and requirement.non_empty):
@@ -739,6 +755,43 @@ class BindingScorer:
                     turn[name] = None if value is MISSING else value
             turns.append(turn)
         return tuple(turns), None
+
+    def _trace_for(self, execution: ExecutionResult) -> tuple[dict[str, Any] | None, str | None]:
+        """The execution's imported trace as a span tree, or the reason it cannot be used.
+        No trace gives None (the metric's `execution.trace` requirement makes it not
+        applicable). A partial trace, or more than one trace for the execution, is not
+        scored: an agent judged on part of what it did, or on a guess between two
+        records, is judged on evidence that is not there."""
+        if execution.run_id not in self._observations:
+            self._observations[execution.run_id] = self.storage.list_trace_observations(
+                execution.run_id
+            )
+        rows = [
+            row
+            for row in self._observations[execution.run_id]
+            if row["execution_id"] == execution.execution_id
+        ]
+        if not rows:
+            return None, None
+        if len(rows) > 1:
+            return None, f"trace_ambiguous:{len(rows)} traces"
+        row = rows[0]
+        if not row["complete"]:
+            return None, "trace_partial:" + ",".join(row["partial_reasons"])
+        trace = Trace(trace_id=row["trace_id"])
+        for artifact_id in row.get("raw_artifact_ids") or []:
+            if artifact_id not in self._parsed:
+                stored = self.storage.get_artifact(artifact_id)
+                self._parsed[artifact_id] = (
+                    parse_otlp(self.artifacts.read_bytes(stored)) if stored else []
+                )
+            for parsed in self._parsed[artifact_id]:
+                if parsed.trace_id == row["trace_id"]:
+                    for span in parsed.spans:
+                        trace.add(span)
+        if not trace.spans:
+            return None, "trace_unreadable"
+        return {"format": TREE_FORMAT, "spans": span_tree(trace)}, None
 
     @staticmethod
     def _serialize_raw(outcome: EvaluationOutcome) -> bytes | None:

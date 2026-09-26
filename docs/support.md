@@ -23,14 +23,16 @@ The core install ships the native evaluators: `native.exact_match`, `native.json
 and custom Python evaluators you trust. Evaluator frameworks are never imported into the
 aibench process. They run in their own environment, driven by a worker.
 
-**DeepEval** (33 metrics, pinned to `deepeval==4.2.5`): faithfulness, answer
+**DeepEval** (37 metrics, pinned to `deepeval==4.2.5`): faithfulness, answer
 relevancy, contextual precision/recall/relevancy, hallucination, bias, toxicity, PII
 leakage, misuse, non-advice, role violation, prompt alignment, summarization, task
 completion, argument and tool correctness, tool permission, exact and pattern match, and
 G-Eval with your own criteria. For multi-turn applications it adds 12 conversation
 metrics (completeness, knowledge retention, role and topic adherence, goal accuracy, tool
 use, turn-level relevancy, faithfulness and retrieval, conversational G-Eval), each scored on
-the conversation up to every turn of an episode. Install it for a project with `aibench plugins install
+the conversation up to every turn of an episode, and 4 agent-trace metrics (step
+efficiency, plan quality, plan adherence, agent loop detection) over traces imported with
+`aibench traces import`. Install it for a project with `aibench plugins install
 deepeval --judge-provider PROVIDER.json`, or type `/plugins install deepeval` in the chat to
 use the assistant's model as judge. Either one shows its changes before making them:
 
@@ -46,7 +48,7 @@ tone"). The assistant can only suggest the install; you type the command. `aiben
 status` shows each optional plugin's state. The judge model is a paid external call; any
 OpenAI-compatible endpoint (such as GLM on Z.ai) works without code. Metrics, field mapping
 and judges are described in `plugins/deepeval/README.md`. Multi-turn conversational metrics
-Metrics that need images, audio, MCP servers or agent traces are not included.
+Metrics that need images, audio or MCP servers are not included.
 
 **Ragas faithfulness** (`ragas.faithfulness@1`, pinned to `ragas==0.4.3`) is the
 independent second ecosystem used by the Phase 2 comparison workflow. Install it separately:

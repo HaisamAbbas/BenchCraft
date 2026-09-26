@@ -85,9 +85,13 @@ OPTIONAL_PLUGINS: dict[str, OptionalPlugin] = {
             "turn_contextual_recall",
             "turn_contextual_relevancy",
             "conversational_g_eval",
+            "step_efficiency",
+            "plan_quality",
+            "plan_adherence",
+            "agent_loop_detection",
         ),
-        not_included="metrics needing images, audio, MCP servers or agent traces, and DAG "
-        "and arena metrics",
+        not_included="metrics needing images, audio or MCP servers, and DAG and arena "
+        "metrics",
     ),
     "ragas": OptionalPlugin(
         name="ragas",

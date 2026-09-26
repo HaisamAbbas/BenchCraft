@@ -170,6 +170,10 @@ class ExecutablePlan(FrozenModel):
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
     budgets: BudgetLimits = Field(default_factory=BudgetLimits)
     evaluation_timeout_seconds: float = Field(default=60.0, gt=0, le=3600)
+    # Per case for a metric whose manifest uses a model (a judge): judge models, reasoning
+    # ones especially, take minutes where local checks take milliseconds. Measured: GLM-4.6
+    # judging DeepEval faithfulness took 61 s per case on average, 69 s at worst.
+    model_evaluation_timeout_seconds: float = Field(default=300.0, gt=0, le=3600)
     plugin_environments: tuple[PluginEnvironmentRef, ...] = ()
     gates: tuple[ReleaseGate, ...] = ()
     # A test world the application declares; its seed is loaded before each case/episode.

@@ -314,3 +314,115 @@ def normalize(trace: Trace) -> dict[str, Any]:
         "models": models,
         "error_spans": [s.span_id for s in trace.spans if s.error],
     }
+
+
+# --------------------------------------------------------------------------- span trees
+
+TREE_FORMAT = "aibench-span-tree/1"
+TEXT_LIMIT = 4_000  # characters kept of one span's input or output; the rest is cut and marked
+
+_OPENINFERENCE_KINDS = {
+    "LLM": "llm",
+    "TOOL": "tool",
+    "AGENT": "agent",
+    "RETRIEVER": "retriever",
+}
+_OPERATION_KINDS = {
+    "chat": "llm",
+    "text_completion": "llm",
+    "generate_content": "llm",
+    "execute_tool": "tool",
+    "invoke_agent": "agent",
+    "create_agent": "agent",
+    "retrieval": "retriever",
+}
+# (input, output) attributes, first found wins: gen-ai semantic conventions (current and
+# older), tool calls, then OpenInference.
+_IO_KEYS = (
+    ("gen_ai.input.messages", "gen_ai.output.messages"),
+    ("gen_ai.prompt", "gen_ai.completion"),
+    ("gen_ai.tool.call.arguments", "gen_ai.tool.call.result"),
+    ("input.value", "output.value"),
+)
+
+
+def _kind(span: Span) -> str:
+    attributes = span.attributes
+    marked = _OPENINFERENCE_KINDS.get(str(attributes.get("openinference.span.kind", "")).upper())
+    if marked:
+        return marked
+    operation = _OPERATION_KINDS.get(str(attributes.get("gen_ai.operation.name", "")))
+    if operation:
+        return operation
+    if "gen_ai.tool.name" in attributes:
+        return "tool"
+    if "gen_ai.agent.name" in attributes:
+        return "agent"
+    if "gen_ai.request.model" in attributes or "gen_ai.response.model" in attributes:
+        return "llm"
+    return "other"
+
+
+def _text(value: Any, limit: int) -> Any:
+    """A span's input or output, decoded when it is JSON text, with long text cut to
+    `limit` characters and marked, so one span cannot fill a judge's context."""
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            decoded = value
+        if not isinstance(decoded, str):
+            value = decoded
+    if not isinstance(value, str):
+        encoded = json.dumps(value, ensure_ascii=False, default=str)
+        if len(encoded) <= limit:
+            return value
+        value = encoded
+    if len(value) <= limit:
+        return value
+    return value[:limit] + f"... [cut: {len(value) - limit} more characters]"
+
+
+def span_tree(trace: Trace, *, text_limit: int = TEXT_LIMIT) -> list[dict[str, Any]]:
+    """The trace as a tree of spans, roots first, children in start order: each span's
+    `name`, `kind` (agent, llm, tool, retriever or other), `input`, `output`, `model` and
+    `error`, from the attributes it carries (`_IO_KEYS`, `_kind`). Nothing is invented: a
+    field the span does not carry is left out. Spans in a parent cycle are left out."""
+    looped = trace.in_cycles()
+    order = sorted(
+        (s for s in trace.spans if s.span_id not in looped),
+        key=lambda s: (s.start_ns is None, s.start_ns or 0, s.span_id),
+    )
+    ids = {s.span_id for s in order}
+    children: dict[str | None, list[Span]] = defaultdict(list)
+    for span in order:
+        parent = span.parent_span_id if span.parent_span_id in ids else None
+        children[parent].append(span)
+
+    def node(span: Span) -> dict[str, Any]:
+        attributes = span.attributes
+        kind = _kind(span)
+        name = (
+            attributes.get("gen_ai.tool.name")
+            if kind == "tool"
+            else attributes.get("gen_ai.agent.name")
+            if kind == "agent"
+            else None
+        )
+        entry: dict[str, Any] = {"name": str(name or span.name), "kind": kind}
+        for input_key, output_key in _IO_KEYS:
+            if input_key in attributes or output_key in attributes:
+                if input_key in attributes:
+                    entry["input"] = _text(attributes[input_key], text_limit)
+                if output_key in attributes:
+                    entry["output"] = _text(attributes[output_key], text_limit)
+                break
+        model = attributes.get("gen_ai.response.model") or attributes.get("gen_ai.request.model")
+        if model:
+            entry["model"] = str(model)
+        if span.error:
+            entry["error"] = True
+        entry["children"] = [node(child) for child in children.get(span.span_id, [])]
+        return entry
+
+    return [node(root) for root in children.get(None, [])]

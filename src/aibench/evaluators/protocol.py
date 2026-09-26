@@ -36,6 +36,7 @@ FieldState = Literal["present", "empty", "missing"]
 _EXECUTION_FIELDS = ("output", "retrieved_context", "tool_events", "usage", "cost", "world_state")
 _REFERENCE_FIELDS = ("answer", "context", "tools")
 EPISODE_TURNS = "episode.turns"
+EXECUTION_TRACE = "execution.trace"
 
 
 @dataclass(frozen=True)
@@ -43,20 +44,26 @@ class EvaluationView:
     """Read-only view of one case and its recorded execution. Field paths:
     `case.input`, `case.case_id`, `case.group_id`, `case.reference.<answer|context|tools>`,
     `case.expectations.<key>...`, `case.metadata.<key>...`, `case.fixtures.<name>`,
-    `execution.<output|retrieved_context|tool_events|usage|cost|world_state>`, and
-    `episode.turns`: for a case in an episode, the conversation up to and including it.
+    `execution.<output|retrieved_context|tool_events|usage|cost|world_state>`,
+    `execution.trace`: the execution's imported trace as a span tree
+    (`observations.otel.span_tree`), and `episode.turns`: for a case in an episode, the
+    conversation up to and including it.
 
     `episode` is filled by the scorer only for a metric that requires `episode.turns`: one
     dict per turn, in dataset order, with the turn's `case_id`, `input` and recorded `output`
-    (and its `retrieved_context` and `tool_events` when the metric requires those)."""
+    (and its `retrieved_context` and `tool_events` when the metric requires those).
+    `trace` is likewise filled only for a metric that requires `execution.trace`."""
 
     case: BenchmarkCase
     execution: ExecutionResult
     episode: tuple[Any, ...] | None = None
+    trace: Any = None
 
     def get(self, path: str) -> Any:
         head, _, rest = path.partition(".")
         parts = rest.split(".") if rest else []
+        if path == EXECUTION_TRACE:
+            return MISSING if self.trace is None else deep_unfreeze(self.trace)
         if head == "execution" and len(parts) == 1 and parts[0] in _EXECUTION_FIELDS:
             value = getattr(self.execution, parts[0])
             # ExecutionResult uses None for "not observed"; () for tool_events means
@@ -87,7 +94,7 @@ class EvaluationView:
         parts = rest.split(".") if rest else []
         valid = (
             (head == "execution" and len(parts) == 1 and parts[0] in _EXECUTION_FIELDS)
-            or path == EPISODE_TURNS
+            or path in (EPISODE_TURNS, EXECUTION_TRACE)
             or (
                 head == "case"
                 and parts[:1] in (["input"], ["case_id"], ["group_id"])

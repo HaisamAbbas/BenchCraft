@@ -61,6 +61,10 @@ CONCEPTS: dict[str, str] = {
     "turn_retrieval_precision": "each turn's relevant passages are ranked first",
     "turn_retrieval_recall": "each turn's passages support the expected outcome",
     "turn_retrieval_relevancy": "each turn's retrieved passages are relevant",
+    "agent_efficiency": "the agent reached its answer without unneeded steps",
+    "plan_quality": "the plan the agent made for the task was sound",
+    "plan_adherence": "the agent followed its own plan",
+    "agent_loops": "the agent did not loop: no repeated tool calls or stalled reasoning",
     "latency": "end-to-end response time",
     "reliability": "application errors, timeouts and failed calls",
 }
@@ -155,6 +159,15 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "turn_retrieval_precision": (r"turn contextual precision",),
     "turn_retrieval_recall": (r"turn contextual recall",),
     "turn_retrieval_relevancy": (r"turn contextual relevan(?:ce|cy)",),
+    "agent_efficiency": (r"step efficiency", r"unnecessary steps", r"unneeded steps"),
+    "plan_quality": (r"plan quality", r"(?:good|sound|reasonable) plans?"),
+    "plan_adherence": (r"plan adherence", r"follows? (?:its|the|their) (?:own )?plan"),
+    "agent_loops": (
+        r"loop detection",
+        r"(?:agent|tool) loops?",
+        r"gets? stuck",
+        r"repeats? (?:the same )?tool calls?",
+    ),
     "custom_criteria": (
         r"criteri(?:a|on)",
         r"rubric",
@@ -318,6 +331,10 @@ def build_catalog(
         usable: int | None = None
         for requirement in requires:
             head, _, name = requirement.path.partition(".")
+            if requirement.path == "execution.trace":
+                # Imported per run after it ran (`aibench traces import`); a run without
+                # one is not applicable case by case, not ineligible up front.
+                continue
             if head == "execution" and name != "output" and not profile.available(name):
                 reasons.append(
                     f"reads {requirement.path}, which application {profile.application_id!r} "

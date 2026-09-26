@@ -10,7 +10,8 @@ from C extensions — goes to stderr and can never corrupt the protocol stream.
     {"op": "prepare", "params": {...}}               -> {"ok": true}
     {"op": "evaluate", "case": {...}, "execution": {...}, "episode": [...]?}
         -> {"ok": true, "outcome": {...}, "usage": [...]}
-    (`episode`, the conversation so far, is sent only to a metric requiring `episode.turns`)
+    (`episode`, the conversation so far, is sent only to a metric requiring `episode.turns`;
+    `trace`, the execution's span tree, only to one requiring `execution.trace`)
     {"op": "close"}                                   -> {"ok": true}   (then exits)
     any failure                                       -> {"ok": false, "error": "..."}
 
@@ -105,6 +106,7 @@ def main(argv: list[str]) -> int:
                     case=BenchmarkCase.model_validate(request["case"]),
                     execution=ExecutionResult.model_validate(request["execution"]),
                     episode=None if episode is None else tuple(episode),
+                    trace=request.get("trace"),
                 )
                 ctx = EvaluatorContext(run_id=view.execution.run_id, scoring_id="worker")
                 outcome = loop.run_until_complete(evaluator.evaluate(view, ctx))

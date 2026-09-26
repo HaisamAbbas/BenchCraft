@@ -796,6 +796,7 @@ async def evaluate_run(
         run_id=run_id,
         bindings=plan.metrics,
         timeout_seconds=plan.evaluation_timeout_seconds,
+        model_timeout_seconds=plan.model_evaluation_timeout_seconds,
         application=application,
     )
 

@@ -426,7 +426,9 @@ class RunEngine:
                     self.artifacts,
                     self.scoring_id,
                     metric,
-                    self.plan.evaluation_timeout_seconds,
+                    self.plan.model_evaluation_timeout_seconds
+                    if metric.manifest.uses_models
+                    else self.plan.evaluation_timeout_seconds,
                     self.controller.abort_event,
                     application=self.application,
                     dependency_lock_hash=self.dependency_lock_hash,
