@@ -207,6 +207,17 @@ def ungrounded(patch: PlanPatch, message: str) -> list[str]:
     return problems
 
 
+def _copied_text(patch: PlanPatch) -> tuple[str, ...]:
+    """The free text a patch copies from the user: objectives and string parameters."""
+    params = [
+        leaf
+        for evaluator_params in patch.params.values()
+        for _, leaf in _leaves(deep_unfreeze(evaluator_params))
+        if isinstance(leaf, str)
+    ]
+    return (*patch.add_objectives, *params)
+
+
 def patch_problems(
     patch: PlanPatch, quote: str, message: str, *, offer: str | None = None
 ) -> list[str]:
@@ -220,9 +231,10 @@ def patch_problems(
         return ["the quoted request is not in the user's message"]
     if offer and offer.rstrip().endswith("?") and _AFFIRMATION.match(message.strip()):
         return ungrounded(patch, offer)
-    # Negations inside the objectives being added ("never invent fines") describe what to
+    # Negations inside the text being copied into the plan (an objective such as "never
+    # invent fines", G-Eval criteria such as "says it is not available") describe what to
     # check; they are not the user holding back the change.
-    if _refusal_from_quote_onward(message, quote, ignore=patch.add_objectives):
+    if _refusal_from_quote_onward(message, quote, ignore=_copied_text(patch)):
         return ["the user's words hold back or refuse this change"]
     return ungrounded(patch, message)
 
@@ -630,7 +642,12 @@ def tool_specs() -> list[dict[str, Any]]:
         ),
         _tool(
             "propose_plan_patch",
-            "Change the draft; creates a new revision.",
+            "Change the draft; creates a new revision. There is no field that adds a metric: "
+            "metrics follow from objectives (add_objectives, in the user's words). Configure "
+            "a metric with `params`, keyed by its evaluator ID, e.g. a G-Eval check is an "
+            'objective naming G-Eval or criteria plus params {"deepeval.g_eval": {"name": '
+            '"...", "criteria": "...", "evaluation_params": ["input", "actual_output", '
+            '"expected_output"]}}. Every value must be the user\'s own words.',
             _object(
                 {
                     "expected_revision": {"type": "integer"},
