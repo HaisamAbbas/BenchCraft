@@ -479,3 +479,28 @@ def test_sampling_is_pinned_across_platforms_and_versions(tmp_path: Path) -> Non
         plan.model_copy(update={"selection": CaseSelection()}), tmp_path, policy=TRUSTED
     ).cases
     assert [c.case_id for c in sample_cases(everything, 3, 7)] == picked
+
+
+def test_a_concept_with_many_ineligible_candidates_still_drafts_a_bounded_gap() -> None:
+    """A plugin can add dozens of candidates for one concept (DeepEval's tool metrics); when
+    none is eligible, listing every reason once overflowed the gap's 1000-character bound
+    and drafting failed. The gap now lists what fits and counts the rest."""
+    from aibench.planning.catalog import MetricOption
+    from aibench.planning.drafts import Gap
+    from aibench.planning.template import _unmeasurable
+
+    def option(i: int) -> MetricOption:
+        return MetricOption(
+            metric=f"plugin.metric_{i}@1.0.0", evaluator_id=f"plugin.metric_{i}",
+            version="1.0.0", description="", concepts=("tool_use",), requires=(),
+            value_kind="scalar", uses_models=True, default_rule=None, required_params=(),
+            limitations=(), eligible=False,
+            reasons=["needs execution.tool_events (not declared or observed)"],
+        )  # fmt: skip
+
+    few = _unmeasurable("tool_use", [option(1), option(2)])
+    assert few.startswith("tool_use cannot be measured: plugin.metric_1@1.0.0 needs")
+    assert "more" not in few
+    many = _unmeasurable("tool_use", [option(i) for i in range(40)])
+    assert len(many) <= 1000 and many.endswith("more")
+    assert Gap(subject="obj-1", reason=many).reason == many

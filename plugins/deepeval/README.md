@@ -75,7 +75,8 @@ recorded score.
 ### Agent-trace metrics
 
 For agents that export OpenTelemetry spans: run the app, attach its traces with `aibench
-traces import RUN_ID FILE`, then score. The harness turns the execution's trace into a span
+traces import RUN_ID FILE`, then score. In the chat: `/run`, then `/traces import FILE`
+(the latest run by default) and `/rescore`. The harness turns the execution's trace into a span
 tree (agent, llm, tool and retriever spans with their inputs, outputs, model and errors, from
 the `gen_ai.*` and OpenInference attributes the spans carry; each input and output cut to
 4000 characters), and the adapter hands it to DeepEval as its trace.

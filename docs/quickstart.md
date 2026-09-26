@@ -82,6 +82,8 @@ Inside the chat:
 | `/status` | Committed run state. Needs no model |
 | `/failures` | The failed case and the application failure |
 | `/case support-004` | The question, the reference answer, the app's answer and what it retrieved |
+| `/traces import FILE` | Attaches your app's OpenTelemetry export (OTLP/JSON) to the latest run; `/traces` shows what it added. The file must be in the project or a policy data root |
+| `/rescore` | Scores the run's stored outputs with the current draft, e.g. agent-trace metrics after `/traces import`. The app is not called |
 | `/report` | Report summary in the terminal, plus `report.html` and `report.json` under `.aibench/reports/RUN_ID/` |
 | `/plugins` | Optional metric plugins (DeepEval, Ragas). `/plugins install deepeval` shows what installing it changes; add `--yes` to do it, with the assistant's model as judge |
 | `/themes` | Lists the colour themes (red `crimson` by default). `/themes ocean` switches and saves the choice in `.aibench/ui.json` |

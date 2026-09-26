@@ -522,6 +522,10 @@ Rules:
   policy; never say a listed plugin does not exist. Once installed, its metrics are chosen
   like any other: from the objectives' concepts (objective_concepts); parameters only the
   user can give (G-Eval criteria, a role, a domain) come from the draft's questions.
+- Agent-trace metrics (step efficiency, plan quality, plan adherence, loop detection) read
+  OpenTelemetry traces imported after a run; without them they are not applicable. Tell the
+  user to type /traces import FILE (their app's OTLP/JSON export) and then /rescore; check
+  what was imported with get_trace_evidence. You cannot import files yourself.
 - Ask a question (ask_user) only when the answer changes the benchmark; at most two.
 - While a run is active, questions and explanations never affect it. A change to the
   dataset, metrics, thresholds or sampling creates a new draft revision; the active run

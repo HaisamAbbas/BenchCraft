@@ -32,7 +32,7 @@ metrics (completeness, knowledge retention, role and topic adherence, goal accur
 use, turn-level relevancy, faithfulness and retrieval, conversational G-Eval), each scored on
 the conversation up to every turn of an episode, and 4 agent-trace metrics (step
 efficiency, plan quality, plan adherence, agent loop detection) over traces imported with
-`aibench traces import`. Install it for a project with `aibench plugins install
+`aibench traces import` (or `/traces import FILE` in the chat, then `/rescore`). Install it for a project with `aibench plugins install
 deepeval --judge-provider PROVIDER.json`, or type `/plugins install deepeval` in the chat to
 use the assistant's model as judge. Either one shows its changes before making them:
 

@@ -5,6 +5,18 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased — traces and rescoring in the chat
+
+- `/traces import FILE [RUN_ID]` attaches an OpenTelemetry (OTLP/JSON) export to a run the
+  session started (the latest by default), as `aibench traces import` does; the file must
+  be inside the project or a policy data root. `/traces [RUN_ID]` shows what the run's
+  traces add. `/rescore [RUN_ID]` scores the stored outputs with the current draft (the
+  application is not called), so run, import and agent-trace scoring happen in one
+  conversation. The assistant points users to these commands for agent-trace metrics.
+- Fixed: drafting failed when a concept had many ineligible candidates (a plugin such as
+  DeepEval adds dozens): the gap's explanation exceeded its 1000-character bound. It now
+  lists the candidates that fit and counts the rest.
+
 ## Unreleased — DeepEval metrics for the assistant
 
 - `aibench-deepeval` 0.2.0rc1 wraps every DeepEval 4.2.5 single-turn metric aibench's
