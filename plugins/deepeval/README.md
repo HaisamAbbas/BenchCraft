@@ -7,8 +7,8 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 
 ## Metrics
 
-Every DeepEval 4.2.5 single-turn and conversation metric that aibench's recorded data can
-feed (33). Each is an
+Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
+recorded data can feed (37). Each is an
 evaluator `deepeval.<name>@1`, scores 0 to 1 with higher better (DeepEval normalizes bias,
 toxicity and the other safety metrics that way), and is decided by the plan's rule
 (default `>= 0.5`), not by DeepEval's own `success` flag.
@@ -72,9 +72,27 @@ not complete.
 A score outside 0..1 (a judge answer DeepEval did not bound) is an evaluator error, never a
 recorded score.
 
-Not included: metrics that need data aibench does not record: images, audio, MCP servers,
-or agent traces (step efficiency, plan quality and adherence, agent loop detection). DAG
-and arena metrics need objects a plan cannot declare.
+### Agent-trace metrics
+
+For agents that export OpenTelemetry spans: run the app, attach its traces with `aibench
+traces import RUN_ID FILE`, then score. The harness turns the execution's trace into a span
+tree (agent, llm, tool and retriever spans with their inputs, outputs, model and errors, from
+the `gen_ai.*` and OpenInference attributes the spans carry; each input and output cut to
+4000 characters), and the adapter hands it to DeepEval as its trace.
+
+| Metric | Reads | Needs from the plan |
+|---|---|---|
+| `step_efficiency` | question, answer, trace | judge |
+| `plan_quality` | question, answer, trace | judge |
+| `plan_adherence` | question, answer, trace | judge |
+| `agent_loop_detection` | trace (no judge: repeated tool calls, stalled reasoning, call cycles) | optional `check_*` switches and thresholds |
+
+An execution with no imported trace, a partial trace (a missing parent or root, unsampled or
+dropped spans) or more than one trace is not applicable. The trace's span contents are sent
+to the judge.
+
+Not included: metrics that need data aibench does not record: images, audio, MCP servers.
+DAG and arena metrics need objects a plan cannot declare.
 
 ## Judges
 

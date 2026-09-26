@@ -27,6 +27,24 @@ Workspace schema changes are listed under "Workspace". Upgrade steps are in
   0.2.0rc1, so strict comparisons against earlier faithfulness runs report a plugin
   identity difference. Workspace: sessions gain `evaluator_defaults` (optional).
 
+## Unreleased — DeepEval agent-trace metrics
+
+- `aibench-deepeval` adds DeepEval 4.2.5's agent metrics: step efficiency, plan quality and
+  plan adherence (judged), and agent loop detection (deterministic). They read the trace
+  imported for each execution (`aibench traces import`), which the harness turns into a
+  span tree (`observations.otel.span_tree`: agent, llm, tool and retriever spans with inputs,
+  outputs, model and errors, from `gen_ai.*` and OpenInference attributes, text cut to 4000
+  characters) and the adapter converts to DeepEval's trace.
+- The evaluation view gains `execution.trace`. A metric requiring it is not applicable
+  without an imported trace, with a partial trace, or with more than one trace for the
+  execution, and bypasses the evaluation cache. Planning does not rule such metrics out up
+  front, since traces are imported after a run.
+- Plans gain `model_evaluation_timeout_seconds` (default 300): the per-case limit for
+  model-judged metrics, which `aibench run`, rescoring and `aibench score` apply;
+  `evaluation_timeout_seconds` (60) still governs local checks. A live check with GLM-4.6
+  judging DeepEval faithfulness took 61 s per case on average (69 s at worst), past the old
+  shared 60 s limit.
+
 ## Unreleased — DeepEval conversation metrics
 
 - `aibench-deepeval` adds DeepEval 4.2.5's 12 conversational metrics (conversation

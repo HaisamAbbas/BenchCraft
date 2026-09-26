@@ -60,6 +60,7 @@ FIELDS: dict[str, tuple[str, bool]] = {
     "context": ("case.reference.context", True),
     "tools_called": ("execution.tool_events", False),  # none called is evidence
     "expected_tools": ("case.reference.tools", True),
+    "trace": ("execution.trace", True),  # the imported trace, as DeepEval's trace (below)
 }
 
 # Upstream lists worth keeping in the raw artifact, when a metric has them.
@@ -93,6 +94,14 @@ class Spec:
 
 _STRINGS = {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
 _TOOL_NAMES = {"type": "array", "items": {"type": "string", "minLength": 1}}
+
+_TRACE_LIMITS = (
+    (
+        "Reads the trace imported for the execution (`aibench traces import`); a run "
+        "without one is not applicable, and so is a partial trace."
+    ),
+    "The trace's span inputs and outputs are sent to the judge, each cut to 4000 characters.",
+)
 
 SPECS: tuple[Spec, ...] = (
     Spec(
@@ -257,6 +266,47 @@ SPECS: tuple[Spec, ...] = (
         required=("allowed_tools|denied_tools",),
     ),
     Spec(
+        "step_efficiency",
+        "StepEfficiencyMetric",
+        "how directly the agent reached its answer, without unneeded steps (from its trace)",
+        ("input", "actual_output", "trace"),
+        ("agent_efficiency",),
+        limitations=_TRACE_LIMITS,
+    ),
+    Spec(
+        "plan_quality",
+        "PlanQualityMetric",
+        "how sound the plan the agent made for the task was (from its trace)",
+        ("input", "actual_output", "trace"),
+        ("plan_quality",),
+        limitations=_TRACE_LIMITS,
+    ),
+    Spec(
+        "plan_adherence",
+        "PlanAdherenceMetric",
+        "how closely the agent followed its own plan (from its trace)",
+        ("input", "actual_output", "trace"),
+        ("plan_adherence",),
+        limitations=_TRACE_LIMITS,
+    ),
+    Spec(
+        "agent_loop_detection",
+        "AgentLoopDetectionMetric",
+        "1 when the trace shows no repeated tool calls, stalled reasoning or call cycles; "
+        "lower as the agent loops",
+        ("input", "actual_output", "trace"),
+        ("agent_loops",),
+        judged=False,
+        params={
+            "check_tool_repetition": {"type": "boolean"},
+            "check_reasoning_stagnation": {"type": "boolean"},
+            "check_call_graph_cycles": {"type": "boolean"},
+            "repetition_threshold": {"type": "integer", "minimum": 2},
+            "similarity_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        limitations=_TRACE_LIMITS[:1],
+    ),
+    Spec(
         "exact_match",
         "ExactMatchMetric",
         "1 when the answer equals the reference answer exactly, else 0",
@@ -352,6 +402,33 @@ def out_of_range(score: Any) -> EvaluationOutcome | None:
     return EvaluationOutcome.error(f"judge_out_of_range: DeepEval returned {score!r}, not 0..1")
 
 
+_SPAN_TYPES = {"agent": "agent", "llm": "llm", "tool": "tool", "retriever": "retriever"}
+
+
+def deepeval_trace(tree: dict[str, Any]) -> dict[str, Any]:
+    """aibench's span tree (`observations.otel.span_tree`) as the nested trace dict DeepEval's
+    agent metrics read: each span's `name`, `type`, `input`, `output`, `model`, `error` and
+    `children`. Several root spans hang under one `base` span, as DeepEval expects one root."""
+
+    def span(node: dict[str, Any]) -> dict[str, Any]:
+        converted: dict[str, Any] = {
+            "name": node["name"],
+            "type": _SPAN_TYPES.get(node["kind"], "base"),
+        }
+        for key in ("input", "output", "model"):
+            if key in node:
+                converted[key] = node[key]
+        if node.get("error"):
+            converted["error"] = "the span ended with an error status"
+        converted["children"] = [span(child) for child in node.get("children", [])]
+        return converted
+
+    roots = [span(root) for root in tree["spans"]]
+    if len(roots) == 1:
+        return roots[0]
+    return {"name": "trace", "type": "base", "children": roots}
+
+
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
@@ -426,6 +503,8 @@ class DeepEvalMetric(Evaluator):
                 )
                 for attempt in attempts
             ]
+        if "trace" in fields and not view.get("execution.trace").get("spans"):
+            return None, "empty:execution.trace"
         if "expected_tools" in fields:
             names = (view.get("case.reference.tools") or {}).get("tool_names") or []
             if not names:
@@ -462,8 +541,11 @@ class DeepEvalMetric(Evaluator):
             return EvaluationOutcome.not_applicable(str(not_applicable))
         judge = build_judge(self.params["judge"]) if self.spec.judged else None
         metric = self._new_metric(judge)
+        test_case = LLMTestCase(**values)
+        if "trace" in self._fields():
+            test_case._trace_dict = deepeval_trace(view.get("execution.trace"))
         try:
-            score = await metric.a_measure(LLMTestCase(**values), _show_indicator=False)
+            score = await metric.a_measure(test_case, _show_indicator=False)
         finally:
             if judge is not None:
                 report_judge_usage(ctx, metric, judge)

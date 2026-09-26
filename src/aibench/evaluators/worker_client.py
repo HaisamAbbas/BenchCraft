@@ -239,6 +239,8 @@ class WorkerEvaluator(Evaluator):
         }
         if view.episode is not None:  # assembled only for a metric that reads it
             request["episode"] = list(view.episode)
+        if view.trace is not None:  # likewise the span tree
+            request["trace"] = view.trace
         try:
             response = await self._call(request)
         except WorkerError as exc:
