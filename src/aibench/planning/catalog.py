@@ -74,11 +74,21 @@ ENGINE_RECORDED = frozenset({"latency", "reliability"})
 # Keyword patterns per concept for reading objective text (the template planner, and a
 # cross-check on model-assigned concepts). Regexes over lower-cased text, whole words.
 _KEYWORDS: dict[str, tuple[str, ...]] = {
-    "correctness": (r"correct(ness)?", r"accura(te|cy)", r"wrong", r"incorrect"),
+    "correctness": (
+        r"correct(ness)?",
+        r"accura(te|cy)",
+        r"wrong",
+        r"incorrect",
+        r"(?:expected|reference) answers?",
+    ),
     "groundedness": (
         r"faithful(ness)?",
         r"grounded(ness)?",
         r"hallucinat\w*",
+        # "never invent fines", "doesn't make up rules": what the answer must not do.
+        r"invent(?:s|ed|ing)?",  # not "inventory"
+        r"(?:make|makes|making|made) up",
+        r"fabricat\w*",
         r"unsupported claims?",
         r"cit(e|es|ed|ation|ations)",
         r"retrieved passages?",
