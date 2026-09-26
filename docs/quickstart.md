@@ -111,13 +111,13 @@ Add `https://api.z.ai` to `allowed_planner_origins` and `env:ZAI_API_KEY` to
 base URL uses Z.ai's Chat Completions API; the application appends `/chat/completions`.
 Z.ai's documented model name is `glm-4.6`. In PowerShell, set the variable for the current
 terminal with `$env:ZAI_API_KEY = "<your Z.ai key>"`, then start chat with
-`aibench --provider-config examples/planner/zai-glm-4.6.provider.json`.
+`aibench chat --provider-config examples/planner/zai-glm-4.6.provider.json`.
 
 Set the key in your environment, never in a file. Then run:
 
 ```bash
 export OPENAI_API_KEY=...        # PowerShell: $env:OPENAI_API_KEY = "..."
-aibench --provider-config openai.provider.json
+aibench chat --provider-config openai.provider.json
 ```
 
 Now you can say "check that answers are correct", "use 5 cases first", "run it", "show the
