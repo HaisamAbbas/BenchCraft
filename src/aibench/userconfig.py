@@ -35,7 +35,13 @@ class Preset:
 
 
 PRESETS: dict[str, Preset] = {
-    "1": Preset("Z.ai (GLM)", "https://api.z.ai/api/paas/v4", "glm-4.6", "ZAI_API_KEY"),
+    # GLM-4.7-Flash is free on Z.ai's API (a free Z.ai key is still needed); glm-4.6 is paid.
+    "1": Preset(
+        "Z.ai GLM-4.7-Flash (free model)",
+        "https://api.z.ai/api/paas/v4",
+        "glm-4.7-flash",
+        "ZAI_API_KEY",
+    ),
     "2": Preset("OpenAI", "https://api.openai.com/v1", None, "OPENAI_API_KEY"),
     "3": Preset("OpenRouter", "https://openrouter.ai/api/v1", None, "OPENROUTER_API_KEY"),
 }
