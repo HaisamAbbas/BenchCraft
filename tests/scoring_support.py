@@ -94,6 +94,10 @@ class Seeded:
         registry: EvaluatorRegistry | None = None,
         **kwargs: Any,
     ) -> ScoringReport:
+        # A test's `timeout_seconds` is its limit for every metric, judged ones included,
+        # unless it sets the judged-metric limit (`model_timeout_seconds`) separately.
+        if "timeout_seconds" in kwargs:
+            kwargs.setdefault("model_timeout_seconds", kwargs["timeout_seconds"])
         return run(
             score_recorded_run(
                 storage=self.storage,
