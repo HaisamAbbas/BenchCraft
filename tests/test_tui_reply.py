@@ -201,7 +201,7 @@ def test_working_line_shows_while_replying_and_esc_interrupts(tmp_path: Path) ->
         console=Console(file=output, width=80, highlight=False),
         output=DummyOutput(),
     )
-    assert "".join(text for _, text in chat._prompt_message()) == "❯ "
+    assert "".join(text for _, text in chat._prompt_message()) == "▌ ❯ "
 
     async def scenario() -> str:
         with create_pipe_input() as pipe:
@@ -225,7 +225,7 @@ def test_working_line_shows_while_replying_and_esc_interrupts(tmp_path: Path) ->
 
     try:
         working = asyncio.run(scenario())
-        assert "Working (1s · esc to interrupt)" in working and working.endswith("❯ ")
+        assert "Working (1s · esc to interrupt)" in working and working.endswith("▌ ❯ ")
         shown = output.getvalue()
         assert "› hello there" in shown  # the sent message, redrawn as a band
         assert "Reply interrupted." in shown

@@ -2,9 +2,9 @@
 the left and the commands on the right, coloured by the active theme.
 
 Block and box-drawing characters are used only when the console's encoding can print them;
-otherwise the logo and separators fall back to ASCII, so a legacy Windows code page still
-gets a readable banner. A terminal too narrow for the one-line logo gets BENCH stacked over
-CRAFT; one too narrow for that gets no logo.
+otherwise the logo, the separators and the input box's edge (`tui.composer`) fall back to
+ASCII, so a legacy Windows code page still gets a readable banner. A terminal too narrow for
+the one-line logo gets BENCH stacked over CRAFT; one too narrow for that gets no logo.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("session", ("/sessions", "/new", "/integrations", "/plugins", "/themes", "/help", "/exit")),
 )
 
-_UNICODE_PROBE = BLOCK_LOGO[0] + BLOCK_LOGO[-1] + "·❯◆•│─"
+_UNICODE_PROBE = BLOCK_LOGO[0] + BLOCK_LOGO[-1] + "·❯◆•│─▌"  # also the input box's edge
 
 
 def unicode_ok(console: Console) -> bool:

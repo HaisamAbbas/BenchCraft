@@ -142,6 +142,13 @@ def test_themes_lists_switches_and_persists_through_the_prompt_loop(tmp_path: Pa
         assert "theme ember" in shown
         assert "/themes [NAME]" in shown  # listed by /help
         assert chat.theme.name == "ember"
+        # The input box on screen is the one that took the new theme: the prompt holds this
+        # same instance, and its band is now painted in the new theme's colour.
+        assert chat.composer.theme.name == "ember"
+        assert chat._session is not None
+        assert chat._session.input_processors == [chat.composer]
+        band = chat._prompt_style.get_attrs_for_style_str("class:composer-band")
+        assert band.bgcolor == chat.theme.composer_bg.lstrip("#")
         assert json.loads(theme_path.read_text(encoding="utf-8")) == {"theme": "ember"}
         # A look-only command is not a benchmark decision: only /help and /exit are recorded.
         assert len(ctl.store.turns(ctl.session_id)) == turns_before + 2

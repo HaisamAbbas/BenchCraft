@@ -2,8 +2,9 @@
 assistant turns, run progress and the engine, each independently cancellable.
 
 - Input stays editable at all times: the prompt is asynchronous (`prompt_toolkit`), and
-  output is printed above it (`patch_stdout`). Enter sends; Esc then Enter adds a line.
-  History is kept per workspace; slash commands complete with Tab.
+  output is printed above it (`patch_stdout`). It is drawn as a tinted box across the bottom
+  (`tui.composer`), so it is always clear where typing goes. Enter sends; Esc then Enter adds
+  a line. History is kept per workspace; slash commands complete with Tab.
 - The welcome screen and chrome follow a colour theme (`/themes`), saved per workspace.
 - Slash commands run at once, even while the assistant is replying, and never wait for a
   model (09-G2, 09-G3). Messages go to a turn worker, one at a time, in order.
@@ -49,7 +50,7 @@ from aibench.planning.planner import PlannerProvider
 from aibench.services.plugins import judge_from_provider
 from aibench.services.runs import RunError
 from aibench.sessions.controller import SessionController
-from aibench.tui import banner, render
+from aibench.tui import banner, composer, render
 from aibench.tui.commands import COMMANDS, CommandResult, Commands, JudgeSource, NewSession
 from aibench.tui.render import safe
 from aibench.tui.reply import ReplyFormatter, user_band
@@ -204,7 +205,10 @@ class ChatApp:
         self.input = input
         self.output = output
         self.theme_path = theme_path
-        self._set_theme(load_theme(theme_path))
+        self._session: PromptSession[str] | None = None
+        theme = load_theme(theme_path)
+        self.composer = composer.ComposerBand(theme, unicode=banner.unicode_ok(self.console))
+        self._set_theme(theme)
         self.progress_interval = progress_interval
         self.coalesce_seconds = coalesce_seconds
         self._queue: asyncio.Queue[str] = asyncio.Queue()
@@ -250,28 +254,35 @@ class ChatApp:
         self._labelled = False
 
     def _set_theme(self, theme: Theme) -> None:
+        """Put a theme on the running prompt: its styles, and the input box that is on screen."""
         self.theme = theme
         self._prompt_style = theme.prompt_style()
+        # The prompt holds this one box, so a `/themes` switch repaints the box that is open
+        # now rather than the one the next prompt would build.
+        self.composer.set_theme(theme)
+        if self._session is not None:
+            self._session.app.invalidate()
 
     def replying(self) -> bool:
         return self._turn is not None and not self._turn.done()
 
     def _prompt_message(self) -> StyleAndTextTuples:
-        """The input prompt, under a live `Working` line while the assistant replies."""
-        unicode = banner.unicode_ok(self.console)
-        prompt = ("class:prompt", "❯ " if unicode else "> ")
+        """The input box: its gutter, under a live `Working` line while the assistant replies."""
+        return [*self._working_line(), *self.composer.gutter]
+
+    def _working_line(self) -> StyleAndTextTuples:
+        """The spinning `Working (Ns)` line, or nothing at all while the assistant is idle."""
         if not self.replying():
-            return [prompt]
-        frames = _SPINNER if unicode else _ASCII_SPINNER
+            return []
+        frames = _SPINNER if self.composer.unicode else _ASCII_SPINNER
         frame = frames[int(time.monotonic() * 10) % len(frames)]
         elapsed = int(time.monotonic() - self._turn_started)
-        dot = "·" if unicode else "|"
+        dot = "·" if self.composer.unicode else "|"
         return [
             ("class:working.spinner", f"{frame} "),
             ("class:working", f"Working ({elapsed}s {dot} "),
             ("class:working.key", "esc"),
             ("class:working", " to interrupt)\n"),
-            prompt,
         ]
 
     def _echo(self, text: str) -> None:
@@ -524,9 +535,18 @@ class ChatApp:
             bottom_toolbar=self.toolbar,
             refresh_interval=self.progress_interval,
             erase_when_done=True,
+            # No rows held empty under the box for the completion menu, so the box sits on
+            # the status bar; the menu opens above the box when there is no room below.
+            reserve_space_for_menu=0,
             input=self.input,
             output=self.output,
+            # The input box: the band's gutter before every line of the input, and the tint
+            # and fill behind them. It keeps Enter as "send", so a newline is still Esc Enter.
+            prompt_continuation=self.composer.continuation,
+            input_processors=[self.composer],
         )
+        composer.pin_to_bottom(session, self.composer)
+        self._session = session
         # A real terminal needs patch_stdout so asynchronous Rich/progress output is
         # rendered above the editable prompt. Injected input/output pairs (used by PTY
         # adapters and the pipe-driven integration test) own their output implementation;
