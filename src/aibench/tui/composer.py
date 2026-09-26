@@ -37,6 +37,7 @@ PLACEHOLDER = "Ask BenchCraft to do anything"  # what the box says while it is e
 _LAST_COLUMN = 1  # the buffer's own trailing space; see the module docstring
 _FILLER_WEIGHT = 1_000  # takes nearly all spare rows, so the input's own window takes none
 _MENU_ROWS = 10  # rows kept for the completion menu while it is open
+_GAP_ROWS = 1  # always a blank row between the conversation (or the banner) and the box
 _CHROME_ROWS = 8  # the Working line, the box, the gap and the status bar, with a margin
 
 
@@ -83,10 +84,10 @@ def pin_to_bottom(session: PromptSession[str], box: ComposerBand | None = None) 
         # terminal makes prompt_toolkit blank the prompt ("Window too small").
         state = session.default_buffer.complete_state
         if not (state and state.completions):
-            return Dimension(min=0, weight=_FILLER_WEIGHT)
+            return Dimension(min=_GAP_ROWS, weight=_FILLER_WEIGHT)
         free = max(session.app.output.get_size().rows - _CHROME_ROWS, 0)
         rows = min(len(state.completions), _MENU_ROWS, free)
-        return Dimension(min=rows, weight=_FILLER_WEIGHT)
+        return Dimension(min=max(rows, _GAP_ROWS), weight=_FILLER_WEIGHT)
 
     filler = Window(height=filler_height, always_hide_cursor=True)
     inner.children.insert(0, ConditionalContainer(filler, filter=open_))

@@ -144,7 +144,8 @@ def test_the_box_is_pinned_above_the_status_bar_and_the_menu_opens_above_it() ->
         assert isinstance(filler, ConditionalContainer)
         assert filler.filter() is True  # shown while the prompt is open
         dimension = filler.content.preferred_height(80, 40)
-        assert dimension.weight > 1 and dimension.min == 0
+        assert dimension.weight > 1
+        assert dimension.min == 1  # a blank row always separates the box from the text above
         assert floats.floats  # the completion menus float over the filler's rows
 
 
