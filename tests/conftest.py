@@ -68,3 +68,15 @@ def pytest_configure(config: pytest.Config) -> None:
         return  # no writable location found anywhere; leave pytest's own default in place
     if _probe_writable(system_candidate):
         config.option.basetemp = str(system_candidate)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_user_settings(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every test, and every process it starts, sees its own per-user settings with
+    first-run setup already skipped: no real ~/.benchcraft, no setup questions in a chat.
+    Tests of setup itself point BENCHCRAFT_HOME elsewhere."""
+    home = tmp_path_factory.mktemp("benchcraft-home")
+    (home / "config.json").write_text('{"provider": null}\n', encoding="utf-8")
+    monkeypatch.setenv("BENCHCRAFT_HOME", str(home))

@@ -19,7 +19,7 @@ def test_package_imports() -> None:
 def test_cli_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "aibench" in result.stdout.lower() or "conversational cli" in result.stdout.lower()
+    assert "benchcraft" in result.stdout.lower()
 
 
 def test_cli_version() -> None:
@@ -27,4 +27,5 @@ def test_cli_version() -> None:
     assert result.exit_code == 0
     import aibench
 
-    assert result.stdout.strip() == f"aibench {aibench.__version__}"
+    # Named after the command typed (`benchcraft` or `aibench`); the test runner is neither.
+    assert result.stdout.strip() == f"benchcraft {aibench.__version__}"

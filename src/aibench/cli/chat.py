@@ -105,16 +105,41 @@ def provider_config(config_path: Path) -> OpenAICompatibleConfig:
 
 
 def open_provider(
-    config_path: Path, policy_path: Path | None
+    source: Path | OpenAICompatibleConfig,
+    policy_path: Path | None,
+    *,
+    user_approved: bool = False,
 ) -> tuple[PlannerProvider | None, list[str]]:
-    """The assistant model, or (None, reasons) when the policy does not permit it."""
-    from aibench.planning.openai_provider import OpenAICompatibleProvider, provider_denials
+    """The assistant model, or (None, reasons) when the policy does not permit it.
 
-    try:
-        config = provider_config(config_path)
-    except ConfigError as exc:
-        return None, [str(exc)]
-    denials = provider_denials(config, load_policy(policy_path))
+    `user_approved`: the model the user chose in `benchcraft setup`. Choosing it approved
+    its endpoint and key reference, so a project without a policy file uses it; a project
+    policy, when there is one, still decides."""
+    from aibench.planning.openai_provider import (
+        OpenAICompatibleConfig,
+        OpenAICompatibleProvider,
+        provider_denials,
+    )
+
+    if isinstance(source, OpenAICompatibleConfig):
+        config = source
+    else:
+        try:
+            config = provider_config(source)
+        except ConfigError as exc:
+            return None, [str(exc)]
+    policy = load_policy(policy_path)
+    if user_approved and policy_path is None:
+        policy = policy.model_copy(
+            update={
+                "allowed_planner_origins": (*policy.allowed_planner_origins, config.base_url),
+                "allowed_secret_refs": (
+                    *policy.allowed_secret_refs,
+                    *([config.api_key] if config.api_key else []),
+                ),
+            }
+        )
+    denials = provider_denials(config, policy)
     if denials:
         return None, denials
     try:
@@ -189,6 +214,7 @@ def chat(
         settings = project_settings(root, app, dataset, policy)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
+    chosen = _assistant_model(provider_config, interactive=send is None)
     workspace = Workspace.at(root)
     storage = Storage(Database.open_workspace(workspace))
     artifacts = ArtifactStore(workspace.artifacts_dir)
@@ -209,8 +235,10 @@ def chat(
             interactive=send is None,
             dataset_notices=dataset_notices,
         )
-        if provider_config is not None:
-            provider, denials = open_provider(provider_config, settings["policy"])
+        if chosen is not None:
+            provider, denials = open_provider(
+                chosen, settings["policy"], user_approved=provider_config is None
+            )
             for denial in denials:
                 err_console.print(f"[yellow]assistant model disabled:[/yellow] {safe(denial)}")
 
@@ -251,6 +279,20 @@ def chat(
             storage.db.close()
 
 
+def _assistant_model(
+    provider_config: Path | None, *, interactive: bool
+) -> Path | OpenAICompatibleConfig | None:
+    """`--provider-config` when given; else the model saved by `benchcraft setup`, asking
+    for one on the first interactive start."""
+    from aibench import userconfig
+
+    if provider_config is not None:
+        return provider_config
+    if interactive and not userconfig.decided():
+        return userconfig.run_setup(lambda line: console.print(safe(line)))
+    return userconfig.saved_provider()
+
+
 def _create(
     storage: Storage,
     artifacts: ArtifactStore,
@@ -266,9 +308,12 @@ def _create(
     application, dataset = settings["application"], settings["dataset"]
     if application is None:
         raise _fail(
-            "a new session needs an application config: pass --app, or set "
-            "application_target in "
-            f"{root / 'aibench.json'}"
+            f"no application is connected in {root} yet. Connect the app to evaluate "
+            "(it is not called during setup):\n"
+            "  benchcraft connect http --url http://localhost:8000/chat --dataset cases.jsonl "
+            "--input-path /question --output-path /answer --effects none\n"
+            "then run `benchcraft` again. To try BenchCraft on a sample app first: "
+            "benchcraft init demo; cd demo; benchcraft"
         )
     if dataset is None:
         dataset = _discover_session_dataset(

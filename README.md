@@ -4,6 +4,39 @@ Conversational CLI for AI application benchmarking. See `docs/spec/implementatio
 for the authoritative specification and `docs/engineering/implementation-contract.md` for
 the engineering process this repository follows.
 
+## Install
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/HaisamAbbas/BenchCraft/main/install.ps1 | iex
+```
+
+macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HaisamAbbas/BenchCraft/main/install.sh | sh
+```
+
+The installer adds [uv](https://astral.sh/uv) if it is missing (it brings its own Python),
+downloads the newest release's wheel, checks it against the release's `SHA256SUMS` and
+installs `benchcraft` as an isolated tool: nothing is added to your projects. Run it again
+to update; `uv tool uninstall aibench` removes it.
+
+Then, in a new terminal:
+
+```powershell
+cd my-app-repo
+benchcraft setup        # once: the assistant's model and key (the key stays in an env var)
+benchcraft connect http --url http://localhost:8000/chat --dataset cases.jsonl `
+  --input-path /question --output-path /answer --effects none
+benchcraft              # say what to check; /plan, /run, /report
+```
+
+For a RAG app, add `--context-path /sources` (and `--context-text-path /text` when each
+source is an object) so metrics such as faithfulness see the documents it retrieved.
+`/plugins install deepeval` in the chat adds DeepEval's 37 metrics from the same release.
+
 ## Quickstart
 
 ```bash
