@@ -39,13 +39,13 @@ def test_setup_saves_the_model_and_the_key_reference_never_the_key(tmp_path: Pat
     assert config is not None
     assert (config.base_url, config.model, config.api_key) == (
         "https://api.z.ai/api/paas/v4",
-        "glm-4.6",
+        "glm-4.7-flash",
         "env:ZAI_API_KEY",
     )
     assert saved == {"ZAI_API_KEY": "zai-secret-key"}
     stored = userconfig.config_file().read_text(encoding="utf-8")
     assert "zai-secret-key" not in stored
-    assert json.loads(stored)["provider"]["model"] == "glm-4.6"
+    assert json.loads(stored)["provider"]["model"] == "glm-4.7-flash"
     assert userconfig.decided() and userconfig.saved_provider() == config
 
 
