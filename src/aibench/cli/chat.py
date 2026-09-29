@@ -31,6 +31,7 @@ from rich.console import Console
 
 from aibench.config.resolve import load_mapping_file, resolve_config
 from aibench.core.errors import AibenchError, ConfigError
+from aibench.core.models import deep_unfreeze
 from aibench.engine.compile import load_policy
 from aibench.inspection.candidates import (
     RepositoryCandidateInventory,
@@ -450,8 +451,11 @@ def _session(
         session = store.get_session(resume)
         if session is None or Path(session.project_root) != root:
             raise _fail(f"no session {resume!r} in project {root}")
-        return SessionController(
-            resume, storage=storage, artifacts=artifacts, workspace_root=workspace.root
+        return _with_project_plugins(
+            SessionController(
+                resume, storage=storage, artifacts=artifacts, workspace_root=workspace.root
+            ),
+            root,
         )
     existing = [s for s in store.list_sessions() if Path(s.project_root) == root]
     if new or not existing:
@@ -487,9 +491,42 @@ def _session(
             interactive=interactive,
             dataset_notices=dataset_notices,
         )
-    return SessionController(
-        chosen, storage=storage, artifacts=artifacts, workspace_root=workspace.root
+    return _with_project_plugins(
+        SessionController(
+            chosen, storage=storage, artifacts=artifacts, workspace_root=workspace.root
+        ),
+        root,
     )
+
+
+def _with_project_plugins(controller: SessionController, root: Path) -> SessionController:
+    """A session keeps the plugin environments it was created with, so one opened before
+    `plugins install` would never see the plugin. Reopening it loads the project's current
+    ones (as the next draft revision; the session's own are never dropped, and a run in
+    progress is left alone)."""
+    try:
+        environments, defaults = session_plugins(root)
+    except AibenchError:
+        return controller  # a broken config is reported where the session needs it
+    if not environments or controller.active_run() is not None:
+        return controller
+    session = controller.session
+    has = {json.dumps(deep_unfreeze(e), sort_keys=True) for e in session.plugin_environments}
+    wanted = [json.dumps(e.model_dump(mode="json"), sort_keys=True) for e in environments]
+    if all(w in has for w in wanted) and deep_unfreeze(session.evaluator_defaults) == defaults:
+        return controller
+    result = controller.use_plugin_environments(environments, defaults)
+    if result.status == "applied":
+        err_console.print(
+            f"[dim]loaded this project's plugins into the session (draft revision "
+            f"{result.revision})[/dim]"
+        )
+    else:
+        err_console.print(
+            "[yellow]this project's plugins could not be loaded into the session: "
+            f"{safe('; '.join(result.problems) or result.status)}[/yellow]"
+        )
+    return controller
 
 
 async def _send(

@@ -687,6 +687,22 @@ class SessionController:
         except AibenchError as exc:
             problems = exc.problems if isinstance(exc, PatchRejected) else [str(exc)]
             return PatchResult("rejected", session.revision, problems=problems)
+        # Settings for a metric that is not in this session's catalog would be saved and
+        # then ignored, and the change reported as applied: say so instead.
+        available = {option.evaluator_id for option in draft.inputs.catalog}
+        unavailable = sorted(set(patch.params) - available)
+        if unavailable:
+            return PatchResult(
+                "rejected",
+                session.revision,
+                problems=[
+                    f"{evaluator_id} is not available in this session, so its settings were "
+                    "not saved; /plugins shows which optional plugins this project has "
+                    "installed (a metric from a plugin needs it installed and allowed by the "
+                    "policy)"
+                    for evaluator_id in unavailable
+                ],
+            )
         decision = DecisionRecord(
             decision_id=f"{self.session_id}:d{revision}",
             session_id=self.session_id,
