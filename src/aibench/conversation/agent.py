@@ -231,10 +231,7 @@ def patch_problems(
         return ["the quoted request is not in the user's message"]
     if offer and offer.rstrip().endswith("?") and _AFFIRMATION.match(message.strip()):
         return ungrounded(patch, offer)
-    # Negations inside the text being copied into the plan (an objective such as "never
-    # invent fines", G-Eval criteria such as "says it is not available") describe what to
-    # check; they are not the user holding back the change.
-    if _refusal_from_quote_onward(message, quote, ignore=_copied_text(patch)):
+    if _reversed_from_quote_onward(message, quote, copied=_copied_text(patch)):
         return ["the user's words hold back or refuse this change"]
     return ungrounded(patch, message)
 
@@ -289,22 +286,58 @@ def _sentence_with(message: str, quote: str) -> str:
     return message
 
 
-def _refusal_from_quote_onward(message: str, quote: str, *, ignore: tuple[str, ...] = ()) -> bool:
+def _refusal_from_quote_onward(message: str, quote: str) -> bool:
     """A later refusal in the same message overrides an earlier request or correction.
-    Text in `ignore` (the content being added, such as an objective) is not searched."""
-
-    def without_ignored(sentence: str) -> str:
-        text = _norm(sentence)
-        for phrase in ignore:
-            if len(_norm(phrase)) >= 2:
-                text = text.replace(_norm(phrase), " ")
-        return text
-
+    Any negation counts: this guards actions that run or spend, where asking again is
+    cheaper than acting without consent."""
     sentences = re.split(r"(?<=[.!?;\n])\s+", message)
     for index, sentence in enumerate(sentences):
         if _norm(quote) in _norm(sentence):
-            return any(_NEGATIONS.search(without_ignored(later)) for later in sentences[index:])
+            return any(_NEGATIONS.search(later) for later in sentences[index:])
     return True  # a quote that does not fit one sentence is ambiguous; fail closed
+
+
+# Ways of taking a request back: "don't add it", "not yet", "hold off", "never mind". A
+# plan change only creates a new draft revision (nothing runs, nothing is spent, and it can
+# be undone), so it is refused on these, not on any "not" in the message: objectives and
+# criteria are full of them ("never invent fines", "says it is not available").
+_ACTION = r"(?:add|change|apply|proceed|update|edit|modify|touch|select)"
+# Modal wording ("should not add facts") is often an objective or criterion; it only
+# counts when aimed at the request itself ("should not add it", "...yet").
+_AIMED = (
+    r"(?=\s*(?:it|that|this|those|them|anything|any|the\s+(?:objective|check|metric|change|plan"
+    r"|draft)|yet|now|[.!,;]|$))"
+)
+_REVERSAL = re.compile(
+    r"\b(?:hold\s+off|wait|later|instead|never\s?mind|forget\s+(?:it|that|this)"
+    r"|scrap\s+(?:it|that|this)|cancel|undo|revert)\b"
+    r"|\bnot\s+(?:yet|now|today|this\s+time)\b"
+    # Commands to the assistant: "don't change the sample", "stop editing", "I don't want that".
+    rf"|\b(?:don'?t|do\s+not|stop|no\s+need\s+to|rather\s+not)\b(?:\s+\w+){{0,2}}?\s+"
+    rf"(?:{_ACTION}|want|go\s+ahead|do\s+(?:it|that|this))\b"
+    rf"|\b(?:shouldn'?t|should\s+not|won'?t|must\s+not)\s+{_ACTION}{_AIMED}"
+    rf"|\b(?:let'?s|lets|let\s+us|please|just)\s+not\s+(?:{_ACTION}{_AIMED}|do\b)"
+    r"|\b(?:don'?t|do\s+not)\s*(?:it|that|this)?\s*[.!]*\s*$"
+)
+
+
+def _reversed_from_quote_onward(message: str, quote: str, *, copied: tuple[str, ...] = ()) -> bool:
+    """Whether the quoted sentence or a later one takes the request back. Text the change
+    copies into the plan (`copied`) is what to check, not the user's own instructions."""
+
+    text = _norm(message).replace("’", "'")
+    start = text.find(_norm(quote).replace("’", "'"))
+    if start < 0:
+        return True  # the quote is not the user's words
+    # From the start of the sentence where the quoted request begins to the end of the
+    # message: the quote may span several sentences (the whole message), a "don't" may sit
+    # just before it, and a later sentence may take it back.
+    boundaries = list(re.finditer(r"[.!?;]\s", text[:start]))
+    text = text[boundaries[-1].end() :] if boundaries else text
+    for phrase in copied:
+        if len(_norm(phrase)) >= 2:
+            text = text.replace(_norm(phrase), " ")
+    return any(_REVERSAL.search(part) for part in re.split(r"(?<=[.!?;\n])\s+", text))
 
 
 def asks_for(kind: ActionKind, sentence: str) -> bool:

@@ -43,10 +43,13 @@ def template_proposal(
     params: dict[str, dict[str, object]] | None = None,
     rules: dict[str, DecisionRule] | None = None,
     concepts: dict[str, tuple[str, ...]] | None = None,
+    configured: frozenset[str] = frozenset(),
 ) -> DraftProposal:
     """`params` and `rules` are what the user supplied, by evaluator ID (e.g. a JSON Schema
     or a threshold); `concepts` maps objective text to concepts the user chose for it.
-    Nothing else is filled in."""
+    `configured` are the evaluators the user set parameters for themselves (`params` also
+    holds project defaults): each belongs in the plan even when no objective's wording
+    names it, e.g. a G-Eval check whose criteria the user wrote. Nothing else is filled in."""
     supplied = params or {}
     chosen = concepts or {}
     user_rules = rules or {}
@@ -94,6 +97,17 @@ def template_proposal(
             _plan_concept(
                 objective, concept, catalog, supplied, user_rules, metrics, gaps, questions
             )
+
+    if stated:
+        for evaluator_id in sorted(configured):
+            option = next((o for o in catalog if o.evaluator_id == evaluator_id), None)
+            if option is None or option.metric in metrics:
+                continue
+            named = next((c for c in option.concepts if c in CONCEPTS), None)
+            if named is not None:  # attributed to the objective stated last
+                _plan_concept(
+                    stated[-1], named, [option], supplied, user_rules, metrics, gaps, questions
+                )
 
     unique = list({(q.prompt, q.required_fields, q.blocking_scope): q for q in questions}.values())
     return DraftProposal(
