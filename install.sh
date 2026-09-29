@@ -28,9 +28,13 @@ SOURCE="${BENCHCRAFT_RELEASES:-}"
 if [ -z "$SOURCE" ]; then
     TAG="${BENCHCRAFT_VERSION:-}"
     if [ -z "$TAG" ]; then
-        # The newest release, pre-releases included (releases/latest skips those).
-        TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" \
-            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+        # The most recently published release, pre-releases included (releases/latest skips
+        # those). Not the first one listed: the list is not in publish order (rc10 came
+        # below rc5), so each tag is paired with its publish time and the newest is taken.
+        TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=100" \
+            | grep -o '"tag_name": *"[^"]*"\|"published_at": *"[^"]*"' \
+            | sed 's/.*: *"\([^"]*\)"/\1/' | paste -d ' ' - - | sort -k2 -r \
+            | head -n 1 | cut -d ' ' -f 1)
         [ -n "$TAG" ] || fail "no BenchCraft release found at github.com/$REPO"
     fi
     SOURCE="https://github.com/$REPO/releases/download/$TAG"

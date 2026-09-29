@@ -31,8 +31,12 @@ function Install-BenchCraft {
     if (-not $Source) {
         $Tag = $env:BENCHCRAFT_VERSION
         if (-not $Tag) {
-            # The newest release, pre-releases included (releases/latest skips those).
-            $Tag = (Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=1")[0].tag_name
+            # The most recently published release, pre-releases included (releases/latest
+            # skips those). Not the first one listed: the list is not in publish order (rc10
+            # came below rc5).
+            $Listed = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=100"
+            $Tag = ($Listed | Where-Object { -not $_.draft } |
+                Sort-Object { [datetime]$_.published_at } -Descending | Select-Object -First 1).tag_name
             if (-not $Tag) { throw "no BenchCraft release found at github.com/$Repo" }
         }
         $Source = "https://github.com/$Repo/releases/download/$Tag"
