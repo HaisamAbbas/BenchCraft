@@ -5,6 +5,17 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc7 — choosing a session
+
+Found when an empty session was opened by mistake among six that all looked alike.
+
+- The session chooser lists sessions newest first with what each checks (its objectives)
+  and whether it has run, instead of an ID and a revision number.
+- Sessions with no objective and no run are hidden from the chooser and reused: when none
+  is worth resuming the newest empty one opens without a prompt, and choosing "new session"
+  reuses one, so abandoned sessions no longer pile up. `--new` (and `--objective`) still
+  create a session; `--send` needs exactly one session with work in it, as before.
+
 ## 0.1.0rc6 — sessions and plugins
 
 Found on a real project: a session created before `plugins install deepeval` was resumed
