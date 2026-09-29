@@ -89,6 +89,8 @@ def test_http_setup_creates_a_bounded_no_repository_project_without_network_call
     assert policy["allowed_egress_origins"] == ["https://api.example.test:443/"]
     assert policy["allowed_secret_refs"] == ["env:SUPPORT_API_TOKEN"]
     assert policy["ceilings"]["max_application_calls"] == 7
+    # Judged metrics make several calls per case: the judge ceiling is not the app's.
+    assert policy["ceilings"]["max_evaluator_calls"] == 7 * 20
     assert "SUPPORT_API_TOKEN" not in json.dumps(report)
 
 

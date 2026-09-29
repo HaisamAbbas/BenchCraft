@@ -80,6 +80,7 @@ _TRANSIENT = (
     httpx.ReadError,
 )
 _ATTEMPTS = 5
+_DEFAULT_OUTPUT_TOKENS = 8000
 _MAX_WAIT = 30.0
 _RETRY_BUDGET_SECONDS = 200.0
 
@@ -101,7 +102,8 @@ class _OpenAICompatible:
         self._url = config["base_url"].rstrip("/") + "/chat/completions"
         self._key = key
         self._timeout = float(config.get("timeout_seconds", 120))
-        self._max_tokens = int(config.get("max_output_tokens", 2000))
+        # A reasoning model spends part of this on thinking before it writes the JSON.
+        self._max_tokens = int(config.get("max_output_tokens", _DEFAULT_OUTPUT_TOKENS))
         self._json_mode = bool(config.get("json_mode", True))
         self._retry_wait = float(config.get("retry_wait_seconds", 2))
         self._retry_until = time.monotonic() + _RETRY_BUDGET_SECONDS
@@ -202,7 +204,13 @@ class _OpenAICompatible:
         for ours, theirs in (("input", "prompt_tokens"), ("output", "completion_tokens")):
             if isinstance(usage.get(theirs), int):
                 self.tokens[ours] = self.tokens.get(ours, 0) + usage[theirs]
-        content = payload["choices"][0]["message"].get("content") or ""
+        choice = payload["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise RuntimeError(
+                f"judge output was cut off at {self._max_tokens} tokens (a reasoning model "
+                "spends them thinking before it answers): raise the judge's max_output_tokens"
+            )
+        content = choice["message"].get("content") or ""
         text = _FENCE.sub("", content.strip())
         if schema is None:
             return text

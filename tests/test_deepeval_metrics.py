@@ -105,7 +105,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc1" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc2" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -263,9 +263,19 @@ def test_g_eval_reads_only_the_fields_the_plan_names(
 class _JudgeServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, status: int, *, rate_limited_first: int = 0, forever: bool = False) -> None:
+    def __init__(
+        self,
+        status: int,
+        *,
+        rate_limited_first: int = 0,
+        forever: bool = False,
+        thinking_tokens: int = 0,
+    ) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
         self.status = status
+        # A reasoning model: it needs this many tokens for thinking before it writes the JSON,
+        # and a request that allows fewer gets an empty, cut-off reply (finish_reason "length").
+        self.thinking_tokens = thinking_tokens
         # The first `rate_limited_first` requests get a 429 (or every one, with `forever`).
         self.rate_limited_first = rate_limited_first
         self.forever = forever
@@ -302,9 +312,18 @@ class _JudgeHandler(BaseHTTPRequestHandler):
             }
             content = "```json\n" + json.dumps(answer) + "\n```"
             payload = {
-                "choices": [{"message": {"role": "assistant", "content": content}}],
+                "choices": [
+                    {"message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+                ],
                 "usage": {"prompt_tokens": 100, "completion_tokens": 20},
             }
+            if body["max_tokens"] < self.server.thinking_tokens + 20:
+                payload = {
+                    "choices": [
+                        {"message": {"role": "assistant", "content": ""}, "finish_reason": "length"}
+                    ],
+                    "usage": {"prompt_tokens": 100, "completion_tokens": body["max_tokens"]},
+                }
         data = json.dumps(payload).encode()
         self.send_response(429 if limited else self.server.status)
         if limited:
@@ -328,7 +347,11 @@ def _judge_server(status: int = 200, **limits: Any) -> Iterator[_JudgeServer]:
 
 
 def _openai_compatible_score(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, **limits: Any
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    judge_extra: dict[str, Any] | None = None,
+    **limits: Any,
 ) -> tuple[Any, _JudgeServer, Seeded]:
     monkeypatch.setenv("AIBENCH_TEST_JUDGE_KEY", "sk-test-judge-secret-123456")
     registry = EvaluatorRegistry.with_native()
@@ -347,6 +370,7 @@ def _openai_compatible_score(
                     "model": "glm-test",
                     "api_key_env": "JUDGE_KEY",
                     "retry_wait_seconds": 0,  # tests do not wait between attempts
+                    **(judge_extra or {}),
                 }
             },
         }
@@ -408,6 +432,29 @@ def test_openai_compatible_judge_gives_up_after_its_attempts(
     assert result.status is ExecutionStatus.ERROR
     assert "judge HTTP 429" in (result.reason or "")
     assert len(server.requests) == 5  # one call, five attempts, then the error
+
+
+def test_openai_compatible_judge_leaves_room_for_a_reasoning_model_to_think(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """glm-4.7-flashx spent its whole 2000-token allowance thinking and returned nothing, so
+    faithfulness and contextual precision failed on every case. The default allowance leaves
+    room, and a reply cut off by the allowance says so instead of a JSON decode error."""
+    result, server, _ = _openai_compatible_score(tmp_path, monkeypatch, 200, thinking_tokens=5000)
+    assert result.status is ExecutionStatus.OK and result.value.value == 1.0
+    assert server.requests[0]["body"]["max_tokens"] >= 8000
+
+    result, _, _ = _openai_compatible_score(
+        tmp_path / "small",
+        monkeypatch,
+        200,
+        {"max_output_tokens": 2000},
+        thinking_tokens=5000,
+    )
+    assert result.status is ExecutionStatus.ERROR
+    assert "cut off at 2000 tokens" in (result.reason or "")
+    assert "max_output_tokens" in (result.reason or "")
+    assert "JSONDecodeError" not in (result.reason or "")
 
 
 def test_reference_context_and_retrieval_are_never_swapped(
