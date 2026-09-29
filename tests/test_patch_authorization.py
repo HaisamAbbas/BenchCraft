@@ -284,3 +284,86 @@ def test_a_metric_the_user_configured_is_planned_even_if_the_objective_does_not_
         assert not any(n.startswith("deepeval.") and n != "deepeval.g_eval" for n in planned)
     finally:
         ctl.storage.db.close()
+
+
+def test_settings_for_a_metric_this_session_does_not_have_are_reported_not_saved(
+    tmp_path: Path,
+) -> None:
+    """A session without the plugin saved G-Eval settings and reported the change applied,
+    although no such metric existed there. The assistant now learns it is unavailable."""
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"}, objectives=("catch wrong answers",))
+    try:
+        before = ctl.session.revision
+        result = ctl.apply_patch(
+            PlanPatch(
+                add_objectives=("traffic correctness",),
+                params={"deepeval.g_eval": {"name": "traffic correctness", "criteria": CRITERIA}},
+            ),
+            expected_revision=before,
+            source="assistant",
+        )
+        assert result.status == "rejected"
+        assert "deepeval.g_eval is not available in this session" in result.problems[0]
+        assert "/plugins" in result.problems[0]
+        assert ctl.session.revision == before  # nothing was saved
+    finally:
+        ctl.storage.db.close()
+
+
+@requires_plugin_env
+def test_reopening_an_older_session_loads_the_plugins_installed_since(tmp_path: Path) -> None:
+    """The reported case: a session created before `plugins install deepeval` was reopened
+    afterwards, and the G-Eval change was accepted but planned nothing. Reopening now loads
+    the project's plugins; the G-Eval change then plans a G-Eval metric."""
+    from aibench.cli.chat import _with_project_plugins
+
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(
+        {"a": "answer"},
+        objectives=("catch wrong answers",),
+        policy={
+            "data_roots": [str(tmp_path)],
+            "allowed_evaluators": ["native.*", "deepeval.*"],
+            "allowed_plugin_environments": [str(PLUGIN_ENV)],
+            "allow_model_evaluators": True,
+        },
+    )
+    try:
+        assert not ctl.session.plugin_environments  # created before the install
+        judge = {"kind": "python_factory", "factory": "aibench_schema_judges:agreeing_judge"}
+        (h.root / "aibench.json").write_text(
+            json.dumps(
+                {
+                    "plugin_environments": [
+                        {
+                            "name": "deepeval",
+                            "python": str(PLUGIN_ENV),
+                            "default_params": {"deepeval.*": {"judge": judge}},
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        before = ctl.session.revision
+        assert _with_project_plugins(ctl, h.root) is ctl
+        assert ctl.session.revision == before + 1
+        assert len(ctl.session.plugin_environments) == 1
+
+        again = ctl.session.revision
+        _with_project_plugins(ctl, h.root)  # already loaded: nothing changes
+        assert ctl.session.revision == again
+
+        result = ctl.apply_patch(
+            PlanPatch(
+                add_objectives=("traffic correctness",),
+                params={"deepeval.g_eval": {"name": "traffic correctness", "criteria": CRITERIA}},
+            ),
+            expected_revision=ctl.session.revision,
+            source="assistant",
+        )
+        assert result.status == "applied", result.problems
+        assert _planned_g_eval(ctl)["criteria"] == CRITERIA
+    finally:
+        ctl.storage.db.close()

@@ -5,6 +5,20 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc6 — sessions and plugins
+
+Found on a real project: a session created before `plugins install deepeval` was resumed
+afterwards, and a G-Eval change was "applied" but planned nothing, while the assistant said
+it had added a G-Eval metric.
+
+- Reopening a session loads the project's current plugin environments and their defaults
+  (as the next draft revision; a session's own plugins are kept and a run in progress is
+  left alone). A session keeps the plugins it was created with, so it never saw plugins
+  installed later.
+- A plan change with settings for a metric the session does not have is rejected with a
+  reason ("deepeval.g_eval is not available in this session ... /plugins") instead of being
+  saved and reported as applied, so the assistant cannot claim a metric that is not there.
+
 ## 0.1.0rc5 — plan changes with a real model
 
 Found by running the assistant against a real model (`glm-4.5-flash`) on a G-Eval request.
