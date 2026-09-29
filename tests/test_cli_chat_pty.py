@@ -130,8 +130,8 @@ def test_themes_switch_is_saved_and_shown_on_the_next_launch(tmp_path: Path) -> 
 
     reopened = _Terminal(project)
     try:
-        reopened.expect("Resume which session?", timeout=STARTUP_SECONDS)
-        reopened.send("1")
+        # The one earlier session is empty (no objective, no run): nothing to choose, so it
+        # is reused without a prompt.
         reopened.expect("Type /help for commands", timeout=STARTUP_SECONDS)
         assert reopened.shows("theme ocean")
         reopened.exit()

@@ -13,9 +13,13 @@ was opened (10-G4).
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from aibench.core.models import deep_unfreeze
+from aibench.core.sessions import BenchmarkSession
 from aibench.sessions.store import SessionStore
 
 MAX_SUMMARY_CHARS = 4_000
@@ -65,6 +69,41 @@ def session_summary(store: SessionStore, session_id: str, *, earlier_turns: int)
         "runs": list(dict.fromkeys(a.run_id for a in store.list_actions(session_id) if a.run_id)),
     }
     return _bounded(summary)
+
+
+@dataclass(frozen=True)
+class SessionLine:
+    """What identifies a session to the person choosing one: when it was last used, what it
+    is checking and whether it has run."""
+
+    session_id: str
+    revision: int
+    updated_at: datetime
+    objectives: tuple[str, ...]
+    runs: int
+
+    @property
+    def empty(self) -> bool:
+        """No objective and no run: opened and abandoned, nothing worth resuming."""
+        return not self.objectives and self.runs == 0
+
+
+def describe_sessions(
+    store: SessionStore, sessions: Sequence[BenchmarkSession]
+) -> list[SessionLine]:
+    lines = []
+    for session in sessions:
+        decision = store.get_decision(session.decision_id) if session.decision_id else None
+        lines.append(
+            SessionLine(
+                session_id=session.session_id,
+                revision=session.revision,
+                updated_at=session.updated_at,
+                objectives=tuple(decision.choices.objectives) if decision else (),
+                runs=len({a.run_id for a in store.list_actions(session.session_id) if a.run_id}),
+            )
+        )
+    return lines
 
 
 def _bounded(summary: dict[str, Any]) -> dict[str, Any]:

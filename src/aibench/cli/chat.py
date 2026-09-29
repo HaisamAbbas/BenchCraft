@@ -22,6 +22,7 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +45,7 @@ from aibench.security.redaction import sanitize_value
 from aibench.services.plugins import session_plugins
 from aibench.sessions.controller import SessionController
 from aibench.sessions.store import SessionStore
+from aibench.sessions.summary import SessionLine, describe_sessions
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
@@ -149,25 +151,56 @@ def open_provider(
         return None, [str(exc)]
 
 
-def _choose(sessions: list[Any]) -> str | None:
-    """Interactive chooser: a session ID, or None for a new session."""
-    console.print("Sessions in this project:")
-    for index, s in enumerate(sessions, start=1):
-        run = f", run {s.active_run_id}" if s.active_run_id else ""
-        console.print(
-            safe(
-                f"  [{index}] {s.session_id} revision {s.revision}{run}, "
-                f"{s.updated_at:%Y-%m-%d %H:%M}"
-            )
-        )
+def _describe(line: SessionLine) -> str:
+    what = "; ".join(o if len(o) <= 60 else o[:57] + "..." for o in line.objectives[:2])
+    if len(line.objectives) > 2:
+        what += f" (+{len(line.objectives) - 2} more)"
+    ran = f"{line.runs} run(s)" if line.runs else "not run yet"
+    return f"{line.session_id} | {line.updated_at:%Y-%m-%d %H:%M} | {what} | {ran}"
+
+
+def _choose(sessions: list[SessionLine], hidden_empty: int = 0) -> str | None:
+    """Interactive chooser over sessions worth resuming, newest first: a session ID, or
+    None for a new one."""
+    console.print("Sessions in this project (newest first):")
+    for index, line in enumerate(sessions, start=1):
+        console.print(safe(f"  [{index}] {_describe(line)}"))
     console.print(safe("  [n] new session"))
+    if hidden_empty:
+        console.print(
+            safe(f"  ({hidden_empty} empty session(s) not listed; a new session reuses one)")
+        )
     while True:
         answer = input("Resume which session? ").strip().lower()
         if answer in ("n", "new"):
             return None
         if answer.isdigit() and 1 <= int(answer) <= len(sessions):
-            return str(sessions[int(answer) - 1].session_id)
+            return sessions[int(answer) - 1].session_id
         console.print("Type a number from the list, or n.")
+
+
+def _pick(
+    lines: list[SessionLine],
+    *,
+    send: bool,
+    chooser: Callable[[list[SessionLine], int], str | None],
+) -> tuple[str | None, str | None]:
+    """Which existing session to open: (session_id, None), or (None, error). `lines` are
+    newest first. Sessions with an objective or a run are worth resuming; empty ones
+    (opened and abandoned) are never listed and are reused when nothing else is wanted, so
+    they do not pile up. None with no error means "start a new one"."""
+    worth = [line for line in lines if not line.empty]
+    empties = [line for line in lines if line.empty]
+    if send:
+        if len(worth) > 1:
+            return None, (
+                f"{len(worth)} sessions in this project have work in them; choose one with "
+                "--resume SESSION_ID or start one with --new (aibench sessions list)"
+            )
+        return (worth or empties)[0].session_id, None
+    if not worth:
+        return empties[0].session_id, None
+    return chooser(worth, len(empties)), None
 
 
 _PROJECT = typer.Option(None, "--project", help="Project directory (default: cwd).")
@@ -458,6 +491,7 @@ def _session(
             root,
         )
     existing = [s for s in store.list_sessions() if Path(s.project_root) == root]
+    lines = describe_sessions(store, existing)
     if new or not existing:
         return _create(
             storage,
@@ -470,15 +504,13 @@ def _session(
             interactive=interactive,
             dataset_notices=dataset_notices,
         )
-    if send is not None:
-        if len(existing) > 1:
-            raise _fail(
-                f"{len(existing)} sessions exist in this project; choose one with --resume "
-                "SESSION_ID or start one with --new (aibench sessions list)"
-            )
-        chosen: str | None = existing[0].session_id
-    else:
-        chosen = _choose(existing)
+    chosen, problem = _pick(lines, send=send is not None, chooser=_choose)
+    if problem:
+        raise _fail(problem)
+    if chosen is None:  # a new session: an empty one is reused unless objectives were given
+        empty = next((line for line in lines if line.empty), None)
+        if empty is not None and not objectives:
+            chosen = empty.session_id
     if chosen is None:
         return _create(
             storage,
