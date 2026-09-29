@@ -43,7 +43,7 @@ from aibench.inspection.candidates import (
 from aibench.planning.planner import PlannerProvider
 from aibench.security.redaction import sanitize_value
 from aibench.services.plugins import session_plugins
-from aibench.sessions.controller import SessionController
+from aibench.sessions.controller import PatchResult, SessionController
 from aibench.sessions.store import SessionStore
 from aibench.sessions.summary import SessionLine, describe_sessions
 from aibench.storage.artifacts import ArtifactStore
@@ -532,32 +532,38 @@ def _session(
 
 
 def _with_project_plugins(controller: SessionController, root: Path) -> SessionController:
-    """A session keeps the plugin environments it was created with, so one opened before
-    `plugins install` would never see the plugin. Reopening it loads the project's current
-    ones (as the next draft revision; the session's own are never dropped, and a run in
-    progress is left alone)."""
+    """Bring a reopened session up to date with its project, as the next draft revision.
+
+    A session keeps the plugin environments it was created with, so one opened before
+    `plugins install` would never see the plugin: the project's current ones are loaded (the
+    session's own are never dropped). A draft also records the policy limits it was made
+    under, so a policy edited since (a raised call limit) is picked up by redrafting. A run
+    in progress is left alone."""
+    if controller.active_run() is not None:
+        return controller
     try:
         environments, defaults = session_plugins(root)
     except AibenchError:
-        return controller  # a broken config is reported where the session needs it
-    if not environments or controller.active_run() is not None:
-        return controller
+        environments, defaults = (), {}  # a broken config is reported where it is needed
     session = controller.session
     has = {json.dumps(deep_unfreeze(e), sort_keys=True) for e in session.plugin_environments}
     wanted = [json.dumps(e.model_dump(mode="json"), sort_keys=True) for e in environments]
-    if all(w in has for w in wanted) and deep_unfreeze(session.evaluator_defaults) == defaults:
-        return controller
-    result = controller.use_plugin_environments(environments, defaults)
-    if result.status == "applied":
-        err_console.print(
-            f"[dim]loaded this project's plugins into the session (draft revision "
-            f"{result.revision})[/dim]"
-        )
+    needs_plugins = bool(environments) and not (
+        all(w in has for w in wanted) and deep_unfreeze(session.evaluator_defaults) == defaults
+    )
+    if needs_plugins:
+        result: PatchResult | None = controller.use_plugin_environments(environments, defaults)
+        done, failed = "loaded this project's plugins into the session", "load the plugins"
     else:
-        err_console.print(
-            "[yellow]this project's plugins could not be loaded into the session: "
-            f"{safe('; '.join(result.problems) or result.status)}[/yellow]"
-        )
+        result = controller.refresh_draft()
+        done, failed = "refreshed the plan under the project's current policy", "refresh the plan"
+    if result is None:
+        return controller
+    if result.status == "applied":
+        err_console.print(f"[dim]{done} (draft revision {result.revision})[/dim]")
+    else:
+        reason = safe("; ".join(result.problems) or result.status)
+        err_console.print(f"[yellow]could not {failed}: {reason}[/yellow]")
     return controller
 
 

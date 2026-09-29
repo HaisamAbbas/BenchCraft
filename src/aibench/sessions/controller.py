@@ -737,14 +737,27 @@ class SessionController:
         """Make these plugin environments (and their parameter defaults) the session's, then
         redraft the current choices as the next revision, so the catalog, questions and
         metrics reflect what is now installed. Never touches a run."""
-        session = self.session
-        active = self.active_run(session)
         self.store.update_session(
             self.session_id,
             plugin_environments=tuple(e.model_dump(mode="json") for e in environments),
             evaluator_defaults=defaults,
         )
+        result = self._redraft({"plugin_environments": [e.python for e in environments]})
+        assert result is not None  # a forced redraft always commits or reports why not
+        return result
+
+    def refresh_draft(self) -> PatchResult | None:
+        """Redraft the current choices under the policy and catalog as they are now, as the
+        next revision; None when that gives the same plan. A draft records the limits of the
+        policy it was made under, so a policy edited afterwards (a raised call limit) would
+        never reach a session that already exists. Never touches a run."""
+        return self._redraft({"refreshed": "policy or catalog changed"}, only_if_different=True)
+
+    def _redraft(
+        self, change: dict[str, Any], *, only_if_different: bool = False
+    ) -> PatchResult | None:
         session = self.session
+        active = self.active_run(session)
         current = self.current_decision()
         revision = session.revision + 1
         try:
@@ -758,6 +771,8 @@ class SessionController:
         except AibenchError as exc:
             problems = exc.problems if isinstance(exc, PatchRejected) else [str(exc)]
             return PatchResult("rejected", session.revision, problems=problems)
+        if only_if_different and draft.plan_hash == current.plan_hash:
+            return None
         decision = DecisionRecord(
             decision_id=f"{self.session_id}:d{revision}",
             session_id=self.session_id,
@@ -765,7 +780,7 @@ class SessionController:
             source="user",
             revision=revision,
             supersedes=current.decision_id,
-            structured_change={"plugin_environments": [e.python for e in environments]},
+            structured_change=change,
             choices=current.choices,
             plan_file=draft.plan_file,
             plan_hash=draft.plan_hash,

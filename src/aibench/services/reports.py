@@ -54,6 +54,7 @@ from aibench.reporting.render import render
 from aibench.security.redaction import sanitize
 from aibench.services.runs import _FINISHED, RunError, _frozen_application, _frozen_plan
 from aibench.services.scoring import select_final_executions
+from aibench.services.suspect_answers import looks_like_error
 from aibench.services.traces import traces_summary
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import Storage
@@ -280,6 +281,9 @@ def _application_section(
         1 for e in finals if e.error_kind is not None and e.error_kind.value == "timeout"
     )
     failed = sum(1 for e in finals if e.status is not ExecutionStatus.OK)
+    error_like = sorted(
+        e.case_id for e in finals if e.status is ExecutionStatus.OK and looks_like_error(e.output)
+    )
     dispatched = [a for a in attempts if was_dispatched(a)]
     known = sum(float(a.cost) for a in dispatched if a.cost is not None)
     unknown = sum(1 for a in dispatched if a.cost is None) + uncommitted
@@ -294,6 +298,9 @@ def _application_section(
         "attempts": len(attempts),
         "uncommitted_dispatches": uncommitted,
         "retried_items": sum(1 for e in finals if e.attempt_id > 1),
+        # Answers that read like the application failing while reporting success (see
+        # services.suspect_answers): every metric would score an error message.
+        "error_like_answers": {"count": len(error_like), "case_ids": error_like[:10]},
         "cache_hits": cache_hits,
         "latency": {
             "definition": (
@@ -820,7 +827,15 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
         ],
         "metrics": metrics,
         "application": {
-            k: app[k] for k in ("planned", "recorded", "completed", "failed", "error_kinds")
+            k: app[k]
+            for k in (
+                "planned",
+                "recorded",
+                "completed",
+                "failed",
+                "error_kinds",
+                "error_like_answers",
+            )
         },
         "latency_ms": {
             k: app["latency"][k]
