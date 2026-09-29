@@ -26,15 +26,17 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, Field, PlainSerializer, model_validator
 
-from aibench.core.models import DecisionRule, FrozenModel, FrozenValue, utcnow
+from aibench.core.models import DecisionRule, FrozenModel, FrozenValue, deep_unfreeze, utcnow
 from aibench.core.plans import BudgetLimits, CaseSelection
 
 _ID = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
 
+# Each evaluator's parameters are themselves frozen (nested read-only mappings), so the
+# whole value is unwrapped recursively: `dict` alone left inner mappings unserializable.
 FrozenParams = Annotated[
     dict[str, FrozenValue],
     AfterValidator(MappingProxyType),
-    PlainSerializer(dict, return_type=dict[str, object]),
+    PlainSerializer(deep_unfreeze, return_type=dict[str, object]),
 ]
 FrozenConcepts = Annotated[
     dict[str, tuple[str, ...]],

@@ -245,6 +245,7 @@ def build_draft(
         params=ctx.user_params,
         rules=ctx.user_rules,
         concepts=dict(choices.objective_concepts),
+        configured=frozenset(choices.params),
     )
     if choices.repetitions != proposal.repetitions:
         proposal = proposal.model_copy(update={"repetitions": choices.repetitions})

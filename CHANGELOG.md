@@ -5,6 +5,21 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc5 — plan changes with a real model
+
+Found by running the assistant against a real model (`glm-4.5-flash`) on a G-Eval request.
+
+- Plan changes are refused when the user takes the request back ("don't add it", "not yet",
+  "hold off", "never mind", a later "actually, don't"), not on any "not" in the message:
+  objectives and criteria are full of them. Runs, rescores and experiments keep the strict
+  any-negation rule. A quote may span several sentences (the model quoted the whole message
+  and was refused with no refusal wording found).
+- Fixed: recording a plan change with `params` (metric settings such as G-Eval criteria)
+  failed with `Unable to serialize unknown type: mappingproxy`, so the assistant could not
+  configure a metric. Settings now save, plan and survive reopening a session.
+- A metric whose settings the user gave is planned even when no objective's wording names
+  it (project defaults such as the judge select nothing).
+
 ## 0.1.0rc4 — G-Eval criteria in conversation
 
 - Negations inside any text copied into the plan (G-Eval criteria such as "says the
