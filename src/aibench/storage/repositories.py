@@ -1386,12 +1386,14 @@ class Storage:
     def _list_metric_results(self, run_id: str, case_id: str | None) -> list[EvaluationResult]:
         if case_id is not None:
             rows = self.conn.execute(
-                "SELECT data FROM metric_results WHERE run_id = ? AND case_id = ?",
+                "SELECT data FROM metric_results WHERE run_id = ? AND case_id = ? "
+                "ORDER BY committed_at, rowid",
                 (run_id, case_id),
             ).fetchall()
         else:
             rows = self.conn.execute(
-                "SELECT data FROM metric_results WHERE run_id = ?", (run_id,)
+                "SELECT data FROM metric_results WHERE run_id = ? ORDER BY committed_at, rowid",
+                (run_id,),
             ).fetchall()
         return [EvaluationResult.model_validate_json(row["data"]) for row in rows]
 

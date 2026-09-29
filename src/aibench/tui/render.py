@@ -248,6 +248,14 @@ def rescored(console: Console, data: dict[str, Any]) -> None:
         f"rescored run {safe(data['run_id'])} as {safe(data['scoring_id'])} "
         "[dim](stored outputs; the application was not called)[/dim]",
     )
+    carried = data.get("carried_forward", 0)
+    if carried:
+        evaluated = data.get("evaluated_now", 0)
+        out(
+            console,
+            f"  carried forward {carried} finished result(s); evaluated {evaluated} now"
+            + (" [dim](/rescore all evaluates everything again)[/dim]" if evaluated == 0 else ""),
+        )
     for summary in data["summaries"]:
         mean = summary["value_summary"].get("mean")
         value = f" mean {_number(mean)}" if mean is not None else ""

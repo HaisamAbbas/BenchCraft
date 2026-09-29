@@ -98,6 +98,19 @@ class ScoringReport:
     results: list[EvaluationResult] = field(default_factory=list)
     # Problems that could not change any recorded result, e.g. an evaluator's close() failed.
     warnings: list[str] = field(default_factory=list)
+    # Results carried forward from earlier passes instead of evaluated again (see
+    # `score_recorded_run(carry_forward=True)`).
+    carried: int = 0
+
+
+CARRIED_NOTE = (
+    "an earlier pass's finished result for the same stored answer and metric settings, "
+    "carried forward instead of evaluated again; nothing was called for it in this pass"
+)
+
+
+def is_carried(result: EvaluationResult) -> bool:
+    return "carried_forward" in (deep_unfreeze(result.provenance) or {})
 
 
 _JUDGE_CONFIG_KEYS = ("judge", "model", "llm", "provider", "factory")
@@ -356,8 +369,16 @@ async def score_recorded_run(
     prepare_timeout_seconds: float = DEFAULT_PREPARE_TIMEOUT_SECONDS,
     cancel: asyncio.Event | None = None,
     application: ApplicationSpec | None = None,
+    carry_forward: bool = False,
 ) -> ScoringReport:
-    """`application` overrides the catalog lookup (the engine passes the run's frozen spec)."""
+    """`application` overrides the catalog lookup (the engine passes the run's frozen spec).
+
+    `carry_forward`: bring the pass up to date instead of repeating it. A finished result of
+    an earlier pass of this run (same stored answer, same metric settings) is carried into
+    this pass as it is, and only what is missing or failed is evaluated: a judge that hit a
+    rate limit on 2 of 15 cases is asked about those 2, not all 15. Every pass stays complete
+    and each carried result says so in its provenance. Results that depend on an imported
+    trace are always evaluated again, since a trace can change between passes."""
     record = storage.get_run(run_id)
     if record is None:
         raise ScoringError(f"no run committed with run_id={run_id!r}")
@@ -378,6 +399,7 @@ async def score_recorded_run(
     episodes = episode_prefixes(stored_cases)
 
     report = ScoringReport(scoring_id=f"score-{uuid.uuid4().hex[:12]}", run_id=run_id)
+    earlier = storage.list_metric_results(run_id) if carry_forward else []
     # Recorded first, so a report can interpret this pass's results even if it is cut short.
     storage.append_run_event(
         run_id,
@@ -389,7 +411,9 @@ async def score_recorded_run(
                 application=application,
                 dependency_lock_hash=dependency_lock_hash,
             ),
-            "repeat_reason": "explicit_stored_output_rescore",
+            "repeat_reason": (
+                "carry_forward_unfinished" if carry_forward else "explicit_stored_output_rescore"
+            ),
             "independent_judge_repeat": "not_proven",
         },
     )
@@ -406,8 +430,10 @@ async def score_recorded_run(
             dependency_lock_hash=dependency_lock_hash,
             episodes=episodes,
         )
+        scorer.carry_from(earlier)
         metric_results = await scorer.score_all(executions, cases, report.warnings)
         report.results.extend(metric_results)
+        report.carried += sum(1 for r in metric_results if is_carried(r))
         report.summaries.append(
             summarize(
                 metric_results,
@@ -503,6 +529,8 @@ class BindingScorer:
         self.cancel = cancel or asyncio.Event()
         self.prepare_error: str | None = None
         self._evaluator: Evaluator | None = None
+        # Finished results of earlier passes to reuse, by (case, repetition); see `carry_from`.
+        self._carry: dict[tuple[str, int], EvaluationResult] = {}
 
     async def open(self) -> None:
         """Construct and prepare the evaluator. Construction and prepare() are evaluator
@@ -517,12 +545,66 @@ class BindingScorer:
         except Exception as exc:  # noqa: BLE001 - see docstring
             self.prepare_error = f"evaluator_prepare_failed:{type(exc).__name__}: {exc}"[:500]
 
+    def carry_from(self, earlier: Sequence[EvaluationResult]) -> None:
+        """Offer finished results of earlier passes (oldest first): one for the same case,
+        repetition, stored answer and metric settings is carried into this pass instead of
+        being evaluated again. A result that depends on an imported trace is never carried."""
+        if self._traced:
+            return
+        manifest = self.manifest
+        for old in earlier:
+            if (
+                old.status is ExecutionStatus.OK
+                and old.execution_id is not None
+                and old.metric_id == manifest.evaluator_id
+                and old.metric_version == manifest.version
+                and old.binding_hash == self.metric.binding_hash
+            ):
+                self._carry[(old.case_id, old.repetition_id)] = old  # a later one replaces
+
+    def _carried(self, execution: ExecutionResult) -> EvaluationResult | None:
+        source = self._carry.get((execution.case_id, execution.repetition_id))
+        if (
+            source is None
+            or execution.status is not ExecutionStatus.OK
+            or source.execution_id != execution.execution_id
+        ):
+            return None
+        fresh = self._result(execution, EvaluationOutcome(ExecutionStatus.OK))
+        copied = evaluation_from_cache(source, fresh, key=f"carried:{source.result_id}")
+        provenance = deep_unfreeze(copied.provenance)
+        provenance.pop("cache", None)
+        provenance["carried_forward"] = {
+            "source_result_id": source.result_id,
+            "source_scoring_id": source.scoring_id,
+            "note": CARRIED_NOTE,
+        }
+        return copied.model_copy(
+            update={
+                "provenance": provenance,
+                # The value is the old one; whether it passes is decided by this pass's rule.
+                "decision": decide(source.status, source.value, self.rule),
+                "resources": {
+                    "latency_ms": None,
+                    "model_calls": 0,
+                    "cost": 0.0,
+                    "accounting": "complete",
+                    "carried_forward": True,
+                },
+            }
+        )
+
     async def score(
         self, execution: ExecutionResult, candidates: list[BenchmarkCase]
     ) -> EvaluationResult:
         """Evaluate one execution and commit the attempt (evaluation_attempts). With the
         evaluation cache on (`cache_policy_hash`), a stored result for the same key is
-        copied instead of calling the evaluator (16-T3)."""
+        copied instead of calling the evaluator (16-T3). A result offered by `carry_from`
+        is reused as it is."""
+        carried = self._carried(execution)
+        if carried is not None:
+            self.storage.commit_evaluation_attempt(carried, attempt_number=carried.attempt_number)
+            return carried
         key = self._cache_key(execution, candidates)
         result = self._from_cache(key, execution) if key else None
         if result is None:
