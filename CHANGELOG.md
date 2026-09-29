@@ -5,6 +5,21 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc10 — judges that think, budgets that fit
+
+Found on a real RAG project, where the two retrieval metrics failed on every case.
+
+- The `openai_compatible` judge now allows 8000 output tokens by default (was 2000). A
+  reasoning model such as `glm-4.7-flashx` spends part of that on thinking before it
+  writes its JSON; at 2000 it used all of it and returned nothing, which showed as a JSON
+  decode error on every faithfulness and contextual precision case. A reply cut off by the
+  allowance is now reported as that, and names `max_output_tokens`.
+- `benchcraft connect http` defaults to 100 application calls and allows 20 judge calls
+  per application call (it was 20 of each). Judged metrics make several calls per case, so
+  a 15-case run with five of them ended `budget_exhausted` at 97 of 100 judge calls. The
+  wall-clock limit is one hour (was 30 minutes). Existing projects keep their
+  `policy.json`; raise `ceilings.max_evaluator_calls` there.
+
 ## 0.1.0rc9 — retry only what failed
 
 - `/rescore` keeps the results the run already finished and evaluates only what failed or is

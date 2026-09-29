@@ -30,6 +30,7 @@ app = typer.Typer(help="Connect an application without providing its repository.
 console = Console(highlight=False, emoji=False)
 err_console = Console(stderr=True, highlight=False, emoji=False)
 _APP_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
+JUDGE_CALLS_PER_APPLICATION_CALL = 20
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
@@ -90,7 +91,13 @@ def setup_http(
     bearer_secret_ref: str | None = typer.Option(
         None, "--bearer-secret-ref", help="Bearer-token secret reference, such as env:MY_API_TOKEN."
     ),
-    max_calls: int = typer.Option(20, "--max-calls", min=1, max=1000, help="Hard application-call ceiling."),
+    max_calls: int = typer.Option(
+        100,
+        "--max-calls",
+        min=1,
+        max=1000,
+        help="Hard application-call ceiling; judge calls may reach 20 per application call.",
+    ),
 ) -> None:
     """Create a bounded API project without probing or calling its endpoint."""
     root = project.expanduser().resolve()
@@ -198,8 +205,10 @@ def setup_http(
             "allowed_evaluators": ("native.*",),
             "ceilings": BudgetLimits(
                 max_application_calls=max_calls,
-                max_evaluator_calls=max_calls,
-                max_wall_seconds=1800,
+                # A judged metric makes several model calls per case (faithfulness about
+                # four); one ceiling for both stopped a 15-case run at 97 of 100 calls.
+                max_evaluator_calls=max_calls * JUDGE_CALLS_PER_APPLICATION_CALL,
+                max_wall_seconds=3600,
             ),
         }
         policy = ExecutionPolicy.model_validate(policy_fields)
