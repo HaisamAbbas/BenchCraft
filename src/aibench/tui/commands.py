@@ -35,7 +35,7 @@ COMMANDS: dict[str, str] = {
     "/stop": "cancel the current run (partial results are kept)",
     "/failures": "failed and errored results of the current run",
     "/traces": "/traces [import FILE] [RUN_ID] - a run's imported traces, or attach an export",
-    "/rescore": "/rescore [RUN_ID] - score stored outputs with the current draft (no app calls)",
+    "/rescore": "/rescore [all] [RUN_ID] - score stored outputs; only what failed or is missing",
     "/case": "/case CASE_ID - one case's evidence",
     "/budget": "ceilings, committed spend and unknown accounting",
     "/app": "the application's runner: what it observes, missing evidence, resets, test worlds",
@@ -267,13 +267,21 @@ class Commands:
 
     async def _rescore(self, argument: str) -> CommandResult:
         """Score the run's stored outputs with the current draft: the same policy-checked
-        path as the assistant's rescore. The application is never called."""
+        path as the assistant's rescore. The application is never called. Results already
+        finished are carried forward and only what failed or is missing is evaluated, so a
+        judge that hit a rate limit on 2 of 15 cases is asked about those 2; `/rescore all`
+        evaluates everything again."""
         words = argument.split()
+        everything = bool(words) and words[0].lower() == "all"
+        if everything:
+            words = words[1:]
         if len(words) > 1:
             return CommandResult(
-                "/rescore", "error", {"error": "usage: /rescore [RUN_ID]"}, ok=False
+                "/rescore", "error", {"error": "usage: /rescore [all] [RUN_ID]"}, ok=False
             )
-        report = await self.controller.rescore(words[0] if words else None)
+        report = await self.controller.rescore(
+            words[0] if words else None, carry_forward=not everything
+        )
         return CommandResult("/rescore", "rescored", report)
 
     async def _app(self, _: str) -> CommandResult:

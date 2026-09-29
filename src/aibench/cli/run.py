@@ -269,13 +269,24 @@ def evaluate(
     policy: Path | None = _POLICY,
     workspace: Path | None = _WORKSPACE,
     json_output: bool = _JSON,
+    only_unfinished: bool = typer.Option(
+        False,
+        "--only-unfinished",
+        help="Carry forward results already finished in earlier passes; evaluate only what "
+        "failed or is missing.",
+    ),
 ) -> None:
     """Rescore stored executions without rerunning the application."""
     storage, artifacts = _open(workspace)
     try:
         report = asyncio.run(
             evaluate_run(
-                run_id, plan, storage=storage, artifacts=artifacts, policy=load_policy(policy)
+                run_id,
+                plan,
+                storage=storage,
+                artifacts=artifacts,
+                policy=load_policy(policy),
+                carry_forward=only_unfinished,
             )
         )
     except AibenchError as exc:
@@ -287,6 +298,7 @@ def evaluate(
         "run_id": run_id,
         "summaries": [s.as_dict() for s in report.summaries],
         "warnings": report.warnings,
+        "carried_forward": report.carried,
     }
     if json_output:
         console.print_json(data=data)
@@ -294,6 +306,8 @@ def evaluate(
     console.print(
         f"rescored run {escape(run_id)} as {report.scoring_id} (the application was not invoked)"
     )
+    if report.carried:
+        console.print(f"  carried forward {report.carried} finished result(s)")
     for s in report.summaries:
         console.print(
             f"  {s.metric_id}@{s.metric_version}: completed={s.completed}/{s.selected} "

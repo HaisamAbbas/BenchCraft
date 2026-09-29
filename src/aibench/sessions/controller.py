@@ -1340,11 +1340,16 @@ class SessionController:
                 usage[name] = usage.get(name, 0) + int(value)
         return {**run_budget(self.storage, self.artifacts, target), "conversation": usage}
 
-    async def rescore(self, run_id: str | None = None) -> dict[str, Any]:
+    async def rescore(
+        self, run_id: str | None = None, *, carry_forward: bool = True
+    ) -> dict[str, Any]:
         """Rescore this session's stored executions with its current validated draft.
 
         This delegates to the same policy-checked service as `aibench evaluate`; that
-        service reads stored executions and cannot invoke the application runner.
+        service reads stored executions and cannot invoke the application runner. By
+        default results the run already finished are carried forward and only what is
+        missing or failed is evaluated (a rate-limited judge is asked about the failed
+        cases, not all of them); `carry_forward=False` evaluates everything again.
         """
         target = run_id
         if target is None:
@@ -1363,6 +1368,7 @@ class SessionController:
             storage=self.storage,
             artifacts=self.artifacts,
             policy=self.policy().with_trusted_local(self.session.trusted_local),
+            carry_forward=carry_forward,
         )
         return {
             "run_id": report.run_id,
@@ -1370,6 +1376,8 @@ class SessionController:
             "summaries": [summary.as_dict() for summary in report.summaries],
             "warnings": report.warnings,
             "application_invoked": False,
+            "carried_forward": report.carried,
+            "evaluated_now": len(report.results) - report.carried,
         }
 
     def report(self, run_id: str | None = None, *, for_assistant: bool = False) -> dict[str, Any]:

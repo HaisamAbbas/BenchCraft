@@ -755,8 +755,11 @@ async def evaluate_run(
     storage: Storage,
     artifacts: ArtifactStore,
     policy: ExecutionPolicy,
+    carry_forward: bool = False,
 ) -> ScoringReport:
-    """Rescore saved executions with the metrics of `plan_path` (never invokes the app)."""
+    """Rescore saved executions with the metrics of `plan_path` (never invokes the app).
+    With `carry_forward`, results already finished in earlier passes are reused and only the
+    missing or failed ones are evaluated (see `score_recorded_run`)."""
     plan = load_plan(plan_path)
     plan_dir = plan_path.resolve().parent
     record = storage.get_run(run_id)
@@ -798,6 +801,7 @@ async def evaluate_run(
         timeout_seconds=plan.evaluation_timeout_seconds,
         model_timeout_seconds=plan.model_evaluation_timeout_seconds,
         application=application,
+        carry_forward=carry_forward,
     )
 
 

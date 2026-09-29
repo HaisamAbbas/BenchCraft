@@ -5,6 +5,19 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc9 — retry only what failed
+
+- `/rescore` keeps the results the run already finished and evaluates only what failed or is
+  missing: 2 judge calls that hit a rate limit are retried, not all 15 (about 45 s each on a
+  free endpoint). `/rescore all` (and `aibench evaluate` without `--only-unfinished`) still
+  evaluates everything again. A carried result is an earlier pass's result for the same stored
+  answer and metric settings; the new pass stays complete, marks each carried result in its
+  provenance (`carried_forward`), attributes no calls or cost to it and decides pass or fail
+  under the pass's own rule. Results that depend on an imported trace are always evaluated
+  again. On a real run: 28 results carried, 2 evaluated, 229 s instead of about 12 minutes.
+- `aibench evaluate` gains `--only-unfinished`; stored metric results are now read in the
+  order they were committed.
+
 ## 0.1.0rc8 — runs that finish
 
 Found on a real project, where three benchmark runs in a row ended incomplete.
