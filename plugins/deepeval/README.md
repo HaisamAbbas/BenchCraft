@@ -106,7 +106,11 @@ Every judged metric takes a `judge` parameter:
   any Chat Completions endpoint, such as GLM on Z.ai. Built in: no code needed. The key is
   read from the worker's `NAME` variable, which the harness sets from the plugin
   environment's `secret_env`. Calls and tokens are counted; cost is unknown (never zero).
-  Optional: `timeout_seconds`, `max_output_tokens`, `json_mode` (default true).
+  Optional: `timeout_seconds`, `max_output_tokens`, `json_mode` (default true),
+  `retry_wait_seconds` (default 2). A rate limit (429), a server error (5xx) or a dropped
+  connection is retried up to five times with a doubling wait (the server's `Retry-After`
+  when given, at most 30 s) inside 200 s per case; a wrong key or a bad request is not. Free
+  endpoints answer 429 under load, and a case would otherwise fail on the first one.
 - `{"kind": "deepeval_model", "model": "<name>"}`: DeepEval's native model support. Pass the
   provider key explicitly (`--plugin-secret`); the worker inherits nothing else.
 - `{"kind": "python_factory", "factory": "module:function"}`: a function returning a

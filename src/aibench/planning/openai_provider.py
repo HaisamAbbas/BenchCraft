@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -37,6 +38,14 @@ from aibench.security.secrets import Redactor, resolve_secret
 
 MAX_RESPONSE_BYTES = 2_000_000
 
+# A rate limit (429) or a busy server (5xx) is usually gone in seconds, and free endpoints
+# answer them often. A request that has produced nothing yet is retried a few times with a
+# growing wait (the server's `Retry-After` when given); the user is waiting, so not for long.
+# Errors that repeating cannot fix (a wrong key, a bad request) are never retried.
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+_ATTEMPTS = 4
+_MAX_WAIT_SECONDS = 15.0
+
 
 class OpenAICompatibleConfig(FrozenModel):
     kind: Literal["openai_compatible"] = "openai_compatible"
@@ -47,6 +56,7 @@ class OpenAICompatibleConfig(FrozenModel):
     max_output_tokens: int = Field(default=4000, ge=1, le=100_000)
     temperature: float = Field(default=0.0, ge=0, le=2)
     seed: int | None = 0
+    retry_wait_seconds: float = Field(default=2.0, ge=0, le=60)  # first wait; doubles
 
 
 def provider_denials(config: OpenAICompatibleConfig, policy: ExecutionPolicy) -> list[str]:
@@ -113,6 +123,20 @@ class OpenAICompatibleProvider:
     def close(self) -> None:
         self._client.close()
 
+    def _pause(self, attempt: int, status: int | None, retry_after: str | None) -> float | None:
+        """Seconds to wait before trying again, or None to give up: the reply is final (an
+        error retrying cannot fix) or the attempts are used. `status` is None for a failed
+        connection."""
+        if attempt == _ATTEMPTS - 1 or (status is not None and status not in _RETRY_STATUSES):
+            return None
+        wait = min(_MAX_WAIT_SECONDS, self.config.retry_wait_seconds * 2**attempt)
+        if retry_after is not None:
+            try:
+                wait = min(_MAX_WAIT_SECONDS, max(0.0, float(retry_after)))
+            except ValueError:
+                pass  # an HTTP date: keep the computed wait
+        return wait
+
     def _body(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.config.model,
@@ -140,40 +164,63 @@ class OpenAICompatibleProvider:
         ends with `data: [DONE]`."""
         body = {**self._body(messages, tools), "stream": True}
         body["stream_options"] = {"include_usage": True}
-        state = _StreamState(self._redactor, on_text)
-        try:
-            with self._client.stream("POST", "chat/completions", json=body) as response:
-                if response.status_code != 200:
-                    raw = response.read()[:MAX_RESPONSE_BYTES]
-                    text = self._redactor.text(raw.decode("utf-8", errors="replace"))
-                    raise PlannerError(f"HTTP {response.status_code}: {text[:300]}")
-                received = 0
-                for line in response.iter_lines():
-                    received += len(line) + 1
-                    if received > MAX_RESPONSE_BYTES:
-                        raise PlannerError(f"response exceeds {MAX_RESPONSE_BYTES} bytes")
-                    if state.feed(line):
-                        break
-        except httpx.HTTPError as exc:
-            raise PlannerError(self._redactor.text(f"{type(exc).__name__}: {exc}")) from exc
-        return state.reply()
+        for attempt in range(_ATTEMPTS):
+            state = _StreamState(self._redactor, on_text)
+            pause: float | None = None
+            try:
+                with self._client.stream("POST", "chat/completions", json=body) as response:
+                    if response.status_code != 200:
+                        raw = response.read()[:MAX_RESPONSE_BYTES]
+                        text = self._redactor.text(raw.decode("utf-8", errors="replace"))
+                        pause = self._pause(
+                            attempt, response.status_code, response.headers.get("retry-after")
+                        )
+                        if pause is None:
+                            raise PlannerError(f"HTTP {response.status_code}: {text[:300]}")
+                    else:
+                        received = 0
+                        for line in response.iter_lines():
+                            received += len(line) + 1
+                            if received > MAX_RESPONSE_BYTES:
+                                raise PlannerError(f"response exceeds {MAX_RESPONSE_BYTES} bytes")
+                            if state.feed(line):
+                                break
+                        return state.reply()
+            except httpx.HTTPError as exc:
+                # Once text or a tool call has streamed, a retry would repeat it.
+                pause = None if (state.text or state.calls) else self._pause(attempt, None, None)
+                if pause is None:
+                    raise PlannerError(self._redactor.text(f"{type(exc).__name__}: {exc}")) from exc
+            time.sleep(pause or 0.0)
+        raise PlannerError("no reply after retries")  # unreachable: the last attempt raises
 
     def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> ModelReply:
         body = self._body(messages, tools)
-        try:
-            with self._client.stream("POST", "chat/completions", json=body) as response:
-                raw = bytearray()
-                for chunk in response.iter_bytes():
-                    raw.extend(chunk)
-                    if len(raw) > MAX_RESPONSE_BYTES:
-                        raise PlannerError(f"response exceeds {MAX_RESPONSE_BYTES} bytes")
-                status = response.status_code
-        except httpx.HTTPError as exc:
-            raise PlannerError(self._redactor.text(f"{type(exc).__name__}: {exc}")) from exc
-        text = self._redactor.text(raw.decode("utf-8", errors="replace"))
-        if status != 200:
-            raise PlannerError(f"HTTP {status}: {text[:300]}")
-        return parse_reply(text)
+        for attempt in range(_ATTEMPTS):
+            retry_after: str | None = None
+            try:
+                with self._client.stream("POST", "chat/completions", json=body) as response:
+                    raw = bytearray()
+                    for chunk in response.iter_bytes():
+                        raw.extend(chunk)
+                        if len(raw) > MAX_RESPONSE_BYTES:
+                            raise PlannerError(f"response exceeds {MAX_RESPONSE_BYTES} bytes")
+                    status = response.status_code
+                    retry_after = response.headers.get("retry-after")
+            except httpx.HTTPError as exc:
+                pause = self._pause(attempt, None, None)
+                if pause is None:
+                    raise PlannerError(self._redactor.text(f"{type(exc).__name__}: {exc}")) from exc
+                time.sleep(pause)
+                continue
+            text = self._redactor.text(raw.decode("utf-8", errors="replace"))
+            if status == 200:
+                return parse_reply(text)
+            pause = self._pause(attempt, status, retry_after)
+            if pause is None:
+                raise PlannerError(f"HTTP {status}: {text[:300]}")
+            time.sleep(pause)
+        raise PlannerError("no reply after retries")  # unreachable: the last attempt raises
 
 
 def parse_reply(text: str) -> ModelReply:

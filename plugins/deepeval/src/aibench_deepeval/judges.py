@@ -15,10 +15,12 @@ never when manifests are listed.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
 import re
+import time
 from functools import cache
 from typing import Any
 
@@ -47,6 +49,7 @@ JUDGE_SCHEMA: dict[str, Any] = {
                 "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 600},
                 "max_output_tokens": {"type": "integer", "minimum": 16, "maximum": 32768},
                 "json_mode": {"type": "boolean"},
+                "retry_wait_seconds": {"type": "number", "minimum": 0, "maximum": 60},
             },
         },
         {
@@ -63,6 +66,22 @@ JUDGE_SCHEMA: dict[str, Any] = {
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 _ERROR_TEXT_LIMIT = 300
+
+# A rate limit (429), a busy or failing server (5xx) or a dropped connection is usually gone
+# in seconds; free endpoints hit these often. Each is retried a few times with a growing
+# wait (the server's `Retry-After` when it gives one), inside a total time limit so a case
+# still fails cleanly before the harness's own per-case limit. Errors that repeating cannot
+# fix (a wrong key, a bad request) are never retried.
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+_TRANSIENT = (
+    httpx.TimeoutException,
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+    httpx.ReadError,
+)
+_ATTEMPTS = 5
+_MAX_WAIT = 30.0
+_RETRY_BUDGET_SECONDS = 200.0
 
 
 class _OpenAICompatible:
@@ -84,6 +103,9 @@ class _OpenAICompatible:
         self._timeout = float(config.get("timeout_seconds", 120))
         self._max_tokens = int(config.get("max_output_tokens", 2000))
         self._json_mode = bool(config.get("json_mode", True))
+        self._retry_wait = float(config.get("retry_wait_seconds", 2))
+        self._retry_until = time.monotonic() + _RETRY_BUDGET_SECONDS
+        self.retries = 0
         self.calls = 0
         self.tokens: dict[str, int] = {}
         super().__init__(model=config["model"])  # type: ignore[call-arg]
@@ -96,15 +118,62 @@ class _OpenAICompatible:
 
     def generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
         with httpx.Client(timeout=self._timeout) as client:
-            response = client.post(self._url, headers=self._headers(), json=self._body(prompt))
-        return self._parse(response, schema)
+            for attempt in range(_ATTEMPTS):
+                try:
+                    response = client.post(
+                        self._url, headers=self._headers(), json=self._body(prompt)
+                    )
+                except _TRANSIENT:
+                    wait = self._wait(attempt, None)
+                    if wait is None:
+                        raise
+                    time.sleep(wait)
+                    continue
+                wait = self._wait(attempt, response)
+                if wait is None:
+                    return self._parse(response, schema)
+                time.sleep(wait)
+        raise AssertionError("unreachable: the last attempt returns or raises")
 
     async def a_generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(
-                self._url, headers=self._headers(), json=self._body(prompt)
-            )
-        return self._parse(response, schema)
+            for attempt in range(_ATTEMPTS):
+                try:
+                    response = await client.post(
+                        self._url, headers=self._headers(), json=self._body(prompt)
+                    )
+                except _TRANSIENT:
+                    wait = self._wait(attempt, None)
+                    if wait is None:
+                        raise
+                    await asyncio.sleep(wait)
+                    continue
+                wait = self._wait(attempt, response)
+                if wait is None:
+                    return self._parse(response, schema)
+                await asyncio.sleep(wait)
+        raise AssertionError("unreachable: the last attempt returns or raises")
+
+    def _wait(self, attempt: int, response: httpx.Response | None) -> float | None:
+        """Seconds to wait before trying again, or None to stop: the reply is final (a
+        success or an error retrying cannot fix), or attempts or time are used up. A
+        transient failure has no reply (`response` None)."""
+        if response is not None and response.status_code not in _RETRY_STATUSES:
+            return None
+        last = attempt == _ATTEMPTS - 1
+        if last:
+            return None
+        wait = min(_MAX_WAIT, self._retry_wait * 2**attempt)
+        header = response.headers.get("retry-after") if response is not None else None
+        if header is not None:
+            try:
+                wait = min(_MAX_WAIT, max(0.0, float(header)))
+            except ValueError:
+                pass  # an HTTP date: keep the computed wait
+        if time.monotonic() + wait > self._retry_until:
+            return None
+        self.retries += 1
+        return wait
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}

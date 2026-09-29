@@ -263,9 +263,12 @@ def test_g_eval_reads_only_the_fields_the_plan_names(
 class _JudgeServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, status: int) -> None:
+    def __init__(self, status: int, *, rate_limited_first: int = 0, forever: bool = False) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
         self.status = status
+        # The first `rate_limited_first` requests get a 429 (or every one, with `forever`).
+        self.rate_limited_first = rate_limited_first
+        self.forever = forever
         self.requests: list[dict[str, Any]] = []
 
     @property
@@ -284,8 +287,11 @@ class _JudgeHandler(BaseHTTPRequestHandler):
         self.server.requests.append(
             {"path": self.path, "auth": self.headers.get("Authorization"), "body": body}
         )
-        if self.server.status != 200:
-            payload: Any = {"error": f"bad key {self.headers.get('Authorization')}"}
+        limited = self.server.forever or len(self.server.requests) <= self.server.rate_limited_first
+        if limited:
+            payload: Any = {"error": {"code": "1302", "message": "rate limit reached"}}
+        elif self.server.status != 200:
+            payload = {"error": f"bad key {self.headers.get('Authorization')}"}
         else:
             # One object with every key answer relevancy asks for (DeepEval's schemas
             # ignore the rest), fenced as some models do.
@@ -300,7 +306,9 @@ class _JudgeHandler(BaseHTTPRequestHandler):
                 "usage": {"prompt_tokens": 100, "completion_tokens": 20},
             }
         data = json.dumps(payload).encode()
-        self.send_response(self.server.status)
+        self.send_response(429 if limited else self.server.status)
+        if limited:
+            self.send_header("Retry-After", "0")
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -308,8 +316,8 @@ class _JudgeHandler(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def _judge_server(status: int = 200) -> Iterator[_JudgeServer]:
-    server = _JudgeServer(status)
+def _judge_server(status: int = 200, **limits: Any) -> Iterator[_JudgeServer]:
+    server = _JudgeServer(status, **limits)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -320,7 +328,7 @@ def _judge_server(status: int = 200) -> Iterator[_JudgeServer]:
 
 
 def _openai_compatible_score(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, **limits: Any
 ) -> tuple[Any, _JudgeServer, Seeded]:
     monkeypatch.setenv("AIBENCH_TEST_JUDGE_KEY", "sk-test-judge-secret-123456")
     registry = EvaluatorRegistry.with_native()
@@ -329,7 +337,7 @@ def _openai_compatible_score(
     )
     seeded = Seeded(tmp_path)
     seeded.seed([case("c1")], [execution("c1", "Refunds are available within 30 days.")])
-    with _judge_server(status) as server:
+    with _judge_server(status, **limits) as server:
         binding = {
             "metric": "deepeval.answer_relevancy",
             "params": {
@@ -338,6 +346,7 @@ def _openai_compatible_score(
                     "base_url": server.base_url,
                     "model": "glm-test",
                     "api_key_env": "JUDGE_KEY",
+                    "retry_wait_seconds": 0,  # tests do not wait between attempts
                 }
             },
         }
@@ -370,10 +379,35 @@ def test_openai_compatible_judge_scores_with_its_key_and_counts_its_calls(
 def test_openai_compatible_judge_failure_is_an_error_that_never_shows_the_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    result, _, _ = _openai_compatible_score(tmp_path, monkeypatch, 401)
+    result, server, _ = _openai_compatible_score(tmp_path, monkeypatch, 401)
     assert result.status is ExecutionStatus.ERROR and result.value is None
     assert "judge HTTP 401" in (result.reason or "")
     assert "sk-test-judge-secret" not in (result.reason or "")
+    assert len(server.requests) == 1  # a wrong key is not retried
+
+
+def test_openai_compatible_judge_waits_out_a_rate_limit_and_still_scores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Free endpoints answer 429 under load (Z.ai: code 1302). The judge waits (the
+    server's Retry-After) and tries again instead of failing the case."""
+    result, server, _ = _openai_compatible_score(tmp_path, monkeypatch, 200, rate_limited_first=3)
+    assert result.status is ExecutionStatus.OK and result.value.value == 1.0
+    limited = [r for r in server.requests[:3]]
+    assert len(limited) == 3 and len(server.requests) > 3
+    # Only answered calls are counted as the judge's calls and tokens.
+    answered = len(server.requests) - 3
+    assert result.resources["model_calls"] == answered
+    assert result.resources["tokens"]["input"] == 100 * answered
+
+
+def test_openai_compatible_judge_gives_up_after_its_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result, server, _ = _openai_compatible_score(tmp_path, monkeypatch, 200, forever=True)
+    assert result.status is ExecutionStatus.ERROR
+    assert "judge HTTP 429" in (result.reason or "")
+    assert len(server.requests) == 5  # one call, five attempts, then the error
 
 
 def test_reference_context_and_retrieval_are_never_swapped(

@@ -5,6 +5,26 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc8 — runs that finish
+
+Found on a real project, where three benchmark runs in a row ended incomplete.
+
+- Judge and assistant model calls wait out a rate limit and try again: 429, 5xx and dropped
+  connections are retried with a growing wait (the server's `Retry-After` when given). The
+  judge makes up to 5 attempts within 200 s a case; the assistant 4, and only while nothing
+  has streamed, so a reply is never repeated. A wrong key or a bad request is never retried.
+  Before this, 7 of 10 judge calls on a free endpoint failed on their first `429`. The
+  provider config gains `retry_wait_seconds`, and so does the judge's.
+- Reopening a session refreshes its plan under the project's current policy when that
+  changes it. A draft records the limits of the policy it was made under, so raising a limit
+  in the policy never reached an existing session: every run stopped at the old 20-call
+  limit (`budget_exhausted`) although the policy allowed 100. Nothing changes, and no
+  revision is added, when the plan is already current.
+- The report warns when answers look like the application failing while reporting success
+  (`Error: ... Invalid API Key`, `Error code: 429`, a traceback), counted per run with the
+  first case IDs, since every metric would score the error text. A run whose 15 answers were
+  all such errors is now flagged at once.
+
 ## 0.1.0rc7 — choosing a session
 
 Found when an empty session was opened by mistake among six that all looked alike.

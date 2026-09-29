@@ -407,6 +407,16 @@ def report(console: Console, data: dict[str, Any]) -> None:
             else "not measured (no successful request)"
         ),
     )
+    suspect = app.get("error_like_answers") or {"count": 0}
+    if suspect["count"]:
+        out(
+            console,
+            f"  [yellow]warning: {suspect['count']} of {app['completed']} answers look like "
+            "errors, not answers[/yellow] (e.g. "
+            f"{safe(', '.join(suspect['case_ids'][:3]))}): the application may be failing "
+            "while reporting success, and metrics would score the error text. Check with "
+            "/case CASE_ID before trusting these scores.",
+        )
     for role, cost in data["cost"].items():
         if cost.get("accounting") in (None, "not_attributed"):
             continue

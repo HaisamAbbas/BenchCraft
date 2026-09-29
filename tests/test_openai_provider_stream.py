@@ -114,7 +114,8 @@ def test_streamed_tool_arguments_are_redacted_after_fragment_assembly() -> None:
         ((200, Stream([chunk("partial")], done=False)), "ended before [DONE]"),
         ((200, Stream([{"choices": "nope"}])), "choices is not a list"),
         ((200, Stream([chunk(tool_calls=[{"function": {"name": "x"}}])])), "malformed tool call"),
-        ((500, {"error": "boom"}), "HTTP 500"),
+        # 429 and 5xx are retried (tests/test_provider_retries.py); a bad request is not.
+        ((400, {"error": "boom"}), "HTTP 400"),
     ],
 )
 def test_malformed_or_failed_streams_are_planner_errors(
