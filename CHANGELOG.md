@@ -5,6 +5,13 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased
+
+- The installers (`install.ps1`, `install.sh`) install the most recently published release.
+  They took the first release GitHub listed, and the list is not in publish order (`rc10` came
+  below `rc5`), so after 0.1.0rc10 they kept installing 0.1.0rc9. Until this is merged, install
+  a given version with `BENCHCRAFT_VERSION=v0.1.0rc10`.
+
 ## 0.1.0rc10 — judges that think, budgets that fit
 
 Found on a real RAG project, where the two retrieval metrics failed on every case.
