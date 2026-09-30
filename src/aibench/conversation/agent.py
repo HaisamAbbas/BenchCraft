@@ -236,6 +236,25 @@ def patch_problems(
     return ungrounded(patch, message)
 
 
+def patch_fix(problems: list[str], message: str) -> str | None:
+    """What to do differently, for a rejected patch, in words a model can act on. A model that
+    is only told "not in the user's message" tends to paraphrase again; the user's message is
+    handed back so it can copy from it."""
+    excerpt = " ".join(message.split())[:300]
+    if any("quoted request is not" in p for p in problems):
+        return (
+            "user_quote must be copied unchanged from the user's latest message, which reads: "
+            f'"{excerpt}". Quote one sentence or phrase of it exactly, then call again.'
+        )
+    if any("does not appear" in p or "is not stated" in p for p in problems):
+        return (
+            "Use the user's own words: copy phrases from their message instead of renaming "
+            'or shortening them (keep "traffic correctness", do not turn it into '
+            f'"correctness"). The message reads: "{excerpt}".'
+        )
+    return None
+
+
 # Authorization is decided on the user's own words and later corrections, conservatively: a
 # refusal only means the assistant has to ask again, while a false acceptance acts without
 # consent.
@@ -677,10 +696,13 @@ def tool_specs() -> list[dict[str, Any]]:
             "propose_plan_patch",
             "Change the draft; creates a new revision. There is no field that adds a metric: "
             "metrics follow from objectives (add_objectives, in the user's words). Configure "
-            "a metric with `params`, keyed by its evaluator ID, e.g. a G-Eval check is an "
-            'objective naming G-Eval or criteria plus params {"deepeval.g_eval": {"name": '
-            '"...", "criteria": "...", "evaluation_params": ["input", "actual_output", '
-            '"expected_output"]}}. Every value must be the user\'s own words.',
+            "a metric with `params`, keyed by its evaluator ID (from list_evaluators, e.g. "
+            "deepeval.g_eval), never by an objective's name. A custom check is an objective "
+            'plus params {"deepeval.g_eval": {"name": "...", "criteria": "...", '
+            '"evaluation_params": ["input", "actual_output", "expected_output"]}}. Every value, '
+            "objective text included, must be the user's exact words: do not rename or "
+            'shorten them ("traffic correctness" stays "traffic correctness"). If a call '
+            "is rejected, read how_to_fix and retry once with the user's exact words.",
             _object(
                 {
                     "expected_revision": {"type": "integer"},
@@ -1551,7 +1573,9 @@ class _Turn:
             return self._reject("propose_plan_patch", [e["msg"] for e in exc.errors()][:10])
         problems = patch_problems(patch, quote, self.message, offer=self.previous_reply)
         if problems:
-            return self._reject("propose_plan_patch", problems)
+            return self._reject(
+                "propose_plan_patch", problems, fix=patch_fix(problems, self.message)
+            )
         try:
             expected = int(args.get("expected_revision", -1))
         except (TypeError, ValueError):
@@ -1581,9 +1605,12 @@ class _Turn:
             )
         return data
 
-    def _reject(self, tool: str, problems: list[str]) -> dict[str, Any]:
+    def _reject(self, tool: str, problems: list[str], fix: str | None = None) -> dict[str, Any]:
         self.outcome.rejected.append({"tool": tool, "status": "rejected", "problems": problems})
-        return {"status": "rejected", "problems": problems}
+        reply: dict[str, Any] = {"status": "rejected", "problems": problems}
+        if fix:
+            reply["how_to_fix"] = fix
+        return reply
 
     async def _ask(self, args: dict[str, Any]) -> Any:
         if len(self.outcome.questions) >= self.agent.limits.max_questions:

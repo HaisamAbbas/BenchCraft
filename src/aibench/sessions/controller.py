@@ -226,6 +226,28 @@ def _stable_seed(session_id: str) -> int:
     return int(hashlib.sha256(session_id.encode()).hexdigest()[:8], 16) % (2**31)
 
 
+def unavailable_settings(names: list[str], available: list[str]) -> list[str]:
+    """Why settings keyed by `names` were not saved. A name that is not a metric id at all (an
+    objective's name, "traffic_correctness") gets the ids that exist: telling a model it is
+    "not available" sent it round in circles between plugins and paraphrases."""
+    problems = []
+    for name in names:
+        prefix = name.split(".", 1)[0] if "." in name else None
+        if prefix and not any(i.startswith(prefix + ".") for i in available):
+            problems.append(
+                f"{name} is not available in this session, so its settings were not saved; "
+                "/plugins shows which optional plugins this project has installed (a metric "
+                "from a plugin needs it installed and allowed by the policy)"
+            )
+            continue
+        shown = ", ".join(available[:15]) + (" ..." if len(available) > 15 else "")
+        problems.append(
+            f"{name!r} is not a metric id, so its settings were not saved. Settings are keyed "
+            f"by a metric id, never by an objective's name. Metric ids in this session: {shown}"
+        )
+    return problems
+
+
 class SessionController:
     def __init__(
         self,
@@ -695,13 +717,7 @@ class SessionController:
             return PatchResult(
                 "rejected",
                 session.revision,
-                problems=[
-                    f"{evaluator_id} is not available in this session, so its settings were "
-                    "not saved; /plugins shows which optional plugins this project has "
-                    "installed (a metric from a plugin needs it installed and allowed by the "
-                    "policy)"
-                    for evaluator_id in unavailable
-                ],
+                problems=unavailable_settings(unavailable, sorted(available)),
             )
         decision = DecisionRecord(
             decision_id=f"{self.session_id}:d{revision}",

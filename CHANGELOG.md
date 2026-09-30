@@ -5,6 +5,16 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased
+
+- A plan change the assistant proposes and BenchCraft rejects now comes back with what to do
+  differently. A quote or objective that is not the user's words returns the user's message to
+  copy from ("keep \"traffic correctness\", do not turn it into \"correctness\""), and settings
+  keyed by something that is not a metric id (an objective's name) list the metric ids that
+  exist instead of "not available in this session". The tool description says settings go under
+  a metric id and objectives keep the user's exact words. In a real session each of these took
+  the assistant several tries.
+
 ## 0.1.0rc11 — judges that are quick and a reinstall that keeps them
 
 From a real 15-case run with five DeepEval metrics that took an hour and lost 13 of 90
