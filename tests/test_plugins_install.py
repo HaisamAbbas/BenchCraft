@@ -136,6 +136,45 @@ def test_plan_install_previews_every_change_and_writes_nothing(tmp_path: Path) -
     assert _files(root) == before and not (root / "policy.json.bak").exists()
 
 
+def test_installing_again_keeps_the_judge_the_project_already_uses(tmp_path: Path) -> None:
+    """Upgrading the plugin swapped a paid glm-4.7-flashx judge for the assistant's free
+    glm-4.5-flash, silently. An existing judge (and its key reference) stays."""
+    root = _project(tmp_path)
+    mine, mine_secrets = judge_from_provider(
+        "https://api.z.ai/api/paas/v4", "glm-4.5-air", "env:MY_JUDGE_KEY"
+    )
+    config = json.loads((root / "aibench.json").read_text(encoding="utf-8"))
+    config["plugin_environments"] = [
+        {
+            "name": "deepeval",
+            "python": ".aibench/plugins/deepeval/venv/python",
+            "secret_env": mine_secrets,
+            "default_params": {"deepeval.*": {"judge": mine}},
+        }
+    ]
+    (root / "aibench.json").write_text(json.dumps(config), encoding="utf-8")
+
+    plan = plan_install(
+        "deepeval", root, policy_path=root / "policy.json", judge=JUDGE, secret_env=SECRETS
+    )
+    assert plan.judge_kept is True
+    assert plan.summary()["judge"] == "glm-4.5-air at https://api.z.ai/api/paas/v4"
+    [entry] = plan.config["plugin_environments"]
+    assert entry["default_params"] == {"deepeval.*": {"judge": mine}}
+    assert entry["secret_env"]["AIBENCH_JUDGE_KEY"] == "env:MY_JUDGE_KEY"  # theirs wins
+
+    # With no assistant model offered at all, an existing judge is enough to reinstall.
+    again = plan_install("deepeval", root, policy_path=root / "policy.json")
+    assert again.judge_kept is True and again.judge == mine
+
+    # A first install still needs a judge from somewhere.
+    fresh = _project(tmp_path / "fresh")
+    first = plan_install(
+        "deepeval", fresh, policy_path=fresh / "policy.json", judge=JUDGE, secret_env=SECRETS
+    )
+    assert first.judge_kept is False
+
+
 @pytest.mark.parametrize(
     ("name", "judge", "problem"),
     [

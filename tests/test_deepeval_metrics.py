@@ -105,7 +105,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc2" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc3" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -444,17 +444,74 @@ def test_openai_compatible_judge_leaves_room_for_a_reasoning_model_to_think(
     assert result.status is ExecutionStatus.OK and result.value.value == 1.0
     assert server.requests[0]["body"]["max_tokens"] >= 8000
 
-    result, _, _ = _openai_compatible_score(
+
+def test_a_reply_cut_off_by_the_allowance_is_asked_again_with_more_room(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A judge configured with too little room still scores: the allowance doubles until the
+    model has finished thinking. A model that needs more than the ceiling fails with an error
+    that says so, never a JSON decode error."""
+    result, server, _ = _openai_compatible_score(
         tmp_path / "small",
         monkeypatch,
         200,
         {"max_output_tokens": 2000},
         thinking_tokens=5000,
     )
+    assert result.status is ExecutionStatus.OK and result.value.value == 1.0
+    sizes = [r["body"]["max_tokens"] for r in server.requests]
+    assert sizes[:3] == [2000, 4000, 8000]
+    assert set(sizes[2:]) == {8000}  # the metric's later calls keep the room that worked
+
+    result, server, _ = _openai_compatible_score(
+        tmp_path / "hopeless", monkeypatch, 200, thinking_tokens=100_000
+    )
     assert result.status is ExecutionStatus.ERROR
-    assert "cut off at 2000 tokens" in (result.reason or "")
-    assert "max_output_tokens" in (result.reason or "")
+    assert [r["body"]["max_tokens"] for r in server.requests] == [8000, 16000, 32000, 32768]
+    assert "cut off at 32768 tokens" in (result.reason or "")
+    assert "thinking" in (result.reason or "")
     assert "JSONDecodeError" not in (result.reason or "")
+
+
+def test_the_judge_asks_a_model_not_to_think_when_told_to_and_by_default_on_zai(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Judging does not need long reasoning: one glm-4.7-flashx call took 76 to 197 s and a
+    whole run took an hour. Z.ai accepts `thinking: disabled` on every model, so it is the
+    default there; anywhere else the provider's default is left alone unless it is set."""
+    _, server, _ = _openai_compatible_score(tmp_path / "plain", monkeypatch, 200)
+    assert "thinking" not in server.requests[0]["body"]  # a local server: nothing added
+    _, server, _ = _openai_compatible_score(
+        tmp_path / "off", monkeypatch, 200, {"thinking": "disabled"}
+    )
+    assert server.requests[0]["body"]["thinking"] == {"type": "disabled"}
+    _, server, _ = _openai_compatible_score(
+        tmp_path / "on", monkeypatch, 200, {"thinking": "enabled"}
+    )
+    assert server.requests[0]["body"]["thinking"] == {"type": "enabled"}
+
+
+@requires_plugin_env
+def test_a_stalled_connection_is_abandoned_long_before_a_slow_reply_would_be() -> None:
+    got = plugin_python(
+        "import json, os; os.environ['K'] = 'x';"
+        "from aibench_deepeval.judges import openai_compatible_judge as j;"
+        "t = j({'kind': 'openai_compatible', 'base_url': 'http://x', 'model': 'm',"
+        " 'api_key_env': 'K'})._timeouts();"
+        "print(json.dumps([t.connect, t.read]))"
+    )
+    assert got == [15.0, 120.0]
+
+
+@requires_plugin_env
+def test_thinking_is_off_by_default_only_on_zai_hosts() -> None:
+    got = plugin_python(
+        "import json; from aibench_deepeval.judges import default_thinking as d;"
+        "print(json.dumps([d(u) for u in ("
+        "'https://api.z.ai/api/paas/v4', 'https://open.z.ai/x', 'https://api.openai.com/v1',"
+        "'https://notz.ai.example.com/v1', 'http://127.0.0.1:8000/v1')]))"
+    )
+    assert got == ["disabled", "disabled", "default", "default", "default"]
 
 
 def test_reference_context_and_retrieval_are_never_swapped(

@@ -23,6 +23,7 @@ import re
 import time
 from functools import cache
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -50,6 +51,7 @@ JUDGE_SCHEMA: dict[str, Any] = {
                 "max_output_tokens": {"type": "integer", "minimum": 16, "maximum": 32768},
                 "json_mode": {"type": "boolean"},
                 "retry_wait_seconds": {"type": "number", "minimum": 0, "maximum": 60},
+                "thinking": {"enum": ["default", "disabled", "enabled"]},
             },
         },
         {
@@ -81,8 +83,24 @@ _TRANSIENT = (
 )
 _ATTEMPTS = 5
 _DEFAULT_OUTPUT_TOKENS = 8000
+_MAX_OUTPUT_TOKENS = 32768
+_CONNECT_SECONDS = 15.0
 _MAX_WAIT = 30.0
 _RETRY_BUDGET_SECONDS = 200.0
+
+
+class _CutOff(RuntimeError):
+    """The reply stopped at the output allowance, before the judge finished its JSON."""
+
+
+def default_thinking(base_url: str) -> str:
+    """Judging is classification against a rubric and DeepEval makes many small calls per
+    case; a model that thinks first (GLM on Z.ai) took 76 to 197 s for one call and sometimes
+    answered nothing. Z.ai accepts `thinking: disabled` on every model (non-thinking models
+    ignore it), so it is off there unless the judge says otherwise; other endpoints are left
+    at the provider's default."""
+    host = (urlsplit(base_url).hostname or "").lower()
+    return "disabled" if host == "z.ai" or host.endswith(".z.ai") else "default"
 
 
 class _OpenAICompatible:
@@ -105,6 +123,7 @@ class _OpenAICompatible:
         # A reasoning model spends part of this on thinking before it writes the JSON.
         self._max_tokens = int(config.get("max_output_tokens", _DEFAULT_OUTPUT_TOKENS))
         self._json_mode = bool(config.get("json_mode", True))
+        self._thinking = str(config.get("thinking") or default_thinking(config["base_url"]))
         self._retry_wait = float(config.get("retry_wait_seconds", 2))
         self._retry_until = time.monotonic() + _RETRY_BUDGET_SECONDS
         self.retries = 0
@@ -119,7 +138,7 @@ class _OpenAICompatible:
         return str(self.name)
 
     def generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
-        with httpx.Client(timeout=self._timeout) as client:
+        with httpx.Client(timeout=self._timeouts()) as client:
             for attempt in range(_ATTEMPTS):
                 try:
                     response = client.post(
@@ -133,12 +152,17 @@ class _OpenAICompatible:
                     continue
                 wait = self._wait(attempt, response)
                 if wait is None:
-                    return self._parse(response, schema)
+                    try:
+                        return self._parse(response, schema)
+                    except _CutOff:
+                        if attempt == _ATTEMPTS - 1 or not self._grow():
+                            raise
+                        continue
                 time.sleep(wait)
         raise AssertionError("unreachable: the last attempt returns or raises")
 
     async def a_generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeouts()) as client:
             for attempt in range(_ATTEMPTS):
                 try:
                     response = await client.post(
@@ -152,7 +176,12 @@ class _OpenAICompatible:
                     continue
                 wait = self._wait(attempt, response)
                 if wait is None:
-                    return self._parse(response, schema)
+                    try:
+                        return self._parse(response, schema)
+                    except _CutOff:
+                        if attempt == _ATTEMPTS - 1 or not self._grow():
+                            raise
+                        continue
                 await asyncio.sleep(wait)
         raise AssertionError("unreachable: the last attempt returns or raises")
 
@@ -177,6 +206,20 @@ class _OpenAICompatible:
         self.retries += 1
         return wait
 
+    def _timeouts(self) -> httpx.Timeout:
+        """A reply may take `timeout_seconds`, but a connection that does not open within a
+        few seconds is abandoned and retried: a stalled handshake held one case for 260 s."""
+        return httpx.Timeout(self._timeout, connect=min(_CONNECT_SECONDS, self._timeout))
+
+    def _grow(self) -> bool:
+        """Double the output allowance for the next try; False once it is at its ceiling."""
+        grown = min(self._max_tokens * 2, _MAX_OUTPUT_TOKENS)
+        if grown == self._max_tokens:
+            return False
+        self._max_tokens = grown
+        self.retries += 1
+        return True
+
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
 
@@ -192,6 +235,8 @@ class _OpenAICompatible:
         }
         if self._json_mode:
             body["response_format"] = {"type": "json_object"}
+        if self._thinking != "default":
+            body["thinking"] = {"type": self._thinking}
         return body
 
     def _parse(self, response: httpx.Response, schema: Any) -> Any:
@@ -206,9 +251,10 @@ class _OpenAICompatible:
                 self.tokens[ours] = self.tokens.get(ours, 0) + usage[theirs]
         choice = payload["choices"][0]
         if choice.get("finish_reason") == "length":
-            raise RuntimeError(
+            raise _CutOff(
                 f"judge output was cut off at {self._max_tokens} tokens (a reasoning model "
-                "spends them thinking before it answers): raise the judge's max_output_tokens"
+                "spends them thinking before it answers): raise the judge's max_output_tokens "
+                'or set its "thinking" to "disabled"'
             )
         content = choice["message"].get("content") or ""
         text = _FENCE.sub("", content.strip())

@@ -179,7 +179,8 @@ def plugin_preview(console: Console, data: dict[str, Any]) -> None:
         out(console, f"  installs from: {safe(data['installs_from'])}")
     out(console, f"  metrics: {safe(', '.join(data['metrics']))}")
     if data["judge"]:
-        out(console, f"  judge: {safe(data['judge'])} (paid calls to that provider)")
+        kept = " - the judge this project already uses, kept" if data.get("judge_kept") else ""
+        out(console, f"  judge: {safe(data['judge'])} (paid calls to that provider){kept}")
     for name, ref in data["secret_env"].items():
         out(console, f"  judge key: {safe(ref)}, passed to its workers as {safe(name)}")
     out(console, f"  project config: {safe(data['config'])} (plugin_environments)")
