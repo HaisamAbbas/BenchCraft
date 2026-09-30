@@ -5,33 +5,10 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
-## 0.1.0rc12 — test cases from documents, and an assistant that recovers
+## 0.1.0rc12 — quick judges, test cases from documents, an assistant that recovers
 
-- `/cases`: test cases from documents, in the chat. `/cases generate FILE_OR_FOLDER`
-  has the assistant's model write candidate cases from `.txt`/`.md` documents (the policy
-  must allow the model's provider to receive them) and shows each beside the exact quote it
-  cites, flagging an answer that is not word for word in that quote. `/cases accept N...`
-  (or `all`) and `/cases reject N...` are the user's review; `/cases save [FILE.jsonl]`
-  writes the accepted cases to a new dataset file, never over an existing one. Generated
-  references stay unverified until accepted, exactly as with `benchcraft candidates`.
-  The assistant is told it cannot generate, accept or save cases itself.
-- Fixed: a dataset written by `benchcraft candidates promote` (and `/cases save`) could
-  not be read back. The file carried `duplicate_of_line`, `source_line` and a null
-  `repository`, which the dataset reader refuses. Unset fields are now left out.
-
-- A plan change the assistant proposes and BenchCraft rejects now comes back with what to do
-  differently. A quote or objective that is not the user's words returns the user's message to
-  copy from ("keep \"traffic correctness\", do not turn it into \"correctness\""), and settings
-  keyed by something that is not a metric id (an objective's name) list the metric ids that
-  exist instead of "not available in this session". The tool description says settings go under
-  a metric id and objectives keep the user's exact words. In a real session each of these took
-  the assistant several tries.
-
-## 0.1.0rc11 — judges that are quick and a reinstall that keeps them
-
-From a real 15-case run with five DeepEval metrics that took an hour and lost 13 of 90
-results to the judge.
-
+Judge and install changes come from a real 15-case run with five DeepEval metrics that took
+an hour and lost 13 of 90 results to the judge.
 - The `openai_compatible` judge has a `thinking` setting (`default`, `disabled`,
   `enabled`). On Z.ai it is `disabled` unless set: judging is classification against a
   rubric and DeepEval makes dozens of small calls per case, but a thinking model took 76
@@ -52,6 +29,24 @@ results to the judge.
 - The installers (`install.ps1`, `install.sh`) install the most recently published release.
   They took the first release GitHub listed, and that list is not in publish order (`rc10`
   came below `rc5`), so after 0.1.0rc10 they kept installing 0.1.0rc9.
+- `/cases`: test cases from documents, in the chat. `/cases generate FILE_OR_FOLDER`
+  has the assistant's model write candidate cases from `.txt`/`.md` documents (the policy
+  must allow the model's provider to receive them) and shows each beside the exact quote it
+  cites, flagging an answer that is not word for word in that quote. `/cases accept N...`
+  (or `all`) and `/cases reject N...` are the user's review; `/cases save [FILE.jsonl]`
+  writes the accepted cases to a new dataset file, never over an existing one. Generated
+  references stay unverified until accepted, exactly as with `benchcraft candidates`.
+  The assistant is told it cannot generate, accept or save cases itself.
+- Fixed: a dataset written by `benchcraft candidates promote` (and `/cases save`) could
+  not be read back. The file carried `duplicate_of_line`, `source_line` and a null
+  `repository`, which the dataset reader refuses. Unset fields are now left out.
+- A plan change the assistant proposes and BenchCraft rejects now comes back with what to do
+  differently. A quote or objective that is not the user's words returns the user's message to
+  copy from ("keep \"traffic correctness\", do not turn it into \"correctness\""), and settings
+  keyed by something that is not a metric id (an objective's name) list the metric ids that
+  exist instead of "not available in this session". The tool description says settings go under
+  a metric id and objectives keep the user's exact words. In a real session each of these took
+  the assistant several tries.
 - Plugin `aibench-deepeval` 0.2.0rc3.
 
 ## 0.1.0rc10 — judges that think, budgets that fit
