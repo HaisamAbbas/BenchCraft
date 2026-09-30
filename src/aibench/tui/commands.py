@@ -37,6 +37,7 @@ COMMANDS: dict[str, str] = {
     "/traces": "/traces [import FILE] [RUN_ID] - a run's imported traces, or attach an export",
     "/rescore": "/rescore [all] [RUN_ID] - score stored outputs; only what failed or is missing",
     "/case": "/case CASE_ID - one case's evidence",
+    "/cases": "/cases generate FILE... | accept N... | reject N... | save - test cases from documents",
     "/budget": "ceilings, committed spend and unknown accounting",
     "/app": "the application's runner: what it observes, missing evidence, resets, test worlds",
     "/world": "/world NAME|none - select one of the application's test worlds (a new draft)",
@@ -83,10 +84,12 @@ class Commands:
         *,
         judge: JudgeSource | None = None,
         progress: Callable[[str], None] | None = None,
+        provider: Any = None,
     ):
         self.controller = controller
         self.new_session = new_session
         self.judge = judge
+        self.provider = provider  # the assistant's model: it writes candidate cases
         self.progress = progress or (lambda _line: None)
 
     async def run(self, text: str, *, message_id: str | None = None) -> CommandResult:
@@ -244,6 +247,100 @@ class Commands:
             },
             ok=result.status == "applied",
         )
+
+    async def _cases(self, argument: str) -> CommandResult:
+        """`/cases`: test cases from documents. `generate FILE...` has the assistant's model
+        write candidate cases from the documents (they go to that model's provider, so the
+        policy must allow it); `accept`/`reject` are the user's review of each one, shown
+        beside the source quote it cites; `save` writes the accepted ones to a new dataset
+        file. Nothing generated is a case until it is accepted and saved."""
+        from aibench.services import case_pools
+
+        usage = (
+            "usage: /cases generate FILE_OR_FOLDER... [--max N]  |  /cases  |  "
+            "/cases accept N... | all  |  /cases reject N...  |  /cases save [FILE.jsonl]"
+        )
+        words = shlex.split(argument, posix=False)
+        sub = words[0].lower() if words else "show"
+        rest = words[1:]
+        storage = self.controller.storage
+        root = self.controller.project_root
+
+        def failed(message: str) -> CommandResult:
+            return CommandResult("/cases", "error", {"error": message}, ok=False)
+
+        if sub == "generate":
+            limit = 20
+            if "--max" in rest:
+                at = rest.index("--max")
+                if at + 1 >= len(rest) or not rest[at + 1].isdigit() or not 1 <= int(rest[at + 1]) <= 50:
+                    return failed("--max takes a number from 1 to 50")
+                limit = int(rest[at + 1])
+                rest = rest[:at] + rest[at + 2 :]
+            if not rest:
+                return failed(usage)
+            config = getattr(self.provider, "config", None)
+            if config is None:
+                return failed(
+                    "no assistant model is configured to write the cases: run "
+                    "`benchcraft setup` first"
+                )
+            sources = case_pools.source_files(root, rest)
+            # Only the model call runs off this thread: the database is not shared with it.
+            manifest, candidates = await asyncio.to_thread(
+                case_pools.draft_pool,
+                config,
+                self.controller.policy(),
+                sources,
+                max_candidates=limit,
+            )
+            made = case_pools.store_pool(storage, manifest, candidates)
+            return CommandResult(
+                "/cases",
+                "cases",
+                {
+                    "pool_id": made.pool_id,
+                    "rows": made.rows,
+                    "duplicate_sources": made.duplicate_sources,
+                    "generated": True,
+                },
+            )
+        pool_id = case_pools.newest_pool_id(storage)
+        if sub == "show":
+            if pool_id is None:
+                return failed("no cases yet: /cases generate FILE_OR_FOLDER")
+            return CommandResult(
+                "/cases",
+                "cases",
+                {
+                    "pool_id": pool_id,
+                    "rows": case_pools.pool_rows(storage, pool_id),
+                    "duplicate_sources": [],
+                    "generated": False,
+                },
+            )
+        if sub in ("accept", "reject"):
+            if pool_id is None:
+                return failed("no cases yet: /cases generate FILE_OR_FOLDER")
+            if not rest:
+                return failed(f"which cases? /cases {sub} 1 2 3  (or /cases {sub} all)")
+            done = case_pools.decide(storage, pool_id, rest, accept=sub == "accept")
+            left = sum(
+                1 for row in case_pools.pool_rows(storage, pool_id) if row["status"] == "candidate"
+            )
+            return CommandResult(
+                "/cases",
+                "cases_decided",
+                {"accepted": sub == "accept", "done": done, "undecided": left},
+            )
+        if sub == "save":
+            if pool_id is None:
+                return failed("no cases yet: /cases generate FILE_OR_FOLDER")
+            target = Path(rest[0].strip('"')) if rest else Path(case_pools.DEFAULT_OUTPUT)
+            target = target if target.is_absolute() else root / target
+            path, count = case_pools.save_accepted(storage, pool_id, target)
+            return CommandResult("/cases", "cases_saved", {"path": str(path), "count": count})
+        return failed(usage)
 
     async def _traces(self, argument: str) -> CommandResult:
         """`/traces [RUN_ID]`: what the run's imported traces add. `/traces import FILE

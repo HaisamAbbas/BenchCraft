@@ -107,7 +107,8 @@ Every judged metric takes a `judge` parameter:
   read from the worker's `NAME` variable, which the harness sets from the plugin
   environment's `secret_env`. Calls and tokens are counted; cost is unknown (never zero).
   Optional: `timeout_seconds`, `max_output_tokens` (default 8000: a reasoning model
-  spends some of it thinking), `json_mode` (default true),
+  spends some of it thinking), `thinking` (`default`, `disabled` or `enabled`; disabled on Z.ai, where a thinking
+  model is slow and judging does not need it), `json_mode` (default true),
   `retry_wait_seconds` (default 2). A rate limit (429), a server error (5xx) or a dropped
   connection is retried up to five times with a doubling wait (the server's `Retry-After`
   when given, at most 30 s) inside 200 s per case; a wrong key or a bad request is not. Free

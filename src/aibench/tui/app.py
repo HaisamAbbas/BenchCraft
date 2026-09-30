@@ -161,6 +161,12 @@ def render_result(console: Console, result: CommandResult) -> None:
         render.plugin_preview(console, data)
     elif kind == "plugin_installed":
         render.plugin_installed(console, data)
+    elif kind == "cases":
+        render.cases(console, data)
+    elif kind == "cases_decided":
+        render.cases_decided(console, data)
+    elif kind == "cases_saved":
+        render.cases_saved(console, data)
     elif kind == "traces":
         render.traces(console, data)
     elif kind == "traces_imported":
@@ -235,6 +241,7 @@ class ChatApp:
             self.new_session,
             judge=self._judge(),
             progress=lambda line: self.say(f"[dim]{safe(line)}[/dim]"),
+            provider=self.provider,
         )
         self._seen_run: str | None = None
         self._last_sequence = 0

@@ -28,6 +28,7 @@ from aibench.planning.openai_provider import (
     provider_denials,
 )
 from aibench.services.candidates import (
+    path_denials,
     promote_candidates,
     record_candidate_executable_check,
     record_candidate_review,
@@ -48,22 +49,6 @@ def _fail(message: str, code: int = 2) -> typer.Exit:
 def _open_storage(root: Path | None) -> tuple[Workspace, Storage]:
     workspace = Workspace.at(root or Path.cwd())
     return workspace, Storage(Database.open_workspace(workspace))
-
-
-def _path_denials(policy, paths: tuple[Path, ...]) -> list[str]:
-    if not policy.data_roots:
-        return []
-    denials = []
-    roots = tuple(Path(root).resolve() for root in policy.data_roots)
-    for path in paths:
-        try:
-            resolved = path.resolve(strict=True)
-        except OSError as exc:
-            denials.append(f"source {path} cannot be resolved: {exc}")
-            continue
-        if not any(resolved.is_relative_to(root) for root in roots):
-            denials.append(f"source {path} is outside the policy's data_roots")
-    return denials
 
 
 @app.command("generate")
@@ -92,7 +77,7 @@ def generate(
                 "candidate generation is restricted to --split development; held-out data is never sent"
             )
         loaded_policy = load_policy(policy)
-        if denials := _path_denials(loaded_policy, tuple(sources)):
+        if denials := path_denials(loaded_policy, tuple(sources)):
             raise CandidateGenerationError("; ".join(denials))
         config = OpenAICompatibleConfig.model_validate(load_mapping_file(provider_config))
         # Candidate jobs have a hard output-token cap even if a shared planner config is

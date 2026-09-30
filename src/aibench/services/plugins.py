@@ -216,6 +216,7 @@ class InstallPlan:
     policy_changes: list[str]
     judge: dict[str, Any] | None
     secret_env: dict[str, str]
+    judge_kept: bool = False  # the project already had a judge for this plugin; it is kept
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -230,9 +231,18 @@ class InstallPlan:
             "policy": str(self.policy_path) if self.policy_path else None,
             "policy_changes": self.policy_changes,
             "judge": _judge_label(self.judge),
+            "judge_kept": self.judge_kept,
             "secret_env": self.secret_env,
             "metrics": list(self.plugin.metrics),
         }
+
+
+def _configured_judge(entry: dict[str, Any] | None, evaluators: str) -> dict[str, Any] | None:
+    """The judge an existing plugin environment entry already names for these evaluators."""
+    if not entry:
+        return None
+    judge = ((entry.get("default_params") or {}).get(evaluators) or {}).get("judge")
+    return judge if isinstance(judge, dict) and judge else None
 
 
 def _judge_label(judge: dict[str, Any] | None) -> str | None:
@@ -294,11 +304,6 @@ def plan_install(
     if plugin is None:
         known = ", ".join(OPTIONAL_PLUGINS)
         raise PluginInstallError(f"no optional plugin {name!r}; known: {known}")
-    if plugin.uses_models and judge is None:
-        raise PluginInstallError(
-            f"{name} metrics are judged by a model: open the chat with --provider-config to "
-            "use the assistant's model as judge, or pass --judge-provider"
-        )
     source = _source_checkout(plugin)
     release = None if source is not None or existing_python is not None else release_source()
     path = config_path(project_root)
@@ -318,12 +323,29 @@ def plan_install(
         create = project_root / ".aibench" / "plugins" / name / "venv"
         python = _venv_python(create)
     secrets = dict(secret_env or {})
+    previous = next(
+        (e for e in config.get("plugin_environments", []) if e.get("name") == name), None
+    )
+    kept = _configured_judge(previous, plugin.evaluators)
+    if kept is not None:
+        # Installing again (to upgrade the plugin) must not swap the judge the user chose for
+        # the assistant's model: that turned a paid glm-4.7-flashx judge into the free
+        # glm-4.5-flash without a word. Change the judge by editing the project config.
+        judge = kept
+        secrets = {**secrets, **dict(previous.get("secret_env") or {})}  # type: ignore[union-attr]
+    if plugin.uses_models and judge is None:
+        raise PluginInstallError(
+            f"{name} metrics are judged by a model: open the chat with --provider-config to "
+            "use the assistant's model as judge, or pass --judge-provider"
+        )
     entry: dict[str, Any] = {
         "name": name,
         "python": _relative_or_absolute(python, path.parent),
         "secret_env": secrets,
     }
-    if judge is not None:
+    if kept is not None:
+        entry["default_params"] = previous["default_params"]  # type: ignore[index]
+    elif judge is not None:
         entry["default_params"] = {plugin.evaluators: {"judge": judge}}
     others = [e for e in config.get("plugin_environments", []) if e.get("name") != name]
     config = {**config, "plugin_environments": [*others, entry]}
@@ -368,6 +390,7 @@ def plan_install(
         policy_changes=changes,
         judge=judge,
         secret_env=secrets,
+        judge_kept=kept is not None,
     )
 
 

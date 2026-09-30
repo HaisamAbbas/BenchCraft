@@ -26,7 +26,12 @@ from pydantic import ValidationError as PydanticValidationError
 
 from aibench.core.errors import AibenchError
 from aibench.core.models import deep_unfreeze
-from aibench.core.plans import BudgetLimits, CaseSelection, PluginEnvironmentRef
+from aibench.core.plans import (
+    BudgetLimits,
+    CaseSelection,
+    ConcurrencyLimits,
+    PluginEnvironmentRef,
+)
 from aibench.core.sessions import BenchmarkSession, PendingQuestion, PlanPatch, SessionChoices
 from aibench.engine.compile import freeze_plan, load_policy
 from aibench.planning.catalog import CONCEPTS
@@ -147,6 +152,26 @@ def apply_patch(
         raise PatchRejected(_validation_problems(exc)) from exc
 
 
+# A judged metric is dozens of small model calls per case; scored one case at a time a
+# 15-case run with five of them took an hour. Three at a time is a fraction of a paid
+# endpoint's limits and, with the judge's retries, tolerable on a free one.
+JUDGED_EVALUATION_CONCURRENCY = 3
+
+
+def with_judged_concurrency(ctx: Any, proposal: Any, catalog: list[Any]) -> Any:
+    """`ctx` with evaluation concurrency raised when the proposal has a model-judged metric."""
+    judged = {option.metric for option in catalog if option.uses_models}
+    if not any(choice.metric in judged for choice in proposal.metrics):
+        return ctx
+    limits: ConcurrencyLimits = ctx.concurrency
+    if limits.evaluation >= JUDGED_EVALUATION_CONCURRENCY:
+        return ctx
+    return replace(
+        ctx,
+        concurrency=limits.model_copy(update={"evaluation": JUDGED_EVALUATION_CONCURRENCY}),
+    )
+
+
 def _declared_worlds(application: Path) -> list[str]:
     try:
         return sorted(load_application(application).spec.test_worlds)
@@ -249,6 +274,7 @@ def build_draft(
     )
     if choices.repetitions != proposal.repetitions:
         proposal = proposal.model_copy(update={"repetitions": choices.repetitions})
+    ctx = with_judged_concurrency(ctx, proposal, inputs.catalog)
     validation = validate_draft(proposal, ctx)
     if validation.plan is None:
         raise PatchRejected(validation.blocking_messages())
