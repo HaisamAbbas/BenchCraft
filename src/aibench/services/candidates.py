@@ -23,6 +23,7 @@ from aibench.datasets.candidates import (
     source_text_for_span,
     verify_source_quote,
 )
+from aibench.security.policy import ExecutionPolicy
 from aibench.storage.repositories import CandidateTransition, Storage
 
 
@@ -39,6 +40,23 @@ def _event(
         actor=actor,
         details=details,
     )
+
+
+def path_denials(policy: ExecutionPolicy, paths: tuple[Path, ...]) -> list[str]:
+    """Why these source documents may not be sent to a model under `policy`."""
+    if not policy.data_roots:
+        return []
+    denials = []
+    roots = tuple(Path(root).resolve() for root in policy.data_roots)
+    for path in paths:
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            denials.append(f"source {path} cannot be resolved: {exc}")
+            continue
+        if not any(resolved.is_relative_to(root) for root in roots):
+            denials.append(f"source {path} is outside the policy's data_roots")
+    return denials
 
 
 def _need_candidate(storage: Storage, candidate_id: str) -> DatasetCandidate:
@@ -137,8 +155,17 @@ def _write_cases(path: Path, candidates: tuple[DatasetCandidate, ...]) -> tuple[
     if path.exists():
         raise ConflictError(f"output already exists: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
+    # `duplicate_of_line` and `source_line` are set when a dataset file is read, and the
+    # reader refuses them (and a null `repository`) in a file: unset fields are left out and
+    # the reader's defaults fill them.
     content = "".join(
-        json.dumps(item.case.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
+        json.dumps(
+            item.case.model_dump(
+                mode="json", exclude={"duplicate_of_line", "source_line"}, exclude_none=True
+            ),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         + "\n"
         for item in candidates
     ).encode("utf-8")

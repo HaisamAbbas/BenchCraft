@@ -5,7 +5,19 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
-## Unreleased
+## 0.1.0rc12 — test cases from documents, and an assistant that recovers
+
+- `/cases`: test cases from documents, in the chat. `/cases generate FILE_OR_FOLDER`
+  has the assistant's model write candidate cases from `.txt`/`.md` documents (the policy
+  must allow the model's provider to receive them) and shows each beside the exact quote it
+  cites, flagging an answer that is not word for word in that quote. `/cases accept N...`
+  (or `all`) and `/cases reject N...` are the user's review; `/cases save [FILE.jsonl]`
+  writes the accepted cases to a new dataset file, never over an existing one. Generated
+  references stay unverified until accepted, exactly as with `benchcraft candidates`.
+  The assistant is told it cannot generate, accept or save cases itself.
+- Fixed: a dataset written by `benchcraft candidates promote` (and `/cases save`) could
+  not be read back. The file carried `duplicate_of_line`, `source_line` and a null
+  `repository`, which the dataset reader refuses. Unset fields are now left out.
 
 - A plan change the assistant proposes and BenchCraft rejects now comes back with what to do
   differently. A quote or objective that is not the user's words returns the user's message to

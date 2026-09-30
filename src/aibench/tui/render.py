@@ -202,6 +202,51 @@ def plugin_installed(console: Console, data: dict[str, Any]) -> None:
     out(console, '  ask for what to measure, e.g. "check relevancy and bias", or /plan')
 
 
+def cases(console: Console, data: dict[str, Any]) -> None:
+    """`/cases`: candidate test cases, each beside the source quote it cites, for review."""
+    rows = data["rows"]
+    verb = "generated" if data["generated"] else "in"
+    out(console, f"[bold]{len(rows)} candidate case(s)[/bold] {verb} {safe(data['pool_id'])}")
+    for row in rows:
+        tag = {"candidate": "to review", "reviewed": "accepted", "rejected": "rejected"}.get(
+            row["status"], row["status"]
+        )
+        out(console, f"\n[bold]{row['number']}.[/bold] ({tag})  {safe(row['question'])}")
+        out(console, f"   answer: {safe(row['answer'])}")
+        if row["quote"] is None:
+            out(console, "   [yellow]source changed or missing: this case cannot be used[/yellow]")
+            continue
+        quote = row["quote"] if len(row["quote"]) <= 240 else row["quote"][:237] + "..."
+        out(console, f"   [dim]{safe(row['source'])}:[/dim] \"{safe(quote)}\"")
+        if not row["verbatim"]:
+            out(console, "   [yellow]the answer is not word for word in that quote: check it[/yellow]")
+    for item in data.get("duplicate_sources", []):
+        out(console, f"[yellow]same document twice: {safe(item['source_ref'])}[/yellow]")
+    out(
+        console,
+        "\nRead each case against its quote. Then /cases accept 1 2 3 (or /cases accept all), "
+        "/cases reject N, and /cases save. [dim]Nothing is a test case until it is accepted "
+        "and saved.[/dim]",
+    )
+
+
+def cases_decided(console: Console, data: dict[str, Any]) -> None:
+    word = "accepted" if data["accepted"] else "rejected"
+    numbers = ", ".join(str(item["number"]) for item in data["done"]) or "none"
+    out(console, f"{word}: {numbers}; {data['undecided']} still to review")
+    if data["accepted"] and data["done"]:
+        out(console, "  /cases save writes the accepted cases to a new dataset file")
+
+
+def cases_saved(console: Console, data: dict[str, Any]) -> None:
+    out(console, f"[green]saved {data['count']} case(s)[/green] to {safe(data['path'])}")
+    out(
+        console,
+        f'  to benchmark with them, tell me: "use the dataset {safe(data["path"])}"; '
+        "the answers in it were written by a model and accepted by you",
+    )
+
+
 def traces(console: Console, data: dict[str, Any]) -> None:
     """`/traces`: what a run's imported traces add."""
     if data["run_id"] is None or not data["available"]:

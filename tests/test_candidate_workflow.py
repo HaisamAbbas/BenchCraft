@@ -17,6 +17,7 @@ from aibench.datasets.candidates import (
     candidate_for_promotion,
     generate_candidate_pool,
 )
+from aibench.datasets.ingest import ingest_dataset
 from aibench.planning.planner import ModelReply, ToolCall
 from aibench.services.candidates import (
     promote_candidates,
@@ -245,6 +246,10 @@ def test_human_review_and_promotion_are_separate_audited_actions(
     assert storage.get_candidate(candidate.candidate_id).status is CandidateStatus.PROMOTED
     exported = json.loads(output.read_text(encoding="utf-8"))
     assert exported["reference"]["status"] == "human_reviewed"
+    # A promoted file is a dataset the benchmark can read back: it used to carry two
+    # fields only the reader sets, and was refused as an unknown field.
+    assert "source_line" not in exported and "duplicate_of_line" not in exported
+    assert ingest_dataset(output, retain_cases=False).is_valid
     assert [event.kind for event in storage.list_candidate_events(candidate.candidate_id)] == [
         "generated",
         "reviewed_human",

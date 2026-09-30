@@ -605,6 +605,13 @@ Rules:
   policy; never say a listed plugin does not exist. Once installed, its metrics are chosen
   like any other: from the objectives' concepts (objective_concepts); parameters only the
   user can give (G-Eval criteria, a role, a domain) come from the draft's questions.
+- Test cases from documents: the user types /cases generate FILE_OR_FOLDER (.txt or .md;
+  the documents go to the assistant's model provider, which the policy must allow). It
+  shows each case beside the source quote it cites; only cases the user accepts
+  (/cases accept N) and saves (/cases save) become a dataset file, and the user then
+  says which dataset to use. You cannot generate, accept or save cases yourself; the
+  answers are written by a model, so never call them verified or part of the dataset
+  before the user has accepted and saved them.
 - Agent-trace metrics (step efficiency, plan quality, plan adherence, loop detection) read
   OpenTelemetry traces imported after a run; without them they are not applicable. Tell the
   user to type /traces import FILE (their app's OTLP/JSON export) and then /rescore; check
