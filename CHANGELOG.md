@@ -9,6 +9,7 @@ Workspace schema changes are listed under "Workspace". Upgrade steps are in
 
 Judge and install changes come from a real 15-case run with five DeepEval metrics that took
 an hour and lost 13 of 90 results to the judge.
+
 - The `openai_compatible` judge has a `thinking` setting (`default`, `disabled`,
   `enabled`). On Z.ai it is `disabled` unless set: judging is classification against a
   rubric and DeepEval makes dozens of small calls per case, but a thinking model took 76
