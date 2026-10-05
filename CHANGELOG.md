@@ -5,6 +5,14 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc16 — the assistant stops looping on empty settings
+
+- A plan change from the assistant that carries settings for a metric but sets nothing
+  (`params: {"native.exact_match@1.0.0": {}}`) no longer fails. Empty settings blocks are
+  ignored and `id@version` is read as `id`; real settings are still checked. The assistant
+  used to be refused three ways in a row and ran out of tokens on "use the dataset FILE and
+  check that the answers are correct".
+
 ## 0.1.0rc15 — status after a rescore, and /cases that survives a bad quote
 
 - Fixed: `needs attention` (and the evaluation counts) in a run's status line stayed at the
