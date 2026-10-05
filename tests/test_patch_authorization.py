@@ -367,3 +367,78 @@ def test_reopening_an_older_session_loads_the_plugins_installed_since(tmp_path: 
         assert _planned_g_eval(ctl)["criteria"] == CRITERIA
     finally:
         ctl.storage.db.close()
+
+
+@requires_plugin_env
+def test_g_eval_needs_criteria_not_a_name(tmp_path: Path) -> None:
+    """The real model sent G-Eval's criteria without a `name`. G-Eval then needed a name "that
+    only you can supply", the metric was left out of the plan, and the run had no correctness
+    check although the plan read "ready to run". The name is only a label."""
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(
+        {"a": "answer"},
+        objectives=("catch wrong answers",),
+        policy={
+            "data_roots": [str(tmp_path)],
+            "allowed_evaluators": ["native.*", "deepeval.*"],
+            "allowed_plugin_environments": [str(PLUGIN_ENV)],
+            "allow_model_evaluators": True,
+        },
+    )
+    try:
+        judge = {"kind": "python_factory", "factory": "aibench_schema_judges:agreeing_judge"}
+        loaded = ctl.use_plugin_environments(
+            (PluginEnvironmentRef(python=str(PLUGIN_ENV)),), {"deepeval.*": {"judge": judge}}
+        )
+        assert loaded.status == "applied", loaded.problems
+        result = ctl.apply_patch(
+            PlanPatch(
+                add_objectives=("traffic correctness",),
+                params={"deepeval.g_eval": {"criteria": CRITERIA}},
+            ),
+            expected_revision=ctl.session.revision,
+            source="assistant",
+        )
+        assert result.status == "applied", result.problems
+        assert _planned_g_eval(ctl)["criteria"] == CRITERIA
+    finally:
+        ctl.storage.db.close()
+
+
+@requires_plugin_env
+def test_a_change_that_would_leave_a_configured_metric_out_of_the_plan_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A metric configured with settings that leave it unable to run used to be dropped from
+    the plan quietly. The change is refused instead, saying what is missing, so the assistant
+    (or the user) can fix it before the plan reads "ready to run" without it."""
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(
+        {"a": "answer"},
+        objectives=("catch wrong answers",),
+        policy={
+            "data_roots": [str(tmp_path)],
+            "allowed_evaluators": ["native.*", "deepeval.*"],
+            "allowed_plugin_environments": [str(PLUGIN_ENV)],
+            "allow_model_evaluators": True,
+        },
+    )
+    try:
+        judge = {"kind": "python_factory", "factory": "aibench_schema_judges:agreeing_judge"}
+        loaded = ctl.use_plugin_environments((PluginEnvironmentRef(python=str(PLUGIN_ENV)),), {})
+        assert loaded.status == "applied", loaded.problems
+        before = ctl.session.revision
+        result = ctl.apply_patch(
+            PlanPatch(
+                add_objectives=("check for misuse",),
+                params={"deepeval.misuse": {"judge": judge}},  # no `domain`
+            ),
+            expected_revision=before,
+            source="assistant",
+        )
+        assert result.status == "rejected"
+        assert "deepeval.misuse would not be in the plan" in result.problems[0]
+        assert "domain" in result.problems[0]
+        assert ctl.session.revision == before  # nothing was saved
+    finally:
+        ctl.storage.db.close()

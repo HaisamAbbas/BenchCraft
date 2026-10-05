@@ -665,7 +665,7 @@ class GEval(DeepEvalMetric):
             "parameters_schema": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["judge", "name"],
+                "required": ["judge"],
                 "anyOf": [{"required": ["criteria"]}, {"required": ["evaluation_steps"]}],
                 "properties": {
                     "judge": JUDGE_SCHEMA,
@@ -772,7 +772,8 @@ class GEval(DeepEvalMetric):
             for item in self.params.get("rubric") or []
         ]
         return UpstreamGEval(
-            name=self.params["name"],
+            # `name` is a label only; the criteria are what the judge reads.
+            name=self.params.get("name") or "custom criteria",
             evaluation_params=[SingleTurnParams(name) for name in self._fields()],
             criteria=self.params.get("criteria"),
             evaluation_steps=self.params.get("evaluation_steps"),
