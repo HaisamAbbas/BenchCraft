@@ -5,6 +5,26 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc17 — G-Eval scores you can trust
+
+From a real run where the same answer, criteria and judge scored 0.2 once and 1.0 when scored
+again: a small judge's single G-Eval score is not reliable.
+
+### Metric semantics
+
+- `deepeval.g_eval` is now version 1.1.0: each case is scored `repeats` times (default 3,
+  1 to 9; `repeats: 1` is the old single score) and the median is the score. On a real
+  document question the five calls were 0.70, 0.70, 0.70, 0.30, 0.70, and the median ignores
+  the 0.30 outlier a single call could have returned. Scores further than 0.3 apart are
+  flagged: the result's reason starts with `unstable:` and lists the scores. The reason also
+  carries the judge's own explanation, which G-Eval results did not show before.
+- Reports count them: the terminal report, the markdown/HTML report and the report facts say
+  how many of a metric's results are unstable. They are still recorded and still decide pass
+  or fail by their median; the count says which numbers not to trust alone.
+- G-Eval costs `repeats` times the judge calls (about 6 s each on `glm-4.5-air`). Runs scored
+  with 1.0.0 are not comparable with 1.1.0 runs; `/rescore all` re-scores an old run.
+- Plugin `aibench-deepeval` 0.2.0rc5.
+
 ## 0.1.0rc16 — the assistant stops looping on empty settings
 
 - A plan change from the assistant that carries settings for a metric but sets nothing

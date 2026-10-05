@@ -111,3 +111,26 @@ class PlanlessJudge(AgreeingJudge):
 
 def planless_judge() -> PlanlessJudge:
     return PlanlessJudge()
+
+
+class ScatteredJudge(AgreeingJudge):
+    """A G-Eval judge that is not consistent: successive scores for the same answer are 2, 9
+    and 10 out of 10 (what a small judge did on a correct answer: 0.2 once, 1.0 the next
+    time). Everything else is answered as `AgreeingJudge` does."""
+
+    SCORES = (2, 9, 10)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scored = 0
+
+    def generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
+        answer = super().generate(prompt, schema)
+        if isinstance(answer, BaseModel) and isinstance(getattr(answer, "score", None), (int, float)):
+            answer = answer.model_copy(update={"score": float(self.SCORES[self.scored % 3])})
+            self.scored += 1
+        return answer
+
+
+def scattered_judge() -> ScatteredJudge:
+    return ScatteredJudge()

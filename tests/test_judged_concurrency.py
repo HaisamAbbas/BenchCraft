@@ -18,7 +18,7 @@ class _Ctx:
 def _catalog() -> list[SimpleNamespace]:
     return [
         SimpleNamespace(metric="native.exact_match@1.0.0", uses_models=False),
-        SimpleNamespace(metric="deepeval.g_eval@1.0.0", uses_models=True),
+        SimpleNamespace(metric="deepeval.g_eval@1.1.0", uses_models=True),
     ]
 
 
@@ -28,7 +28,7 @@ def _proposal(*metrics: str) -> SimpleNamespace:
 
 def test_a_judged_metric_raises_evaluation_concurrency_and_leaves_the_rest_alone() -> None:
     ctx = _Ctx(ConcurrencyLimits(application=2))
-    raised = with_judged_concurrency(ctx, _proposal("deepeval.g_eval@1.0.0"), _catalog())
+    raised = with_judged_concurrency(ctx, _proposal("deepeval.g_eval@1.1.0"), _catalog())
     assert raised.concurrency.evaluation == JUDGED_EVALUATION_CONCURRENCY
     assert raised.concurrency.application == 2  # the application's own limit is untouched
     assert ctx.concurrency.evaluation == 1  # the input is not modified
@@ -42,5 +42,5 @@ def test_native_metrics_keep_one_case_at_a_time() -> None:
 
 def test_a_higher_limit_already_set_is_never_lowered() -> None:
     ctx = _Ctx(ConcurrencyLimits(evaluation=8))
-    same = with_judged_concurrency(ctx, _proposal("deepeval.g_eval@1.0.0"), _catalog())
+    same = with_judged_concurrency(ctx, _proposal("deepeval.g_eval@1.1.0"), _catalog())
     assert same.concurrency.evaluation == 8

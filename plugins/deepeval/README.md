@@ -33,7 +33,7 @@ toxicity and the other safety metrics that way), and is decided by the plan's ru
 | `tool_permission` | reported tool calls | `allowed_tools` or `denied_tools` |
 | `exact_match` | answer, reference answer | nothing |
 | `pattern_match` | answer | `pattern` |
-| `g_eval` | what `evaluation_params` names (default: question, answer) | judge, `name`, `criteria` or `evaluation_steps`; optional `rubric` |
+| `g_eval` | what `evaluation_params` names (default: question, answer) | judge, `name`, `criteria` or `evaluation_steps`; optional `rubric`, `repeats` (1 to 9, default 3: the median of that many judge scores; scores more than 0.3 apart are reported as unstable) |
 
 Field mapping: `case.input` -> `input`, `execution.output` -> `actual_output`,
 `case.reference.answer` -> `expected_output`, `execution.retrieved_context` ->
