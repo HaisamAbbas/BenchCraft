@@ -62,6 +62,12 @@ _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _ASCII_SPINNER = "|/-\\"
 _FRAME_SECONDS = 0.1  # how often the Working line redraws while the assistant replies
 
+# Commands that can take minutes (scoring, installs, a model writing cases, big reports).
+# They run in the background like an assistant turn, so the input box stays and a Working
+# line counts seconds; the quick ones (/status, /pause, /stop ...) still answer at once.
+LONG_COMMANDS = frozenset({"/rescore", "/plugins", "/cases", "/report", "/traces", "/compare"})
+_PROGRESS_SECONDS = 10.0  # how often a long command says how far it is
+
 # Commands of the interactive terminal itself: they change only how it looks, so they are
 # handled here rather than recorded in the session like the benchmark controls.
 TERMINAL_COMMANDS: dict[str, str] = {
@@ -206,6 +212,7 @@ class ChatApp:
         output: Output | None = None,
         progress_interval: float = 0.5,
         coalesce_seconds: float = 2.0,
+        command_progress_seconds: float = _PROGRESS_SECONDS,
     ) -> None:
         self.provider = provider
         self.limits = limits
@@ -223,6 +230,11 @@ class ChatApp:
         self._set_theme(theme)
         self.progress_interval = progress_interval
         self.coalesce_seconds = coalesce_seconds
+        self.command_progress_seconds = command_progress_seconds
+        self._command: asyncio.Task[None] | None = None
+        self._command_name = ""
+        self._command_active = False
+        self._command_started = 0.0
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._turn: asyncio.Task[TurnOutcome] | None = None
         self._stream = ""
@@ -279,18 +291,28 @@ class ChatApp:
     def replying(self) -> bool:
         return self._turn is not None and not self._turn.done()
 
+    def commanding(self) -> bool:
+        """A long slash command is running in the background."""
+        return self._command_active
+
     def _prompt_message(self) -> StyleAndTextTuples:
         """The input box: its gutter, under a live `Working` line while the assistant replies."""
         return [*self._working_line(), *self.composer.gutter]
 
     def _working_line(self) -> StyleAndTextTuples:
         """The spinning `Working (Ns)` line, or nothing at all while the assistant is idle."""
-        if not self.replying():
-            return []
         frames = _SPINNER if self.composer.unicode else _ASCII_SPINNER
         frame = frames[int(time.monotonic() * 10) % len(frames)]
-        elapsed = int(time.monotonic() - self._turn_started)
         dot = "·" if self.composer.unicode else "|"
+        if not self.replying():
+            if not self.commanding():
+                return []
+            took = int(time.monotonic() - self._command_started)
+            return [
+                ("class:working.spinner", f"{frame} "),
+                ("class:working", f"Working: {self._command_name} ({took}s)\n"),
+            ]
+        elapsed = int(time.monotonic() - self._turn_started)
         return [
             ("class:working.spinner", f"{frame} "),
             ("class:working", f"Working ({elapsed}s {dot} "),
@@ -344,7 +366,12 @@ class ChatApp:
             parts.append(render.status_line(status))
         elif session.active_run_id:
             parts.append(f"run {session.active_run_id}")
-        parts.append("assistant replying" if self._turn and not self._turn.done() else "idle")
+        if self._turn and not self._turn.done():
+            parts.append("assistant replying")
+        elif self.commanding():
+            parts.append(f"working: {self._command_name.split()[0]}")
+        else:
+            parts.append("idle")
         self._toolbar = " | ".join(parts)
 
     def toolbar(self) -> str:
@@ -478,20 +505,77 @@ class ChatApp:
             if name.lower() == "/themes":
                 self.themes(argument)
                 return
-            result = await self.commands.run(text)
-            render_result(self.console, result)
-            if result.kind == "help":
-                for command, meaning in TERMINAL_COMMANDS.items():
-                    self.say(f"  {command:<10} {safe(meaning)}")
-            if result.switch_to is not None:
-                self._use(result.switch_to)
-                self._banner()
-            if result.exit:
-                self._exit = True
+            if name.lower() in LONG_COMMANDS:
+                if self.commanding():
+                    self.say(
+                        f"[dim]({safe(self._command_name)} is still running; "
+                        "wait for it to finish)[/dim]"
+                    )
+                    return
+                self._command_name = text
+                self._command_active = True
+                self._command_started = time.monotonic()
+                self._command = asyncio.ensure_future(self._run_command(text))
+                self._refresh_toolbar()
+                return
+            await self._run_and_show(text)
             return
         if self._turn is not None and not self._turn.done():
             self.say("[dim](queued: the assistant is still replying; Esc interrupts it)[/dim]")
         await self._queue.put(text)
+
+    async def _run_and_show(self, text: str) -> None:
+        result = await self.commands.run(text)
+        render_result(self.console, result)
+        if result.kind == "help":
+            for command, meaning in TERMINAL_COMMANDS.items():
+                self.say(f"  {command:<10} {safe(meaning)}")
+        if result.switch_to is not None:
+            self._use(result.switch_to)
+            self._banner()
+        if result.exit:
+            self._exit = True
+
+    async def _run_command(self, text: str) -> None:
+        """A long command, in the background: the prompt stays open and a Working line shows
+        until it ends. A failure is reported, never left as silence."""
+        progress = asyncio.ensure_future(self._command_progress(text))
+        try:
+            await self._run_and_show(text)
+        except asyncio.CancelledError:
+            self.say(f"[yellow]{safe(text)} was cancelled.[/yellow]")
+            raise
+        except Exception as exc:  # noqa: BLE001 - one command's failure must not end the chat
+            self.say(f"[red]{safe(text)} failed: {safe(str(exc))}[/red]")
+        finally:
+            progress.cancel()
+            await asyncio.gather(progress, return_exceptions=True)
+            self._command_active = False
+            self._refresh_toolbar()
+
+    async def _command_progress(self, text: str) -> None:
+        """While `/rescore` runs, say how many of the run's evaluations are stored again."""
+        words = text.split()
+        if words[0].lower() != "/rescore":
+            return
+        try:
+            run_id = next((w for w in words[1:] if w.startswith("run-")), None)
+            status = self.controller.run_status(run_id)
+            run_id = status["run_id"]
+            planned = sum(status["counts"].get("evaluation", {}).values())
+            baseline = len(self.controller.storage.list_metric_results(run_id))
+        except Exception:  # noqa: BLE001 - progress is a courtesy; never break the command
+            return
+        last = 0
+        while True:
+            await asyncio.sleep(self.command_progress_seconds)
+            try:
+                done = len(self.controller.storage.list_metric_results(run_id)) - baseline
+            except Exception:  # noqa: BLE001
+                return
+            if done != last and planned:
+                last = done
+                self.say(f"[dim]rescoring: {min(done, planned)} of {planned} evaluations[/dim]")
 
     def themes(self, argument: str) -> None:
         """`/themes` lists the themes; `/themes NAME` switches now and saves the choice."""
@@ -527,7 +611,7 @@ class ChatApp:
         was_replying = False
         while True:
             await asyncio.sleep(_FRAME_SECONDS)
-            replying = self.replying()
+            replying = self.replying() or self.commanding()
             if replying or was_replying:
                 session.app.invalidate()
             was_replying = replying
@@ -593,6 +677,10 @@ class ChatApp:
         if self._turn is not None and not self._turn.done():
             self._turn.cancel()
             await asyncio.wait([self._turn])
+        if self._command is not None and not self._command.done():
+            # Leaving ends a long command; what it already stored is kept.
+            self._command.cancel()
+            await asyncio.gather(self._command, return_exceptions=True)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
