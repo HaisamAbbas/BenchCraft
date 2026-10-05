@@ -31,6 +31,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import re
 import statistics
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
@@ -631,6 +632,15 @@ GEVAL_SPEC = Spec(
 # scored 0.2 in a run and 1.0 when scored again. Each case is scored `repeats` times and the
 # median decides; scores further apart than UNSTABLE_SPREAD are flagged, not trusted.
 DEFAULT_REPEATS = 3
+
+# Criteria that speak of the expected answer cannot be judged without it. DeepEval only
+# shows the judge the fields named in `evaluation_params`, so criteria that say "the same
+# facts as the expected answer" with the default fields (question and answer) made the
+# judge reply that the expected answer was missing, and score every case 0.
+_MENTIONS_EXPECTED = re.compile(
+    r"\b(?:expected|reference|gold|ground[ -]truth)\s+(?:answer|output|response)\b",
+    re.IGNORECASE,
+)
 UNSTABLE_SPREAD = 0.3
 
 
@@ -655,6 +665,16 @@ class GEval(DeepEvalMetric):
                     "comparable."
                 ),
             ),
+            # Criteria that speak of the expected answer need it sent to the judge (see
+            # `_MENTIONS_EXPECTED`); the harness reads this to send the field to the worker.
+            "parameter_patterns": {
+                name: {
+                    "pattern": _MENTIONS_EXPECTED.pattern,
+                    "requires": {"path": FIELDS["expected_output"][0], "non_empty": True},
+                    "unless_set": "evaluation_params",
+                }
+                for name in ("criteria", "evaluation_steps")
+            },
             "parameter_requirements": {
                 "evaluation_params": {
                     name: {"path": FIELDS[name][0], "non_empty": FIELDS[name][1]}
@@ -757,7 +777,14 @@ class GEval(DeepEvalMetric):
         )
 
     def _fields(self) -> tuple[str, ...]:
-        chosen = self.params.get("evaluation_params") or ["input", "actual_output"]
+        chosen = self.params.get("evaluation_params")
+        if not chosen:
+            chosen = ["input", "actual_output"]
+            written = " ".join(
+                [self.params.get("criteria") or "", *(self.params.get("evaluation_steps") or [])]
+            )
+            if _MENTIONS_EXPECTED.search(written):
+                chosen.append("expected_output")
         return tuple(name for name in _GEVAL_FIELDS if name in chosen)
 
     def _new_metric(self, judge: Any) -> Any:

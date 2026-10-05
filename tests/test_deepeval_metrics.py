@@ -299,6 +299,41 @@ def test_g_eval_scores_a_case_three_times_and_flags_scores_that_disagree(
     assert "unstable" not in steady.reason
 
 
+def _g_eval_without_fields(tmp_path: Path, registry: EvaluatorRegistry, criteria: str) -> Any:
+    seeded = Seeded(tmp_path)
+    seeded.seed([case("c1")], [execution("c1", "Refunds are available.")])  # no reference answer
+    binding = {
+        "metric": "deepeval.g_eval",
+        "params": {"judge": AGREEING, "name": "x", "criteria": criteria},
+    }
+    [result] = seeded.score([binding], registry=registry, timeout_seconds=120).results
+    return result
+
+
+def test_g_eval_criteria_about_the_expected_answer_send_the_judge_the_expected_answer(
+    tmp_path: Path, registry: EvaluatorRegistry
+) -> None:
+    """With no `evaluation_params` the judge saw only the question and the answer, so criteria
+    like "states the same facts as the expected answer" made it reply that the expected answer
+    was missing, and every case scored 0. Criteria that speak of the expected (or reference)
+    answer now include it; a case without one is not applicable, as it is when the field is
+    named explicitly. Criteria that do not mention it are unchanged."""
+    for criteria in (
+        "The answer states the same facts as the expected answer.",
+        "Compare it with the Reference Output.",
+        "Does it match the ground-truth answer?",
+    ):
+        result = _g_eval_without_fields(tmp_path / criteria[:12], registry, criteria)
+        assert result.status is ExecutionStatus.NOT_APPLICABLE, criteria
+        assert result.reason == "missing:case.reference.answer"
+    plain = _g_eval_without_fields(tmp_path / "plain", registry, "Is the answer polite?")
+    assert plain.status is ExecutionStatus.OK
+    expecting = _g_eval_without_fields(
+        tmp_path / "unrelated", registry, "Answers must not be expected to be long."
+    )
+    assert expecting.status is ExecutionStatus.OK  # "expected" alone is not "expected answer"
+
+
 def test_g_eval_with_one_repeat_is_the_single_score_it_was(
     tmp_path: Path, registry: EvaluatorRegistry
 ) -> None:

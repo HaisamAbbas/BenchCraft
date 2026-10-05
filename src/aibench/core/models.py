@@ -1159,6 +1159,11 @@ class EvaluatorManifest(FrozenModel):
     # listed value -> requirement, e.g. {"evaluation_params": {"expected_output":
     # {"path": "case.reference.answer", "non_empty": true}}}. Read by `required_fields`.
     parameter_requirements: FrozenValue = Field(default_factory=dict)
+    # A field a parameter's TEXT adds, for a metric whose criteria name what they read:
+    # parameter -> {"pattern": regex, "requires": requirement, "unless_set": other
+    # parameter}. The requirement applies when the regex matches the parameter's text (or
+    # any item of a list) and `unless_set`, if given, is absent. Read by `required_fields`.
+    parameter_patterns: FrozenValue = Field(default_factory=dict)
     default_rule: DecisionRule | None = None
     parameters_schema: FrozenValue = Field(default_factory=dict)
     # recorded_outputs: scores stored executions per case (the default).
