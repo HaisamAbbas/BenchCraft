@@ -65,7 +65,11 @@ _FRAME_SECONDS = 0.1  # how often the Working line redraws while the assistant r
 # Commands that can take minutes (scoring, installs, a model writing cases, big reports).
 # They run in the background like an assistant turn, so the input box stays and a Working
 # line counts seconds; the quick ones (/status, /pause, /stop ...) still answer at once.
-LONG_COMMANDS = frozenset({"/rescore", "/plugins", "/cases", "/report", "/traces", "/compare"})
+LONG_COMMANDS = frozenset({"/rescore", "/report", "/compare"})
+# Commands that are long only for one subcommand: `/plugins` alone lists, `/plugins install`
+# installs; `/cases` alone shows the pool, `/cases generate` calls a model; `/traces` shows a
+# run's traces, `/traces import` reads a file.
+LONG_SUBCOMMANDS = {"/plugins": "install", "/cases": "generate", "/traces": "import"}
 _PROGRESS_SECONDS = 10.0  # how often a long command says how far it is
 
 # Commands of the interactive terminal itself: they change only how it looks, so they are
@@ -73,6 +77,18 @@ _PROGRESS_SECONDS = 10.0  # how often a long command says how far it is
 TERMINAL_COMMANDS: dict[str, str] = {
     "/themes": "/themes [NAME] - list colour themes, or switch (saved for this project)",
 }
+
+
+def is_long_command(text: str) -> bool:
+    """Whether a slash command can take minutes, so it runs in the background."""
+    words = text.split()
+    if not words:
+        return False
+    name = words[0].lower()
+    if name in LONG_COMMANDS:
+        return True
+    wanted = LONG_SUBCOMMANDS.get(name)
+    return wanted is not None and wanted in [w.lower() for w in words[1:2]]
 
 
 def notable_event(event: dict[str, Any]) -> str | None:
@@ -232,6 +248,7 @@ class ChatApp:
         self.coalesce_seconds = coalesce_seconds
         self.command_progress_seconds = command_progress_seconds
         self._command: asyncio.Task[None] | None = None
+        self._pending_commands: list[str] = []
         self._command_name = ""
         self._command_active = False
         self._command_started = 0.0
@@ -505,24 +522,29 @@ class ChatApp:
             if name.lower() == "/themes":
                 self.themes(argument)
                 return
-            if name.lower() in LONG_COMMANDS:
+            if is_long_command(text):
                 if self.commanding():
+                    # Like a message sent while the assistant is replying: it waits its turn.
+                    self._pending_commands.append(text)
                     self.say(
-                        f"[dim]({safe(self._command_name)} is still running; "
-                        "wait for it to finish)[/dim]"
+                        f"[dim](queued: {safe(self._command_name)} is still running; "
+                        f"{safe(text)} runs after it)[/dim]"
                     )
                     return
-                self._command_name = text
-                self._command_active = True
-                self._command_started = time.monotonic()
-                self._command = asyncio.ensure_future(self._run_command(text))
-                self._refresh_toolbar()
+                self._start_command(text)
                 return
             await self._run_and_show(text)
             return
         if self._turn is not None and not self._turn.done():
             self.say("[dim](queued: the assistant is still replying; Esc interrupts it)[/dim]")
         await self._queue.put(text)
+
+    def _start_command(self, text: str) -> None:
+        self._command_name = text
+        self._command_active = True
+        self._command_started = time.monotonic()
+        self._command = asyncio.ensure_future(self._run_command(text))
+        self._refresh_toolbar()
 
     async def _run_and_show(self, text: str) -> None:
         result = await self.commands.run(text)
@@ -552,6 +574,8 @@ class ChatApp:
             await asyncio.gather(progress, return_exceptions=True)
             self._command_active = False
             self._refresh_toolbar()
+            if self._pending_commands and not self._exit:
+                self._start_command(self._pending_commands.pop(0))
 
     async def _command_progress(self, text: str) -> None:
         """While `/rescore` runs, say how many of the run's evaluations are stored again."""
@@ -677,6 +701,7 @@ class ChatApp:
         if self._turn is not None and not self._turn.done():
             self._turn.cancel()
             await asyncio.wait([self._turn])
+        self._pending_commands.clear()  # queued commands do not run after leaving
         if self._command is not None and not self._command.done():
             # Leaving ends a long command; what it already stored is kept.
             self._command.cancel()

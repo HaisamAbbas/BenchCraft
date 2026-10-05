@@ -10,12 +10,13 @@ Workspace schema changes are listed under "Workspace". Upgrade steps are in
 Reported from a real session: running `/rescore all` made the input box disappear and showed
 nothing for twenty minutes, while a message to the assistant keeps the box and a live line.
 
-- Slash commands that can take minutes (`/rescore`, `/plugins`, `/cases`, `/report`,
-  `/traces`, `/compare`) run in the background like an assistant turn: the input box stays, a
-  `Working: /rescore all (42s)` line counts seconds, the toolbar says `working: /rescore`, and
-  the result appears when it ends. Quick commands (`/status`, `/pause`, `/stop` ...) still
-  answer at once while one runs. A second long command is refused until the first ends; a
-  failure is reported; `/exit` ends a running one (what it stored is kept).
+- Slash commands that can take minutes (`/rescore`, `/report`, `/compare`, `/plugins install`,
+  `/cases generate`, `/traces import`) run in the background like an assistant turn: the input
+  box stays, a `Working: /rescore all (42s)` line counts seconds, the toolbar says `working:
+  /rescore`, and the result appears when it ends. Quick commands (`/status`, `/pause`, `/stop`,
+  `/plugins`, `/cases` ...) still answer at once while one runs. A second long command waits
+  its turn ("queued: ...") as a message does while the assistant replies; a failure is
+  reported; `/exit` ends a running one and drops the queue (what it stored is kept).
 - `/rescore` also prints `rescoring: 70 of 90 evaluations` every ten seconds.
 - Not changed: Esc interrupts the assistant's reply only, never a running command.
 

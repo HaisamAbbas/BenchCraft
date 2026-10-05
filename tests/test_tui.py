@@ -468,7 +468,7 @@ def test_a_long_slash_command_runs_in_the_background_and_the_input_box_stays(
     """`/rescore all` ran inside the input loop: the box disappeared and nothing showed it was
     working for twenty minutes, unlike a message to the assistant. A long command now runs
     like a turn: the prompt stays, a Working line counts seconds, quick commands still answer
-    meanwhile, a second long command is refused, and the result appears when it ends."""
+    meanwhile, a second long command queues behind it, and the result appears when it ends."""
     from aibench.tui.commands import CommandResult
 
     h = SessionHarness(tmp_path)
@@ -510,11 +510,13 @@ def test_a_long_slash_command_runs_in_the_background_and_the_input_box_stays(
             )
             assert chat.commanding()
 
+            # A second long command waits its turn, as a message does while the assistant
+            # replies.
             pipe.send_text("/rescore\r")
-            await _wait_until(lambda: "is still running" in output.getvalue())
+            await _wait_until(lambda: "queued: /rescore all is still running" in output.getvalue())
 
             release.set()
-            await _wait_until(lambda: "rescore finished" in output.getvalue())
+            await _wait_until(lambda: output.getvalue().count("rescore finished") == 2)
             await _wait_until(lambda: not chat.commanding())
             assert "".join(text for _, text in chat._working_line()) == ""
             assert "idle" in chat.toolbar()
@@ -611,3 +613,32 @@ def test_rescore_says_how_many_evaluations_are_stored_again_while_it_runs(tmp_pa
         asyncio.run(scenario())
     finally:
         ctl.storage.db.close()
+
+
+def test_only_the_commands_that_can_take_minutes_run_in_the_background() -> None:
+    from aibench.tui.app import is_long_command
+
+    for text in (
+        "/rescore",
+        "/rescore all run-1",
+        "/report html",
+        "/compare a b",
+        "/plugins install deepeval --yes",
+        "/cases generate rules.txt --max 6",
+        "/traces import file.json",
+    ):
+        assert is_long_command(text), text
+    for text in (
+        "/plugins",  # lists
+        "/cases",  # shows the pool
+        "/cases accept 1 2",
+        "/cases save",
+        "/traces",
+        "/status",
+        "/plan",
+        "/stop",
+        "/exit",
+        "not a command",
+        "",
+    ):
+        assert not is_long_command(text), text
