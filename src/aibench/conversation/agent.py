@@ -236,6 +236,9 @@ def patch_problems(
     return ungrounded(patch, message)
 
 
+_PARAM_PROBLEM = re.compile(r"^[\w.]+ parameter (\w+)(?:=| )")
+
+
 def patch_fix(problems: list[str], message: str) -> str | None:
     """What to do differently, for a rejected patch, in words a model can act on. A model that
     is only told "not in the user's message" tends to paraphrase again; the user's message is
@@ -245,6 +248,13 @@ def patch_fix(problems: list[str], message: str) -> str | None:
         return (
             "user_quote must be copied unchanged from the user's latest message, which reads: "
             f'"{excerpt}". Quote one sentence or phrase of it exactly, then call again.'
+        )
+    unstated = sorted({m.group(1) for p in problems if (m := _PARAM_PROBLEM.search(p))})
+    if unstated:
+        return (
+            f"Leave out these settings, which the user did not state: {', '.join(unstated)}. "
+            "Keep only what their message says (for a G-Eval check, its name and criteria), "
+            f'and call again. The message reads: "{excerpt}".'
         )
     if any("does not appear" in p or "is not stated" in p for p in problems):
         return (
@@ -705,9 +715,9 @@ def tool_specs() -> list[dict[str, Any]]:
             "metrics follow from objectives (add_objectives, in the user's words). Configure "
             "a metric with `params`, keyed by its evaluator ID (from list_evaluators, e.g. "
             "deepeval.g_eval), never by an objective's name. A custom check is an objective "
-            'plus params {"deepeval.g_eval": {"name": "...", "criteria": "...", '
-            '"evaluation_params": ["input", "actual_output", "expected_output"]}}. Every value, '
-            "objective text included, must be the user's exact words: do not rename or "
+            'plus params {"deepeval.g_eval": {"name": "...", "criteria": "..."}}: only what the '
+            "user stated; leave out evaluation_params and anything else they did not say. Every "
+            "value, objective text included, must be the user's exact words: do not rename or "
             'shorten them ("traffic correctness" stays "traffic correctness"). If a call '
             "is rejected, read how_to_fix and retry once with the user's exact words.",
             _object(
