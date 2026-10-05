@@ -5,6 +5,18 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc19 — `/cases` shows what a quote sits under
+
+Found when a generated case asked what medical exemptions *differently-abled persons* get and
+cited the line just above their heading, which belongs to senior citizens. The quote matched,
+so the case looked fine and was accepted; a stricter judge later scored the app 0.0 on
+faithfulness because the expected answer was wrong.
+
+- `/cases` shows, for each case, the nearest heading above the quote (a guess: a markdown
+  heading or numbered section title), the first heading below it ("the quote is above it"),
+  and the text on both sides of the quote. The review prompt asks whether the question is
+  about what the quote is really about. A quote that matches its text is not enough.
+
 ## 0.1.0rc18 — a requested metric is never dropped quietly
 
 Found when a run's report had no G-Eval line: the assistant had saved G-Eval's `criteria`

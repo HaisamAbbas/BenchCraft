@@ -218,6 +218,22 @@ def cases(console: Console, data: dict[str, Any]) -> None:
             continue
         quote = row["quote"] if len(row["quote"]) <= 240 else row["quote"][:237] + "..."
         out(console, f"   [dim]{safe(row['source'])}:[/dim] \"{safe(quote)}\"")
+        if row.get("heading"):
+            out(console, f"   [dim]nearest heading above (a guess):[/dim] {safe(row['heading'])}")
+        if row.get("heading_after"):
+            out(
+                console,
+                "   [dim]next heading below the quote:[/dim] "
+                f"{safe(row['heading_after'])} [dim](the quote is above it)[/dim]",
+            )
+        if row.get("before") or row.get("after"):
+            # What the quote sits among: a question can name one group while its quote is
+            # under another heading, which only shows in the text around it.
+            out(
+                console,
+                f"   [dim]around it: ...{safe(row.get('before', ''))}[/dim] "
+                f"[bold]{safe(quote)}[/bold] [dim]{safe(row.get('after', ''))}...[/dim]",
+            )
         if not row["verbatim"]:
             out(console, "   [yellow]the answer is not word for word in that quote: check it[/yellow]")
     if data.get("dropped"):
@@ -230,7 +246,8 @@ def cases(console: Console, data: dict[str, Any]) -> None:
         out(console, f"[yellow]same document twice: {safe(item['source_ref'])}[/yellow]")
     out(
         console,
-        "\nRead each case against its quote. Then /cases accept 1 2 3 (or /cases accept all), "
+        "\nRead each case against its quote and what surrounds it: does the question ask about "
+        "what the quote is really about? Then /cases accept 1 2 3 (or /cases accept all), "
         "/cases reject N, and /cases save. [dim]Nothing is a test case until it is accepted "
         "and saved.[/dim]",
     )
