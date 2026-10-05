@@ -5,12 +5,19 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
-## Unreleased
+## 0.1.0rc15 — status after a rescore, and /cases that survives a bad quote
 
 - Fixed: `needs attention` (and the evaluation counts) in a run's status line stayed at the
   number of evaluations the run itself left failed, even after `/rescore` had scored them all.
   A failed evaluation that a later scoring pass finished no longer counts, for a finished run;
   failures nothing has settled still do.
+- Fixed: `/cases generate` (and `benchcraft candidates generate`) failed completely when any
+  one case's source quote was not in the document, discarding the good cases ("source_quote
+  ... is not an exact substring"). A quote that differs only in spacing or line breaks is now
+  matched to the document's own text, so the evidence stays verbatim; a case whose quote is not
+  in the document is left out and the chat says how many; only a reply with no usable case is
+  an error. On a real document and model, 0 or 1 of 6 cases are left out and generation no
+  longer fails.
 
 ## 0.1.0rc14 — faithfulness with glm-4.5-air
 

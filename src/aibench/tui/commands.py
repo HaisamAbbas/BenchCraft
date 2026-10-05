@@ -287,14 +287,14 @@ class Commands:
                 )
             sources = case_pools.source_files(root, rest)
             # Only the model call runs off this thread: the database is not shared with it.
-            manifest, candidates = await asyncio.to_thread(
+            manifest, candidates, dropped = await asyncio.to_thread(
                 case_pools.draft_pool,
                 config,
                 self.controller.policy(),
                 sources,
                 max_candidates=limit,
             )
-            made = case_pools.store_pool(storage, manifest, candidates)
+            made = case_pools.store_pool(storage, manifest, candidates, dropped)
             return CommandResult(
                 "/cases",
                 "cases",
@@ -302,6 +302,7 @@ class Commands:
                     "pool_id": made.pool_id,
                     "rows": made.rows,
                     "duplicate_sources": made.duplicate_sources,
+                    "dropped": list(made.dropped),
                     "generated": True,
                 },
             )

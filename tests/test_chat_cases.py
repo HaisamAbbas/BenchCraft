@@ -159,3 +159,75 @@ def test_documents_and_models_the_policy_does_not_allow_are_refused(tmp_path: Pa
     assert not no_model.ok and "no assistant model" in no_model.data["error"]
     assert not early_accept.ok and "no cases yet" in early_accept.data["error"]
     assert not unknown.ok and "usage: /cases generate" in unknown.data["error"]
+
+
+def _reply_with_quotes() -> tuple[int, Any]:
+    wrapped = "Refunds may be requested  within 30 days\nof purchase."  # spacing retyped
+    cases = [
+        {
+            "input": "How long do I have to request a refund?",
+            "expected_answer": FIRST,
+            "source_id": "source_1",
+            "source_quote": FIRST,
+        },
+        {
+            "input": "Within how many days can a refund be asked for?",
+            "expected_answer": FIRST,
+            "source_id": "source_1",
+            "source_quote": wrapped,
+        },
+        {  # not in the document at all
+            "input": "Can I get a refund after a year?",
+            "expected_answer": "Yes, refunds are possible for a year.",
+            "source_id": "source_1",
+            "source_quote": "Refunds are possible for a full year.",
+        },
+    ]
+    return 200, completion([tool_call("write_candidates", {"cases": cases})])
+
+
+def test_one_invented_quote_leaves_out_that_case_not_the_whole_pool(tmp_path: Path) -> None:
+    """A real model's quote for one case did not match the document, and the whole
+    generation failed ("source_quote ... is not an exact substring"), discarding the good
+    cases. A quote that differs only in spacing is matched to the document's own text; a
+    quote that is not there drops only its case, and the chat says so."""
+    (tmp_path / "refunds.md").write_text(DOCUMENT, encoding="utf-8")
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"})
+    try:
+        with chat_server([_reply_with_quotes(), _reply_all_invented()]) as server:
+            host, port = server.server_address[:2]
+            config = OpenAICompatibleConfig(base_url=f"http://{host}:{port}/v1", model="writer-1")
+            commands = Commands(ctl, provider=SimpleNamespace(config=config))
+
+            async def scenario() -> tuple[CommandResult, CommandResult]:
+                first = await commands.run("/cases generate refunds.md")
+                second = await commands.run("/cases generate refunds.md")
+                return first, second
+
+            first, second = asyncio.run(scenario())
+    finally:
+        ctl.storage.db.close()
+    rows = first.data["rows"]
+    assert [r["question"] for r in rows] == [
+        "How long do I have to request a refund?",
+        "Within how many days can a refund be asked for?",
+    ]
+    # The retyped quote is shown as the document's own words, not the model's spacing.
+    assert rows[1]["quote"] == FIRST and rows[1]["verbatim"] is True
+    assert first.data["dropped"] == ["Can I get a refund after a year?"]
+    assert "left out 1 case(s) whose quoted source text is not in the document" in _shown(first)
+    # Nothing usable at all is an error that says what to do.
+    assert not second.ok and "none of the cases" in second.data["error"]
+
+
+def _reply_all_invented() -> tuple[int, Any]:
+    cases = [
+        {
+            "input": "Is shipping free?",
+            "expected_answer": "Yes.",
+            "source_id": "source_1",
+            "source_quote": "Shipping is always free.",
+        }
+    ]
+    return 200, completion([tool_call("write_candidates", {"cases": cases})])

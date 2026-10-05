@@ -220,6 +220,12 @@ def cases(console: Console, data: dict[str, Any]) -> None:
         out(console, f"   [dim]{safe(row['source'])}:[/dim] \"{safe(quote)}\"")
         if not row["verbatim"]:
             out(console, "   [yellow]the answer is not word for word in that quote: check it[/yellow]")
+    if data.get("dropped"):
+        out(
+            console,
+            f"[yellow]left out {len(data['dropped'])} case(s) whose quoted source text is not in the "
+            "document (nothing to check them against)[/yellow]",
+        )
     for item in data.get("duplicate_sources", []):
         out(console, f"[yellow]same document twice: {safe(item['source_ref'])}[/yellow]")
     out(
