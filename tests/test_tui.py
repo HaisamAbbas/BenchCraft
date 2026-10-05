@@ -460,3 +460,185 @@ def test_graceful_exit_drains_in_flight_work_and_leaves_run_resumable(tmp_path: 
         reopened.storage.db.close()
     finally:
         ctl.storage.db.close()
+
+
+def test_a_long_slash_command_runs_in_the_background_and_the_input_box_stays(
+    tmp_path: Path,
+) -> None:
+    """`/rescore all` ran inside the input loop: the box disappeared and nothing showed it was
+    working for twenty minutes, unlike a message to the assistant. A long command now runs
+    like a turn: the prompt stays, a Working line counts seconds, quick commands still answer
+    meanwhile, a second long command queues behind it, and the result appears when it ends."""
+    from aibench.tui.commands import CommandResult
+
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"})
+    output = io.StringIO()
+    chat = ChatApp(
+        ctl, provider=None, console=Console(file=output, highlight=False), progress_interval=0.01
+    )
+
+    async def scenario() -> None:
+        started, release = asyncio.Event(), asyncio.Event()
+        quick = chat.commands.run
+
+        async def run(text: str, **kwargs: Any) -> CommandResult:
+            if text.startswith("/rescore"):
+                started.set()
+                await release.wait()
+                return CommandResult("/rescore", "error", {"error": "rescore finished"}, ok=False)
+            return await quick(text, **kwargs)
+
+        chat.commands.run = run  # type: ignore[method-assign]
+        with create_pipe_input() as pipe:
+            chat.input = pipe
+            chat.output = DummyOutput()
+            prompt = asyncio.create_task(chat.run())
+            await asyncio.sleep(0.05)
+
+            pipe.send_text("/rescore all\r")
+            await asyncio.wait_for(started.wait(), 3)
+            assert chat.commanding()
+            working = "".join(text for _, text in chat._working_line())
+            assert "Working: /rescore all" in working and "to interrupt" not in working
+            assert "working: /rescore" in chat.toolbar()
+
+            # The prompt is open: a quick command is answered while /rescore is still running.
+            pipe.send_text("/status\r")
+            await _wait_until(
+                lambda: any(turn.content == "/status" for turn in ctl.store.turns(ctl.session_id))
+            )
+            assert chat.commanding()
+
+            # A second long command waits its turn, as a message does while the assistant
+            # replies.
+            pipe.send_text("/rescore\r")
+            await _wait_until(lambda: "queued: /rescore all is still running" in output.getvalue())
+
+            release.set()
+            await _wait_until(lambda: output.getvalue().count("rescore finished") == 2)
+            await _wait_until(lambda: not chat.commanding())
+            assert "".join(text for _, text in chat._working_line()) == ""
+            assert "idle" in chat.toolbar()
+
+            pipe.send_text("/exit\r")
+            await asyncio.wait_for(prompt, timeout=3)
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        ctl.storage.db.close()
+
+
+def test_a_long_command_that_fails_says_so_and_leaving_cancels_it(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"})
+    output = io.StringIO()
+    chat = ChatApp(ctl, provider=None, console=Console(file=output, highlight=False))
+
+    async def scenario() -> None:
+        quick = chat.commands.run
+        hang = asyncio.Event()
+
+        async def run(text: str, **kwargs: Any) -> Any:
+            if text.startswith("/plugins"):
+                raise RuntimeError("the environment broke")
+            if text.startswith("/cases"):
+                await hang.wait()  # never ends on its own
+            return await quick(text, **kwargs)
+
+        chat.commands.run = run  # type: ignore[method-assign]
+        with create_pipe_input() as pipe:
+            chat.input = pipe
+            chat.output = DummyOutput()
+            prompt = asyncio.create_task(chat.run())
+            await asyncio.sleep(0.05)
+            pipe.send_text("/plugins install x\r")
+            await _wait_until(lambda: "failed: the environment broke" in output.getvalue())
+            await _wait_until(lambda: not chat.commanding())  # a failure frees the next one
+
+            pipe.send_text("/cases generate x.md\r")
+            await _wait_until(chat.commanding)
+            pipe.send_text("/exit\r")
+            await asyncio.wait_for(prompt, timeout=3)
+            assert not chat.commanding()
+            assert "was cancelled" in output.getvalue()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        ctl.storage.db.close()
+
+
+def test_rescore_says_how_many_evaluations_are_stored_again_while_it_runs(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer", "b": "answer"}, objectives=("catch wrong answers",))
+    output = io.StringIO()
+    chat = ChatApp(
+        ctl,
+        provider=None,
+        console=Console(file=output, highlight=False),
+        command_progress_seconds=0.02,
+    )
+
+    async def scenario() -> None:
+        started = await ctl.start_run(action_id="run-1", expected_revision=ctl.session.revision)
+        done = await ctl.wait_for_run(started.run_id)
+        assert done is not None and done.state.value == "completed"
+        stored = ctl.storage.list_metric_results(started.run_id)
+        planned = len(stored)  # one evaluation per case for the one metric
+        again = [0]  # how many results the "rescore" has stored again so far
+
+        original = ctl.storage.list_metric_results
+        ctl.storage.list_metric_results = lambda *a, **k: stored + stored[: again[0]]  # type: ignore[method-assign]
+        task = asyncio.create_task(chat._command_progress("/rescore all"))
+        await asyncio.sleep(0.05)
+        assert "rescoring" not in output.getvalue()  # nothing stored again yet
+        again[0] = 1
+        await _wait_until(lambda: f"rescoring: 1 of {planned} evaluations" in output.getvalue())
+        again[0] = planned
+        await _wait_until(
+            lambda: f"rescoring: {planned} of {planned} evaluations" in output.getvalue()
+        )
+        task.cancel()
+        # Another long command shows no progress line of its own.
+        before = output.getvalue()
+        other = asyncio.create_task(chat._command_progress("/plugins"))
+        await asyncio.sleep(0.05)
+        other.cancel()
+        assert output.getvalue() == before
+        ctl.storage.list_metric_results = original  # type: ignore[method-assign]
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        ctl.storage.db.close()
+
+
+def test_only_the_commands_that_can_take_minutes_run_in_the_background() -> None:
+    from aibench.tui.app import is_long_command
+
+    for text in (
+        "/rescore",
+        "/rescore all run-1",
+        "/report html",
+        "/compare a b",
+        "/plugins install deepeval --yes",
+        "/cases generate rules.txt --max 6",
+        "/traces import file.json",
+    ):
+        assert is_long_command(text), text
+    for text in (
+        "/plugins",  # lists
+        "/cases",  # shows the pool
+        "/cases accept 1 2",
+        "/cases save",
+        "/traces",
+        "/status",
+        "/plan",
+        "/stop",
+        "/exit",
+        "not a command",
+        "",
+    ):
+        assert not is_long_command(text), text
