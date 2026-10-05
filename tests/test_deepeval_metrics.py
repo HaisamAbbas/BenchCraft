@@ -105,7 +105,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc3" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc4" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -270,12 +270,16 @@ class _JudgeServer(ThreadingHTTPServer):
         rate_limited_first: int = 0,
         forever: bool = False,
         thinking_tokens: int = 0,
+        malformed: tuple[str, ...] = (),
     ) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
         self.status = status
         # A reasoning model: it needs this many tokens for thinking before it writes the JSON,
         # and a request that allows fewer gets an empty, cut-off reply (finish_reason "length").
         self.thinking_tokens = thinking_tokens
+        # Replies sent as the content of the first answered requests, in order, instead of
+        # the valid JSON: a model's near-miss at JSON.
+        self.malformed = list(malformed)
         # The first `rate_limited_first` requests get a 429 (or every one, with `forever`).
         self.rate_limited_first = rate_limited_first
         self.forever = forever
@@ -311,6 +315,8 @@ class _JudgeHandler(BaseHTTPRequestHandler):
                 "reason": "The answer addresses refunds.",
             }
             content = "```json\n" + json.dumps(answer) + "\n```"
+            if self.server.malformed:
+                content = self.server.malformed.pop(0)
             payload = {
                 "choices": [
                     {"message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
@@ -492,6 +498,70 @@ def test_the_judge_asks_a_model_not_to_think_when_told_to_and_by_default_on_zai(
 
 
 @requires_plugin_env
+def test_a_comma_before_a_bracket_is_forgiven_and_other_bad_json_is_asked_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """glm-4.5-air answered faithfulness with a near-miss at JSON on 11 of 15 cases. The one
+    mistake models make most (a comma before a closing bracket) is repaired; anything else
+    still not JSON is asked again, and a judge that never produces JSON fails with that said."""
+    trailing = (
+        '{"statements": ["a"], "verdicts": [{"verdict": "yes", "reason": "r"},], "reason": "x",}'
+    )
+    _, clean, _ = _openai_compatible_score(tmp_path / "clean", monkeypatch, 200)
+    baseline = len(clean.requests)
+    result, server, _ = _openai_compatible_score(
+        tmp_path / "comma", monkeypatch, 200, malformed=(trailing,)
+    )
+    assert result.status is ExecutionStatus.OK and result.value.value == 1.0
+    assert len(server.requests) == baseline  # the first reply was repaired, not asked again
+
+    result, server, _ = _openai_compatible_score(
+        tmp_path / "again", monkeypatch, 200, malformed=("{ not json at all",)
+    )
+    assert result.status is ExecutionStatus.OK and result.value.value == 1.0
+    assert len(server.requests) == baseline + 1  # one bad reply, asked again
+
+    result, server, _ = _openai_compatible_score(
+        tmp_path / "never", monkeypatch, 200, malformed=("{ not json",) * 9
+    )
+    assert result.status is ExecutionStatus.ERROR
+    assert "not valid JSON" in (result.reason or "")
+
+
+def test_a_judge_that_copies_deepevals_doubled_braces_still_scores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The exact reply glm-4.5-air gave for faithfulness's verdicts on 11 of 15 cases, every
+    time: DeepEval's prompt shows its example JSON with doubled braces and the model copied
+    them. That is repaired, not asked again (it would answer the same)."""
+    doubled = (
+        '{\n"statements": ["a"],\n"verdicts": [\n{{\n"verdict": "yes",\n"reason": "r"\n}}\n]  \n,'
+        '"reason": "x"\n}'
+    )
+    _, clean, _ = _openai_compatible_score(tmp_path / "clean", monkeypatch, 200)
+    result, server, _ = _openai_compatible_score(
+        tmp_path / "doubled", monkeypatch, 200, malformed=(doubled,)
+    )
+    assert result.status is ExecutionStatus.OK and result.value.value == 1.0
+    assert len(server.requests) == len(clean.requests)
+
+
+@requires_plugin_env
+def test_doubled_braces_are_collapsed_only_where_they_open_an_object() -> None:
+    got = plugin_python(
+        "import json; from aibench_deepeval.judges import _load_json as L;"
+        "print(json.dumps(["
+        'L(\'{"a": {"b": 1}}\'),'
+        'L(\'{"s": "{{keep}}", "n": {{"x": 2}}}\'),'
+        'L(\'{"v": [{{"k": "a }} b"}}, {{"k": 1}}],}\')]))'
+    )
+    assert got == [
+        {"a": {"b": 1}},
+        {"s": "{{keep}}", "n": {"x": 2}},
+        {"v": [{"k": "a }} b"}, {"k": 1}]},
+    ]
+
+
 def test_a_stalled_connection_is_abandoned_long_before_a_slow_reply_would_be() -> None:
     got = plugin_python(
         "import json, os; os.environ['K'] = 'x';"

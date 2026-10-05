@@ -5,6 +5,15 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc14 — faithfulness with glm-4.5-air
+
+- The `openai_compatible` judge repairs the two near-misses at JSON that models make: a
+  comma before a closing bracket, and doubled braces (`{{ ... }}`) copied from DeepEval's
+  prompt examples. `glm-4.5-air` did the second on every faithfulness verdict, so
+  faithfulness failed on 11 of 15 cases while every other metric worked. Replies that
+  are still not JSON are asked again (up to the judge's five attempts) and then fail
+  saying so. Plugin `aibench-deepeval` 0.2.0rc4.
+
 ## 0.1.0rc13 — assistant stops over-asking for G-Eval settings
 
 - The assistant's tool description no longer tells it to add G-Eval's `evaluation_params` to every
