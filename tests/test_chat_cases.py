@@ -231,3 +231,63 @@ def _reply_all_invented() -> tuple[int, Any]:
         }
     ]
     return 200, completion([tool_call("write_candidates", {"cases": cases})])
+
+
+SECTIONED = (
+    "# Benefits\n\n"
+    "## 9.3.1 Senior Citizens\n"
+    "* Medical Exemptions: Relaxed medical fitness requirements.\n"
+    "* Priority Service: Preferential treatment at RTOs.\n\n"
+    "## 9.3.2 Differently-Abled Persons\n"
+    "* Adapted Vehicles: Permission for vehicle modifications.\n"
+)
+
+
+def test_a_quote_is_shown_with_the_heading_and_text_around_it(tmp_path: Path) -> None:
+    """A model asked what medical exemptions *differently-abled persons* get and cited
+    the senior citizens' line, which sits just above their heading. The quote matched, so the
+    case looked fine, and the wrong case was accepted. The review shows the nearest heading
+    above the quote and the text on both sides of it."""
+    (tmp_path / "benefits.md").write_text(SECTIONED, encoding="utf-8")
+    quote = "Medical Exemptions: Relaxed medical fitness requirements."
+    cases = [
+        {
+            "input": "What medical exemptions do differently-abled persons get?",
+            "expected_answer": "Relaxed medical fitness requirements.",
+            "source_id": "source_1",
+            "source_quote": quote,
+        }
+    ]
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"})
+    try:
+        with chat_server(
+            [(200, completion([tool_call("write_candidates", {"cases": cases})]))]
+        ) as server:
+            host, port = server.server_address[:2]
+            config = OpenAICompatibleConfig(base_url=f"http://{host}:{port}/v1", model="writer-1")
+            commands = Commands(ctl, provider=SimpleNamespace(config=config))
+            made = asyncio.run(commands.run("/cases generate benefits.md"))
+    finally:
+        ctl.storage.db.close()
+    [row] = made.data["rows"]
+    assert row["heading"] == "9.3.1 Senior Citizens"  # not the group the question names
+    assert row["after"].startswith("* Priority Service")
+    assert row["heading_after"] == "9.3.2 Differently-Abled Persons"  # the quote is above it
+    assert "9.3.2 Differently-Abled Persons" in row["after"]
+    shown = _shown(made)
+    assert "nearest heading above (a guess): 9.3.1 Senior Citizens" in shown
+    assert "next heading below the quote: 9.3.2 Differently-Abled Persons" in shown
+    assert "around it:" in shown and "Priority Service" in shown
+    assert "does the question ask about what the quote is really about" in shown
+
+
+def test_headings_are_found_in_markdown_and_numbered_text_and_otherwise_absent() -> None:
+    from aibench.datasets.candidates import heading_above
+
+    assert heading_above("# Refund policy\n\nSome text.") == "Refund policy"
+    assert heading_above("intro 4.2.3 Helmet and Seatbelt Requirements * Motorcycle") == (
+        "4.2.3 Helmet and Seatbelt Requirements"
+    )
+    assert heading_above("# Old\n\n9.3.2 Newer Section ? text") == "9.3.2 Newer Section"
+    assert heading_above("plain words with no headings at all") is None

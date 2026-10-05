@@ -23,7 +23,7 @@ from aibench.datasets.candidates import (
     MAX_SOURCE_FILES,
     CandidateGenerationError,
     generate_candidate_pool,
-    source_text_for_span,
+    source_surroundings,
     verify_source_quote,
 )
 from aibench.planning.openai_provider import (
@@ -151,8 +151,12 @@ def _row(number: int, candidate: DatasetCandidate) -> dict[str, Any]:
     reference = candidate.case.reference
     assert reference is not None
     span = candidate.source_spans[0]
+    heading: str | None = None
+    heading_after: str | None = None
+    before = after = ""
     try:
-        quote: str | None = " ".join(source_text_for_span(span).split())
+        before, quote_text, after, heading, heading_after = source_surroundings(span)
+        quote: str | None = quote_text
         verbatim = verify_source_quote(candidate).outcome == "passed"
     except ValidationError:
         quote, verbatim = None, False  # the document changed or moved since generation
@@ -165,6 +169,10 @@ def _row(number: int, candidate: DatasetCandidate) -> dict[str, Any]:
         "source": f"{Path(span.source_ref).name}:{span.start_line}",
         "quote": quote,
         "verbatim": verbatim,
+        "heading": heading,
+        "heading_after": heading_after,
+        "before": before,
+        "after": after,
     }
 
 

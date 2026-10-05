@@ -386,6 +386,55 @@ def source_text_for_span(span: CandidateSourceSpan) -> str:
     return text[span.start_offset : span.end_offset]
 
 
+# A numbered section ("9.3.2 Differently-Abled Persons") or a markdown heading line.
+_NUMBERED_HEADING = re.compile(
+    r"(?<![\w.])\d{1,2}(?:\.\d{1,2}){1,3}\.?[ ]+[A-Z][A-Za-z0-9/&,'() -]{2,60}"
+)
+_MARKDOWN_HEADING = re.compile(r"^#{1,6}[ ]+(.+?)[ ]*$", re.MULTILINE)
+
+
+def heading_below(text: str) -> str | None:
+    """The first section heading in `text` (the part of a document after a quote). A quote
+    just above the heading of another group is what a mismatched question looks like."""
+    found: list[tuple[int, str]] = []
+    for match in _MARKDOWN_HEADING.finditer(text):
+        found.append((match.start(), match.group(1).strip()))
+    for match in _NUMBERED_HEADING.finditer(text):
+        found.append((match.start(), " ".join(match.group(0).split())))
+    return min(found)[1] if found else None
+
+
+def heading_above(text: str) -> str | None:
+    """The nearest section heading in `text` (the part of a document above a quote): the
+    last markdown heading line or numbered section title. A guess for a reviewer's benefit,
+    never evidence; a quote cut from the start of a document may have none."""
+    found: list[tuple[int, str]] = []
+    for match in _MARKDOWN_HEADING.finditer(text):
+        found.append((match.start(), match.group(1).strip()))
+    for match in _NUMBERED_HEADING.finditer(text):
+        found.append((match.start(), " ".join(match.group(0).split())))
+    return max(found)[1] if found else None
+
+
+def source_surroundings(
+    span: CandidateSourceSpan, *, before: int = 220, after: int = 220
+) -> tuple[str, str, str, str | None, str | None]:
+    """(text before, the quote, text after, heading above, heading below) of an unchanged span, so a
+    reviewer can see which section a quote comes from: a model's question can name one group
+    while its quote sits under another. Fails closed like `source_text_for_span`."""
+    quote = source_text_for_span(span)  # also checks the file is unchanged
+    text = Path(span.source_ref).read_bytes().decode("utf-8")
+    above = text[: span.start_offset]
+    below = text[span.end_offset : span.end_offset + after]
+    return (
+        " ".join(above[-before:].split()),
+        " ".join(quote.split()),
+        " ".join(below.split()),
+        heading_above(above),
+        heading_below(below),
+    )
+
+
 def verify_source_quote(candidate: DatasetCandidate) -> CandidateVerification:
     """Strict executable oracle: the candidate answer must be an exact source substring."""
     if candidate.case.reference is None or not candidate.case.reference.answer:
