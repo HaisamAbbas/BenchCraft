@@ -148,6 +148,16 @@ def _profile_manifest(profile: dict[str, Any]) -> EvaluatorManifest:
 # --------------------------------------------------------------------------- sections
 
 
+def unstable_count(results: list[EvaluationResult]) -> int:
+    """Scored results whose repeated judge calls disagreed (the evaluator says so with an
+    `unstable:` reason). The number is recorded, but it should not be trusted alone."""
+    return sum(
+        1
+        for r in results
+        if r.status is ExecutionStatus.OK and (r.reason or "").startswith("unstable:")
+    )
+
+
 def _metric_section(
     profile: dict[str, Any],
     binding_hash: str,
@@ -185,6 +195,9 @@ def _metric_section(
             "source": profile.get("source", "frozen_with_run"),
         },
         "summary": summary.as_dict(),
+        # Scores whose repeated judge calls disagreed (the evaluator says so with an
+        # "unstable:" reason): a number is recorded, but it should not be trusted alone.
+        "unstable_results": unstable_count(results),
         # The metric could not be computed (evaluator failures), by reason code (never free
         # text); distinct from cases the application failed, which are `unavailable`.
         "evaluator_failures": dict(
@@ -783,6 +796,7 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
                     "decisions": s["decisions"],
                     "value_summary": s["value_summary"],
                     "evaluator_errors": s["errors"],
+                    "unstable_results": m["unstable_results"],
                     "not_applicable": s["not_applicable"],
                     "unavailable": s["unavailable"],
                     "cancelled": s["cancelled"],

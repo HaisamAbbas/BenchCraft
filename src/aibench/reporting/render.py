@@ -227,7 +227,12 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
                         f"not evaluated {decisions.get('not_evaluated', 0)}"
                     ),
                     "pass_of_selected": fraction(decisions.get("pass", 0), s["selected"]),
-                    "values": _value_summary(s),
+                    "values": _value_summary(s)
+                    + (
+                        f" ({m['unstable_results']} unstable: repeated judge scores disagreed)"
+                        if m.get("unstable_results")
+                        else ""
+                    ),
                     "evaluator_errors": str(s["errors"])
                     + (
                         " ("

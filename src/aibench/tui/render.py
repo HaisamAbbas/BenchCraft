@@ -452,7 +452,13 @@ def report(console: Console, data: dict[str, Any]) -> None:
             f"  {safe(m['metric'])}: pass {_of(d.get('pass', 0), m['selected'])} of selected, "
             f"completed {_of(m['completed'], m['selected'])}; evaluator errors "
             f"{m['evaluator_errors']}, not applicable {m['not_applicable']}, unavailable "
-            f"{m['unavailable']}, cancelled {m.get('cancelled', 0)}, pending {m['pending']}",
+            f"{m['unavailable']}, cancelled {m.get('cancelled', 0)}, pending {m['pending']}"
+            + (
+                f"; [yellow]{m['unstable_results']} unstable score(s)[/yellow] "
+                "(repeated judge scores disagreed; see /case)"
+                if m.get("unstable_results")
+                else ""
+            ),
         )
     app = data["application"]
     latency = data["latency_ms"]

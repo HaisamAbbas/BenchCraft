@@ -31,10 +31,18 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import statistics
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from aibench.core.models import DecisionRule, EvaluatorManifest, FieldRequirement, MetricDirection
+from aibench.core.models import (
+    DecisionRule,
+    EvaluatorManifest,
+    ExecutionStatus,
+    FieldRequirement,
+    MetricDirection,
+    MetricValue,
+)
 from aibench.evaluators.agent import parse_tool_events
 from aibench.evaluators.protocol import (
     EvaluationOutcome,
@@ -619,6 +627,13 @@ GEVAL_SPEC = Spec(
 )
 
 
+# One G-Eval score from a small judge is not reliable: the same answer, criteria and judge
+# scored 0.2 in a run and 1.0 when scored again. Each case is scored `repeats` times and the
+# median decides; scores further apart than UNSTABLE_SPREAD are flagged, not trusted.
+DEFAULT_REPEATS = 3
+UNSTABLE_SPREAD = 0.3
+
+
 class GEval(DeepEvalMetric):
     """G-Eval: the plan supplies the criteria (or explicit steps), which fields the judge
     sees, and optionally a rubric. The criteria are part of the metric's identity. Fields
@@ -628,6 +643,7 @@ class GEval(DeepEvalMetric):
     manifest = EvaluatorManifest(
         **{
             **_manifest(GEVAL_SPEC).model_dump(),
+            "version": "1.1.0",  # 1.0.0 scored once; the median of repeats is a new meaning
             "description": (
                 f"DeepEval {PINNED_DEEPEVAL} GEval: a judge scores the answer against "
                 "criteria the plan states (0 to 1)."
@@ -654,6 +670,7 @@ class GEval(DeepEvalMetric):
                 "properties": {
                     "judge": JUDGE_SCHEMA,
                     "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                    "repeats": {"type": "integer", "minimum": 1, "maximum": 9},
                     "criteria": {"type": "string", "minLength": 1},
                     "evaluation_steps": _STRINGS,
                     "evaluation_params": {
@@ -684,6 +701,60 @@ class GEval(DeepEvalMetric):
             },
         }
     )
+
+    async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
+        repeats = int(self.params.get("repeats", DEFAULT_REPEATS))
+        if repeats == 1:
+            return await super().evaluate(view, ctx)
+        from deepeval.test_case import LLMTestCase
+
+        values, not_applicable = self._test_case(view)
+        if values is None:
+            return EvaluationOutcome.not_applicable(str(not_applicable))
+        judge = build_judge(self.params["judge"])
+        scores: list[float] = []
+        reasons: list[str | None] = []
+        metric: Any = None
+        try:
+            for _ in range(repeats):  # one after another: a small judge's rate limit is shared
+                metric = self._new_metric(judge)
+                score = await metric.a_measure(LLMTestCase(**values), _show_indicator=False)
+                bad = out_of_range(score)
+                if bad is not None:
+                    return bad
+                scores.append(float(score))
+                reasons.append(getattr(metric, "reason", None))
+        finally:
+            if metric is not None:
+                report_judge_usage(ctx, metric, judge)
+        median = statistics.median(scores)
+        spread = max(scores) - min(scores)
+        unstable = spread > UNSTABLE_SPREAD + 1e-9
+        listed = ", ".join(f"{score:.2f}" for score in scores)
+        nearest = min(range(repeats), key=lambda i: abs(scores[i] - median))
+        raw: dict[str, Any] = {
+            "deepeval_version": PINNED_DEEPEVAL,
+            "metric": self.spec.upstream,
+            "judge": getattr(metric, "evaluation_model", None),
+            "scores": scores,
+            "median": median,
+            "spread": spread,
+            "unstable": unstable,
+            "reasons": reasons,
+        }
+        return EvaluationOutcome(
+            ExecutionStatus.OK,
+            MetricValue(kind="scalar", value=median),
+            # "unstable:" is a stable code the report counts; the rest is for the reader.
+            (
+                f"unstable: the judge's {repeats} scores disagree ({listed}); median {median:.2f}"
+                if unstable
+                else f"median of {repeats} judge scores ({listed})"
+            )
+            + (f". Judge: {reasons[nearest]}" if reasons[nearest] else ""),
+            tuple(FIELDS[name][0] for name in self._fields()),
+            raw,
+        )
 
     def _fields(self) -> tuple[str, ...]:
         chosen = self.params.get("evaluation_params") or ["input", "actual_output"]

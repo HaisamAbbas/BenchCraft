@@ -105,7 +105,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc4" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc5" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -255,6 +255,66 @@ def test_g_eval_reads_only_the_fields_the_plan_names(
         ExecutionStatus.NOT_APPLICABLE,
         "missing:case.reference.answer",
     )
+
+
+SCATTERED = {"kind": "python_factory", "factory": "aibench_schema_judges:scattered_judge"}
+
+
+def _g_eval(
+    tmp_path: Path, registry: EvaluatorRegistry, judge: dict[str, Any], **params: Any
+) -> Any:
+    seeded = Seeded(tmp_path)
+    seeded.seed(
+        [case("c1", answer="Refunds within 30 days.")],
+        [execution("c1", "Refunds are available within 30 days.")],
+    )
+    binding = {
+        "metric": "deepeval.g_eval",
+        "params": {
+            "judge": judge,
+            "name": "agrees",
+            "criteria": "Does the answer state the same facts as the expected output?",
+            "evaluation_params": ["input", "actual_output", "expected_output"],
+            **params,
+        },
+    }
+    [result] = seeded.score([binding], registry=registry, timeout_seconds=120).results
+    return result
+
+
+def test_g_eval_scores_a_case_three_times_and_flags_scores_that_disagree(
+    tmp_path: Path, registry: EvaluatorRegistry
+) -> None:
+    """The same answer, criteria and judge scored 0.2 in a run and 1.0 when scored again, so
+    one G-Eval score is not trustworthy. Three scores 0.2, 0.9 and 1.0 give their median, say
+    they disagree, and the reason starts with the code the report counts."""
+    result = _g_eval(tmp_path, registry, SCATTERED)
+    assert result.status is ExecutionStatus.OK and result.value.value == 0.9
+    assert result.reason is not None and result.reason.startswith("unstable:")
+    assert "0.20, 0.90, 1.00" in result.reason and "median 0.90" in result.reason
+
+    steady = _g_eval(tmp_path / "steady", registry, AGREEING)
+    assert steady.value.value == 1.0
+    assert steady.reason is not None and steady.reason.startswith("median of 3 judge scores")
+    assert "unstable" not in steady.reason
+
+
+def test_g_eval_with_one_repeat_is_the_single_score_it_was(
+    tmp_path: Path, registry: EvaluatorRegistry
+) -> None:
+    result = _g_eval(tmp_path, registry, SCATTERED, repeats=1)
+    assert result.status is ExecutionStatus.OK and result.value.value == 0.2
+    assert not (result.reason or "").startswith(("unstable", "median"))
+
+
+def test_g_eval_repeats_must_be_between_one_and_nine(registry: EvaluatorRegistry) -> None:
+    base = {"judge": AGREEING, "name": "x", "criteria": "c"}
+    for bad in (0, 10, 2.5, "3"):
+        with pytest.raises(BindingValidationError):
+            registry.validate(
+                [MetricBinding(metric="deepeval.g_eval", params={**base, "repeats": bad})]
+            )
+    registry.validate([MetricBinding(metric="deepeval.g_eval", params={**base, "repeats": 5})])
 
 
 # --------------------------------------------------------------------------- openai_compatible
