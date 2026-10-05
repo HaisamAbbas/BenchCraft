@@ -248,6 +248,29 @@ def unavailable_settings(names: list[str], available: list[str]) -> list[str]:
     return problems
 
 
+def unplanned_settings(patch: PlanPatch, draft: Any) -> list[str]:
+    """Metrics the patch configures that did not make it into the plan, and why. A metric
+    configured with settings it cannot run on (a required setting missing) was left out of
+    the plan as a pending question while the plan still read "ready to run": the run had no
+    correctness check, and nobody was told. The change is refused instead, with the reason."""
+    planned = {choice.metric.rsplit("@", 1)[0] for choice in draft.document.rationale}
+    available = {option.evaluator_id for option in draft.inputs.catalog}
+    problems = []
+    for evaluator_id, settings in patch.params.items():
+        if not settings or evaluator_id not in available or evaluator_id in planned:
+            continue
+        reasons = [
+            question.prompt
+            for question in draft.document.pending_questions
+            if evaluator_id in question.prompt
+        ] + [gap.reason for gap in draft.document.gaps if evaluator_id in gap.reason]
+        problems.append(
+            f"{evaluator_id} would not be in the plan with these settings, so nothing was "
+            f"changed: {'; '.join(reasons) or 'its settings are incomplete'}"
+        )
+    return problems
+
+
 class SessionController:
     def __init__(
         self,
@@ -719,6 +742,9 @@ class SessionController:
                 session.revision,
                 problems=unavailable_settings(unavailable, sorted(available)),
             )
+        dropped = unplanned_settings(patch, draft)
+        if dropped:
+            return PatchResult("rejected", session.revision, problems=dropped)
         decision = DecisionRecord(
             decision_id=f"{self.session_id}:d{revision}",
             session_id=self.session_id,

@@ -5,6 +5,27 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc18 — a requested metric is never dropped quietly
+
+Found when a run's report had no G-Eval line: the assistant had saved G-Eval's `criteria`
+without a `name`, G-Eval then "needed a name only you can supply", and the metric was left
+out of the plan while the plan still read "ready to run". The run had no correctness check.
+
+- G-Eval's `name` is optional (a label; the criteria are what the judge reads).
+- A plan change that configures a metric which would not make it into the plan is refused,
+  with what is missing ("deepeval.misuse would not be in the plan with these settings ...
+  needs domain"), and nothing is saved. The assistant or the user fixes it before the plan
+  can read "ready to run" without a metric they asked for.
+- G-Eval criteria that speak of the expected (or reference) answer now send it to the judge.
+  With no `evaluation_params` the judge saw only the question and the answer, so criteria such
+  as "states the same facts as the expected answer" made it reply that the expected answer was
+  missing and score every case 0 (a real run's whole G-Eval line was 0). A manifest can now
+  declare `parameter_patterns`: a regex over a parameter's text that adds a required field, so
+  the harness and the plugin agree on what the judge is shown. A case with no expected answer
+  is then not applicable, as when the field is named explicitly. Naming `evaluation_params`
+  yourself still decides the fields.
+- Plugin `aibench-deepeval` 0.2.0rc6.
+
 ## 0.1.0rc17 — G-Eval scores you can trust
 
 From a real run where the same answer, criteria and judge scored 0.2 once and 1.0 when scored

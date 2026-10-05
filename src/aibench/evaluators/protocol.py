@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal
@@ -270,6 +271,13 @@ class Evaluator(abc.ABC):
                 requirement = by_value.get(value) if isinstance(value, str) else None
                 if requirement is not None:
                     extra.append(FieldRequirement.model_validate(requirement))
+        for name, rule in (deep_unfreeze(self.manifest.parameter_patterns) or {}).items():
+            if rule.get("unless_set") and params.get(rule["unless_set"]):
+                continue
+            value = params.get(name)
+            text = " ".join(value) if isinstance(value, (list, tuple)) else value
+            if isinstance(text, str) and re.search(rule["pattern"], text, re.IGNORECASE):
+                extra.append(FieldRequirement.model_validate(rule["requires"]))
         paths = {r.path for r in self.manifest.requires}
         return (*self.manifest.requires, *(r for r in extra if r.path not in paths))
 
