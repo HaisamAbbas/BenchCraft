@@ -5,6 +5,13 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## Unreleased
+
+- Fixed: `needs attention` (and the evaluation counts) in a run's status line stayed at the
+  number of evaluations the run itself left failed, even after `/rescore` had scored them all.
+  A failed evaluation that a later scoring pass finished no longer counts, for a finished run;
+  failures nothing has settled still do.
+
 ## 0.1.0rc14 — faithfulness with glm-4.5-air
 
 - The `openai_compatible` judge repairs the two near-misses at JSON that models make: a

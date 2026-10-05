@@ -185,3 +185,44 @@ def test_the_rescore_command_carries_by_default_and_all_evaluates_everything(
     assert "carried forward 2 finished result(s); evaluated 0 now" in shown
     assert "/rescore all evaluates everything again" in shown
     assert shown.count("carried forward") == 1  # a full rescore says nothing about carrying
+
+
+def test_needs_attention_clears_once_a_rescore_has_finished_what_the_run_left_failed(
+    tmp_path: Path,
+) -> None:
+    """The run's own work records still say "failed" after a rescore settled those
+    evaluations, so the status line kept saying "needs attention 11" with every metric
+    scored. A failed evaluation a later pass finished is no longer waiting for attention."""
+    from aibench.core.models import WorkItem, WorkItemState
+    from aibench.engine.engine import evaluation_key
+    from aibench.services.runs import run_status
+
+    seeded = _seeded(tmp_path)
+    registry = _registry()
+    Flaky.fail_once.add("b")
+    first = seeded.score([BINDING], registry=registry)
+    failed = next(r for r in first.results if r.status is ExecutionStatus.ERROR)
+    assert failed.binding_hash is not None
+    for case_id in "abc":  # the run's records, as the engine leaves them
+        key = evaluation_key(case_id, 0, failed.binding_hash)
+        state = WorkItemState.FAILED if case_id == "b" else WorkItemState.SUCCEEDED
+        seeded.storage.commit_work_item(
+            WorkItem(
+                work_item_id=f"w-{case_id}",
+                run_id=RUN_ID,
+                task_key=key,
+                kind="evaluation",
+                state=state,
+                last_error="judge HTTP 429" if case_id == "b" else None,
+            )
+        )
+    seeded.storage.update_run_status(RUN_ID, "completed")
+
+    before = run_status(seeded.storage, RUN_ID)
+    assert before["counts"]["evaluation"] == {"succeeded": 2, "failed": 1}
+    assert [item["state"] for item in before["needs_attention"]] == ["failed"]
+
+    seeded.score([BINDING], registry=registry, carry_forward=True)  # b is evaluated again
+    after = run_status(seeded.storage, RUN_ID)
+    assert after["needs_attention"] == []
+    assert after["counts"]["evaluation"] == {"succeeded": 3}
