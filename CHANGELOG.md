@@ -5,7 +5,7 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
-## Unreleased
+## 0.1.0rc13 — assistant stops over-asking for G-Eval settings
 
 - The assistant's tool description no longer tells it to add G-Eval's `evaluation_params` to every
   check. They are not the user's words, so BenchCraft refused them and the assistant used its six
