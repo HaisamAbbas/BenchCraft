@@ -89,6 +89,69 @@ _MAX_WAIT = 30.0
 _RETRY_BUDGET_SECONDS = 200.0
 
 
+class _BadJSON(RuntimeError):
+    """The reply is not JSON even after the usual repair; asking again often gives JSON."""
+
+
+_TRAILING_COMMA = re.compile(r",(\s*[}\]])")
+
+
+def _undouble_braces(text: str) -> str:
+    """Collapse `{{ ... }}` to `{ ... }` outside strings. DeepEval's prompts show their
+    example JSON with doubled braces (they are escaped for formatting) and some models copy
+    that literally. Only a doubled opener is collapsed, and only its own doubled closer is
+    dropped, so ordinary nested objects (`}}` closing two) are left alone."""
+    out: list[str] = []
+    doubled: list[bool] = []  # one entry per open object: was it opened with `{{`
+    in_string = escaped = False
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if in_string:
+            out.append(c)
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == '"':
+                in_string = False
+        elif c == '"':
+            in_string = True
+            out.append(c)
+        elif c == "{":
+            twice = text[i + 1 : i + 2] == "{"
+            doubled.append(twice)
+            out.append(c)
+            i += 1 if twice else 0
+        elif c == "}":
+            twice = doubled.pop() if doubled else False
+            out.append(c)
+            i += 1 if twice and text[i + 1 : i + 2] == "}" else 0
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _load_json(text: str) -> Any:
+    """`json.loads`, with the repairs for the near-misses models make: a comma before a
+    closing bracket, and doubled braces copied from DeepEval's prompt. Tried only when the
+    text is not valid as it is."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        for repaired in (
+            _TRAILING_COMMA.sub(r"\1", text),
+            _undouble_braces(text),
+            _TRAILING_COMMA.sub(r"\1", _undouble_braces(text)),
+        ):
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                continue
+        raise _BadJSON(f"judge reply is not valid JSON ({exc.msg}, char {exc.pos})") from exc
+
+
 class _CutOff(RuntimeError):
     """The reply stopped at the output allowance, before the judge finished its JSON."""
 
@@ -154,9 +217,12 @@ class _OpenAICompatible:
                 if wait is None:
                     try:
                         return self._parse(response, schema)
-                    except _CutOff:
-                        if attempt == _ATTEMPTS - 1 or not self._grow():
+                    except (_CutOff, _BadJSON) as exc:
+                        if attempt == _ATTEMPTS - 1 or (
+                            isinstance(exc, _CutOff) and not self._grow()
+                        ):
                             raise
+                        self.retries += isinstance(exc, _BadJSON)
                         continue
                 time.sleep(wait)
         raise AssertionError("unreachable: the last attempt returns or raises")
@@ -178,9 +244,12 @@ class _OpenAICompatible:
                 if wait is None:
                     try:
                         return self._parse(response, schema)
-                    except _CutOff:
-                        if attempt == _ATTEMPTS - 1 or not self._grow():
+                    except (_CutOff, _BadJSON) as exc:
+                        if attempt == _ATTEMPTS - 1 or (
+                            isinstance(exc, _CutOff) and not self._grow()
+                        ):
                             raise
+                        self.retries += isinstance(exc, _BadJSON)
                         continue
                 await asyncio.sleep(wait)
         raise AssertionError("unreachable: the last attempt returns or raises")
@@ -260,7 +329,7 @@ class _OpenAICompatible:
         text = _FENCE.sub("", content.strip())
         if schema is None:
             return text
-        return schema.model_validate(json.loads(text))
+        return schema.model_validate(_load_json(text))
 
 
 @cache
