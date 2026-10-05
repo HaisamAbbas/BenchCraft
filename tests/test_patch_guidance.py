@@ -84,3 +84,19 @@ def _tool_results(provider: ScriptedProvider) -> list[dict[str, Any]]:
             except (TypeError, ValueError):
                 continue
     return results
+
+
+def test_settings_the_user_never_stated_are_named_so_the_model_drops_them() -> None:
+    """G-Eval's evaluation_params were offered by the tool description and then refused as
+    not the user's words; in a real session the assistant ran out of calls retrying."""
+    problems = [
+        "deepeval.g_eval parameter evaluation_params 'input' does not appear in the user's message",
+        (
+            "deepeval.g_eval parameter evaluation_params 'actual_output' does not appear in the "
+            "user's message"
+        ),
+    ]
+    fix = patch_fix(problems, MESSAGE)
+    assert fix is not None
+    assert "Leave out these settings" in fix and "evaluation_params" in fix
+    assert fix.count("evaluation_params") == 1  # listed once, not per value
