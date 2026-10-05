@@ -50,6 +50,7 @@ from aibench.core.models import (
     Approval,
     EffectLevel,
     ExecutionResult,
+    ExecutionStatus,
     RedactionClass,
     ResetPolicy,
     RunManifest,
@@ -255,7 +256,9 @@ def create_run(
             },
             "test_world": world_params,
             "metric_profiles": profiles,
-            **({"experiment_context": experiment_context} if experiment_context is not None else {}),
+            **(
+                {"experiment_context": experiment_context} if experiment_context is not None else {}
+            ),
         },
         seed=(run_seed if run_seed is not None else random.SystemRandom().randrange(2**31)),
         environment={"python": platform.python_version(), "platform": sys.platform},
@@ -723,6 +726,22 @@ async def _execute_leased(
 # --------------------------------------------------------------------------- status / rescore
 
 
+def _evaluation_identity(task_key: str) -> tuple[str, int, str | None]:
+    return parse_work_item_key(task_key, "evaluation")
+
+
+def _finished_evaluations(storage: Storage, run_id: str) -> set[tuple[str, int, str | None]]:
+    """(case, repetition, binding) of every evaluation whose latest stored result is not an
+    error: the latest pass wins."""
+    latest: dict[tuple[str, int, str | None], bool] = {}
+    for result in storage.list_metric_results(run_id):  # in the order they were committed
+        binding = result.binding_hash[7:23] if result.binding_hash else None
+        latest[(result.case_id, result.repetition_id, binding)] = (
+            result.status is not ExecutionStatus.ERROR
+        )
+    return {key for key, finished in latest.items() if finished}
+
+
 def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
     record = storage.get_run(run_id)
     if record is None:
@@ -731,15 +750,35 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
     last_session = next(
         (e for e in reversed(events) if e["event_type"] == "run_session_ended"), None
     )
+    items = storage.list_work_items(run_id)
+    counts = work_counts(storage, run_id)
     blocked = [
         {"task_key": w.task_key, "state": w.state.value, "reason": w.last_error}
-        for w in storage.list_work_items(run_id)
+        for w in items
         if w.state in (WorkItemState.FAILED, WorkItemState.BLOCKED, WorkItemState.UNKNOWN_EFFECT)
     ]
+    if record.status in _FINISHED:
+        # A rescore settles evaluations the run itself left failed, but it never touches the
+        # run's work records: "needs attention 11" stayed after every result was scored.
+        # A failed evaluation is not waiting for attention once a later pass finished it.
+        done = _finished_evaluations(storage, run_id)
+        settled = {
+            w.task_key
+            for w in items
+            if w.kind == "evaluation"
+            and w.state is WorkItemState.FAILED
+            and _evaluation_identity(w.task_key) in done
+        }
+        if settled:
+            blocked = [b for b in blocked if b["task_key"] not in settled]
+            evaluation = dict(counts.get("evaluation", {}))
+            evaluation["failed"] = evaluation.get("failed", 0) - len(settled)
+            evaluation["succeeded"] = evaluation.get("succeeded", 0) + len(settled)
+            counts["evaluation"] = {k: v for k, v in evaluation.items() if v}
     return {
         "run_id": run_id,
         "status": record.status,
-        "counts": work_counts(storage, run_id),
+        "counts": counts,
         "needs_attention": blocked,
         "budget": last_session["payload"].get("budget") if last_session else None,
         # Why the last session stopped early, if it said (storage failure, lease lost).

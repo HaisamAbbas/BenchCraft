@@ -45,6 +45,7 @@ class GeneratedPool:
     pool_id: str
     rows: list[dict[str, Any]]
     duplicate_sources: list[dict[str, str]]
+    dropped: tuple[str, ...] = ()  # questions whose quoted source text was not in the document
 
 
 def source_files(root: Path, words: list[str]) -> tuple[Path, ...]:
@@ -80,7 +81,7 @@ def draft_pool(
     sources: tuple[Path, ...],
     *,
     max_candidates: int = 20,
-) -> tuple[CandidatePoolManifest, tuple[DatasetCandidate, ...]]:
+) -> tuple[CandidatePoolManifest, tuple[DatasetCandidate, ...], tuple[str, ...]]:
     """Ask the model for candidate cases from `sources`. The documents go to the model's
     provider, so the policy has to allow both. Blocking, and it touches no database, so the
     chat runs it off its own thread; `store_pool` keeps what it returns."""
@@ -91,14 +92,17 @@ def draft_pool(
         update={"max_output_tokens": min(config.max_output_tokens, GENERATION_OUTPUT_TOKENS)}
     )
     provider = OpenAICompatibleProvider(capped)
+    dropped: list[str] = []
     try:
-        return generate_candidate_pool(
+        manifest, candidates = generate_candidate_pool(
             sources,
             provider,
             pool_id="pool-" + uuid4().hex,
             source_split="development",
             max_candidates=max_candidates,
+            dropped=dropped,
         )
+        return manifest, candidates, tuple(dropped)
     finally:
         provider.close()
 
@@ -107,6 +111,7 @@ def store_pool(
     storage: Storage,
     manifest: CandidatePoolManifest,
     candidates: tuple[DatasetCandidate, ...],
+    dropped: tuple[str, ...] = (),
 ) -> GeneratedPool:
     storage.commit_candidate_pool(manifest, candidates)
     duplicates = [
@@ -114,7 +119,9 @@ def store_pool(
         for item in manifest.sources
         if item.duplicate_of
     ]
-    return GeneratedPool(manifest.pool_id, pool_rows(storage, manifest.pool_id), duplicates)
+    return GeneratedPool(
+        manifest.pool_id, pool_rows(storage, manifest.pool_id), duplicates, dropped
+    )
 
 
 def _ordered(storage: Storage, pool_id: str) -> list[DatasetCandidate]:

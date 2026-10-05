@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
@@ -45,6 +46,10 @@ the source labels. Do not include hidden tests, private reasoning, or other fiel
 Generation prompt version: aibench.dataset-generation.v1
 """
 GENERATION_PROMPT_HASH = content_hash(GENERATION_PROMPT)
+
+
+class _QuoteNotFound(Exception):
+    """One generated case cites text that is not in its source."""
 
 
 class CandidateGenerationError(AibenchError):
@@ -213,6 +218,21 @@ def _source_message(sources: Sequence[_Source]) -> str:
     )
 
 
+def _locate_quote(text: str, quote: str) -> tuple[int, int] | None:
+    """Where `quote` is in `text`: exactly, or else differing only in white space (a model
+    retypes line breaks and runs of spaces freely). The span is always the source's own
+    characters, so the evidence stays verbatim; anything else is not a match."""
+    start = text.find(quote)
+    if start >= 0:
+        return start, start + len(quote)
+    words = quote.split()
+    if not words:
+        return None
+    pattern = r"\s+".join(re.escape(word) for word in words)
+    found = re.search(pattern, text)
+    return (found.start(), found.end()) if found else None
+
+
 def _line_at(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
@@ -227,19 +247,20 @@ def _candidate_from_generated(
     source = sources.get(item.source_id)
     if source is None:
         raise CandidateGenerationError(f"unknown source_id {item.source_id!r}")
-    start = source.text.find(item.source_quote)
-    if start < 0:
-        raise CandidateGenerationError(
-            f"source_quote for {item.source_id!r} is not an exact substring of that source"
+    located = _locate_quote(source.text, item.source_quote)
+    if located is None:
+        raise _QuoteNotFound(
+            f"source_quote for {item.source_id!r} is not in that source"
         )
-    end = start + len(item.source_quote)
+    start, end = located
+    quote = source.text[start:end]
     candidate_id = (
         "candidate-"
         + content_hash(
             {
                 "pool_id": pool_id,
                 "source_digest": source.digest,
-                "source_quote": item.source_quote,
+                "source_quote": quote,
                 "input": item.input,
                 "expected_answer": item.expected_answer,
             }
@@ -282,6 +303,7 @@ def generate_candidate_pool(
     pool_id: str,
     source_split: str,
     max_candidates: int = 20,
+    dropped: list[str] | None = None,
 ) -> tuple[CandidatePoolManifest, tuple[DatasetCandidate, ...]]:
     """Make one bounded provider call from explicit development-only text sources.
 
@@ -317,12 +339,25 @@ def generate_candidate_pool(
 
     identity = f"{provider.name}:{provider.model}"
     source_map = {source.source_id: source for source in sources}
-    candidates = tuple(
-        _candidate_from_generated(
-            item, pool_id=pool_id, generator_identity=identity, sources=source_map
+    made: list[DatasetCandidate] = []
+    for item in generated.cases:
+        try:
+            made.append(
+                _candidate_from_generated(
+                    item, pool_id=pool_id, generator_identity=identity, sources=source_map
+                )
+            )
+        except _QuoteNotFound:
+            # A case whose quote is not in the document has no evidence: leave out that
+            # case, not the good ones beside it.
+            if dropped is not None:
+                dropped.append(item.input)
+    if not made:
+        raise CandidateGenerationError(
+            "none of the cases the model wrote quote text that is in the document; "
+            "try again, or a smaller document"
         )
-        for item in generated.cases
-    )
+    candidates = tuple(made)
     if len({candidate.candidate_id for candidate in candidates}) != len(candidates):
         raise CandidateGenerationError("provider returned an exact duplicate candidate")
     manifest = CandidatePoolManifest(
