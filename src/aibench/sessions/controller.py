@@ -813,7 +813,12 @@ class SessionController:
         except AibenchError as exc:
             problems = exc.problems if isinstance(exc, PatchRejected) else [str(exc)]
             return PatchResult("rejected", session.revision, problems=problems)
-        if only_if_different and draft.plan_hash == current.plan_hash:
+        # The plan file names the dataset by path, so its hash is the same after the file's
+        # cases changed; the draft's case counts and estimate are not. Compare the dataset too.
+        unchanged_dataset = draft.document.dataset_hash == (current.draft or {}).get(
+            "dataset_hash"
+        )
+        if only_if_different and draft.plan_hash == current.plan_hash and unchanged_dataset:
             return None
         decision = DecisionRecord(
             decision_id=f"{self.session_id}:d{revision}",

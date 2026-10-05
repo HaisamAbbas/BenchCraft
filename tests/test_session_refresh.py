@@ -5,6 +5,7 @@ now redrafts it under the current policy, and only when that changes the plan.""
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -74,3 +75,29 @@ def test_reopening_a_session_refreshes_its_plan_under_the_current_policy(
         assert ctl.session.revision == revision + 1
     finally:
         ctl.storage.db.close()
+
+
+def test_a_dataset_edited_on_disk_is_noticed_when_the_session_is_reopened(tmp_path: Path) -> None:
+    """A case was removed from the dataset file; the reopened session kept saying "3 cases"
+    because the plan file names the dataset by path and so hashes the same. The plan said it
+    would run cases that were gone."""
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "x", "b": "y", "c": "z"}, objectives=("catch wrong answers",))
+    try:
+        dataset = Path(ctl.current_decision().choices.dataset)
+        cases = dataset.read_text(encoding="utf-8").splitlines()
+        assert ctl.state()["draft"]["coverage"][0]["selected_cases"] == 3
+        before = ctl.session.revision
+        dataset.write_text("\n".join(cases[:-1]) + "\n", encoding="utf-8")
+        reopened = h.reopen(ctl)
+        try:
+            changed = reopened.refresh_draft()
+            assert changed is not None and changed.status == "applied"
+            assert reopened.session.revision == before + 1
+            assert reopened.state()["draft"]["coverage"][0]["selected_cases"] == 2
+            assert reopened.refresh_draft() is None  # nothing further changed
+        finally:
+            reopened.storage.db.close()
+    finally:
+        with contextlib.suppress(Exception):
+            ctl.storage.db.close()

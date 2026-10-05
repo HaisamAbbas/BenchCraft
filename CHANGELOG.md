@@ -5,6 +5,14 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc20 — a dataset edited on disk is noticed
+
+- Fixed: a session's draft kept the case counts and estimate of the dataset as it was when the
+  draft was made. After a case was removed from the dataset file, reopening the session still
+  said "up to 5 cases" (the file had 4), because the plan file names the dataset by path and
+  so hashed the same. Reopening a session now compares the dataset's content as well and makes
+  a new draft revision when it changed.
+
 ## 0.1.0rc19 — `/cases` shows what a quote sits under
 
 Found when a generated case asked what medical exemptions *differently-abled persons* get and
