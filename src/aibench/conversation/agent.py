@@ -236,6 +236,19 @@ def patch_problems(
     return ungrounded(patch, message)
 
 
+def _without_empty_settings(raw: Any) -> Any:
+    """A patch with the settings blocks that set nothing removed, and `id@version` read as
+    `id`. A model fills `params` with `{"native.exact_match@1.0.0": {}}` for every metric it
+    mentions; refusing that as settings for a metric that "is not available" sent it round
+    and round until the turn ran out of tokens, for a change that asked for no settings."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("params"), dict):
+        return raw
+    params = {
+        str(name).split("@", 1)[0]: value for name, value in raw["params"].items() if value
+    }
+    return {**raw, "params": params}
+
+
 _PARAM_PROBLEM = re.compile(r"^[\w.]+ parameter (\w+)(?:=| )")
 
 
@@ -1585,7 +1598,7 @@ class _Turn:
     async def _patch(self, args: dict[str, Any]) -> Any:
         quote = str(args.get("user_quote", ""))
         try:
-            patch = PlanPatch.model_validate(args.get("patch", {}))
+            patch = PlanPatch.model_validate(_without_empty_settings(args.get("patch", {})))
         except PydanticValidationError as exc:
             return self._reject("propose_plan_patch", [e["msg"] for e in exc.errors()][:10])
         problems = patch_problems(patch, quote, self.message, offer=self.previous_reply)

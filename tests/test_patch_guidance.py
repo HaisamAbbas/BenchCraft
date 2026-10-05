@@ -100,3 +100,29 @@ def test_settings_the_user_never_stated_are_named_so_the_model_drops_them() -> N
     assert fix is not None
     assert "Leave out these settings" in fix and "evaluation_params" in fix
     assert fix.count("evaluation_params") == 1  # listed once, not per value
+
+
+def test_empty_settings_for_a_metric_are_ignored_not_refused(tmp_path: Path) -> None:
+    """The assistant sent params {"native.exact_match@1.0.0": {}} with a change that asked for
+    no settings, was refused three ways, and ran out of tokens. Settings that set nothing are
+    dropped and `id@version` is read as `id`; real settings are still checked."""
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"})
+    user = "Check that the answers are correct compared with the expected answers"
+    provider = ScriptedProvider(
+        [
+            patch_step(
+                user,
+                add_objectives=[user],
+                params={"native.exact_match@1.0.0": {}, "deepeval.g_eval": {}},
+            ),
+            say("Added."),
+        ]
+    )
+    agent = ConversationAgent(ctl, provider)
+    try:
+        outcome = asyncio.run(agent.handle_message(user))
+        assert outcome.rejected == []
+        assert user in ctl.state()["draft"]["objectives"]
+    finally:
+        ctl.storage.db.close()
