@@ -5,6 +5,15 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc23 — a terminal opened before a key was saved
+
+- On Windows, `benchcraft` adopts the API keys and tokens stored for your account (user
+  environment variables whose names end in `_API_KEY` or `_TOKEN`) that the terminal does not
+  have. A terminal opened before a key was stored never sees it, which showed up as "assistant
+  model disabled: secret 'env:OPENROUTER_API_KEY' is not set" right after saving the key. A
+  variable the terminal does have always wins; other stored variables are ignored;
+  `BENCHCRAFT_NO_USER_ENV=1` turns it off.
+
 ## 0.1.0rc22 — passages grouped per source
 
 Found when testing a second RAG app (LightRAG), whose answer lists one reference per source
