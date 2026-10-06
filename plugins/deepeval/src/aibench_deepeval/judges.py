@@ -26,6 +26,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+from pydantic import ValidationError
 
 JUDGE_SCHEMA: dict[str, Any] = {
     "oneOf": [
@@ -160,10 +161,21 @@ def default_thinking(base_url: str) -> str:
     """Judging is classification against a rubric and DeepEval makes many small calls per
     case; a model that thinks first (GLM on Z.ai) took 76 to 197 s for one call and sometimes
     answered nothing. Z.ai accepts `thinking: disabled` on every model (non-thinking models
-    ignore it), so it is off there unless the judge says otherwise; other endpoints are left
-    at the provider's default."""
+    ignore it), so it is off there unless the judge says otherwise. OpenRouter takes it as
+    `reasoning: {"enabled": false}`: DeepSeek V4 Flash answered the same JSON in 2 s instead of
+    8 s and at a sixth of the cost, and a faithfulness case that reasoned for over 300 s no
+    longer does. Other endpoints are left at the provider's default."""
     host = (urlsplit(base_url).hostname or "").lower()
-    return "disabled" if host == "z.ai" or host.endswith(".z.ai") else "default"
+    stops_thinking = ("z.ai", "openrouter.ai")
+    return "disabled" if host.endswith(stops_thinking) else "default"
+
+
+def _thinking_field(base_url: str, thinking: str) -> dict[str, Any]:
+    """The request field that turns a model's thinking on or off, in the endpoint's own form."""
+    host = (urlsplit(base_url).hostname or "").lower()
+    if host == "openrouter.ai" or host.endswith(".openrouter.ai"):
+        return {"reasoning": {"enabled": thinking == "enabled"}}
+    return {"thinking": {"type": thinking}}
 
 
 class _OpenAICompatible:
@@ -186,6 +198,7 @@ class _OpenAICompatible:
         # A reasoning model spends part of this on thinking before it writes the JSON.
         self._max_tokens = int(config.get("max_output_tokens", _DEFAULT_OUTPUT_TOKENS))
         self._json_mode = bool(config.get("json_mode", True))
+        self._base_url = config["base_url"]
         self._thinking = str(config.get("thinking") or default_thinking(config["base_url"]))
         self._retry_wait = float(config.get("retry_wait_seconds", 2))
         self._retry_until = time.monotonic() + _RETRY_BUDGET_SECONDS
@@ -305,7 +318,7 @@ class _OpenAICompatible:
         if self._json_mode:
             body["response_format"] = {"type": "json_object"}
         if self._thinking != "default":
-            body["thinking"] = {"type": self._thinking}
+            body.update(_thinking_field(self._base_url, self._thinking))
         return body
 
     def _parse(self, response: httpx.Response, schema: Any) -> Any:
@@ -329,7 +342,14 @@ class _OpenAICompatible:
         text = _FENCE.sub("", content.strip())
         if schema is None:
             return text
-        return schema.model_validate(_load_json(text))
+        try:
+            return schema.model_validate(_load_json(text))
+        except ValidationError as exc:
+            # Valid JSON of the wrong shape (a model answered with a document instead of the
+            # verdicts DeepEval asked for): asked again, like a reply that is not JSON.
+            raise _BadJSON(
+                f"judge reply does not match the expected shape: {exc.error_count()} error(s)"
+            ) from exc
 
 
 @cache

@@ -199,6 +199,8 @@ def project_worker_view(
 
 class WorkerEvaluator(Evaluator):
     spec: ClassVar[WorkerSpec]
+    # One request at a time per worker process: the scorer gives cases their turn.
+    one_at_a_time: ClassVar[bool] = True
 
     def __init__(self) -> None:
         super().__init__()
