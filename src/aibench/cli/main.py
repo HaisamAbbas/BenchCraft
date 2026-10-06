@@ -120,6 +120,9 @@ def main(
 def run() -> None:
     """The `aibench` console entry point: the Typer app, with a workspace written by a
     newer aibench reported as a plain error (exit 2) wherever it is opened."""
+    from aibench import userconfig
+
+    userconfig.adopt_user_environment()
     try:
         app()
     except WorkspaceTooNew as exc:

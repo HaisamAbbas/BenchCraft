@@ -36,6 +36,7 @@ from aibench.services.candidates import path_denials, promote_candidates, record
 from aibench.storage.repositories import Storage
 
 SOURCE_SUFFIXES = (".txt", ".md")
+GENERATION_TIMEOUT_SECONDS = 600.0  # the most a provider config allows
 DEFAULT_OUTPUT = "cases-from-documents.jsonl"
 _ACCEPTED = (CandidateStatus.REVIEWED, CandidateStatus.VERIFIED)
 
@@ -88,8 +89,13 @@ def draft_pool(
     denials = [*path_denials(policy, sources), *provider_denials(config, policy)]
     if denials:
         raise CandidateGenerationError("; ".join(denials))
+    # One call writes all the cases, and a model that thinks first takes minutes: the chat's
+    # own timeout (it answers a message in seconds) would cut it off.
     capped = config.model_copy(
-        update={"max_output_tokens": min(config.max_output_tokens, GENERATION_OUTPUT_TOKENS)}
+        update={
+            "max_output_tokens": min(config.max_output_tokens, GENERATION_OUTPUT_TOKENS),
+            "timeout_seconds": max(config.timeout_seconds, GENERATION_TIMEOUT_SECONDS),
+        }
     )
     provider = OpenAICompatibleProvider(capped)
     dropped: list[str] = []

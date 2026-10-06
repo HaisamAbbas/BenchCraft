@@ -14,7 +14,7 @@ import getpass
 import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -87,6 +87,56 @@ def save_provider(config: OpenAICompatibleConfig | None) -> Path:
     tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     return path
+
+
+KEY_SUFFIXES = ("_API_KEY", "_TOKEN")
+NO_USER_ENV = "BENCHCRAFT_NO_USER_ENV"  # set to anything to turn adoption off
+
+
+def read_user_environment() -> dict[str, str]:
+    """The user environment variables Windows has stored for this account (not this
+    terminal's copy of them). Empty off Windows."""
+    if sys.platform != "win32":
+        return {}
+    import winreg
+
+    found: dict[str, str] = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            index = 0
+            while True:
+                try:
+                    name, value, _kind = winreg.EnumValue(key, index)
+                except OSError:
+                    break
+                index += 1
+                if isinstance(value, str) and value:
+                    found[name] = value
+    except OSError:
+        return {}
+    return found
+
+
+def adopt_user_environment(
+    reader: Callable[[], dict[str, str]] = read_user_environment,
+    environ: MutableMapping[str, str] | None = None,
+) -> list[str]:
+    """Make the stored API keys and tokens of this account visible to this process.
+
+    A terminal opened before a key was stored never sees it (Windows gives a program its
+    environment when it starts), which looked like "secret env:X is not set" in a session
+    where the key had just been saved. Only names ending in `_API_KEY` or `_TOKEN` are
+    adopted, only when the terminal does not already have them, so a variable a user set
+    for this terminal always wins. Returns the names adopted."""
+    target = os.environ if environ is None else environ
+    if target.get(NO_USER_ENV):
+        return []
+    adopted = []
+    for name, value in reader().items():
+        if name.upper().endswith(KEY_SUFFIXES) and not target.get(name):
+            target[name] = value
+            adopted.append(name)
+    return adopted
 
 
 def persist_user_env(name: str, value: str) -> bool:

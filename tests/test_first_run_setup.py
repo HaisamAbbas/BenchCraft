@@ -221,3 +221,48 @@ def test_a_folder_benchcraft_cannot_write_to_gets_a_message_not_a_traceback(
     assert result.exit_code != 0
     assert "cannot create its folder" in result.output and "Access is denied" in result.output
     assert "Traceback" not in result.output
+
+
+def test_stored_keys_are_adopted_by_a_terminal_opened_before_they_were_saved() -> None:
+    """A key saved as a user variable is invisible to a terminal that was already open, which
+    showed up as "secret env:OPENROUTER_API_KEY is not set" right after the key was stored.
+    BenchCraft adopts stored API keys and tokens the terminal does not have; it never
+    overrides one the terminal has, and ignores every other stored variable."""
+    from aibench import userconfig
+
+    stored = {
+        "OPENROUTER_API_KEY": "sk-stored",
+        "ZAI_API_KEY": "zai-stored",
+        "GITHUB_TOKEN": "gh-stored",
+        "PATH": "C:/stored/path",  # not a key: never adopted
+        "EDITOR": "vim",
+    }
+    environ = {"ZAI_API_KEY": "zai-from-this-terminal"}
+    adopted = userconfig.adopt_user_environment(lambda: stored, environ)
+    assert sorted(adopted) == ["GITHUB_TOKEN", "OPENROUTER_API_KEY"]
+    assert environ == {
+        "ZAI_API_KEY": "zai-from-this-terminal",  # the terminal's own value wins
+        "OPENROUTER_API_KEY": "sk-stored",
+        "GITHUB_TOKEN": "gh-stored",
+    }
+
+    off = {userconfig.NO_USER_ENV: "1"}
+    assert userconfig.adopt_user_environment(lambda: stored, off) == []
+    assert off == {userconfig.NO_USER_ENV: "1"}
+
+    blank = {"OPENROUTER_API_KEY": ""}  # an empty variable counts as not set
+    assert sorted(userconfig.adopt_user_environment(lambda: stored, blank)) == [
+        "GITHUB_TOKEN",
+        "OPENROUTER_API_KEY",
+        "ZAI_API_KEY",
+    ]
+    assert blank["OPENROUTER_API_KEY"] == "sk-stored"
+
+
+def test_reading_the_stored_user_environment_is_safe_everywhere() -> None:
+    """On this platform it returns a mapping of strings (empty off Windows); it never raises."""
+    from aibench import userconfig
+
+    values = userconfig.read_user_environment()
+    assert isinstance(values, dict)
+    assert all(isinstance(k, str) and isinstance(v, str) for k, v in values.items())

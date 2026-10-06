@@ -291,3 +291,33 @@ def test_headings_are_found_in_markdown_and_numbered_text_and_otherwise_absent()
     )
     assert heading_above("# Old\n\n9.3.2 Newer Section ? text") == "9.3.2 Newer Section"
     assert heading_above("plain words with no headings at all") is None
+
+
+def test_candidate_generation_waits_longer_than_the_chat_does(tmp_path: Path) -> None:
+    """DeepSeek V4 Flash took 107 to 202 s to write 15 cases; the saved assistant config's
+    120 s timeout would cut it off. Generation uses at least ten minutes, never less."""
+    from aibench.planning.openai_provider import OpenAICompatibleProvider
+    from aibench.security.policy import ExecutionPolicy
+    from aibench.services import case_pools
+
+    (tmp_path / "refunds.md").write_text(DOCUMENT, encoding="utf-8")
+    seen: list[float] = []
+    original = OpenAICompatibleProvider.__init__
+
+    def spy(self, config, **kwargs):  # type: ignore[no-untyped-def]
+        seen.append(config.timeout_seconds)
+        original(self, config, **kwargs)
+
+    with chat_server([_reply()]) as server:
+        host, port = server.server_address[:2]
+        config = OpenAICompatibleConfig(
+            base_url=f"http://{host}:{port}/v1", model="writer-1", timeout_seconds=120
+        )
+        OpenAICompatibleProvider.__init__ = spy  # type: ignore[method-assign]
+        try:
+            case_pools.draft_pool(
+                config, ExecutionPolicy(), (tmp_path / "refunds.md",), max_candidates=5
+            )
+        finally:
+            OpenAICompatibleProvider.__init__ = original  # type: ignore[method-assign]
+    assert seen == [case_pools.GENERATION_TIMEOUT_SECONDS] and seen[0] >= 600

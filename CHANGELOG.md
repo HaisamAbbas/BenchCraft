@@ -5,6 +5,23 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc23 — a terminal opened before a key was saved, and `/cases` with a model that thinks
+
+- On Windows, `benchcraft` adopts the API keys and tokens stored for your account (user
+  environment variables whose names end in `_API_KEY` or `_TOKEN`) that the terminal does not
+  have. A terminal opened before a key was stored never sees it, which showed up as "assistant
+  model disabled: secret 'env:OPENROUTER_API_KEY' is not set" right after saving the key. A
+  variable the terminal does have always wins; other stored variables are ignored;
+  `BENCHCRAFT_NO_USER_ENV=1` turns it off.
+- `/cases generate` works with a model that thinks before it answers (DeepSeek V4 Flash). The
+  one-call generation had 6,000 output tokens; the model's thinking used them, so its reply was
+  cut off mid-list ("2 validation errors ... source_id Field required") or held no tool call
+  ("provider must return exactly one write_candidates tool call"). It now has 16,000, a
+  ten-minute timeout (the saved chat config's 120 s cut off generations that took 107 to
+  202 s), and, when a reply comes back after nearly all of its allowance, an error that says so
+  and suggests `--max 6` or a smaller document. On three real runs, 15 cases each, none left
+  out.
+
 ## 0.1.0rc22 — passages grouped per source
 
 Found when testing a second RAG app (LightRAG), whose answer lists one reference per source

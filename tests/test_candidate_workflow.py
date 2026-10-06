@@ -399,3 +399,65 @@ def test_source_digest_change_blocks_review(candidate_job) -> None:
             note="Reviewed the source.",
         )
     assert storage.get_candidate(candidate.candidate_id).status is CandidateStatus.CANDIDATE
+
+
+class _ThinkingProvider:
+    """A model that thinks first: its output allowance is gone before the cases are written."""
+
+    name = "thinking"
+    model = "thinking-model-1"
+
+    def __init__(self, tool_calls: tuple[ToolCall, ...], completion_tokens: int) -> None:
+        self.tool_calls = tool_calls
+        self.completion_tokens = completion_tokens
+
+    def complete(self, messages, tools):
+        return ModelReply(
+            text="",
+            tool_calls=self.tool_calls,
+            prompt_tokens=20_000,
+            completion_tokens=self.completion_tokens,
+        )
+
+
+def test_a_model_that_ran_out_of_output_says_so_and_what_to_do(tmp_path: Path) -> None:
+    """DeepSeek V4 Flash thinks before it answers. With 6,000 output tokens its reply was cut
+    off mid-list or held no tool call, and the error ("provider must return exactly one
+    write_candidates tool call") gave no clue. The allowance is larger now, and when a reply
+    still comes back after nearly all of it, the error names the likely cause."""
+    from aibench.datasets.candidates import GENERATION_OUTPUT_TOKENS
+
+    assert GENERATION_OUTPUT_TOKENS >= 16_000
+    source = tmp_path / "refunds.md"
+    source.write_text("# Refunds\n\n" + ANSWER, encoding="utf-8")
+    used_up = GENERATION_OUTPUT_TOKENS - 10
+
+    for calls, text in (
+        ((), "no tool call"),
+        (
+            (ToolCall("c1", "write_candidates", '{"cases": [{"input": "How long?"'),),  # cut off
+            "provider returned invalid candidates",
+        ),
+    ):
+        with pytest.raises(CandidateGenerationError) as raised:
+            generate_candidate_pool(
+                [source],
+                _ThinkingProvider(calls, used_up),
+                pool_id="pool-x",
+                source_split="development",
+                max_candidates=3,
+            )
+        message = str(raised.value)
+        assert "used nearly all of its output allowance" in message and "--max 6" in message
+
+    # The same failure from a model that was NOT near its limit is not blamed on thinking.
+    with pytest.raises(CandidateGenerationError) as raised:
+        generate_candidate_pool(
+            [source],
+            _ThinkingProvider((), 400),
+            pool_id="pool-y",
+            source_split="development",
+            max_candidates=3,
+        )
+    assert "exactly one write_candidates tool call" in str(raised.value)
+    assert "output allowance" not in str(raised.value)
