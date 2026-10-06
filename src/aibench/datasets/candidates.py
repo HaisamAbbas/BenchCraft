@@ -35,7 +35,9 @@ MAX_SOURCE_CHARACTERS = 32_000
 MAX_CANDIDATES = 50
 MAX_CASE_TEXT = 2_000
 MAX_QUOTE_CHARACTERS = 2_000
-GENERATION_OUTPUT_TOKENS = 6_000
+# A reasoning model spends part of this thinking before it writes the cases: at 6,000 a
+# DeepSeek V4 Flash reply was cut off mid-list or held no tool call at all.
+GENERATION_OUTPUT_TOKENS = 16_000
 
 GENERATION_PROMPT = """Create factual question and answer cases from the supplied development sources.
 Only use the supplied sources. Do not invent facts. Each answer must be directly supported by
@@ -249,9 +251,7 @@ def _candidate_from_generated(
         raise CandidateGenerationError(f"unknown source_id {item.source_id!r}")
     located = _locate_quote(source.text, item.source_quote)
     if located is None:
-        raise _QuoteNotFound(
-            f"source_quote for {item.source_id!r} is not in that source"
-        )
+        raise _QuoteNotFound(f"source_quote for {item.source_id!r} is not in that source")
     start, end = located
     quote = source.text[start:end]
     candidate_id = (
@@ -325,15 +325,23 @@ def generate_candidate_pool(
     ]
     reply = provider.complete(request, _tool_spec(max_candidates))
     calls = [call for call in reply.tool_calls if call.name == "write_candidates"]
+    cut_off = (
+        " The model used nearly all of its output allowance, which a model that thinks first "
+        "spends before it writes: try fewer cases (--max 6) or a smaller document."
+        if (reply.completion_tokens or 0) >= int(GENERATION_OUTPUT_TOKENS * 0.9)
+        else ""
+    )
     if len(reply.tool_calls) != 1 or len(calls) != 1:
         raise CandidateGenerationError(
-            "provider must return exactly one write_candidates tool call"
+            "provider must return exactly one write_candidates tool call." + cut_off
         )
     try:
         raw = json.loads(calls[0].arguments)
         generated = _GeneratedCases.model_validate(raw)
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        raise CandidateGenerationError(f"provider returned invalid candidates: {exc}") from exc
+        raise CandidateGenerationError(
+            f"provider returned invalid candidates: {exc}.{cut_off}"
+        ) from exc
     if len(generated.cases) > max_candidates:
         raise CandidateGenerationError("provider exceeded the requested candidate limit")
 
