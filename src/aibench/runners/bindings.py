@@ -262,12 +262,15 @@ def _coerce(name: str, raw: Any, binding: OutputBinding) -> tuple[Any, bool]:
         for item in raw:
             if binding.retrieved_context_item is not None:
                 item = resolve_pointer(item, binding.retrieved_context_item)
-            if not isinstance(item, str):
+            # An application may group passages per source (LightRAG: one reference per file,
+            # each with a list of chunk texts): a list of strings is flattened, in order.
+            parts = item if isinstance(item, list) else [item]
+            if not all(isinstance(part, str) for part in parts):
                 raise BindingError(
-                    "retrieved_context items must be strings (set retrieved_context_item "
-                    "to select a text field from each document)"
+                    "retrieved_context items must be strings, or lists of strings (set "
+                    "retrieved_context_item to select the text field from each document)"
                 )
-            texts.append(item)
+            texts.extend(parts)
         return tuple(texts), not texts
     if name == "tool_events":
         if not isinstance(raw, list):

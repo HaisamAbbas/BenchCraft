@@ -5,6 +5,18 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc22 — passages grouped per source
+
+Found when testing a second RAG app (LightRAG), whose answer lists one reference per source
+file, each holding a list of chunk texts.
+
+- `retrieved_context` items (or the field `retrieved_context_item` selects from each) may be a
+  **list of strings**: they are flattened in order. LightRAG's response is read with
+  `"retrieved_context": "/references", "retrieved_context_item": "/content"`; the earlier
+  `/references/0/content` read only the first file's chunks (5 of 14 on a real answer), so
+  recall, precision and faithfulness were scored on partial evidence. A source with no
+  passages adds none; anything that is not a string or a list of strings is still invalid.
+
 ## 0.1.0rc21 — long slash commands behave like a message
 
 Reported from a real session: running `/rescore all` made the input box disappear and showed

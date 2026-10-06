@@ -112,6 +112,31 @@ def test_declared_capabilities_distinguish_present_empty_missing_invalid() -> No
     assert (c["cost"]["state"], c["cost"]["detail"]) == ("unknown", "invalid")
 
 
+def test_passages_grouped_per_source_are_flattened_in_order() -> None:
+    """LightRAG answers with one reference per file, each holding a list of chunk texts. Only
+    the first file's chunks were read when the pointer was /references/0/content, so recall,
+    precision and faithfulness were scored on partial evidence."""
+    document = {
+        "response": "x",
+        "references": [
+            {"file_path": "a.md", "content": ["a1", "a2"]},
+            {"file_path": "b.md", "content": ["b1"]},
+            {"file_path": "c.md", "content": []},  # a source with no passages adds none
+        ],
+    }
+    binding = OutputBinding(retrieved_context="/references", retrieved_context_item="/content")
+    extracted = extract_optional(document, binding)
+    assert extracted.retrieved_context == ("a1", "a2", "b1")
+    assert extracted.completeness["retrieved_context"]["detail"] == "present"
+
+    # Strings and lists of strings may mix; anything else is still invalid, never stringified.
+    mixed = extract_optional({"docs": ["a", ["b", "c"]]}, OutputBinding(retrieved_context="/docs"))
+    assert mixed.retrieved_context == ("a", "b", "c")
+    nested = extract_optional({"docs": [["b", {"x": 1}]]}, OutputBinding(retrieved_context="/docs"))
+    assert nested.retrieved_context is None
+    assert nested.completeness["retrieved_context"]["detail"] == "invalid"
+
+
 def test_retrieved_documents_without_item_pointer_are_invalid_not_stringified() -> None:
     extracted = extract_optional(
         {"docs": [{"text": "a"}]}, OutputBinding(retrieved_context="/docs")

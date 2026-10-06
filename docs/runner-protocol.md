@@ -115,6 +115,11 @@ and you declare where**:
 }
 ```
 
+`retrieved_context` points to a list; each item is a string, or `retrieved_context_item`
+selects the text from it. If an item (or its selected field) is itself a **list of
+strings**, they are flattened in order, which fits an app that groups passages per source
+(`"retrieved_context": "/references", "retrieved_context_item": "/content"`).
+
 `world_state` is the state of the application's test world after the case (see
 [Test worlds](#test-worlds)).
 
