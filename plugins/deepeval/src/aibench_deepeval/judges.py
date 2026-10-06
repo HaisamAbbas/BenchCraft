@@ -78,6 +78,7 @@ _ERROR_TEXT_LIMIT = 300
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _TRANSIENT = (
     httpx.TimeoutException,
+    TimeoutError,  # a call that ran past its total deadline (see `_post`)
     httpx.ConnectError,
     httpx.RemoteProtocolError,
     httpx.ReadError,
@@ -201,7 +202,10 @@ class _OpenAICompatible:
         self._base_url = config["base_url"]
         self._thinking = str(config.get("thinking") or default_thinking(config["base_url"]))
         self._retry_wait = float(config.get("retry_wait_seconds", 2))
-        self._retry_until = time.monotonic() + _RETRY_BUDGET_SECONDS
+        # Room for a call that stalls to its deadline twice and then succeeds: a stalled upstream
+        # is usually fine on the next try (2 of 3 stalled on one prompt, the third took 7 s).
+        budget = max(_RETRY_BUDGET_SECONDS, 3 * self._timeout)
+        self._retry_until = time.monotonic() + budget
         self.retries = 0
         self.calls = 0
         self.tokens: dict[str, int] = {}
@@ -217,9 +221,7 @@ class _OpenAICompatible:
         with httpx.Client(timeout=self._timeouts()) as client:
             for attempt in range(_ATTEMPTS):
                 try:
-                    response = client.post(
-                        self._url, headers=self._headers(), json=self._body(prompt)
-                    )
+                    response = self._post(client, prompt)
                 except _TRANSIENT:
                     wait = self._wait(attempt, None)
                     if wait is None:
@@ -244,8 +246,9 @@ class _OpenAICompatible:
         async with httpx.AsyncClient(timeout=self._timeouts()) as client:
             for attempt in range(_ATTEMPTS):
                 try:
-                    response = await client.post(
-                        self._url, headers=self._headers(), json=self._body(prompt)
+                    response = await asyncio.wait_for(
+                        client.post(self._url, headers=self._headers(), json=self._body(prompt)),
+                        self._timeout,
                     )
                 except _TRANSIENT:
                     wait = self._wait(attempt, None)
@@ -287,6 +290,33 @@ class _OpenAICompatible:
             return None
         self.retries += 1
         return wait
+
+    def _post(self, client: httpx.Client, prompt: str) -> httpx.Response:
+        """One request that cannot outlast `timeout_seconds` in total. The HTTP client's own
+        timeout is per read, and OpenRouter keeps a waiting request alive with small
+        "processing" bytes, so a stalled upstream never tripped it: a judge call hung for over
+        ten minutes against a 180 s limit. The body is read in pieces against a deadline."""
+        deadline = time.monotonic() + self._timeout
+        with client.stream(
+            "POST", self._url, headers=self._headers(), json=self._body(prompt)
+        ) as streamed:
+            chunks = []
+            for chunk in streamed.iter_bytes():
+                if time.monotonic() > deadline:
+                    raise httpx.ReadTimeout(
+                        f"no complete reply within {self._timeout:g} s", request=streamed.request
+                    )
+                chunks.append(chunk)
+            if time.monotonic() > deadline:
+                raise httpx.ReadTimeout(
+                    f"no complete reply within {self._timeout:g} s", request=streamed.request
+                )
+            return httpx.Response(
+                streamed.status_code,
+                headers=streamed.headers,
+                content=b"".join(chunks),
+                request=streamed.request,
+            )
 
     def _timeouts(self) -> httpx.Timeout:
         """A reply may take `timeout_seconds`, but a connection that does not open within a

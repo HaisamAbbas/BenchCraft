@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -105,7 +106,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc7" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc8" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -366,6 +367,7 @@ class _JudgeServer(ThreadingHTTPServer):
         forever: bool = False,
         thinking_tokens: int = 0,
         malformed: tuple[str, ...] = (),
+        trickle: bool = False,
     ) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
         self.status = status
@@ -375,6 +377,9 @@ class _JudgeServer(ThreadingHTTPServer):
         # Replies sent as the content of the first answered requests, in order, instead of
         # the valid JSON: a model's near-miss at JSON.
         self.malformed = list(malformed)
+        # A stalled upstream behind a proxy that keeps the request alive: the reply never
+        # finishes, but small bytes keep arriving, so no read ever times out.
+        self.trickle = trickle
         # The first `rate_limited_first` requests get a 429 (or every one, with `forever`).
         self.rate_limited_first = rate_limited_first
         self.forever = forever
@@ -396,6 +401,19 @@ class _JudgeHandler(BaseHTTPRequestHandler):
         self.server.requests.append(
             {"path": self.path, "auth": self.headers.get("Authorization"), "body": body}
         )
+        if self.server.trickle:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "1000000")
+            self.end_headers()
+            try:
+                for _ in range(600):  # up to 30 s of keep-alive bytes
+                    self.wfile.write(b" ")
+                    self.wfile.flush()
+                    time.sleep(0.05)
+            except OSError:
+                pass  # the client gave up: that is the point
+            return
         limited = self.server.forever or len(self.server.requests) <= self.server.rate_limited_first
         if limited:
             payload: Any = {"error": {"code": "1302", "message": "rate limit reached"}}
@@ -697,6 +715,26 @@ def test_thinking_is_turned_off_for_openrouter_in_its_own_form() -> None:
         {"thinking": {"type": "disabled"}},
         {"thinking": {"type": "enabled"}},
     ]
+
+
+def test_a_call_that_keeps_trickling_bytes_still_ends_at_its_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A judge call to OpenRouter hung for over ten minutes against a 180 s timeout: the proxy
+    kept the stalled request alive with small bytes, and the HTTP client's timeout is per
+    read, so it never fired. `timeout_seconds` is now a total deadline per call."""
+    started = time.monotonic()
+    result, server, _ = _openai_compatible_score(
+        tmp_path,
+        monkeypatch,
+        200,
+        {"timeout_seconds": 1.0, "retry_wait_seconds": 0},
+        trickle=True,
+    )
+    took = time.monotonic() - started
+    assert result.status is ExecutionStatus.ERROR
+    assert took < 25, f"the call outlived its deadline: {took:.0f}s"  # unfixed: the full 30 s
+    assert len(server.requests) >= 2  # a timed-out call is asked again before giving up
 
 
 def test_a_stalled_connection_is_abandoned_long_before_a_slow_reply_would_be() -> None:
