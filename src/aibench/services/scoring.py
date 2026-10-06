@@ -14,6 +14,7 @@ The decision comes from the frozen rule, never from the evaluator.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import math
 import time
@@ -62,7 +63,7 @@ from aibench.storage.repositories import Storage
 FINAL_ATTEMPT_RULE = "highest_attempt_id_per_case_and_repetition"
 DEFAULT_EVALUATION_TIMEOUT_SECONDS = 60.0
 # A model-judged metric's per-case budget (see `ExecutablePlan.model_evaluation_timeout_seconds`).
-DEFAULT_MODEL_EVALUATION_TIMEOUT_SECONDS = 300.0
+DEFAULT_MODEL_EVALUATION_TIMEOUT_SECONDS = 600.0
 # Evaluator startup (prepare, and rebuilding a worker after a timeout) has its own bound, so
 # a slow framework import never eats into a case's evaluation budget.
 DEFAULT_PREPARE_TIMEOUT_SECONDS = 300.0
@@ -529,6 +530,9 @@ class BindingScorer:
         self.cancel = cancel or asyncio.Event()
         self.prepare_error: str | None = None
         self._evaluator: Evaluator | None = None
+        # An evaluator that serves one request at a time (a worker process) takes cases
+        # in turn, so each case's time limit counts its own turn, not the line.
+        self._turn = asyncio.Lock()
         # Finished results of earlier passes to reuse, by (case, repetition); see `carry_from`.
         self._carry: dict[tuple[str, int], EvaluationResult] = {}
 
@@ -770,35 +774,41 @@ class BindingScorer:
             cancel=self.cancel,
             write_artifact=lambda data, mime: self._write(data, mime, execution.run_id),
         )
-        try:
-            await asyncio.wait_for(evaluator.ensure_ready(), self.prepare_timeout_seconds)
-        except Exception as exc:  # noqa: BLE001 - a lost runtime is an evaluator error
-            return self._result(
-                execution,
-                EvaluationOutcome.error(
-                    f"evaluator_restart_failed:{type(exc).__name__}: {exc}"[:500]
-                ),
-            )
-        started = time.perf_counter()
-        try:
-            outcome = await asyncio.wait_for(evaluator.evaluate(view, ctx), self.timeout_seconds)
-            outcome = self._conform(outcome)
-            raw = self._serialize_raw(outcome)
-        except TimeoutError:
-            outcome = EvaluationOutcome.error(
-                f"timeout:evaluation exceeded {self.timeout_seconds}s"
-            )
-        # Deliberately broad: any evaluator bug must become a recorded evaluator error,
-        # never a crash of the scoring pass and never a score.
-        except Exception as exc:  # noqa: BLE001
-            outcome = EvaluationOutcome.error(
-                f"evaluator_exception:{type(exc).__name__}: {exc}"[:500]
-            )
-        else:
+        # Held from the restart check to the end of the call, so a worker killed by one
+        # case's timeout is restarted for the next case in line instead of failing it.
+        turn = self._turn if getattr(evaluator, "one_at_a_time", False) else contextlib.nullcontext()
+        async with turn:
+            try:
+                await asyncio.wait_for(evaluator.ensure_ready(), self.prepare_timeout_seconds)
+            except Exception as exc:  # noqa: BLE001 - a lost runtime is an evaluator error
+                return self._result(
+                    execution,
+                    EvaluationOutcome.error(
+                        f"evaluator_restart_failed:{type(exc).__name__}: {exc}"[:500]
+                    ),
+                )
+            started = time.perf_counter()
+            try:
+                outcome = await asyncio.wait_for(
+                    evaluator.evaluate(view, ctx), self.timeout_seconds
+                )
+                outcome = self._conform(outcome)
+                raw = self._serialize_raw(outcome)
+            except TimeoutError:
+                outcome = EvaluationOutcome.error(
+                    f"timeout:evaluation exceeded {self.timeout_seconds}s"
+                )
+            # Deliberately broad: any evaluator bug must become a recorded evaluator error,
+            # never a crash of the scoring pass and never a score.
+            except Exception as exc:  # noqa: BLE001
+                outcome = EvaluationOutcome.error(
+                    f"evaluator_exception:{type(exc).__name__}: {exc}"[:500]
+                )
+            else:
+                latency_ms = round((time.perf_counter() - started) * 1000, 3)
+                return self._result(execution, outcome, ctx=ctx, latency_ms=latency_ms, raw=raw)
             latency_ms = round((time.perf_counter() - started) * 1000, 3)
-            return self._result(execution, outcome, ctx=ctx, latency_ms=latency_ms, raw=raw)
-        latency_ms = round((time.perf_counter() - started) * 1000, 3)
-        return self._result(execution, outcome, ctx=ctx, latency_ms=latency_ms)
+            return self._result(execution, outcome, ctx=ctx, latency_ms=latency_ms)
 
     def _episode_turns(
         self, case: BenchmarkCase, execution: ExecutionResult

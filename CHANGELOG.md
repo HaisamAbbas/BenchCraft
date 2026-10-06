@@ -5,6 +5,26 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc24 — judging that survives a slow model, on a second app
+
+Found on a pilot run of LightRAG (a different RAG app) judged by DeepSeek V4 Flash on
+OpenRouter: 4 of 24 judged evaluations failed.
+
+- Cases that share a metric's worker take turns. They were evaluated at once through one worker
+  process: when the first case hit its time limit the worker was killed, and the two cases
+  waiting behind it failed with "worker is not running"; each case's limit also counted the
+  time it waited in line. A case's limit now starts at its own turn, and a worker killed by one
+  case's timeout is restarted for the next.
+- Judged metrics get ten minutes per case by default (was five): faithfulness on a 15-passage
+  answer took about two minutes even with thinking off.
+- The judge turns thinking off by default on OpenRouter (`reasoning: {"enabled": false}`), as it
+  does on Z.ai. On four real answers contextual precision took 123 s instead of 1,240 s, scored
+  all four cases (thinking on: one errored), and its scores were within the metric's usual noise
+  of the thinking-on ones. Set `"thinking": "enabled"` on the judge to turn it back on.
+- A judge reply that is valid JSON of the wrong shape (DeepSeek answered with a document, not
+  the verdicts) is asked again, like a reply that is not JSON.
+- Plugin `aibench-deepeval` 0.2.0rc7.
+
 ## 0.1.0rc23 — a terminal opened before a key was saved, and `/cases` with a model that thinks
 
 - On Windows, `benchcraft` adopts the API keys and tokens stored for your account (user

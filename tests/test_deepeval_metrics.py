@@ -105,7 +105,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc6" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc7" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -654,6 +654,48 @@ def test_doubled_braces_are_collapsed_only_where_they_open_an_object() -> None:
         {"a": {"b": 1}},
         {"s": "{{keep}}", "n": {"x": 2}},
         {"v": [{"k": "a }} b"}, {"k": 1}]},
+    ]
+
+
+def test_a_reply_of_the_wrong_shape_is_asked_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DeepSeek answered contextual precision with a document ({"title": ...}) instead of the
+    verdicts DeepEval asked for; the pydantic error ended the case. Valid JSON of the wrong
+    shape is now asked again, like a reply that is not JSON."""
+    _, clean, _ = _openai_compatible_score(tmp_path / "clean", monkeypatch, 200)
+    baseline = len(clean.requests)
+    result, server, _ = _openai_compatible_score(
+        tmp_path / "shape",
+        monkeypatch,
+        200,
+        malformed=('{"title": "Bedrock Authentication", "body": "text"}',),
+    )
+    assert result.status is ExecutionStatus.OK and result.value.value == 1.0
+    assert len(server.requests) == baseline + 1
+
+
+@requires_plugin_env
+def test_thinking_is_turned_off_for_openrouter_in_its_own_form() -> None:
+    """On OpenRouter DeepSeek V4 Flash answered the same JSON in 2 s, not 8 s, at a sixth of
+    the cost with `reasoning: {"enabled": false}`; the Z.ai form (`thinking`) is separate."""
+    got = plugin_python(
+        "import json; from aibench_deepeval.judges import default_thinking as d, _thinking_field as f;"
+        "print(json.dumps(["
+        "d('https://openrouter.ai/api/v1'), d('https://api.z.ai/api/paas/v4'),"
+        "d('https://api.openai.com/v1'), d('http://127.0.0.1:8000/v1'),"
+        "f('https://openrouter.ai/api/v1', 'disabled'), f('https://openrouter.ai/api/v1', 'enabled'),"
+        "f('https://api.z.ai/api/paas/v4', 'disabled'), f('http://127.0.0.1:8000/v1', 'enabled')]))"
+    )
+    assert got == [
+        "disabled",
+        "disabled",
+        "default",
+        "default",
+        {"reasoning": {"enabled": False}},
+        {"reasoning": {"enabled": True}},
+        {"thinking": {"type": "disabled"}},
+        {"thinking": {"type": "enabled"}},
     ]
 
 

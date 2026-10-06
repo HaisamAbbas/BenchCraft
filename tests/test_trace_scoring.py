@@ -256,10 +256,10 @@ def test_model_judged_metrics_get_their_own_longer_time_limit(tmp_path: Path) ->
     assert local.status is ExecutionStatus.ERROR and (local.reason or "").startswith("timeout:")
 
 
-def test_plans_give_judged_metrics_five_minutes_by_default() -> None:
+def test_plans_give_judged_metrics_ten_minutes_by_default() -> None:
     from aibench.core.plans import ExecutablePlan
 
     plan = ExecutablePlan.model_validate(
         {"plan_id": "p", "dataset": "d.jsonl", "application": "a.json"}
     )
-    assert (plan.evaluation_timeout_seconds, plan.model_evaluation_timeout_seconds) == (60.0, 300.0)
+    assert (plan.evaluation_timeout_seconds, plan.model_evaluation_timeout_seconds) == (60.0, 600.0)
