@@ -730,20 +730,37 @@ def _evaluation_identity(task_key: str) -> tuple[str, int, str | None]:
     return parse_work_item_key(task_key, "evaluation")
 
 
-def _latest_evaluations(
-    storage: Storage, run_id: str
-) -> dict[tuple[str, int, str | None], tuple[bool, str | None]]:
-    """(case, repetition, binding) -> (finished, reason) of every evaluation's latest stored
-    result: the latest pass wins, an error is not finished."""
-    latest: dict[tuple[str, int, str | None], tuple[bool, str | None]] = {}
-    for result in storage.list_metric_results(run_id):  # in the order they were committed
-        binding = result.binding_hash[7:23] if result.binding_hash else None
-        failed = result.status is ExecutionStatus.ERROR
-        latest[(result.case_id, result.repetition_id, binding)] = (
-            not failed,
-            result.reason if failed else None,
-        )
-    return latest
+class _EvaluationStates:
+    """Where each of a run's evaluations stands after every scoring pass so far: its latest
+    stored result, an error being not finished. Changing the judge's model or timeout gives an
+    evaluation a new binding, so a failure the run left under the old one is replaced, not
+    repeated, when the newest pass finished the same metric on the same case."""
+
+    def __init__(self, storage: Storage, run_id: str) -> None:
+        results = storage.list_metric_results(run_id)  # in the order they were committed
+        self._by_binding: dict[tuple[str, int, str | None], tuple[bool, str | None]] = {}
+        self._metric_of: dict[str | None, str] = {}
+        newest = results[-1].scoring_id if results else None
+        self._newest_bindings: set[str | None] = set()
+        self._newest: dict[tuple[str, int, str], tuple[bool, str | None]] = {}
+        for result in results:
+            binding = result.binding_hash[7:23] if result.binding_hash else None
+            failed = result.status is ExecutionStatus.ERROR
+            state = (not failed, result.reason if failed else None)
+            self._by_binding[(result.case_id, result.repetition_id, binding)] = state
+            self._metric_of[binding] = result.metric_id
+            if result.scoring_id == newest:
+                self._newest_bindings.add(binding)
+                self._newest[(result.case_id, result.repetition_id, result.metric_id)] = state
+
+    def of(self, identity: tuple[str, int, str | None]) -> tuple[bool, str | None] | None:
+        """(finished, reason) of the evaluation `identity` names, or None if never scored."""
+        case_id, repetition, binding = identity
+        if binding not in self._newest_bindings and binding in self._metric_of:
+            replaced = self._newest.get((case_id, repetition, self._metric_of[binding]))
+            if replaced is not None:
+                return replaced
+        return self._by_binding.get(identity)
 
 
 def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
@@ -765,13 +782,13 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
         # A rescore settles evaluations the run itself left failed, but it never touches the
         # run's work records: "needs attention 11" stayed after every result was scored.
         # A failed evaluation is not waiting for attention once a later pass finished it.
-        latest = _latest_evaluations(storage, run_id)
+        states = _EvaluationStates(storage, run_id)
         settled = set()
         newly_failed: list[tuple[str, str | None]] = []
         for w in items:
             if w.kind != "evaluation":
                 continue
-            state = latest.get(_evaluation_identity(w.task_key))
+            state = states.of(_evaluation_identity(w.task_key))
             if state is None:
                 continue
             if w.state is WorkItemState.FAILED and state[0]:

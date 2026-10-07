@@ -5,6 +5,16 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc27 — "needs attention" no longer counts a failure the new judge settings replaced
+
+Found re-scoring the LightRAG pilot after changing the judge's model and timeout: every
+evaluation was scored (24 of 24, no errors), yet the status said "needs attention 1".
+
+- Changing a judge's settings gives its evaluations a new identity, so the failure the run had
+  left under the old settings matched nothing the rescore produced. The status now treats it
+  as replaced when the newest scoring pass finished the same metric on the same case. A
+  failure of the new settings still shows.
+
 ## 0.1.0rc26 — a judge that must think, and a garbled reply, no longer fail an evaluation
 
 Found re-scoring the LightRAG pilot with GLM 5.3 Flash on OpenRouter.
