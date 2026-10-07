@@ -226,3 +226,43 @@ def test_needs_attention_clears_once_a_rescore_has_finished_what_the_run_left_fa
     after = run_status(seeded.storage, RUN_ID)
     assert after["needs_attention"] == []
     assert after["counts"]["evaluation"] == {"succeeded": 3}
+
+
+def test_an_evaluation_a_rescore_could_not_finish_needs_attention_even_if_the_run_was_clean(
+    tmp_path: Path,
+) -> None:
+    """A rescore's answer-relevancy case timed out, yet the status line said "needs attention
+    0": the run's own records (all succeeded) were all it read. The latest pass counts."""
+    from aibench.core.models import WorkItem, WorkItemState
+    from aibench.engine.engine import evaluation_key
+    from aibench.services.runs import run_status
+
+    seeded = _seeded(tmp_path)
+    registry = _registry()
+    first = seeded.score([BINDING], registry=registry)  # every case scored
+    binding_hash = first.results[0].binding_hash
+    assert binding_hash is not None
+    for case_id in "abc":  # the run's records: all succeeded
+        seeded.storage.commit_work_item(
+            WorkItem(
+                work_item_id=f"w-{case_id}",
+                run_id=RUN_ID,
+                task_key=evaluation_key(case_id, 0, binding_hash),
+                kind="evaluation",
+                state=WorkItemState.SUCCEEDED,
+            )
+        )
+    seeded.storage.update_run_status(RUN_ID, "completed")
+    assert run_status(seeded.storage, RUN_ID)["needs_attention"] == []
+
+    Flaky.fail_once.add("c")  # the rescore: c fails this time
+    seeded.score([BINDING], registry=registry)
+    status = run_status(seeded.storage, RUN_ID)
+    assert [item["task_key"] for item in status["needs_attention"]] == [
+        evaluation_key("c", 0, binding_hash)
+    ]
+    assert "429" in (status["needs_attention"][0]["reason"] or "")
+    assert status["counts"]["evaluation"] == {"succeeded": 2, "failed": 1}
+
+    seeded.score([BINDING], registry=registry)  # the next rescore finishes c
+    assert run_status(seeded.storage, RUN_ID)["needs_attention"] == []

@@ -730,16 +730,20 @@ def _evaluation_identity(task_key: str) -> tuple[str, int, str | None]:
     return parse_work_item_key(task_key, "evaluation")
 
 
-def _finished_evaluations(storage: Storage, run_id: str) -> set[tuple[str, int, str | None]]:
-    """(case, repetition, binding) of every evaluation whose latest stored result is not an
-    error: the latest pass wins."""
-    latest: dict[tuple[str, int, str | None], bool] = {}
+def _latest_evaluations(
+    storage: Storage, run_id: str
+) -> dict[tuple[str, int, str | None], tuple[bool, str | None]]:
+    """(case, repetition, binding) -> (finished, reason) of every evaluation's latest stored
+    result: the latest pass wins, an error is not finished."""
+    latest: dict[tuple[str, int, str | None], tuple[bool, str | None]] = {}
     for result in storage.list_metric_results(run_id):  # in the order they were committed
         binding = result.binding_hash[7:23] if result.binding_hash else None
+        failed = result.status is ExecutionStatus.ERROR
         latest[(result.case_id, result.repetition_id, binding)] = (
-            result.status is not ExecutionStatus.ERROR
+            not failed,
+            result.reason if failed else None,
         )
-    return {key for key, finished in latest.items() if finished}
+    return latest
 
 
 def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
@@ -761,19 +765,32 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
         # A rescore settles evaluations the run itself left failed, but it never touches the
         # run's work records: "needs attention 11" stayed after every result was scored.
         # A failed evaluation is not waiting for attention once a later pass finished it.
-        done = _finished_evaluations(storage, run_id)
-        settled = {
-            w.task_key
-            for w in items
-            if w.kind == "evaluation"
-            and w.state is WorkItemState.FAILED
-            and _evaluation_identity(w.task_key) in done
-        }
-        if settled:
+        latest = _latest_evaluations(storage, run_id)
+        settled = set()
+        newly_failed: list[tuple[str, str | None]] = []
+        for w in items:
+            if w.kind != "evaluation":
+                continue
+            state = latest.get(_evaluation_identity(w.task_key))
+            if state is None:
+                continue
+            if w.state is WorkItemState.FAILED and state[0]:
+                settled.add(w.task_key)
+            # ... and the other way: an evaluation the run finished that the latest pass could
+            # not (a rescore timed out): it needs attention though the run's record is clean.
+            elif w.state is WorkItemState.SUCCEEDED and not state[0]:
+                newly_failed.append((w.task_key, state[1]))
+        if settled or newly_failed:
             blocked = [b for b in blocked if b["task_key"] not in settled]
+            blocked += [
+                {"task_key": key, "state": WorkItemState.FAILED.value, "reason": reason}
+                for key, reason in newly_failed
+            ]
             evaluation = dict(counts.get("evaluation", {}))
-            evaluation["failed"] = evaluation.get("failed", 0) - len(settled)
-            evaluation["succeeded"] = evaluation.get("succeeded", 0) + len(settled)
+            evaluation["failed"] = evaluation.get("failed", 0) - len(settled) + len(newly_failed)
+            evaluation["succeeded"] = (
+                evaluation.get("succeeded", 0) + len(settled) - len(newly_failed)
+            )
             counts["evaluation"] = {k: v for k, v in evaluation.items() if v}
     return {
         "run_id": run_id,

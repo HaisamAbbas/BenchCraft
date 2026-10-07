@@ -5,6 +5,21 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc25 — a stalled judge call ends at its deadline
+
+Found re-scoring the LightRAG pilot with DeepSeek on OpenRouter: one answer-relevancy case took
+the full 600 s while the same metric took 15 to 24 s on the others.
+
+- `timeout_seconds` on an `openai_compatible` judge is now a **total deadline per call**. The
+  HTTP client's own timeout is per read, and OpenRouter keeps a waiting request alive with small
+  bytes, so a stalled upstream never tripped it: one call hung for over ten minutes against a
+  180 s limit. The same prompt stalled on 2 of 3 tries and took 7 s on the third, so a call that
+  runs past its deadline is asked again, and the retry window is three deadlines (it was 200 s).
+- A rescore that cannot finish an evaluation now shows in the status line. "needs attention"
+  read only the run's own records, so a timed-out rescore result left it at 0; an evaluation
+  the latest pass could not finish counts, and clears when a later pass finishes it.
+- Plugin `aibench-deepeval` 0.2.0rc8.
+
 ## 0.1.0rc24 — judging that survives a slow model, on a second app
 
 Found on a pilot run of LightRAG (a different RAG app) judged by DeepSeek V4 Flash on
