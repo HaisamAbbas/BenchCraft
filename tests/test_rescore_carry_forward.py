@@ -51,6 +51,7 @@ class Flaky(Evaluator):
             "uses_models": True,
             "requires": (FieldRequirement(path="execution.output", non_empty=False),),
             "default_rule": {"comparator": ">=", "threshold": 0.5},
+            "parameters_schema": {"type": "object", "properties": {"timeout": {"type": "number"}}},
         }
     )
     asked: ClassVar[list[str]] = []
@@ -266,3 +267,50 @@ def test_an_evaluation_a_rescore_could_not_finish_needs_attention_even_if_the_ru
 
     seeded.score([BINDING], registry=registry)  # the next rescore finishes c
     assert run_status(seeded.storage, RUN_ID)["needs_attention"] == []
+
+
+def test_a_failure_left_under_old_judge_settings_clears_when_the_new_settings_scored_it(
+    tmp_path: Path,
+) -> None:
+    """After the judge's model and timeout were changed, a rescore scored everything, yet the
+    status still said "needs attention 1": the run's failed answer-relevancy evaluation was
+    recorded under the old settings, which are a different binding, so no later result
+    matched it. The newest pass finishing the same metric on the same case replaces it."""
+    from aibench.core.models import WorkItem, WorkItemState
+    from aibench.engine.engine import evaluation_key
+    from aibench.services.runs import run_status
+
+    seeded = _seeded(tmp_path)
+    registry = _registry()
+    Flaky.fail_once.add("b")
+    first = seeded.score([BINDING], registry=registry)  # the run: b failed
+    failed = next(r for r in first.results if r.status is ExecutionStatus.ERROR)
+    assert failed.binding_hash is not None
+    for case_id in "abc":
+        seeded.storage.commit_work_item(
+            WorkItem(
+                work_item_id=f"w-{case_id}",
+                run_id=RUN_ID,
+                task_key=evaluation_key(case_id, 0, failed.binding_hash),
+                kind="evaluation",
+                state=WorkItemState.FAILED if case_id == "b" else WorkItemState.SUCCEEDED,
+                last_error="timeout:evaluation exceeded 600.0s" if case_id == "b" else None,
+            )
+        )
+    seeded.storage.update_run_status(RUN_ID, "completed")
+    assert len(run_status(seeded.storage, RUN_ID)["needs_attention"]) == 1
+
+    changed = {**BINDING, "params": {"timeout": 400}}  # new settings: a new binding
+    rescored = seeded.score([changed], registry=registry, carry_forward=True)
+    assert rescored.results[0].binding_hash != failed.binding_hash
+    assert all(r.status is OK for r in rescored.results)
+    status = run_status(seeded.storage, RUN_ID)
+    assert status["needs_attention"] == []
+    assert status["counts"]["evaluation"] == {"succeeded": 3}
+
+    Flaky.fail_once.add("c")  # but a failure of the new settings still shows
+    seeded.score([changed], registry=registry)
+    status = run_status(seeded.storage, RUN_ID)
+    assert [i["task_key"] for i in status["needs_attention"]] == [
+        evaluation_key("c", 0, failed.binding_hash)
+    ]
