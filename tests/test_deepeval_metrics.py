@@ -6,6 +6,7 @@ installed (see plugins/deepeval/README.md)."""
 
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 import threading
@@ -106,7 +107,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc8" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc9" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -368,6 +369,9 @@ class _JudgeServer(ThreadingHTTPServer):
         thinking_tokens: int = 0,
         malformed: tuple[str, ...] = (),
         trickle: bool = False,
+        gzip_replies: bool = False,
+        garbled_first: int = 0,
+        reasoning_required: bool = False,
     ) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
         self.status = status
@@ -380,6 +384,12 @@ class _JudgeServer(ThreadingHTTPServer):
         # A stalled upstream behind a proxy that keeps the request alive: the reply never
         # finishes, but small bytes keep arriving, so no read ever times out.
         self.trickle = trickle
+        # A large reply compressed on the wire, as OpenRouter sends one.
+        self.gzip_replies = gzip_replies
+        # The first replies are not valid gzip though they say they are.
+        self.garbled_first = garbled_first
+        # A model that refuses to run with thinking switched off (GLM 5.3 Flash on OpenRouter).
+        self.reasoning_required = reasoning_required
         # The first `rate_limited_first` requests get a 429 (or every one, with `forever`).
         self.rate_limited_first = rate_limited_first
         self.forever = forever
@@ -415,7 +425,13 @@ class _JudgeHandler(BaseHTTPRequestHandler):
                 pass  # the client gave up: that is the point
             return
         limited = self.server.forever or len(self.server.requests) <= self.server.rate_limited_first
-        if limited:
+        thinking_off = (body.get("thinking") or {}).get("type") == "disabled" or (
+            body.get("reasoning") or {}
+        ).get("enabled") is False
+        refused = self.server.reasoning_required and thinking_off
+        if refused:
+            payload = {"error": {"message": "Reasoning is mandatory for this endpoint and cannot be disabled.", "code": 400}}
+        elif limited:
             payload: Any = {"error": {"code": "1302", "message": "rate limit reached"}}
         elif self.server.status != 200:
             payload = {"error": f"bad key {self.headers.get('Authorization')}"}
@@ -444,10 +460,15 @@ class _JudgeHandler(BaseHTTPRequestHandler):
                     "usage": {"prompt_tokens": 100, "completion_tokens": body["max_tokens"]},
                 }
         data = json.dumps(payload).encode()
-        self.send_response(429 if limited else self.server.status)
+        if self.server.gzip_replies:
+            garbled = len(self.server.requests) <= self.server.garbled_first
+            data = b"not gzip at all" if garbled else gzip.compress(data)
+        self.send_response(400 if refused else 429 if limited else self.server.status)
         if limited:
             self.send_header("Retry-After", "0")
         self.send_header("Content-Type", "application/json")
+        if self.server.gzip_replies:
+            self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -735,6 +756,36 @@ def test_a_call_that_keeps_trickling_bytes_still_ends_at_its_deadline(
     assert result.status is ExecutionStatus.ERROR
     assert took < 25, f"the call outlived its deadline: {took:.0f}s"  # unfixed: the full 30 s
     assert len(server.requests) >= 2  # a timed-out call is asked again before giving up
+
+
+def test_a_compressed_reply_that_is_garbled_in_transit_is_asked_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A long judge call to OpenRouter ended in "DecodingError: incorrect header check" after
+    143 s and failed the evaluation; the same call decoded fine on the next try."""
+    result, server, _ = _openai_compatible_score(
+        tmp_path, monkeypatch, 200, gzip_replies=True, garbled_first=1
+    )
+    assert result.status is ExecutionStatus.OK, result.reason
+    assert len(server.requests) >= 2
+
+
+def test_a_model_that_must_think_is_asked_again_without_the_thinking_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GLM 5.3 Flash on OpenRouter answers 400 "Reasoning is mandatory" to the request that
+    switches thinking off, which the judge sends by default: it drops the field and asks again."""
+    result, server, _ = _openai_compatible_score(
+        tmp_path,
+        monkeypatch,
+        200,
+        {"thinking": "disabled"},
+        reasoning_required=True,
+    )
+    assert result.status is ExecutionStatus.OK, result.reason
+    first, *later = server.requests
+    assert first["body"].get("thinking") == {"type": "disabled"}
+    assert later and all("thinking" not in r["body"] for r in later)
 
 
 def test_a_stalled_connection_is_abandoned_long_before_a_slow_reply_would_be() -> None:
