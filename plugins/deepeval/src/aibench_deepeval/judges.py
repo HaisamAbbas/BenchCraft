@@ -79,6 +79,7 @@ _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _TRANSIENT = (
     httpx.TimeoutException,
     TimeoutError,  # a call that ran past its total deadline (see `_post`)
+    httpx.DecodingError,  # a compressed reply cut or garbled in transit: the next try is fine
     httpx.ConnectError,
     httpx.RemoteProtocolError,
     httpx.ReadError,
@@ -93,6 +94,11 @@ _RETRY_BUDGET_SECONDS = 200.0
 
 class _BadJSON(RuntimeError):
     """The reply is not JSON even after the usual repair; asking again often gives JSON."""
+
+
+class _ReasoningRequired(_BadJSON):
+    """The model refuses to run with thinking switched off (GLM 5.3 Flash on OpenRouter: "Reasoning
+    is mandatory"). Asked again with the field left out, like a reply that cannot be read."""
 
 
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
@@ -246,10 +252,7 @@ class _OpenAICompatible:
         async with httpx.AsyncClient(timeout=self._timeouts()) as client:
             for attempt in range(_ATTEMPTS):
                 try:
-                    response = await asyncio.wait_for(
-                        client.post(self._url, headers=self._headers(), json=self._body(prompt)),
-                        self._timeout,
-                    )
+                    response = await self._apost(client, prompt)
                 except _TRANSIENT:
                     wait = self._wait(attempt, None)
                     if wait is None:
@@ -269,6 +272,15 @@ class _OpenAICompatible:
                         continue
                 await asyncio.sleep(wait)
         raise AssertionError("unreachable: the last attempt returns or raises")
+
+    async def _apost(self, client: httpx.AsyncClient, prompt: str) -> httpx.Response:
+        try:
+            return await asyncio.wait_for(
+                client.post(self._url, headers=self._headers(), json=self._body(prompt)),
+                self._timeout,
+            )
+        except TimeoutError as exc:  # asyncio's carries no text: say what ran out
+            raise TimeoutError(f"no complete reply within {self._timeout:g} s") from exc
 
     def _wait(self, attempt: int, response: httpx.Response | None) -> float | None:
         """Seconds to wait before trying again, or None to stop: the reply is final (a
@@ -355,6 +367,13 @@ class _OpenAICompatible:
         self.calls += 1
         if response.status_code >= 400:
             detail = response.text[:_ERROR_TEXT_LIMIT].replace(self._key, "[redacted]")
+            if (
+                response.status_code == 400
+                and self._thinking == "disabled"
+                and "reasoning is mandatory" in detail.lower()
+            ):
+                self._thinking = "default"  # this model always thinks: stop asking it not to
+                raise _ReasoningRequired(f"judge HTTP 400: {detail}")
             raise RuntimeError(f"judge HTTP {response.status_code}: {detail}")
         payload = response.json()
         usage = payload.get("usage") or {}

@@ -5,6 +5,21 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc26 — a judge that must think, and a garbled reply, no longer fail an evaluation
+
+Found re-scoring the LightRAG pilot with GLM 5.3 Flash on OpenRouter.
+
+- A model that **refuses to run with thinking switched off** (GLM 5.3 Flash answers 400
+  "Reasoning is mandatory") is asked again without the field. The judge sends the field by
+  default on Z.ai and OpenRouter, so every call to such a model failed before.
+- A compressed reply that is **garbled in transit** (`DecodingError: incorrect header check`,
+  seen after 143 s on a long call) is retried like a timeout instead of failing the evaluation.
+- A judge call that ran past `timeout_seconds` on the async path reported a bare `TimeoutError`.
+  It now says `no complete reply within N s`.
+- Known: with thinking mandatory, contextual precision over 15 long passages (about 17,000
+  tokens) takes a reasoning judge 106 to 160 s per call. The default `timeout_seconds` of 120
+  (180 in the pilot) is marginal there; set the judge's `timeout_seconds` to 400 for such models.
+
 ## 0.1.0rc25 — a stalled judge call ends at its deadline
 
 Found re-scoring the LightRAG pilot with DeepSeek on OpenRouter: one answer-relevancy case took
