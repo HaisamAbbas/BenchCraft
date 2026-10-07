@@ -314,3 +314,47 @@ def test_a_failure_left_under_old_judge_settings_clears_when_the_new_settings_sc
     assert [i["task_key"] for i in status["needs_attention"]] == [
         evaluation_key("c", 0, failed.binding_hash)
     ]
+
+
+def test_an_evaluation_the_run_never_reached_needs_attention_until_a_rescore_scores_it(
+    tmp_path: Path,
+) -> None:
+    """A run stopped at its time limit before scoring one case: the result was recorded as
+    skipped and its work record as succeeded, so the status said "needs attention 1" while two
+    evaluations were unfinished, and "0" if only the skipped one remained."""
+    from aibench.core.models import WorkItem, WorkItemState
+    from aibench.engine.engine import evaluation_key
+    from aibench.services.runs import run_status
+
+    seeded = Seeded(tmp_path)
+    seeded.seed(
+        [case(c, "yes") for c in "abc"],
+        [
+            execution("a", "yes"),
+            execution("b", "yes"),
+            execution("c", status=ExecutionStatus.ERROR),  # its own execution failed
+        ],
+    )
+    registry = _registry()
+    Flaky.asked.clear()
+    first = seeded.score([BINDING], registry=registry)
+    skipped = [r for r in first.results if r.status is ExecutionStatus.SKIPPED]
+    assert [r.case_id for r in skipped] == ["c"]
+    binding_hash = first.results[0].binding_hash
+    assert binding_hash is not None
+    for case_id in "abc":  # the run's records: every evaluation "succeeded"
+        seeded.storage.commit_work_item(
+            WorkItem(
+                work_item_id=f"w-{case_id}",
+                run_id=RUN_ID,
+                task_key=evaluation_key(case_id, 0, binding_hash),
+                kind="evaluation",
+                state=WorkItemState.SUCCEEDED,
+            )
+        )
+    seeded.storage.update_run_status(RUN_ID, "budget_exhausted")
+    status = run_status(seeded.storage, RUN_ID)
+    assert [i["task_key"] for i in status["needs_attention"]] == [
+        evaluation_key("c", 0, binding_hash)
+    ]
+    assert status["counts"]["evaluation"] == {"succeeded": 2, "failed": 1}

@@ -745,7 +745,9 @@ class _EvaluationStates:
         self._newest: dict[tuple[str, int, str], tuple[bool, str | None]] = {}
         for result in results:
             binding = result.binding_hash[7:23] if result.binding_hash else None
-            failed = result.status is ExecutionStatus.ERROR
+            # An evaluation the run never got to (a limit was reached) is as unfinished as one
+            # that failed: it needs attention and a rescore picks it up.
+            failed = result.status in (ExecutionStatus.ERROR, ExecutionStatus.SKIPPED)
             state = (not failed, result.reason if failed else None)
             self._by_binding[(result.case_id, result.repetition_id, binding)] = state
             self._metric_of[binding] = result.metric_id

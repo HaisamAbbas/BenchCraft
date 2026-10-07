@@ -612,6 +612,13 @@ def test_a_reply_cut_off_by_the_allowance_is_asked_again_with_more_room(
     assert "thinking" in (result.reason or "")
     assert "JSONDecodeError" not in (result.reason or "")
 
+    # A judge that was already told not to think is not advised to be told so.
+    result, _, _ = _openai_compatible_score(
+        tmp_path / "told", monkeypatch, 200, {"thinking": "disabled"}, thinking_tokens=100_000
+    )
+    assert "cut off at 32768 tokens" in (result.reason or "")
+    assert '"disabled"' not in (result.reason or "")
+
 
 def test_the_judge_asks_a_model_not_to_think_when_told_to_and_by_default_on_zai(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

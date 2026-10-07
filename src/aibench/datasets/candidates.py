@@ -424,6 +424,20 @@ def heading_above(text: str) -> str | None:
     return max(found)[1] if found else None
 
 
+_WORD = re.compile(r"[a-z0-9_]{4,}")
+
+
+def answer_support(answer: str, quote: str) -> float:
+    """The share of the answer's distinct words (four letters or more) that the quote also
+    has: 1.0 for a quotation, near 0 for an answer that says something else. A paraphrase
+    sits in between, which is how a reviewer can tell it from an invention at a glance."""
+    words = set(_WORD.findall(answer.lower()))
+    if not words:
+        return 1.0
+    present = set(_WORD.findall(quote.lower()))
+    return len(words & present) / len(words)
+
+
 def source_surroundings(
     span: CandidateSourceSpan, *, before: int = 220, after: int = 220
 ) -> tuple[str, str, str, str | None, str | None]:

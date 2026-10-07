@@ -15,6 +15,7 @@ from typing import Any
 from rich.console import Console
 
 from aibench.core.models import CandidateStatus, ReferenceStatus
+from aibench.datasets.candidates import GENERATION_OUTPUT_TOKENS, answer_support
 from aibench.datasets.ingest import ingest_dataset
 from aibench.planning.openai_provider import OpenAICompatibleConfig
 from aibench.tui import render
@@ -88,6 +89,9 @@ def test_cases_from_documents_are_generated_reviewed_and_saved(tmp_path: Path) -
 
             got = asyncio.run(scenario())
             assert len(server.requests) == 1  # one model call for the whole pool
+            # The chat's own 4,000-token setting would starve a model that thinks first:
+            # generation asks for its own allowance.
+            assert server.requests[0]["body"]["max_tokens"] == GENERATION_OUTPUT_TOKENS
 
         assert not got["early_save"].ok and "no cases yet" in got["early_save"].data["error"]
         assert not got["nothing_yet"].ok
@@ -102,7 +106,10 @@ def test_cases_from_documents_are_generated_reviewed_and_saved(tmp_path: Path) -
         shown = _shown(got["generate"])
         assert "1. (to review) How long do I have to request a refund?" in shown
         assert "2 candidate case(s)" in shown and "Nothing is a test case until" in shown
-        assert "not word for word in that quote" in shown  # the paraphrase is flagged
+        # The paraphrase says how much of it is in the quote instead of a bare warning:
+        # the first answer is a quotation, the second shares one word in four with its quote.
+        assert rows[0]["support"] == 1.0 and rows[1]["support"] < 0.5
+        assert "only " in shown and "of the answer's words are in that quote: check it" in shown
 
         assert not got["premature_save"].ok
         assert "no accepted cases yet" in got["premature_save"].data["error"]
@@ -321,3 +328,12 @@ def test_candidate_generation_waits_longer_than_the_chat_does(tmp_path: Path) ->
         finally:
             OpenAICompatibleProvider.__init__ = original  # type: ignore[method-assign]
     assert seen == [case_pools.GENERATION_TIMEOUT_SECONDS] and seen[0] >= 600
+
+
+def test_answer_support_tells_a_quotation_from_a_paraphrase_from_an_invention() -> None:
+    quote = "Items must be unused and in the original packaging."
+    assert answer_support(quote, quote) == 1.0
+    paraphrase = "Returned items must be unused and still in their original packaging."
+    assert 0.5 <= answer_support(paraphrase, quote) < 1.0
+    assert answer_support("A refund takes thirty business days to arrive.", quote) < 0.2
+    assert answer_support("ok", quote) == 1.0  # nothing to compare

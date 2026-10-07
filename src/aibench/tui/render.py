@@ -235,7 +235,12 @@ def cases(console: Console, data: dict[str, Any]) -> None:
                 f"[bold]{safe(quote)}[/bold] [dim]{safe(row.get('after', ''))}...[/dim]",
             )
         if not row["verbatim"]:
-            out(console, "   [yellow]the answer is not word for word in that quote: check it[/yellow]")
+            support = row.get("support") or 0.0
+            share = f"{round(support * 100)}% of the answer's words are in that quote"
+            if support < 0.5:
+                out(console, f"   [yellow]only {share}: check it[/yellow]")
+            else:
+                out(console, f"   [dim]a paraphrase: {share}[/dim]")
     if data.get("dropped"):
         out(
             console,
