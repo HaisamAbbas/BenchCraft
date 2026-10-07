@@ -18,6 +18,11 @@ Found running a 15-case LightRAG benchmark with GLM 5.3 Flash, a model that alwa
   needing attention; it counted only errored ones, so it said 1 when 2 were unfinished.
 - A judge that cannot stop thinking is no longer told to switch thinking off when its output is
   cut off; the message names the options that apply.
+- **Faithfulness says what it measures.** Its description claimed the share of claims
+  "supported by" the retrieved context. Upstream counts a claim the context says nothing about as
+  faithful (`borderline`), so only contradictions lower the score: answers with invented facts
+  scored 1.00. The description and limitations now say so, and name `penalize_ambiguous_claims`,
+  the existing setting that counts such claims as unfaithful.
 - `/cases` no longer says "not word for word in that quote: check it" on nearly every case.
   It shows how much of the answer's wording is in the quote: nothing for a quotation, a quiet
   note for a paraphrase, a warning only when under half is there.
