@@ -65,6 +65,7 @@ class ConversationSpec:
     tools: bool = False  # reads each turn's tool calls
     expected_outcome: bool = False  # reads this turn's reference answer
     limitations: tuple[str, ...] = ()
+    threshold: float = 0.5  # the default decision rule's pass mark
 
 
 CONVERSATION_SPECS: tuple[ConversationSpec, ...] = (
@@ -80,6 +81,13 @@ CONVERSATION_SPECS: tuple[ConversationSpec, ...] = (
         "KnowledgeRetentionMetric",
         "whether the assistant keeps what the user told it earlier in the conversation",
         ("knowledge_retention",),
+        limitations=(
+            (
+                "A clarifying question can be counted as forgetting: on a real support chat the "
+                "judge read the user's opening complaint as already answering the assistant's "
+                "question, and scored a well-handled conversation 0.0 once and 0.5 once."
+            ),
+        ),
     ),
     ConversationSpec(
         "role_adherence",
@@ -88,6 +96,9 @@ CONVERSATION_SPECS: tuple[ConversationSpec, ...] = (
         ("role_adherence",),
         params={"chatbot_role": {"type": "string", "minLength": 1}},
         required=("chatbot_role",),
+        # Scored on the share of turns that keep it, so one bad turn in two scored 0.5 and
+        # passed at 0.5 (verified on a real support chat). One bad turn fails.
+        threshold=1.0,
     ),
     ConversationSpec(
         "goal_accuracy",
@@ -130,6 +141,9 @@ CONVERSATION_SPECS: tuple[ConversationSpec, ...] = (
             "penalize_ambiguous_claims": {"type": "boolean"},
         },
         retrieval=True,
+        # Scored on the share of turns that keep it, so one bad turn in two scored 0.5 and
+        # passed at 0.5 (verified on a real support chat). One bad turn fails.
+        threshold=1.0,
     ),
     ConversationSpec(
         "turn_contextual_precision",
@@ -209,7 +223,7 @@ def _manifest(spec: ConversationSpec) -> EvaluatorManifest:
         direction=MetricDirection.HIGHER,
         aggregation="mean",
         requires=_requirements(spec),
-        default_rule=DecisionRule(comparator=">=", threshold=0.5),
+        default_rule=DecisionRule(comparator=">=", threshold=spec.threshold),
         parameters_schema={
             "type": "object",
             "additionalProperties": False,
