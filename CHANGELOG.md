@@ -5,6 +5,31 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc32 — every DeepEval metric checked on real data
+
+The 30 DeepEval metrics no real run had exercised were each scored, through BenchCraft's real
+scoring path and a real judge (Z.ai glm-4.6), on a realistic case and on a version built to
+break what the metric measures: real LightRAG answers for the single-turn metrics, a realistic
+support conversation for the 12 conversation metrics, and an agent's tool calls and trace for
+the tool and agent metrics. Every one scored the broken version lower. What it found:
+
+- **A burst a provider refuses no longer fails the case.** Contextual relevancy asks about every
+  retrieved passage at once; Z.ai's glm-4.6 took about 25 s per answer and refused further
+  requests while a few ran, so the retries were spent in seconds and the case failed every
+  time. A judge's calls now go through a gate that halves after a refusal (429), down to one at
+  a time, and grows back after a run of answers (`max_concurrent_calls`, default 4); retry
+  waits are jittered. On the same case: 12 calls, one retry, scored.
+- **Metrics scored on a share pass only when nothing is broken** (default pass mark 1.0):
+  tool permission (an agent that deleted .env with a forbidden tool scored 0.5 and passed),
+  agent loop detection (six identical tool calls scored 0.6 and passed), role adherence and
+  turn faithfulness (one bad turn in two scored 0.5 and passed). The others keep 0.5.
+- Knowledge retention can count a clarifying question as forgetting (stated in its
+  limitations): the judge scored a well-handled chat 0.0 once and 0.5 once.
+- Correct, though surprising: a low contextual relevancy on LightRAG reflects that only about one
+  of its 12 retrieved passages is about the question; turn-level retrieval metrics look at a
+  window of turns, so a turn with poor passages still scores well when an earlier turn
+  retrieved what is needed.
+
 ## 0.1.0rc31 — judge cost, Z.ai's thinking refusal, clearer limits, fewer refusals
 
 - **Z.ai's "thinking cannot be disabled" (error 1210) is recognised.** The judge switches thinking

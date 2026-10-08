@@ -315,6 +315,8 @@ SPECS: tuple[Spec, ...] = (
         ("input", "actual_output", "trace"),
         ("agent_loops",),
         judged=False,
+        # Six identical tool calls in a row scored 0.6 and passed at 0.5. A loop fails.
+        threshold=1.0,
         params={
             "check_tool_repetition": {"type": "boolean"},
             "check_reasoning_stagnation": {"type": "boolean"},
