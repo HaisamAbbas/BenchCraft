@@ -94,7 +94,8 @@ OPTIONAL_PLUGINS: dict[str, OptionalPlugin] = {
             "plan_adherence",
             "agent_loop_detection",
         ),
-        not_included="metrics needing images, audio or MCP servers, and arena metrics",
+        not_included="metrics needing images, audio or MCP servers, and arena metrics; "
+        "for JSON correctness use native.json_schema (the same pass/fail, no judge)",
     ),
     "ragas": OptionalPlugin(
         name="ragas",

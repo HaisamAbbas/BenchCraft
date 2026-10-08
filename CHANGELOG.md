@@ -5,6 +5,29 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc29 — DAG metrics: a decision tree written in the plan
+
+The first of the DeepEval metrics BenchCraft did not have. The DeepEval plugin now has 39.
+
+- `deepeval.dag`: a decision tree the judge walks. Task nodes extract something from the
+  answer, judgement nodes answer a yes/no or multiple-choice question, and the verdict the
+  judge lands on gives the score or hands over to a G-Eval for the grade. The tree is plain
+  JSON in the plan.
+- `deepeval.conversational_dag`: the same over a conversation. A node may look at a
+  `turn_window` of messages; a turn whose conversation does not reach it yet is not
+  applicable.
+- The tree is checked before any case runs: only the four node types and their keys; a
+  verdict's child is a node or a G-Eval, never a `metric` child, which upstream builds with
+  its own default model instead of the plan's judge; at most 40 nodes, 8 levels, 4000
+  characters per text. Mistakes upstream only reports while judging are reported up front: a
+  starting node that reads nothing, a yes/no node without both answers, a turn window that is
+  not first < last, a conversation node asked to read the expected outcome (upstream reads node
+  fields per message, where it is not).
+- A G-Eval child is graded by the plan's judge. Upstream builds it with DeepEval's default
+  OpenAI model, so a tree with one could not even be built without an OpenAI key.
+- JSON correctness is not wrapped: its score is the same pass/fail schema check
+  `native.json_schema` already does, with the judge only writing the explanation.
+
 ## 0.1.0rc28 — the limits a model that thinks first runs into
 
 Found running a 15-case LightRAG benchmark with GLM 5.3 Flash, a model that always thinks.

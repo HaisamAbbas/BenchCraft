@@ -8,7 +8,10 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 ## Metrics
 
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
-recorded data can feed (37). Each is an
+recorded data can feed (39). Not here: image, audio and voice metrics (including agent
+responsiveness, a voice-latency metric), the MCP metrics, and arena metrics. JSON correctness
+is covered by `native.json_schema`: upstream's score is the same pass/fail schema check, with
+the judge only writing the explanation. Each is an
 evaluator `deepeval.<name>@1`, scores 0 to 1 with higher better (DeepEval normalizes bias,
 toxicity and the other safety metrics that way), and is decided by the plan's rule
 (default `>= 0.5`), not by DeepEval's own `success` flag.
