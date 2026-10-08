@@ -46,14 +46,25 @@ def _spend_label(status: dict[str, Any]) -> str:
     budget = status.get("budget")
     if not isinstance(budget, dict):
         return "spend not recorded"
-    unknown = sum(
-        int(role.get("calls_with_unknown_cost", 0))
-        for role in (budget.get("application", {}), budget.get("evaluator", {}))
+    roles = {
+        name: role
+        for name, role in (("app", budget.get("application")), ("judge", budget.get("evaluator")))
         if isinstance(role, dict)
-    )
-    if unknown or budget.get("unenforced"):
-        return f"spend partial ({unknown} call(s) with unknown cost)"
-    return "spend accounted"
+    }
+    known = sum(float(role.get("known_cost_usd") or 0.0) for role in roles.values())
+    unknown = {
+        name: int(role.get("calls_with_unknown_cost", 0))
+        for name, role in roles.items()
+        if int(role.get("calls_with_unknown_cost", 0))
+    }
+    if unknown:
+        # Which calls are not priced matters: an app that does not report what it spends is
+        # not the same gap as a judge with no prices configured.
+        missing = " and ".join(f"{n} {name} call(s)" for name, n in unknown.items())
+        return f"spend partial: ${known:.4g} known; cost unknown for {missing}"
+    if budget.get("unenforced"):
+        return f"spend partial: ${known:.4g} known; some limits not enforced"
+    return f"spend ${known:.4g}"
 
 
 def status_line(status: dict[str, Any]) -> str:
@@ -66,11 +77,37 @@ def status_line(status: dict[str, Any]) -> str:
         if status.get("partial")
         else ""
     )
-    return (
+    line = (
         f"run {status['run_id']} {status['status']}{label}: "
         f"executions {_counts(counts, 'execution')}, evaluations {_counts(counts, 'evaluation')}, "
         f"needs attention {_failures(counts)}; {_spend_label(status)}"
     )
+    if status.get("status") == "budget_exhausted":
+        line += f". {_limit_reached(status)}"
+    return line
+
+
+def _limit_reached(status: dict[str, Any]) -> str:
+    """Which policy limit stopped the run, in words: `budget_exhausted` alone did not say that
+    a 15-case run had simply hit its one-hour time limit, nor what to do about it."""
+    budget = status.get("budget") if isinstance(status.get("budget"), dict) else {}
+    hard = ((budget or {}).get("limits") or {}).get("hard") or {}
+    elapsed = (budget or {}).get("elapsed_seconds")
+    app = (budget or {}).get("application") or {}
+    judge = (budget or {}).get("evaluator") or {}
+    wall = hard.get("max_wall_seconds")
+    after = "raise it in the policy, and /rescore scores what the run did not reach"
+    if wall and isinstance(elapsed, (int, float)) and elapsed >= wall:
+        hours = f"{wall / 3600:g} h" if wall >= 3600 else f"{wall / 60:g} min"
+        return f"It stopped at its time limit ({hours}, max_wall_seconds): {after}"
+    for role, key, word in (
+        (app, "max_application_calls", "app-call"),
+        (judge, "max_evaluator_calls", "judge-call"),
+    ):
+        limit = hard.get(key)
+        if limit and int(role.get("calls") or 0) >= int(limit):
+            return f"It stopped at its {limit} {word} limit ({key}): {after}"
+    return "It stopped at a policy limit: /budget shows which"
 
 
 def draft(console: Console, summary: dict[str, Any]) -> None:

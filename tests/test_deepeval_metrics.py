@@ -107,7 +107,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc11" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc12" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -371,7 +371,8 @@ class _JudgeServer(ThreadingHTTPServer):
         trickle: bool = False,
         gzip_replies: bool = False,
         garbled_first: int = 0,
-        reasoning_required: bool = False,
+        reasoning_required: bool | dict[str, Any] = False,
+        reported_cost: float | None = None,
     ) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
         self.status = status
@@ -390,6 +391,8 @@ class _JudgeServer(ThreadingHTTPServer):
         self.garbled_first = garbled_first
         # A model that refuses to run with thinking switched off (GLM 5.3 Flash on OpenRouter).
         self.reasoning_required = reasoning_required
+        # What each answer costs by the provider's own account (OpenRouter's usage.cost).
+        self.reported_cost = reported_cost
         # The first `rate_limited_first` requests get a 429 (or every one, with `forever`).
         self.rate_limited_first = rate_limited_first
         self.forever = forever
@@ -430,7 +433,11 @@ class _JudgeHandler(BaseHTTPRequestHandler):
         ).get("enabled") is False
         refused = self.server.reasoning_required and thinking_off
         if refused:
-            payload = {"error": {"message": "Reasoning is mandatory for this endpoint and cannot be disabled.", "code": 400}}
+            payload = (
+                self.server.reasoning_required
+                if isinstance(self.server.reasoning_required, dict)
+                else OPENROUTER_THINKING_REFUSAL
+            )
         elif limited:
             payload: Any = {"error": {"code": "1302", "message": "rate limit reached"}}
         elif self.server.status != 200:
@@ -450,7 +457,15 @@ class _JudgeHandler(BaseHTTPRequestHandler):
                 "choices": [
                     {"message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
                 ],
-                "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    **(
+                        {"cost": self.server.reported_cost}
+                        if self.server.reported_cost is not None
+                        else {}
+                    ),
+                },
             }
             if body["max_tokens"] < self.server.thinking_tokens + 20:
                 payload = {
@@ -538,6 +553,30 @@ def test_openai_compatible_judge_scores_with_its_key_and_counts_its_calls(
     assert result.resources["cost"] is None and result.resources["accounting"] == "partial"
     raw = seeded.artifacts.read_bytes(seeded.storage.get_artifact(result.raw_artifact_ref))
     assert b"sk-test-judge-secret" not in raw
+
+
+def test_a_judge_call_costs_what_the_provider_reports_or_what_its_prices_say(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every run said "spend partial": the judge's cost was never known. OpenRouter reports
+    each call's cost (`usage.cost`); for a provider that does not (Z.ai), the judge config
+    can state its prices per million tokens."""
+    reported, server, _ = _openai_compatible_score(
+        tmp_path / "reported", monkeypatch, 200, reported_cost=0.0004
+    )
+    calls = len(server.requests)
+    assert reported.resources["cost"] == pytest.approx(0.0004 * calls)
+
+    priced, server, _ = _openai_compatible_score(
+        tmp_path / "priced",
+        monkeypatch,
+        200,
+        {"price_per_million_tokens": {"input": 0.15, "output": 0.5}},
+    )
+    calls = len(server.requests)
+    # 100 input and 20 output tokens a call
+    assert priced.resources["cost"] == pytest.approx(calls * (100 * 0.15 + 20 * 0.5) / 1e6)
+    assert priced.resources["accounting"] != "partial"
 
 
 def test_openai_compatible_judge_failure_is_an_error_that_never_shows_the_key(
@@ -777,17 +816,40 @@ def test_a_compressed_reply_that_is_garbled_in_transit_is_asked_again(
     assert len(server.requests) >= 2
 
 
+# How each provider refuses to run a model with thinking off, word for word (HTTP 400).
+OPENROUTER_THINKING_REFUSAL = {
+    "error": {
+        "message": "Reasoning is mandatory for this endpoint and cannot be disabled.",
+        "code": 400,
+    }
+}
+ZAI_THINKING_REFUSAL = {
+    "error": {
+        "code": "1210",
+        "message": (
+            "This model always engages in thinking and cannot be disabled; please use low, "
+            "high, or max"
+        ),
+    }
+}
+
+
+@pytest.mark.parametrize(
+    "refusal", [OPENROUTER_THINKING_REFUSAL, ZAI_THINKING_REFUSAL], ids=["openrouter", "zai"]
+)
 def test_a_model_that_must_think_is_asked_again_without_the_thinking_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: dict[str, Any]
 ) -> None:
-    """GLM 5.3 Flash on OpenRouter answers 400 "Reasoning is mandatory" to the request that
-    switches thinking off, which the judge sends by default: it drops the field and asks again."""
+    """GLM 5.3 Flash answers 400 to the request that switches thinking off, which the judge
+    sends by default on OpenRouter and Z.ai: it drops the field and asks again. Z.ai words it
+    differently (error 1210), and that one was not recognised: every call failed unless the
+    project set `thinking: default` by hand."""
     result, server, _ = _openai_compatible_score(
         tmp_path,
         monkeypatch,
         200,
         {"thinking": "disabled"},
-        reasoning_required=True,
+        reasoning_required=refusal,
     )
     assert result.status is ExecutionStatus.OK, result.reason
     first, *later = server.requests

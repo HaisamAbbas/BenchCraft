@@ -53,6 +53,16 @@ JUDGE_SCHEMA: dict[str, Any] = {
                 "json_mode": {"type": "boolean"},
                 "retry_wait_seconds": {"type": "number", "minimum": 0, "maximum": 60},
                 "thinking": {"enum": ["default", "disabled", "enabled"]},
+                # US dollars per million tokens, for a provider that does not report cost.
+                "price_per_million_tokens": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["input", "output"],
+                    "properties": {
+                        "input": {"type": "number", "minimum": 0, "maximum": 1000},
+                        "output": {"type": "number", "minimum": 0, "maximum": 1000},
+                    },
+                },
             },
         },
         {
@@ -97,8 +107,18 @@ class _BadJSON(RuntimeError):
 
 
 class _ReasoningRequired(_BadJSON):
-    """The model refuses to run with thinking switched off (GLM 5.3 Flash on OpenRouter: "Reasoning
-    is mandatory"). Asked again with the field left out, like a reply that cannot be read."""
+    """The model refuses to run with thinking switched off. Asked again with the field left
+    out, like a reply that cannot be read."""
+
+
+# How providers say a model cannot stop thinking (HTTP 400): OpenRouter "Reasoning is
+# mandatory for this endpoint and cannot be disabled"; Z.ai error 1210 "This model always
+# engages in thinking and cannot be disabled; please use low, high, or max".
+_THINKING_REQUIRED = re.compile(
+    r"reasoning is mandatory|always engages in thinking|thinking[^.]{0,40}cannot be disabled"
+    r'|"code"\s*:\s*"?1210\b',
+    re.IGNORECASE,
+)
 
 
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
@@ -215,6 +235,13 @@ class _OpenAICompatible:
         self.retries = 0
         self.calls = 0
         self.tokens: dict[str, int] = {}
+        # Cost of the calls answered: the provider's own figure when it gives one (OpenRouter's
+        # `usage.cost`), else tokens at the prices the config states. One call with neither
+        # makes the total unknown: an unknown cost is never counted as zero.
+        price = config.get("price_per_million_tokens")
+        self._price = (float(price["input"]), float(price["output"])) if price else None
+        self.cost_usd = 0.0
+        self.cost_known = True
         super().__init__(model=config["model"])  # type: ignore[call-arg]
 
     def load_model(self, *args: Any, **kwargs: Any) -> Any:
@@ -363,6 +390,21 @@ class _OpenAICompatible:
             body.update(_thinking_field(self._base_url, self._thinking))
         return body
 
+    def _add_cost(self, usage: dict[str, Any]) -> None:
+        reported = usage.get("cost")
+        if isinstance(reported, (int, float)) and not isinstance(reported, bool):
+            self.cost_usd += float(reported)
+            return
+        prompt, completion = usage.get("prompt_tokens"), usage.get("completion_tokens")
+        if self._price and isinstance(prompt, int) and isinstance(completion, int):
+            self.cost_usd += (prompt * self._price[0] + completion * self._price[1]) / 1_000_000
+            return
+        self.cost_known = False
+
+    def cost(self) -> float | None:
+        """What this judge's answered calls cost in US dollars, or None when unknown."""
+        return self.cost_usd if self.cost_known else None
+
     def _parse(self, response: httpx.Response, schema: Any) -> Any:
         self.calls += 1
         if response.status_code >= 400:
@@ -370,7 +412,7 @@ class _OpenAICompatible:
             if (
                 response.status_code == 400
                 and self._thinking == "disabled"
-                and "reasoning is mandatory" in detail.lower()
+                and _THINKING_REQUIRED.search(detail)
             ):
                 self._thinking = "default"  # this model always thinks: stop asking it not to
                 raise _ReasoningRequired(f"judge HTTP 400: {detail}")
@@ -380,12 +422,13 @@ class _OpenAICompatible:
         for ours, theirs in (("input", "prompt_tokens"), ("output", "completion_tokens")):
             if isinstance(usage.get(theirs), int):
                 self.tokens[ours] = self.tokens.get(ours, 0) + usage[theirs]
+        self._add_cost(usage)
         choice = payload["choices"][0]
         if choice.get("finish_reason") == "length":
             advice = (
                 "raise the judge's max_output_tokens or use a judge that thinks less"
                 if self._thinking == "disabled"
-                else "raise the judge's max_output_tokens, set its \"thinking\" to \"disabled\" "
+                else 'raise the judge\'s max_output_tokens, set its "thinking" to "disabled" '
                 "(a model that must think cannot), or use a judge that thinks less"
             )
             raise _CutOff(
@@ -440,7 +483,10 @@ def report_judge_usage(ctx: Any, metric: Any, judge: Any) -> None:
     custom judge that reports nothing leaves cost unknown."""
     if getattr(judge, "counts_own_usage", False):
         ctx.report_usage(
-            provider=judge.get_model_name(), calls=judge.calls, tokens=judge.tokens, cost=None
+            provider=judge.get_model_name(),
+            calls=judge.calls,
+            tokens=judge.tokens,
+            cost=judge.cost() if judge.calls else None,
         )
         return
     cost = getattr(metric, "evaluation_cost", None)

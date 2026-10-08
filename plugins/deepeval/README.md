@@ -18,7 +18,7 @@ toxicity and the other safety metrics that way), and is decided by the plan's ru
 
 | Metric | Reads | Needs from the plan |
 |---|---|---|
-| `faithfulness` | answer, retrieved passages | judge |
+| `faithfulness` | answer, retrieved passages | judge; optional `penalize_ambiguous_claims` (see below) |
 | `answer_relevancy` | question, answer | judge |
 | `contextual_precision` | question, reference answer, retrieved passages | judge |
 | `contextual_recall` | question, reference answer, retrieved passages | judge |
@@ -69,6 +69,20 @@ Not applicable instead of a score: an empty or non-text answer, a context with n
 non-blank passage, no reference tools, no readable tool call for argument correctness, and
 any field G-Eval is asked to read that the case or execution does not have. Faithfulness
 also treats an answer with no claims as not applicable (upstream scores a vacuous 1.0).
+
+**Faithfulness counts contradictions, not unsupported claims.** A claim the retrieved passages
+say nothing about is graded borderline and counts as faithful, so an answer with invented
+detail can score 1.0 (on a real LightRAG run: 0.99 by default, 0.72 strict). With
+`penalize_ambiguous_claims: true` such claims count as unfaithful. To make that the project's
+default, set it beside the judge in `aibench.json`; every planned faithfulness binding then
+uses it, and a value given in a plan still wins:
+
+```json
+"default_params": {
+  "deepeval.*": {"judge": {"kind": "openai_compatible", "...": "..."}},
+  "deepeval.faithfulness": {"penalize_ambiguous_claims": true}
+}
+```
 
 ### Conversation metrics
 
@@ -136,10 +150,14 @@ Every judged metric takes a `judge` parameter:
 - `{"kind": "openai_compatible", "base_url": "...", "model": "...", "api_key_env": "NAME"}`:
   any Chat Completions endpoint, such as GLM on Z.ai. Built in: no code needed. The key is
   read from the worker's `NAME` variable, which the harness sets from the plugin
-  environment's `secret_env`. Calls and tokens are counted; cost is unknown (never zero).
-  Optional: `timeout_seconds`, `max_output_tokens` (default 8000: a reasoning model
-  spends some of it thinking), `thinking` (`default`, `disabled` or `enabled`; disabled on Z.ai, where a thinking
-  model is slow and judging does not need it), `json_mode` (default true),
+  environment's `secret_env`. Calls and tokens are counted. Cost is the provider's own figure
+  when it gives one (OpenRouter does), else tokens at `price_per_million_tokens`
+  (`{"input": 0.15, "output": 0.5}`, US dollars) when the config states them, else unknown
+  (never zero).
+  Optional: `timeout_seconds` (a total deadline per call), `max_output_tokens` (default 8000: a
+  reasoning model spends some of it thinking), `thinking` (`default`, `disabled` or `enabled`;
+  disabled on Z.ai and OpenRouter, where a thinking model is slow and judging does not need it;
+  a model that cannot stop thinking is asked again without it), `json_mode` (default true),
   `retry_wait_seconds` (default 2). A rate limit (429), a server error (5xx) or a dropped
   connection is retried up to five times with a doubling wait (the server's `Retry-After`
   when given, at most 30 s) inside 200 s per case; a wrong key or a bad request is not. Free
@@ -151,6 +169,25 @@ Every judged metric takes a `judge` parameter:
 
 Scores from different judges are not comparable; the judge and G-Eval criteria are part of
 each score's recorded identity.
+
+**A judge that does not think suits the retrieval metrics.** On a real 16-passage LightRAG case,
+contextual precision with `glm-4.6` (thinking off) scored 0.14, 0.20 and 0.14 in 26 s each;
+with GLM 5.3 Flash, which always thinks, it ran past 32,768 tokens and failed, and a thinking
+DeepSeek scored one case 0.00 and then 0.84. A metric can have its own judge in `aibench.json`;
+the most specific pattern wins, whatever the order:
+
+```json
+"default_params": {
+  "deepeval.*": {"judge": {"kind": "openai_compatible", "model": "glm-5.3-flash", "...": "..."}},
+  "deepeval.contextual_precision": {"judge": {"kind": "openai_compatible",
+    "base_url": "https://api.z.ai/api/paas/v4", "model": "glm-4.6",
+    "api_key_env": "AIBENCH_JUDGE_KEY", "thinking": "disabled"}}
+}
+```
+
+A low contextual precision is not always the judge: it scores where the useful passages come in
+the retrieved list. In that case the passage that answers the question was 7th of 16, because
+LightRAG lists its references in document order, not by relevance.
 
 ## Install
 

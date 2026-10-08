@@ -41,7 +41,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -145,10 +145,35 @@ def _leaves(value: Any, key: str = "") -> list[tuple[str, Any]]:
     return [(key, value)]
 
 
-def ungrounded(patch: PlanPatch, message: str) -> list[str]:
+def metric_names(evaluator_id: str) -> tuple[str, ...]:
+    """How a user names a metric: `deepeval.g_eval`, `g_eval`, `g eval`, `g-eval`."""
+    short = evaluator_id.split(".", 1)[-1]
+    return (evaluator_id, short, short.replace("_", " "), short.replace("_", "-"))
+
+
+def concept_stated(
+    concept: str, message: str, serving: Mapping[str, tuple[str, ...]] | None = None
+) -> bool:
+    """A concept is the user's when their message names it, in its catalog form or in words
+    ("custom criteria"), or names a metric that serves it: "use deepeval.g_eval for that one"
+    asks for the concept G-Eval serves, though `custom_criteria` is a word no user types (a
+    real session refused it twice and the user had to be told to type it)."""
+    if _phrase_in(concept, message) or _phrase_in(concept.replace("_", " "), message):
+        return True
+    return any(
+        _phrase_in(name, message)
+        for evaluator_id in (serving or {}).get(concept, ())
+        for name in metric_names(evaluator_id)
+    )
+
+
+def ungrounded(
+    patch: PlanPatch, message: str, serving: Mapping[str, tuple[str, ...]] | None = None
+) -> list[str]:
     """Values in an assistant's patch that the user's message does not state. Every field
     counts: the model may only transcribe what the user said, never fill in a flag,
-    comparator, concept, removal or selection the user did not mention."""
+    comparator, concept, removal or selection the user did not mention. `serving` maps each
+    concept to the metrics that serve it, so naming a metric states its concept."""
     numbers = _numbers(message)
     problems = []
 
@@ -162,7 +187,10 @@ def ungrounded(patch: PlanPatch, message: str) -> list[str]:
         need(text, "objective to remove")
     for text, concepts in patch.objective_concepts.items():
         for concept in concepts:
-            need(concept, f"concept for {text!r}")
+            if not concept_stated(concept, message, serving):
+                problems.append(
+                    f"concept for {text!r} {concept!r} does not appear in the user's message"
+                )
     if patch.all_cases and not re.search(r"\b(all|every|entire|full)\b", message, re.IGNORECASE):
         problems.append("all cases: the user's message does not ask for every case")
     if patch.sample is not None:
@@ -219,7 +247,12 @@ def _copied_text(patch: PlanPatch) -> tuple[str, ...]:
 
 
 def patch_problems(
-    patch: PlanPatch, quote: str, message: str, *, offer: str | None = None
+    patch: PlanPatch,
+    quote: str,
+    message: str,
+    *,
+    offer: str | None = None,
+    serving: Mapping[str, tuple[str, ...]] | None = None,
 ) -> list[str]:
     """Why an assistant's patch may not be applied: its quote is not the user's words,
     the quoted sentence or a later correction refuses the change, or a value is not stated.
@@ -230,10 +263,10 @@ def patch_problems(
     if len(_norm(quote)) < 2 or _norm(quote) not in _norm(message):
         return ["the quoted request is not in the user's message"]
     if offer and offer.rstrip().endswith("?") and _AFFIRMATION.match(message.strip()):
-        return ungrounded(patch, offer)
+        return ungrounded(patch, offer, serving)
     if _reversed_from_quote_onward(message, quote, copied=_copied_text(patch)):
         return ["the user's words hold back or refuse this change"]
-    return ungrounded(patch, message)
+    return ungrounded(patch, message, serving)
 
 
 def _without_empty_settings(raw: Any) -> Any:
@@ -250,6 +283,7 @@ def _without_empty_settings(raw: Any) -> Any:
 
 
 _PARAM_PROBLEM = re.compile(r"^[\w.]+ parameter (\w+)(?:=| )")
+_CONCEPT_PROBLEM = re.compile(r"^concept for .* '(\w+)' does not appear")
 
 
 def patch_fix(problems: list[str], message: str) -> str | None:
@@ -268,6 +302,16 @@ def patch_fix(problems: list[str], message: str) -> str | None:
             f"Leave out these settings, which the user did not state: {', '.join(unstated)}. "
             "Keep only what their message says (for a G-Eval check, its name and criteria), "
             f'and call again. The message reads: "{excerpt}".'
+        )
+    concepts = sorted({m.group(1) for p in problems if (m := _CONCEPT_PROBLEM.search(p))})
+    if concepts:
+        # Rewording cannot help: a concept is stated only by the user naming it or a metric
+        # that serves it. Retrying spent a whole turn's budget in a real session.
+        return (
+            f"Do not retry with other wording: the user has not named {', '.join(concepts)} or a "
+            "metric for it. Leave objective_concepts out (the planner chooses), or ask the user "
+            'which metric they want, e.g. "use deepeval.g_eval for that objective". The message '
+            f'reads: "{excerpt}".'
         )
     if any("does not appear" in p or "is not stated" in p for p in problems):
         return (
@@ -1601,7 +1645,9 @@ class _Turn:
             patch = PlanPatch.model_validate(_without_empty_settings(args.get("patch", {})))
         except PydanticValidationError as exc:
             return self._reject("propose_plan_patch", [e["msg"] for e in exc.errors()][:10])
-        problems = patch_problems(patch, quote, self.message, offer=self.previous_reply)
+        problems = patch_problems(
+            patch, quote, self.message, offer=self.previous_reply, serving=self._serving()
+        )
         if problems:
             return self._reject(
                 "propose_plan_patch", problems, fix=patch_fix(problems, self.message)
@@ -1634,6 +1680,14 @@ class _Turn:
                 {"tool": "propose_plan_patch", "status": result.status, "problems": result.problems}
             )
         return data
+
+    def _serving(self) -> dict[str, tuple[str, ...]]:
+        """concept -> the metrics in this session's catalog that serve it."""
+        serving: dict[str, list[str]] = {}
+        for option in self.controller.inputs().catalog:
+            for concept in option.concepts:
+                serving.setdefault(concept, []).append(option.evaluator_id)
+        return {concept: tuple(ids) for concept, ids in serving.items()}
 
     def _reject(self, tool: str, problems: list[str], fix: str | None = None) -> dict[str, Any]:
         self.outcome.rejected.append({"tool": tool, "status": "rejected", "problems": problems})
