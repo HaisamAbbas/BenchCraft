@@ -46,14 +46,25 @@ def _spend_label(status: dict[str, Any]) -> str:
     budget = status.get("budget")
     if not isinstance(budget, dict):
         return "spend not recorded"
-    unknown = sum(
-        int(role.get("calls_with_unknown_cost", 0))
-        for role in (budget.get("application", {}), budget.get("evaluator", {}))
+    roles = {
+        name: role
+        for name, role in (("app", budget.get("application")), ("judge", budget.get("evaluator")))
         if isinstance(role, dict)
-    )
-    if unknown or budget.get("unenforced"):
-        return f"spend partial ({unknown} call(s) with unknown cost)"
-    return "spend accounted"
+    }
+    known = sum(float(role.get("known_cost_usd") or 0.0) for role in roles.values())
+    unknown = {
+        name: int(role.get("calls_with_unknown_cost", 0))
+        for name, role in roles.items()
+        if int(role.get("calls_with_unknown_cost", 0))
+    }
+    if unknown:
+        # Which calls are not priced matters: an app that does not report what it spends is
+        # not the same gap as a judge with no prices configured.
+        missing = " and ".join(f"{n} {name} call(s)" for name, n in unknown.items())
+        return f"spend partial: ${known:.4g} known; cost unknown for {missing}"
+    if budget.get("unenforced"):
+        return f"spend partial: ${known:.4g} known; some limits not enforced"
+    return f"spend ${known:.4g}"
 
 
 def status_line(status: dict[str, Any]) -> str:

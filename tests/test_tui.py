@@ -184,11 +184,15 @@ def test_status_line_labels_spend_completeness() -> None:
         status="cancelled",
         provisional=False,
         budget={
-            "application": {"calls_with_unknown_cost": 1},
-            "evaluator": {"calls_with_unknown_cost": 0},
+            "application": {"calls_with_unknown_cost": 1, "known_cost_usd": 0.0},
+            "evaluator": {"calls_with_unknown_cost": 0, "known_cost_usd": 0.0123},
         },
     )
-    assert "spend partial (1 call(s) with unknown cost)" in status_line(snapshot)
+    # The judge's cost is known; only the app's one call is not priced, and the line says
+    # which (it said "1 call(s) with unknown cost" and never the amount it did know).
+    assert "spend partial: $0.0123 known; cost unknown for 1 app call(s)" in status_line(snapshot)
+    snapshot["budget"]["application"]["calls_with_unknown_cost"] = 0
+    assert "spend $0.0123" in status_line(snapshot)
 
 
 def test_prompt_loop_accepts_multiline_input_history_completion_and_exit(tmp_path: Path) -> None:
