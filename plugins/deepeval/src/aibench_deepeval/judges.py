@@ -16,11 +16,14 @@ never when manifests are listed.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import json
 import os
+import random
 import re
 import time
+from collections.abc import AsyncIterator
 from functools import cache
 from typing import Any
 from urllib.parse import urlsplit
@@ -53,6 +56,7 @@ JUDGE_SCHEMA: dict[str, Any] = {
                 "json_mode": {"type": "boolean"},
                 "retry_wait_seconds": {"type": "number", "minimum": 0, "maximum": 60},
                 "thinking": {"enum": ["default", "disabled", "enabled"]},
+                "max_concurrent_calls": {"type": "integer", "minimum": 1, "maximum": 32},
                 # US dollars per million tokens, for a provider that does not report cost.
                 "price_per_million_tokens": {
                     "type": "object",
@@ -100,6 +104,7 @@ _MAX_OUTPUT_TOKENS = 32768
 _CONNECT_SECONDS = 15.0
 _MAX_WAIT = 30.0
 _RETRY_BUDGET_SECONDS = 200.0
+_MAX_CONCURRENT_CALLS = 4  # a judge's requests in flight at once (see `a_generate`)
 
 
 class _BadJSON(RuntimeError):
@@ -205,6 +210,45 @@ def _thinking_field(base_url: str, thinking: str) -> dict[str, Any]:
     return {"thinking": {"type": thinking}}
 
 
+class _Slot:
+    refused = False  # the provider answered 429: too many requests at once
+
+
+class _Gate:
+    """How many of one judge's requests may be in flight. A refusal (429) halves the number,
+    down to one at a time; after twice as many answers in a row as it allows, it allows one
+    more, up to the configured most. A request waiting here spends none of its retries, so a
+    case with many passages gets through slowly instead of failing."""
+
+    def __init__(self, most: int) -> None:
+        self.most = most
+        self.allowed = most
+        self.active = 0
+        self._answered = 0
+        self._changed = asyncio.Condition()
+
+    @contextlib.asynccontextmanager
+    async def slot(self) -> AsyncIterator[_Slot]:
+        async with self._changed:
+            await self._changed.wait_for(lambda: self.active < self.allowed)
+            self.active += 1
+        slot = _Slot()
+        try:
+            yield slot
+        finally:
+            async with self._changed:
+                self.active -= 1
+                if slot.refused:
+                    self.allowed = max(1, self.allowed // 2)
+                    self._answered = 0
+                else:
+                    self._answered += 1
+                    if self._answered >= 2 * self.allowed and self.allowed < self.most:
+                        self.allowed += 1
+                        self._answered = 0
+                self._changed.notify_all()
+
+
 class _OpenAICompatible:
     """A Chat Completions judge that answers DeepEval's prompts with JSON. Mixed into
     DeepEval's `DeepEvalBaseLLM` by `openai_compatible_judge`."""
@@ -242,6 +286,8 @@ class _OpenAICompatible:
         self._price = (float(price["input"]), float(price["output"])) if price else None
         self.cost_usd = 0.0
         self.cost_known = True
+        self._max_concurrent = int(config.get("max_concurrent_calls", _MAX_CONCURRENT_CALLS))
+        self._gate: _Gate | None = None  # made on first use, in the worker's event loop
         super().__init__(model=config["model"])  # type: ignore[call-arg]
 
     def load_model(self, *args: Any, **kwargs: Any) -> Any:
@@ -276,10 +322,18 @@ class _OpenAICompatible:
         raise AssertionError("unreachable: the last attempt returns or raises")
 
     async def a_generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
+        # A metric asks about each retrieved passage at once (12 to 16 calls for contextual
+        # relevancy). Z.ai's glm-4.6 took about 25 s on each and refused every further request
+        # while a few were running, so all retries were spent in seconds and the case failed.
+        # The judge's calls go through a gate that lets fewer through after a refusal.
+        if self._gate is None:
+            self._gate = _Gate(self._max_concurrent)
         async with httpx.AsyncClient(timeout=self._timeouts()) as client:
             for attempt in range(_ATTEMPTS):
                 try:
-                    response = await self._apost(client, prompt)
+                    async with self._gate.slot() as slot:
+                        response = await self._apost(client, prompt)
+                        slot.refused = response.status_code == 429
                 except _TRANSIENT:
                     wait = self._wait(attempt, None)
                     if wait is None:
@@ -318,7 +372,9 @@ class _OpenAICompatible:
         last = attempt == _ATTEMPTS - 1
         if last:
             return None
-        wait = min(_MAX_WAIT, self._retry_wait * 2**attempt)
+        # Jitter: calls refused together would otherwise all come back at the same moment
+        # and be refused together again.
+        wait = min(_MAX_WAIT, self._retry_wait * 2**attempt * random.uniform(0.5, 1.5))
         header = response.headers.get("retry-after") if response is not None else None
         if header is not None:
             try:
