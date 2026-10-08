@@ -5,6 +5,30 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc33 — a judge's head-to-head verdict on two runs
+
+- **`/compare BASELINE CURRENT --judge "CRITERIA"`**: beside the stored comparison, a judge
+  says case by case which run's answer is better by the criteria you state: current, baseline
+  or tie (DeepEval's ArenaGEval, new evaluator `deepeval.arena_g_eval`, the plugin's 40th).
+  It reads recorded answers only and runs in the plugin's worker with the session plan's judge,
+  under the same policy as a run. It is never a plan metric (new `consumes: paired_runs`; the
+  planner and the execution gate say where to use it). A case's verdicts and reasons are in the
+  report; the cases where the baseline was better are listed first.
+- **Both orders, really.** Each case is judged twice with the answers in both orders, and a split
+  verdict is a tie, so a judge that favours a position cannot decide a case. Upstream shuffles
+  the answers into a random order on every call, which made two calls two random orders, not
+  both orders; while the arena judges, that shuffle is held and the orders are given.
+- **`/compare` printed nothing but an error** in the chat: its heading closed a colour tag with
+  the literal text `[/colour]`, which the terminal renderer refuses. No test rendered it.
+- **A compressed reply is read on the judge's blocking path.** OpenRouter compresses its
+  replies; `generate` read a reply in pieces against its deadline and rebuilt it with
+  `Content-Encoding: gzip` still set, so it was decoded twice ("incorrect header check") on
+  every call. Scoring uses `a_generate`, which was unaffected; a direct judge call found it.
+- **An account out of credit is not retried.** Z.ai answers an empty balance with 429 (error
+  1113, "Insufficient balance or no resource package. Please recharge."), the status of a
+  rate limit; the judge retried it and shrank its concurrency for nothing. It now fails at once
+  with the provider's message.
+
 ## 0.1.0rc32 — every DeepEval metric checked on real data
 
 The 30 DeepEval metrics no real run had exercised were each scored, through BenchCraft's real

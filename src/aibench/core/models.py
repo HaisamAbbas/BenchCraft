@@ -1170,7 +1170,11 @@ class EvaluatorManifest(FrozenModel):
     # owns_execution: runs the application itself (a delegated suite).
     # remote_job: results arrive from an external job (submit/poll/fetch), never from a
     # per-case evaluate call; a plan cannot bind it (17-T2).
-    consumes: Literal["recorded_outputs", "owns_execution", "remote_job"] = "recorded_outputs"
+    # paired_runs: judges two runs' answers to the same case against each other
+    # (`comparison.output` beside `execution.output`); run by a comparison, never by a plan.
+    consumes: Literal["recorded_outputs", "owns_execution", "remote_job", "paired_runs"] = (
+        "recorded_outputs"
+    )
     uses_models: bool = False
     credentials: tuple[str, ...] = ()
     network_destinations: tuple[str, ...] = ()

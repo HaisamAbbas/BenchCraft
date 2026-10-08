@@ -634,6 +634,32 @@ def report(console: Console, data: dict[str, Any]) -> None:
         out(console, f"  wrote {safe(fmt)}: {safe(path)}")
 
 
+def arena(console: Console, data: dict[str, Any]) -> None:
+    """`/compare ... --judge`: which run's answers the judge preferred, case by case."""
+    counts = data["counts"]
+    judged = counts["current"] + counts["baseline"] + counts["tie"]
+    out(
+        console,
+        f"  [bold]judged head-to-head[/bold] ({safe(str(data.get('judge') or 'judge'))}, each "
+        f"case in both orders): {safe(str(data.get('criteria')))}",
+    )
+    out(console, f"    current better   {counts['current']} of {judged}")
+    out(console, f"    baseline better  {counts['baseline']} of {judged}")
+    out(console, f"    tie              {counts['tie']} of {judged}")
+    if counts["not_applicable"] or counts["error"]:
+        out(
+            console,
+            f"    [yellow]not judged: {counts['not_applicable']} not applicable, "
+            f"{counts['error']} failed[/yellow]",
+        )
+    for row in data["rows"]:
+        if row["verdict"] in ("baseline", "error"):  # what to look at first
+            out(
+                console,
+                f"    {safe(row['case_id'])}: {safe(row['verdict'])}: {safe(row['reason'][:200])}",
+            )
+
+
 def comparison(console: Console, data: dict[str, Any]) -> None:
     """Compact paired-comparison card; no per-case ledger or raw judge content."""
     status = str(data.get("status", "unknown"))
@@ -645,7 +671,7 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
     }.get(status, "yellow")
     out(
         console,
-        f"[bold]comparison[/bold] [{colour}]{safe(status)}[/colour]"
+        f"[bold]comparison[/bold] [{colour}]{safe(status)}[/{colour}]"
         f" (identity_qualified={str(bool(data.get('identity_qualified', data.get('qualified')))).lower()},"
         f" claim_qualified={str(bool(data.get('claim_qualified', data.get('qualified')))).lower()})",
     )
@@ -686,6 +712,8 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
         )
     for warning in data.get("warnings", [])[:10]:
         out(console, f"  [yellow]warning:[/yellow] {safe(warning)}")
+    if isinstance(data.get("arena"), dict):
+        arena(console, data["arena"])
     disagreement = data.get("ecosystem_disagreement") or data.get("cross_framework") or []
     if isinstance(disagreement, list):
         matrix_counts: Counter[str] = Counter()

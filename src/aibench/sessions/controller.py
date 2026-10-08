@@ -1492,6 +1492,59 @@ class SessionController:
         )
         return _comparison_for_assistant(report) if for_assistant else report
 
+    async def judge_runs(
+        self, baseline_run_id: str, current_run_id: str, criteria: str
+    ) -> dict[str, Any]:
+        """Which run's answers a judge prefers, case by case, by the user's `criteria`
+        (DeepEval's ArenaGEval, each case judged in both orders). Reads recorded answers only.
+        The judge, its plugin environment and the policy are the session plan's: the plan is
+        compiled through the execution gate first, so a judge the policy would not permit in
+        a run is not used here either."""
+        from aibench.core.models import MetricBinding
+        from aibench.security.policy import evaluator_denials
+        from aibench.services import arena
+
+        criteria = criteria.strip()
+        if not criteria:
+            raise SessionError('state what makes an answer better: --judge "CRITERIA"')
+        baseline = self._run_id(baseline_run_id)
+        current = self._run_id(current_run_id)
+        decision = self.current_decision()
+        try:
+            compiled = compile_plan(
+                self.directory / decision.plan_file,
+                policy=self.policy(),
+                trusted_local=self.session.trusted_local,
+            )
+        except (PolicyDenied, PlanInvalid) as exc:
+            raise SessionError(f"the current plan cannot load its judge: {exc}") from exc
+        judge = next(
+            (
+                dict(deep_unfreeze(m.binding.params)).get("judge")
+                for m in compiled.metrics
+                if m.manifest.evaluator_id.startswith("deepeval.")
+                and dict(deep_unfreeze(m.binding.params) or {}).get("judge")
+            ),
+            None,
+        ) or ((self.session.evaluator_defaults or {}).get("deepeval.*") or {}).get("judge")
+        if not judge:
+            raise SessionError(
+                "no DeepEval judge in this session: /plugins install deepeval sets one up"
+            )
+        try:
+            metric = compiled.registry.resolve_binding(
+                MetricBinding(metric=arena.ARENA, params={"judge": judge, "criteria": criteria})
+            )
+        except AibenchError as exc:
+            raise SessionError(f"the head-to-head judge is not available: {exc}") from exc
+        denials = evaluator_denials(compiled.policy, [metric.manifest])
+        if denials:
+            raise SessionError("; ".join(denials))
+        found = arena.pairs(self.storage, baseline, current)
+        if not found:
+            raise SessionError("the two runs have no case both answered")
+        return await arena.judge(metric, found)
+
     def _scoring_id(self, run_id: str) -> str:
         record = self.storage.get_run(run_id)
         if record is None:

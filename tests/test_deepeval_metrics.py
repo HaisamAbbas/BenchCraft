@@ -107,7 +107,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc13" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc14" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -371,6 +371,7 @@ class _JudgeServer(ThreadingHTTPServer):
         trickle: bool = False,
         gzip_replies: bool = False,
         max_in_flight: int | None = None,
+        out_of_credit: bool = False,
         answer_seconds: float = 0.0,
         garbled_first: int = 0,
         reasoning_required: bool | dict[str, Any] = False,
@@ -392,6 +393,8 @@ class _JudgeServer(ThreadingHTTPServer):
         # A provider that refuses (429) any request beyond this many in flight, each answer
         # taking `answer_seconds`: Z.ai's glm-4.6 on long judge prompts.
         self.max_in_flight = max_in_flight
+        # Every request refused for an empty balance, as Z.ai does with a 429.
+        self.out_of_credit = out_of_credit
         self.answer_seconds = answer_seconds
         self.in_flight = 0
         self.peak_in_flight = 0
@@ -420,6 +423,20 @@ class _JudgeHandler(BaseHTTPRequestHandler):
         return
 
     def do_POST(self) -> None:
+        if self.server.out_of_credit:
+            self.server.requests.append(
+                {"body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))}
+            )
+            data = (
+                b'{"error":{"code":"1113","message":"Insufficient balance or no resource '
+                b'package. Please recharge."}}'
+            )
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.server.max_in_flight is not None:
             with self.server.flight_lock:
                 busy = self.server.in_flight >= self.server.max_in_flight
@@ -843,6 +860,27 @@ def test_a_call_that_keeps_trickling_bytes_still_ends_at_its_deadline(
     assert len(server.requests) >= 2  # a timed-out call is asked again before giving up
 
 
+def test_a_compressed_reply_is_read_on_the_blocking_path_too() -> None:
+    """OpenRouter compresses its replies. The judge's blocking path (`generate`) reads a
+    reply in pieces against its deadline and rebuilt it with `Content-Encoding: gzip` still
+    set, so httpx decoded it twice: "incorrect header check" on every call. The scoring path
+    (`a_generate`) was unaffected, which is why the tests through the worker never saw it."""
+    with _judge_server(200, gzip_replies=True) as server:
+        snippet = f"""
+import json, os
+os.environ["K"] = "x"
+from aibench_deepeval.judges import openai_compatible_judge
+judge = openai_compatible_judge({{
+    "kind": "openai_compatible", "base_url": "{server.base_url}", "model": "glm-test",
+    "api_key_env": "K", "retry_wait_seconds": 0,
+}})
+print(json.dumps(judge.generate("Say ok")))
+"""
+        reply = plugin_python(snippet)
+    assert "Refunds are available" in reply
+    assert len(server.requests) == 1
+
+
 def test_a_compressed_reply_that_is_garbled_in_transit_is_asked_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -894,6 +932,17 @@ def test_a_model_that_must_think_is_asked_again_without_the_thinking_field(
     first, *later = server.requests
     assert first["body"].get("thinking") == {"type": "disabled"}
     assert later and all("thinking" not in r["body"] for r in later)
+
+
+def test_an_account_out_of_credit_is_not_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Z.ai answers an empty balance with 429 (error 1113), the status of a rate limit: the
+    judge retried a request that waiting cannot fix. It now fails at once and says why."""
+    result, server, _ = _openai_compatible_score(tmp_path, monkeypatch, 200, out_of_credit=True)
+    assert result.status is ExecutionStatus.ERROR
+    assert "Insufficient balance" in (result.reason or "")
+    assert len(server.requests) == 1
 
 
 def test_a_burst_the_provider_refuses_backs_off_instead_of_failing() -> None:
@@ -1011,7 +1060,7 @@ def test_metrics_scored_on_a_share_pass_only_when_nothing_is_broken() -> None:
     strict = plugin_python(
         "import json; from aibench_deepeval import EVALUATORS;"
         "print(json.dumps({e.manifest.evaluator_id: e.manifest.default_rule.threshold"
-        " for e in EVALUATORS}))"
+        " for e in EVALUATORS if e.manifest.default_rule.threshold is not None}))"
     )
     assert {name for name, mark in strict.items() if mark != 0.5} == {
         "deepeval.tool_permission",

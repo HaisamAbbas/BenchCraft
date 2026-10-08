@@ -38,6 +38,9 @@ _EXECUTION_FIELDS = ("output", "retrieved_context", "tool_events", "usage", "cos
 _REFERENCE_FIELDS = ("answer", "context", "tools")
 EPISODE_TURNS = "episode.turns"
 EXECUTION_TRACE = "execution.trace"
+# The other run's answer to the same case, for a metric that judges two runs
+# against each other (`consumes == "paired_runs"`).
+COMPARISON_OUTPUT = "comparison.output"
 
 
 @dataclass(frozen=True)
@@ -53,12 +56,15 @@ class EvaluationView:
     `episode` is filled by the scorer only for a metric that requires `episode.turns`: one
     dict per turn, in dataset order, with the turn's `case_id`, `input` and recorded `output`
     (and its `retrieved_context` and `tool_events` when the metric requires those).
-    `trace` is likewise filled only for a metric that requires `execution.trace`."""
+    `trace` is likewise filled only for a metric that requires `execution.trace`.
+    `comparison` is the baseline run's execution of the same case, filled only when a
+    comparison judges two runs (`comparison.output`)."""
 
     case: BenchmarkCase
     execution: ExecutionResult
     episode: tuple[Any, ...] | None = None
     trace: Any = None
+    comparison: ExecutionResult | None = None
 
     def get(self, path: str) -> Any:
         head, _, rest = path.partition(".")
@@ -80,6 +86,8 @@ class EvaluationView:
             return MISSING if value is None else deep_unfreeze(value)
         if path == EPISODE_TURNS:
             return MISSING if self.episode is None else [dict(turn) for turn in self.episode]
+        if path == COMPARISON_OUTPUT:
+            return MISSING if self.comparison is None else deep_unfreeze(self.comparison.output)
         return case_field(self.case, path)
 
     @staticmethod
@@ -95,7 +103,7 @@ class EvaluationView:
         parts = rest.split(".") if rest else []
         valid = (
             (head == "execution" and len(parts) == 1 and parts[0] in _EXECUTION_FIELDS)
-            or path in (EPISODE_TURNS, EXECUTION_TRACE)
+            or path in (EPISODE_TURNS, EXECUTION_TRACE, COMPARISON_OUTPUT)
             or (
                 head == "case"
                 and parts[:1] in (["input"], ["case_id"], ["group_id"])

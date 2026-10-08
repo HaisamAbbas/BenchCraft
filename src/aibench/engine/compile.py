@@ -314,6 +314,14 @@ def _resolve_metrics(analysis: PlanAnalysis, *, plugins_not_loaded: str | None) 
                 subject,
             )
             continue
+        if metric.manifest.consumes == "paired_runs":
+            analysis.add(
+                "invalid",
+                f"{binding.metric}: it judges two runs' answers against each other, not one "
+                'run; use /compare BASELINE CURRENT --judge "CRITERIA"',
+                subject,
+            )
+            continue
         if metric.binding_hash in seen:
             analysis.add("invalid", f"{binding.metric}: duplicate binding", subject)
             continue

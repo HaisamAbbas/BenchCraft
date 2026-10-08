@@ -27,6 +27,8 @@ from deepeval.models import DeepEvalBaseLLM
 
 _FACT = re.compile(r"\bFACT-[A-Z]\b")
 _CLAIM = re.compile(r"CLAIM:(FACT-[A-Z])\b")
+# An arena contestant in DeepEval's prompt: its masked name opening its answer's JSON.
+_CONTESTANT = re.compile(r'"([A-Z][a-z]+)": "\{')
 
 
 class TokenJudge(DeepEvalBaseLLM):
@@ -111,3 +113,47 @@ def blocking_judge() -> TokenJudge:
 
 def not_a_judge() -> object:
     return object()
+
+
+class ArenaJudge(DeepEvalBaseLLM):
+    """For DeepEval's ArenaGEval: picks the contestant whose answer contains `BEST`. With
+    neither (or both) containing it, it picks the contestant listed first, the way a judge
+    leans towards a position: judging both orders must turn that into a tie."""
+
+    def __init__(self) -> None:
+        super().__init__(model="arena-judge")
+
+    def load_model(self, *args: Any, **kwargs: Any) -> ArenaJudge:
+        return self
+
+    def get_model_name(self, *args: Any, **kwargs: Any) -> str:
+        return "arena-judge"
+
+    def _answer(self, prompt: str, schema: Any) -> Any:
+        from deepeval.metrics.arena_g_eval.schema import RewrittenReason, Steps, Winner
+
+        if schema is Steps:
+            return Steps(steps=["Compare the answers by the criteria."])
+        if schema is RewrittenReason:
+            return RewrittenReason(rewritten_reason="the better answer by the criteria")
+        if schema is Winner:
+            # The contestants appear under masked names, each followed by its answer.
+            names = [m for m in _CONTESTANT.finditer(prompt)]
+            listed = []
+            for index, match in enumerate(names):
+                stop = names[index + 1].start() if index + 1 < len(names) else len(prompt)
+                listed.append((match.group(1), prompt[match.end() : stop]))
+            best = [name for name, answer in listed if "BEST" in answer]
+            winner = best[0] if len(best) == 1 else listed[0][0]
+            return Winner(winner=winner, reason=f"{winner} answers best")
+        raise ValueError(f"ArenaJudge cannot answer schema {schema!r}")
+
+    def generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
+        return self._answer(prompt, schema)
+
+    async def a_generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
+        return self._answer(prompt, schema)
+
+
+def arena_judge() -> ArenaJudge:
+    return ArenaJudge()

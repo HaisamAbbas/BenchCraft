@@ -243,6 +243,11 @@ class WorkerEvaluator(Evaluator):
             request["episode"] = list(view.episode)
         if view.trace is not None:  # likewise the span tree
             request["trace"] = view.trace
+        if view.comparison is not None:  # the other run's answer, for a paired judgement
+            other = view.comparison
+            request["comparison"] = other.model_copy(
+                update={"retrieved_context": None, "tool_events": (), "world_state": None}
+            ).model_dump(mode="json")
         try:
             response = await self._call(request)
         except WorkerError as exc:
