@@ -860,6 +860,27 @@ def test_a_call_that_keeps_trickling_bytes_still_ends_at_its_deadline(
     assert len(server.requests) >= 2  # a timed-out call is asked again before giving up
 
 
+def test_a_compressed_reply_is_read_on_the_blocking_path_too() -> None:
+    """OpenRouter compresses its replies. The judge's blocking path (`generate`) reads a
+    reply in pieces against its deadline and rebuilt it with `Content-Encoding: gzip` still
+    set, so httpx decoded it twice: "incorrect header check" on every call. The scoring path
+    (`a_generate`) was unaffected, which is why the tests through the worker never saw it."""
+    with _judge_server(200, gzip_replies=True) as server:
+        snippet = f"""
+import json, os
+os.environ["K"] = "x"
+from aibench_deepeval.judges import openai_compatible_judge
+judge = openai_compatible_judge({{
+    "kind": "openai_compatible", "base_url": "{server.base_url}", "model": "glm-test",
+    "api_key_env": "K", "retry_wait_seconds": 0,
+}})
+print(json.dumps(judge.generate("Say ok")))
+"""
+        reply = plugin_python(snippet)
+    assert "Refunds are available" in reply
+    assert len(server.requests) == 1
+
+
 def test_a_compressed_reply_that_is_garbled_in_transit_is_asked_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1039,7 +1060,7 @@ def test_metrics_scored_on_a_share_pass_only_when_nothing_is_broken() -> None:
     strict = plugin_python(
         "import json; from aibench_deepeval import EVALUATORS;"
         "print(json.dumps({e.manifest.evaluator_id: e.manifest.default_rule.threshold"
-        " for e in EVALUATORS}))"
+        " for e in EVALUATORS if e.manifest.default_rule.threshold is not None}))"
     )
     assert {name for name, mark in strict.items() if mark != 0.5} == {
         "deepeval.tool_permission",

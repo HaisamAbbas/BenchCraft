@@ -415,9 +415,17 @@ class _OpenAICompatible:
                 raise httpx.ReadTimeout(
                     f"no complete reply within {self._timeout:g} s", request=streamed.request
                 )
+            # The pieces are already decoded. Kept, `Content-Encoding: gzip` makes httpx decode
+            # them a second time, and every compressed reply (OpenRouter's) failed with
+            # "incorrect header check" on this path.
+            headers = [
+                (name, value)
+                for name, value in streamed.headers.multi_items()
+                if name.lower() not in ("content-encoding", "content-length", "transfer-encoding")
+            ]
             return httpx.Response(
                 streamed.status_code,
-                headers=streamed.headers,
+                headers=headers,
                 content=b"".join(chunks),
                 request=streamed.request,
             )

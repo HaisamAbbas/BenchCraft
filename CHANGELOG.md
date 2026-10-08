@@ -20,6 +20,10 @@ Workspace schema changes are listed under "Workspace". Upgrade steps are in
   both orders; while the arena judges, that shuffle is held and the orders are given.
 - **`/compare` printed nothing but an error** in the chat: its heading closed a colour tag with
   the literal text `[/colour]`, which the terminal renderer refuses. No test rendered it.
+- **A compressed reply is read on the judge's blocking path.** OpenRouter compresses its
+  replies; `generate` read a reply in pieces against its deadline and rebuilt it with
+  `Content-Encoding: gzip` still set, so it was decoded twice ("incorrect header check") on
+  every call. Scoring uses `a_generate`, which was unaffected; a direct judge call found it.
 - **An account out of credit is not retried.** Z.ai answers an empty balance with 429 (error
   1113, "Insufficient balance or no resource package. Please recharge."), the status of a
   rate limit; the judge retried it and shrank its concurrency for nothing. It now fails at once
