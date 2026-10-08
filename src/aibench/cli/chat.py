@@ -584,6 +584,14 @@ def _with_project_plugins(controller: SessionController, root: Path) -> SessionC
         return controller
     if result.status == "applied":
         err_console.print(f"[dim]{done} (draft revision {result.revision})[/dim]")
+        # A plugin that no longer loads leaves its metrics out of the new draft: say why
+        # here, not only when /run refuses.
+        findings = (controller.current_decision().draft or {}).get("findings", [])
+        for finding in findings:
+            if finding.get("blocking") and finding.get("subject") == "plugins":
+                err_console.print(
+                    f"[yellow]the plan cannot run: {safe(finding['message'])}[/yellow]"
+                )
     else:
         reason = safe("; ".join(result.problems) or result.status)
         err_console.print(f"[yellow]could not {failed}: {reason}[/yellow]")

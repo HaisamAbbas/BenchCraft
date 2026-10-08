@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -41,6 +42,7 @@ ENTRY_POINT_GROUP = "aibench.evaluators"
 WORKER_TIMEOUT_SECONDS = 120.0
 MAX_WORKER_OUTPUT_BYTES = 1_048_576
 _WORKER_ENV_KEEP = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "TMPDIR", "HOME")
+_EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception)(:|$)")
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,29 @@ def discover_plugins(paths: Sequence[Path] | None = None) -> list[DiscoveredPlug
                 plugin = DiscoveredPlugin(ep.name, ep.value, dist.metadata["Name"], dist.version)
                 found[(plugin.distribution, plugin.name)] = plugin
     return sorted(found.values(), key=lambda p: (p.distribution, p.name))
+
+
+def core_version(paths: Sequence[Path]) -> str | None:
+    """The version of aibench installed on these paths (another environment's site
+    directories), from metadata only; None when it is not installed there."""
+    for dist in metadata.distributions(path=[str(p) for p in paths]):
+        if (dist.metadata["Name"] or "").lower() == "aibench":
+            return dist.version
+    return None
+
+
+def worker_failure(stderr: bytes) -> str:
+    """What a crashed worker's traceback says went wrong: the exception and the lines it
+    printed after it, not just the last line (pydantic's last line is a help link)."""
+    lines = [
+        line.strip()
+        for line in stderr.decode("utf-8", "replace").splitlines()
+        if line.strip() and not line.strip().startswith("For further information visit")
+    ]
+    for index in range(len(lines) - 1, -1, -1):
+        if _EXCEPTION_LINE.match(lines[index]):
+            return " ".join(lines[index:])[:400]
+    return lines[-1][:400] if lines else ""
 
 
 def environment_site_paths(python: Path, *, timeout: float = WORKER_TIMEOUT_SECONDS) -> list[Path]:
@@ -120,10 +145,9 @@ def load_manifests(
     if result.truncated:
         return ManifestLoad(plugin, error="manifest worker output exceeded the size limit")
     if result.returncode != 0:
-        detail = result.stderr.decode("utf-8", "replace").strip().splitlines()
         return ManifestLoad(
             plugin,
-            error=f"manifest worker exited {result.returncode}: {detail[-1] if detail else ''}",
+            error=f"manifest worker exited {result.returncode}: {worker_failure(result.stderr)}",
         )
     try:
         raw = json.loads(result.stdout)

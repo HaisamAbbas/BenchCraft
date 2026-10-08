@@ -14,9 +14,10 @@ import os
 import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from aibench import __version__
 from aibench.core.errors import AibenchError, ConfigError, PolicyError
 from aibench.core.hashes import content_hash
 from aibench.core.models import (
@@ -34,6 +35,7 @@ from aibench.evaluators.worker_client import WorkerSpec, make_worker_factory
 from aibench.registry.discovery import (
     WORKER_TIMEOUT_SECONDS,
     ManifestLoad,
+    core_version,
     discover_plugins,
     environment_site_paths,
     load_manifests,
@@ -186,6 +188,10 @@ class EvaluatorRegistry:
                 extra_paths=extra_paths,
                 timeout=startup_timeout_seconds,
             )
+            if loaded.error:
+                loaded = replace(
+                    loaded, error=_core_mismatch(plugin.name, site_paths, loaded.error)
+                )
             loads.append(loaded)
             spec = WorkerSpec(
                 python=python,
@@ -368,3 +374,16 @@ def applicability_problems(
                 f"does not expose it (output_binding.{name} is not declared)"
             )
     return problems
+
+
+def _core_mismatch(plugin: str, site_paths: Sequence[Path], error: str) -> str:
+    """A plugin that fails to load in an environment holding a different aibench than this
+    one: say so first, since that is the likely cause and `/plugins install` fixes it (it
+    installs this version's aibench beside the plugin)."""
+    installed = core_version(site_paths)
+    if installed is None or installed == __version__:
+        return error
+    return (
+        f"its environment has BenchCraft {installed}, not {__version__}; "
+        f"`/plugins install {plugin}` updates it ({error})"
+    )
