@@ -213,6 +213,12 @@ def render_result(console: Console, result: CommandResult) -> None:
         render.cases_decided(console, data)
     elif kind == "cases_saved":
         render.cases_saved(console, data)
+    elif kind == "cases_check":
+        render.cases_check(console, data)
+    elif kind == "cases_verified":
+        render.cases_verified(console, data)
+    elif kind == "cases_added":
+        render.cases_added(console, data)
     elif kind == "traces":
         render.traces(console, data)
     elif kind == "traces_imported":
