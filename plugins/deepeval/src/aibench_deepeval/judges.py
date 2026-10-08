@@ -90,6 +90,13 @@ _ERROR_TEXT_LIMIT = 300
 # still fails cleanly before the harness's own per-case limit. Errors that repeating cannot
 # fix (a wrong key, a bad request) are never retried.
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+# A provider out of credit can answer 429 like a rate limit (Z.ai, error 1113: "Insufficient
+# balance or no resource package. Please recharge."). Waiting cannot fix that: no retry.
+_OUT_OF_CREDIT = re.compile(
+    r"insufficient balance|no resource package|please recharge|insufficient credits"
+    r'|"code"\s*:\s*"?1113(?!\d)',
+    re.IGNORECASE,
+)
 _TRANSIENT = (
     httpx.TimeoutException,
     TimeoutError,  # a call that ran past its total deadline (see `_post`)
@@ -369,6 +376,8 @@ class _OpenAICompatible:
         transient failure has no reply (`response` None)."""
         if response is not None and response.status_code not in _RETRY_STATUSES:
             return None
+        if response is not None and _OUT_OF_CREDIT.search(response.text[:_ERROR_TEXT_LIMIT]):
+            return None  # an empty balance does not refill by waiting
         last = attempt == _ATTEMPTS - 1
         if last:
             return None

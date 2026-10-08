@@ -338,6 +338,11 @@ def build_catalog(
                 "runs as a remote job with its own submit/fetch commands (data leaves the "
                 "machine), not as a plan metric"
             )
+        if manifest.consumes == "paired_runs":
+            reasons.append(
+                "judges two runs' answers against each other, not one run: "
+                '/compare BASELINE CURRENT --judge "CRITERIA"'
+            )
         usable: int | None = None
         for requirement in requires:
             head, _, name = requirement.path.partition(".")

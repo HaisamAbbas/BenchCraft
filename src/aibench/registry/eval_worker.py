@@ -102,11 +102,15 @@ def main(argv: list[str]) -> int:
                 if evaluator is None:
                     raise RuntimeError("evaluate before prepare")
                 episode = request.get("episode")
+                comparison = request.get("comparison")
                 view = EvaluationView(
                     case=BenchmarkCase.model_validate(request["case"]),
                     execution=ExecutionResult.model_validate(request["execution"]),
                     episode=None if episode is None else tuple(episode),
                     trace=request.get("trace"),
+                    comparison=None
+                    if comparison is None
+                    else ExecutionResult.model_validate(comparison),
                 )
                 ctx = EvaluatorContext(run_id=view.execution.run_id, scoring_id="worker")
                 outcome = loop.run_until_complete(evaluator.evaluate(view, ctx))

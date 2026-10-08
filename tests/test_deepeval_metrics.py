@@ -371,6 +371,7 @@ class _JudgeServer(ThreadingHTTPServer):
         trickle: bool = False,
         gzip_replies: bool = False,
         max_in_flight: int | None = None,
+        out_of_credit: bool = False,
         answer_seconds: float = 0.0,
         garbled_first: int = 0,
         reasoning_required: bool | dict[str, Any] = False,
@@ -392,6 +393,8 @@ class _JudgeServer(ThreadingHTTPServer):
         # A provider that refuses (429) any request beyond this many in flight, each answer
         # taking `answer_seconds`: Z.ai's glm-4.6 on long judge prompts.
         self.max_in_flight = max_in_flight
+        # Every request refused for an empty balance, as Z.ai does with a 429.
+        self.out_of_credit = out_of_credit
         self.answer_seconds = answer_seconds
         self.in_flight = 0
         self.peak_in_flight = 0
@@ -420,6 +423,20 @@ class _JudgeHandler(BaseHTTPRequestHandler):
         return
 
     def do_POST(self) -> None:
+        if self.server.out_of_credit:
+            self.server.requests.append(
+                {"body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))}
+            )
+            data = (
+                b'{"error":{"code":"1113","message":"Insufficient balance or no resource '
+                b'package. Please recharge."}}'
+            )
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.server.max_in_flight is not None:
             with self.server.flight_lock:
                 busy = self.server.in_flight >= self.server.max_in_flight
@@ -894,6 +911,17 @@ def test_a_model_that_must_think_is_asked_again_without_the_thinking_field(
     first, *later = server.requests
     assert first["body"].get("thinking") == {"type": "disabled"}
     assert later and all("thinking" not in r["body"] for r in later)
+
+
+def test_an_account_out_of_credit_is_not_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Z.ai answers an empty balance with 429 (error 1113), the status of a rate limit: the
+    judge retried a request that waiting cannot fix. It now fails at once and says why."""
+    result, server, _ = _openai_compatible_score(tmp_path, monkeypatch, 200, out_of_credit=True)
+    assert result.status is ExecutionStatus.ERROR
+    assert "Insufficient balance" in (result.reason or "")
+    assert len(server.requests) == 1
 
 
 def test_a_burst_the_provider_refuses_backs_off_instead_of_failing() -> None:

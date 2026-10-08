@@ -45,7 +45,10 @@ COMMANDS: dict[str, str] = {
     "/app": "the application's runner: what it observes, missing evidence, resets, test worlds",
     "/world": "/world NAME|none - select one of the application's test worlds (a new draft)",
     "/report": "/report [html|markdown|json] - the current run's report, from stored facts",
-    "/compare": "/compare BASELINE CURRENT - paired stored-run comparison (no model)",
+    "/compare": (
+        "/compare BASELINE CURRENT [--judge \"CRITERIA\"] - paired stored-run comparison; "
+        "--judge also has a judge say which run's answers are better"
+    ),
     "/integrations": "external integrations: modes, data destinations, availability",
     "/plugins": "/plugins [install NAME [--yes]] - optional metric plugins (DeepEval, Ragas)",
     "/sessions": "sessions of this project",
@@ -470,16 +473,32 @@ class Commands:
         return CommandResult("/report", "report", {**facts, "exported": exported["paths"]})
 
     async def _compare(self, argument: str) -> CommandResult:
-        parts = argument.split()
-        if len(parts) != 2:
+        """`/compare BASELINE CURRENT`: the stored, paired comparison (no model). Adding
+        `--judge "CRITERIA"` has a judge also say, case by case, which run's answer is better
+        by those criteria (DeepEval's ArenaGEval, each case judged in both orders)."""
+        words = [_unquote(w) for w in shlex.split(argument, posix=False)]
+        criteria = None
+        if "--judge" in words:
+            at = words.index("--judge")
+            if at + 1 >= len(words):
+                words = []  # a usage error below
+            else:
+                criteria = words[at + 1]
+                words = words[:at] + words[at + 2 :]
+        if len(words) != 2:
             return CommandResult(
                 "/compare",
                 "error",
-                {"error": "usage: /compare BASELINE_RUN_ID CURRENT_RUN_ID"},
+                {
+                    "error": "usage: /compare BASELINE_RUN_ID CURRENT_RUN_ID "
+                    '[--judge "what makes an answer better"]'
+                },
                 ok=False,
                 exit_code=2,
             )
-        report = self.controller.compare_runs(parts[0], parts[1])
+        report = self.controller.compare_runs(words[0], words[1])
+        if criteria is not None:
+            report = {**report, "arena": await self.controller.judge_runs(words[0], words[1], criteria)}
         code = comparison_exit_code(report)
         return CommandResult(
             "/compare",
