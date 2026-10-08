@@ -769,6 +769,31 @@ class _EvaluationStates:
         return self._by_binding.get(identity)
 
 
+SAME_ANSWER_MIN_CASES = 3
+
+
+def same_answer_warning(storage: Storage, run_id: str) -> str | None:
+    """Every case got the same answer. An application failing quietly looks like a clean run:
+    LightRAG with its embedding server down answered "No relevant context found for the
+    query." to all 15 questions, with HTTP 200, and every execution counted as a success."""
+    latest: dict[tuple[str, int], Any] = {}
+    for attempt in storage.list_execution_attempts(run_id):  # oldest first
+        if attempt.status is ExecutionStatus.OK:
+            latest[(attempt.case_id, attempt.repetition_id)] = attempt.output
+    if len({case for case, _ in latest}) < SAME_ANSWER_MIN_CASES:
+        return None
+    answers = {json.dumps(output, sort_keys=True, default=str) for output in latest.values()}
+    if len(answers) != 1:
+        return None
+    output = next(iter(latest.values()))
+    shown = output if isinstance(output, str) else json.dumps(output, default=str)
+    shown = shown.strip() if len(shown) <= 120 else shown[:117].rstrip() + "..."
+    return (
+        f"every case got the same answer ({len(latest)} answers): {shown!r}; the application "
+        "may be failing without reporting an error (a backend it needs is down?)"
+    )
+
+
 def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
     record = storage.get_run(run_id)
     if record is None:
@@ -815,14 +840,17 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
                 evaluation.get("succeeded", 0) + len(settled) - len(newly_failed)
             )
             counts["evaluation"] = {k: v for k, v in evaluation.items() if v}
+    # Why the last session stopped early, if it said (storage failure, lease lost).
+    warnings = list(last_session["payload"].get("warnings") or []) if last_session else []
+    if record.status in _FINISHED and (same := same_answer_warning(storage, run_id)):
+        warnings.append(same)
     return {
         "run_id": run_id,
         "status": record.status,
         "counts": counts,
         "needs_attention": blocked,
         "budget": last_session["payload"].get("budget") if last_session else None,
-        # Why the last session stopped early, if it said (storage failure, lease lost).
-        "warnings": list(last_session["payload"].get("warnings") or []) if last_session else [],
+        "warnings": warnings,
         "last_event_sequence": events[-1]["sequence"] if events else 0,
     }
 
