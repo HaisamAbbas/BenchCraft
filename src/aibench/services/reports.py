@@ -552,6 +552,11 @@ def build_report(
     all_attempts = storage.list_evaluation_attempts(run_id)
     engine_scoring = params.get("scoring_id")
     rescoring_profiles, pass_order = _rescoring_profiles(events)
+    pass_accounting = {
+        event["payload"]["scoring_id"]: event["payload"]
+        for event in events
+        if event["event_type"] == "scoring_pass_completed"
+    }
     frozen = _profiles_from_manifest(params)
     planned_by_key: Counter[str] = Counter(
         str(parse_work_item_key(w.task_key, w.kind)[2]) for w in items if w.kind == "evaluation"
@@ -639,6 +644,9 @@ def build_report(
                 "evaluator_cost": _pass_cost(
                     [a for a in all_attempts if a.scoring_id == scoring_id]
                 ),
+                "budget": pass_accounting.get(scoring_id, {}).get("budget"),
+                "quotas": pass_accounting.get(scoring_id, {}).get("quotas"),
+                "stop_reason": pass_accounting.get(scoring_id, {}).get("stop_reason"),
             }
         )
     if derived:

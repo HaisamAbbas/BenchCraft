@@ -148,6 +148,15 @@ dataclass fields before storing a case.
 - **Trace import** (Prompt 16): `traces import RUN FILE` / `traces show RUN` attach OpenTelemetry (OTLP/JSON) traces to executions by correlation ID. Partial traces stay partial, and parent spans are not double counted.
 - **Opt-in caches** (Prompt 16): plan `cache: {executions, evaluations}`, with version-complete keys, provenance on every hit, and `cache list/clear`. Hits are excluded from latency and repeat claims.
 - **Provider-aware quotas** (Prompt 16): plan `quotas` limit work in flight and the start rate for the application or evaluator globs, and back off on HTTP 429/503.
+- **Stored-output rescoring**: `evaluate` and `/rescore` enforce the chosen plan's evaluator
+  call, reported-token, wall-time, projected-cost and quota limits. `score` inherits those
+  controls from the run's verified frozen plan; older smoke runs without a plan have no
+  implicit ceilings. Each scoring pass receives its own allowance, separate from original
+  execution spend. Retries consume that allowance; carried and inapplicable results do
+  not. JSON output and persisted pass events include the allowance, accounting and stop
+  reason. Time limits stop new dispatches; already started work retains its evaluation
+  timeout. Unknown token use is reported as unenforced, and monetary limits remain soft
+  estimates. Rescoring executes serially and never invokes the application.
 
 ## Not available yet
 

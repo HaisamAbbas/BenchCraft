@@ -1424,6 +1424,9 @@ class SessionController:
             "warnings": report.warnings,
             "application_invoked": False,
             "carried_forward": report.carried,
+            "budget": report.budget,
+            "quotas": report.quotas,
+            "stop_reason": report.stop_reason,
             "evaluated_now": len(report.results) - report.carried,
         }
 

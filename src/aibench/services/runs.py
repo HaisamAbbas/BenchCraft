@@ -909,6 +909,9 @@ async def evaluate_run(
         model_timeout_seconds=plan.model_evaluation_timeout_seconds,
         application=application,
         carry_forward=carry_forward,
+        budgets=plan.budgets,
+        quotas=plan.quotas,
+        retry=plan.retry,
     )
 
 

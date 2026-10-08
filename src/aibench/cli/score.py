@@ -269,12 +269,17 @@ def score(
             "run_id": report.run_id,
             "summaries": [s.as_dict() for s in report.summaries],
             "warnings": report.warnings,
+            "budget": report.budget,
+            "quotas": report.quotas,
+            "stop_reason": report.stop_reason,
         }
         console.print_json(data=payload)
         return
     console.print(f"scoring {report.scoring_id} of run {escape(report.run_id)} (recorded outputs)")
     for summary in report.summaries:
         _print_summary(summary)
+    if report.stop_reason:
+        console.print(f"  stopped: {escape(report.stop_reason)}")
     for warning in report.warnings:
         console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
 

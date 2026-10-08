@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="53" time="252.491" timestamp="2026-10-09T02:13:24.560211+05:00" hostname="Haisam-Abbas-G11"><testcase classname="tests.test_rescore_budgets" name="test_call_ceiling_is_shared_across_bindings_and_saved" time="0.188" /><testcase classname="tests.test_rescore_budgets" name="test_call_token_and_projected_cost_stop_new_invocations[limits0]" time="0.063" /><testcase classname="tests.test_rescore_budgets" name="test_call_token_and_projected_cost_stop_new_invocations[limits1]" time="0.094" /><testcase classname="tests.test_rescore_budgets" name="test_call_token_and_projected_cost_stop_new_invocations[limits2]" time="0.132" /><testcase classname="tests.test_rescore_budgets" name="test_unknown_usage_is_reported_and_cost_estimates_stop_dispatch" time="0.104" /><testcase classname="tests.test_rescore_budgets" name="test_cost_estimate_is_required_before_any_call_or_pass_event" time="0.046" /><testcase classname="tests.test_rescore_budgets" name="test_carried_results_do_not_spend_or_prepare_again" time="0.276" /><testcase classname="tests.test_rescore_budgets" name="test_missing_evidence_does_not_consume_the_next_eligible_call" time="0.088" /><testcase classname="tests.test_rescore_budgets" name="test_wall_limit_stops_after_current_evaluation" time="0.247" /><testcase classname="tests.test_rescore_budgets" name="test_wall_limit_expiring_during_prepare_prevents_evaluation" time="0.222" /><testcase classname="tests.test_rescore_budgets" name="test_rate_quota_is_shared_and_backpressure_delays_retry" time="0.405" /><testcase classname="tests.test_rescore_budgets" name="test_retry_cannot_bypass_call_ceiling" time="0.073" /><testcase classname="tests.test_rescore_budgets" name="test_cancel_while_waiting_for_quota_stops_promptly" time="0.163" /><testcase classname="tests.test_rescore_budgets" name="test_cli_rescore_obeys_declared_or_frozen_budget_without_rerunning_app[evaluate]" time="12.525"><failure message="AssertionError: Usage: aibench runs [OPTIONS] COMMAND [ARGS]...&#10;  Try 'aibench runs --help' for help.&#10;  ┌─ Error ─────────────────────────────────────────────────────────────────────┐&#10;  │ No such command 'report'.                                                   │&#10;  └─────────────────────────────────────────────────────────────────────────────┘&#10;  &#10;assert 2 == 0&#10; +  where 2 = &lt;Result SystemExit(2)&gt;.exit_code">tmp_path = WindowsPath('D:/BenchCraft/.pytest-tmp/1c9e6177/test_cli_rescore_obeys_declare0')
+command = 'evaluate'
+
+    @pytest.mark.parametrize("command", ["evaluate", "score"])
+    def test_cli_rescore_obeys_declared_or_frozen_budget_without_rerunning_app(
+        tmp_path: Path, command: str
+    ) -&gt; None:
+        h = Harness(tmp_path)
+        plan = h.plan(
+            dataset=h.dataset({"a": "hi", "b": "hi"}),
+            application=h.cli_app(),
+            budgets={"max_evaluator_calls": 1},
+        )
+        run_id = h.create(plan)
+        h.execute(run_id)
+        assert h.count() == 2
+        if command == "evaluate":
+            args = ["evaluate", run_id, "--plan", str(plan)]
+        else:
+            metrics = tmp_path / "metrics.json"
+            metrics.write_text(
+                json.dumps({"metrics": [{"metric": "native.exact_match"}]}), encoding="utf-8"
+            )
+            args = ["score", run_id, "--metrics", str(metrics)]
+        result = CliRunner().invoke(app, [*args, "--workspace", str(h.workspace.root.parent), "--json"])
+        assert result.exit_code == 0, result.output  # F06 separately fixes incomplete-pass exit codes.
+        data = json.loads(result.output)
+        assert data["budget"]["evaluator"]["calls"] == 1
+        assert data["summaries"][0]["completed"] == 1
+        assert "max_evaluator_calls=1" in data["stop_reason"]
+        assert h.count() == 2
+        stored = CliRunner().invoke(
+            app, ["runs", "report", run_id, "--workspace", str(h.workspace.root.parent), "--json"]
+        )
+&gt;       assert stored.exit_code == 0, stored.output
+E       AssertionError: Usage: aibench runs [OPTIONS] COMMAND [ARGS]...
+E         Try 'aibench runs --help' for help.
+E         ┌─ Error ─────────────────────────────────────────────────────────────────────┐
+E         │ No such command 'report'.                                                   │
+E         └─────────────────────────────────────────────────────────────────────────────┘
+E
+E       assert 2 == 0
+E        +  where 2 = &lt;Result SystemExit(2)&gt;.exit_code
+
+tests\test_rescore_budgets.py:308: AssertionError</failure></testcase><testcase classname="tests.test_rescore_budgets" name="test_cli_rescore_obeys_declared_or_frozen_budget_without_rerunning_app[score]" time="7.403"><failure message="AssertionError: Usage: aibench runs [OPTIONS] COMMAND [ARGS]...&#10;  Try 'aibench runs --help' for help.&#10;  ┌─ Error ─────────────────────────────────────────────────────────────────────┐&#10;  │ No such command 'report'.                                                   │&#10;  └─────────────────────────────────────────────────────────────────────────────┘&#10;  &#10;assert 2 == 0&#10; +  where 2 = &lt;Result SystemExit(2)&gt;.exit_code">tmp_path = WindowsPath('D:/BenchCraft/.pytest-tmp/1c9e6177/test_cli_rescore_obeys_declare1')
+command = 'score'
+
+
+    @pytest.mark.parametrize("command", ["evaluate", "score"])
+    def test_cli_rescore_obeys_declared_or_frozen_budget_without_rerunning_app(
+        tmp_path: Path, command: str
+    ) -&gt; None:
+        h = Harness(tmp_path)
+        plan = h.plan(
+            dataset=h.dataset({"a": "hi", "b": "hi"}),
+            application=h.cli_app(),
+            budgets={"max_evaluator_calls": 1},
+        )
+        run_id = h.create(plan)
+        h.execute(run_id)
+        assert h.count() == 2
+        if command == "evaluate":
+            policy = tmp_path / "bounded-policy.json"
+            policy.write_text(ExecutionPolicy(ceilings=BudgetLimits(max_evaluator_calls=1)).model_dump_json(), encoding="utf-8")
+            args = ["evaluate", run_id, "--plan", str(plan), "--policy", str(policy)]
+        else:
+            metrics = tmp_path / "metrics.json"
+            metrics.write_text(
+                json.dumps({"metrics": [{"metric": "native.exact_match"}]}), encoding="utf-8"
+            )
+            args = ["score", run_id, "--metrics", str(metrics)]
+        result = CliRunner().invoke(app, [*args, "--workspace", str(h.workspace.root.parent), "--json"])
+        assert result.exit_code == 0, result.output  # F06 separately fixes incomplete-pass exit codes.
+        data = json.loads(result.output)
+        assert data["budget"]["evaluator"]["calls"] == 1
+        assert data["summaries"][0]["completed"] == 1
+        assert "max_evaluator_calls=1" in data["stop_reason"]
+        assert h.count() == 2
+&gt;       stored = CliRunner().invoke(
+            app, ["runs", "report", run_id, "--workspace", str(h.workspace.root.parent), "--json"]
+        )
+E       AssertionError: Usage: aibench runs [OPTIONS] COMMAND [ARGS]...
+E         Try 'aibench runs --help' for help.
+E         ┌─ Error ─────────────────────────────────────────────────────────────────────┐
+E         │ No such command 'report'.                                                   │
+E         └─────────────────────────────────────────────────────────────────────────────┘
+E
+E       assert 2 == 0
+E        +  where 2 = &lt;Result SystemExit(2)&gt;.exit_code
+
+tests\test_rescore_budgets.py:308: AssertionError</failure></testcase><testcase classname="tests.test_reports" name="test_every_number_reconciles_with_the_stored_records" time="11.666" /><testcase classname="tests.test_reports" name="test_missing_accounting_is_never_totalled" time="0.031" /><testcase classname="tests.test_reports" name="test_percentiles_are_observed_values_by_nearest_rank" time="0.093" /><testcase classname="tests.test_reports" name="test_reports_regenerate_without_invoking_the_app_or_any_evaluator" time="16.162" /><testcase classname="tests.test_reports" name="test_a_partial_snapshot_keeps_pending_work_in_every_denominator" time="5.176" /><testcase classname="tests.test_reports" name="test_hostile_evidence_is_inert_in_html_and_markdown" time="1.530" /><testcase classname="tests.test_reports" name="test_case_content_can_be_withheld_and_raw_artifacts_are_only_referenced" time="13.355" /><testcase classname="tests.test_reports" name="test_no_content_withholds_case_derived_structured_metric_values" time="0.060" /><testcase classname="tests.test_reports" name="test_a_rescoring_pass_is_reported_separately_and_is_not_run_spend" time="14.741" /><testcase classname="tests.test_reports" name="test_runs_without_frozen_profiles_derive_them_and_say_so" time="13.466" /><testcase classname="tests.test_reports" name="test_release_gates_use_selected_cases_and_drive_exit_code_1" time="22.187" /><testcase classname="tests.test_reports" name="test_a_lost_observation_can_only_fail_a_gate" time="9.346" /><testcase classname="tests.test_reports" name="test_gates_must_name_an_existing_binding" time="0.027" /><testcase classname="tests.test_reports" name="test_report_facts_copy_numbers_without_recomputing" time="10.503" /><testcase classname="tests.test_report_review_regressions" name="test_a_rescore_keeps_work_that_never_ran_in_its_denominator" time="6.046" /><testcase classname="tests.test_report_review_regressions" name="test_free_text_reasons_never_become_codes" time="0.019" /><testcase classname="tests.test_report_review_regressions" name="test_doctor_never_prints_credentials_from_a_provider_config" time="1.258" /><testcase classname="tests.test_report_review_regressions" name="test_the_claim_check_catches_invented_numbers_the_review_found" time="0.042" /><testcase classname="tests.test_report_review_regressions" name="test_chat_run_starts_a_clear_request_without_second_confirmation" time="30.040" /><testcase classname="tests.test_report_review_regressions" name="test_runs_without_an_engine_pass_report_one_named_pass_and_record_profiles" time="11.332" /><testcase classname="tests.test_report_review_regressions" name="test_terminal_report_never_shows_missing_accounting_as_zero" time="6.941" /><testcase classname="tests.test_report_review_regressions" name="test_run_dir_stores_the_run_in_that_project" time="15.334" /><testcase classname="tests.test_report_review_regressions" name="test_init_on_a_file_is_invalid_input_not_a_crash" time="0.296" /><testcase classname="tests.test_report_review_regressions" name="test_run_output_sanitizes_gate_ids" time="10.475" /><testcase classname="tests.test_report_review_regressions" name="test_status_line_does_not_call_a_finished_run_a_snapshot" time="0.026" /><testcase classname="tests.test_report_review_regressions" name="test_benchmark_default_output_does_not_replace_the_project_plan" time="0.889" /><testcase classname="tests.test_report_review_regressions" name="test_a_pass_rate_gate_needs_a_decision_rule" time="0.468" /><testcase classname="tests.test_report_review_regressions" name="test_export_needs_an_export_verb_and_a_report_object" time="0.010" /><testcase classname="tests.test_report_review_regressions" name="test_error_results_are_not_claim_sources" time="1.138" /><testcase classname="tests.test_rescore_carry_forward" name="test_a_carry_forward_pass_evaluates_only_what_failed" time="0.171" /><testcase classname="tests.test_rescore_carry_forward" name="test_without_carry_forward_every_case_is_evaluated_again" time="0.123" /><testcase classname="tests.test_rescore_carry_forward" name="test_nothing_is_carried_when_the_metric_settings_changed" time="0.092" /><testcase classname="tests.test_rescore_carry_forward" name="test_a_failed_result_is_never_carried_and_a_missing_metric_is_evaluated" time="0.197" /><testcase classname="tests.test_rescore_carry_forward" name="test_the_rescore_command_carries_by_default_and_all_evaluates_everything" time="5.235" /><testcase classname="tests.test_rescore_carry_forward" name="test_needs_attention_clears_once_a_rescore_has_finished_what_the_run_left_failed" time="0.119" /><testcase classname="tests.test_rescore_carry_forward" name="test_an_evaluation_a_rescore_could_not_finish_needs_attention_even_if_the_run_was_clean" time="0.106" /><testcase classname="tests.test_rescore_carry_forward" name="test_a_failure_left_under_old_judge_settings_clears_when_the_new_settings_scored_it" time="0.148" /><testcase classname="tests.test_rescore_carry_forward" name="test_an_evaluation_the_run_never_reached_needs_attention_until_a_rescore_scores_it" time="0.134" /></testsuite></testsuites>

@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F19",
+  "current_item": "F01",
   "items": [
     {
       "id": "F01",
@@ -13,9 +13,15 @@
       "title": "Rescoring bypasses runtime budget enforcement",
       "detail": "Runtime reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "96 initial affected tests passed; 15 final budget tests passed",
+        "38 additional existing report regressions passed",
+        "Mypy: 140 source files passed; Ruff src/tests/plugins passed",
+        "Plan/policy and frozen-plan limits; token/cost/time/quotas/retries/carry/cancel verified",
+        "Unicode hash mismatch identified by review and fixed"
+      ],
+      "review": "evidence/F01-review.md",
       "commit": null,
       "pushed": false
     },
@@ -244,7 +250,7 @@
       "title": "Comparison ignores selected work and uses workspace-wide dataset cases as its denominator",
       "detail": "Distinct-run CLI reproduction",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "86 affected tests passed",
         "Mypy: 140 source files passed",
@@ -252,8 +258,8 @@
         "CLI limits/samples/predicates/repetitions/partial/rescore selected denominators verified"
       ],
       "review": "evidence/F19-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "974a822f4ad92cc2344e67613d08ddadfa36d48c",
+      "pushed": true
     },
     {
       "id": "G01",

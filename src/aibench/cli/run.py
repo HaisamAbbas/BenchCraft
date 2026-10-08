@@ -299,6 +299,9 @@ def evaluate(
         "summaries": [s.as_dict() for s in report.summaries],
         "warnings": report.warnings,
         "carried_forward": report.carried,
+        "budget": report.budget,
+        "quotas": report.quotas,
+        "stop_reason": report.stop_reason,
     }
     if json_output:
         console.print_json(data=data)
@@ -308,6 +311,8 @@ def evaluate(
     )
     if report.carried:
         console.print(f"  carried forward {report.carried} finished result(s)")
+    if report.stop_reason:
+        console.print(f"  stopped: {escape(report.stop_reason)}")
     for s in report.summaries:
         console.print(
             f"  {s.metric_id}@{s.metric_version}: completed={s.completed}/{s.selected} "
