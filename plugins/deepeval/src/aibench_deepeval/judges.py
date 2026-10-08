@@ -97,8 +97,18 @@ class _BadJSON(RuntimeError):
 
 
 class _ReasoningRequired(_BadJSON):
-    """The model refuses to run with thinking switched off (GLM 5.3 Flash on OpenRouter: "Reasoning
-    is mandatory"). Asked again with the field left out, like a reply that cannot be read."""
+    """The model refuses to run with thinking switched off. Asked again with the field left
+    out, like a reply that cannot be read."""
+
+
+# How providers say a model cannot stop thinking (HTTP 400): OpenRouter "Reasoning is
+# mandatory for this endpoint and cannot be disabled"; Z.ai error 1210 "This model always
+# engages in thinking and cannot be disabled; please use low, high, or max".
+_THINKING_REQUIRED = re.compile(
+    r"reasoning is mandatory|always engages in thinking|thinking[^.]{0,40}cannot be disabled"
+    r'|"code"\s*:\s*"?1210\b',
+    re.IGNORECASE,
+)
 
 
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
@@ -370,7 +380,7 @@ class _OpenAICompatible:
             if (
                 response.status_code == 400
                 and self._thinking == "disabled"
-                and "reasoning is mandatory" in detail.lower()
+                and _THINKING_REQUIRED.search(detail)
             ):
                 self._thinking = "default"  # this model always thinks: stop asking it not to
                 raise _ReasoningRequired(f"judge HTTP 400: {detail}")

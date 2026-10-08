@@ -371,7 +371,7 @@ class _JudgeServer(ThreadingHTTPServer):
         trickle: bool = False,
         gzip_replies: bool = False,
         garbled_first: int = 0,
-        reasoning_required: bool = False,
+        reasoning_required: bool | dict[str, Any] = False,
     ) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
         self.status = status
@@ -430,7 +430,11 @@ class _JudgeHandler(BaseHTTPRequestHandler):
         ).get("enabled") is False
         refused = self.server.reasoning_required and thinking_off
         if refused:
-            payload = {"error": {"message": "Reasoning is mandatory for this endpoint and cannot be disabled.", "code": 400}}
+            payload = (
+                self.server.reasoning_required
+                if isinstance(self.server.reasoning_required, dict)
+                else OPENROUTER_THINKING_REFUSAL
+            )
         elif limited:
             payload: Any = {"error": {"code": "1302", "message": "rate limit reached"}}
         elif self.server.status != 200:
@@ -777,17 +781,40 @@ def test_a_compressed_reply_that_is_garbled_in_transit_is_asked_again(
     assert len(server.requests) >= 2
 
 
+# How each provider refuses to run a model with thinking off, word for word (HTTP 400).
+OPENROUTER_THINKING_REFUSAL = {
+    "error": {
+        "message": "Reasoning is mandatory for this endpoint and cannot be disabled.",
+        "code": 400,
+    }
+}
+ZAI_THINKING_REFUSAL = {
+    "error": {
+        "code": "1210",
+        "message": (
+            "This model always engages in thinking and cannot be disabled; please use low, "
+            "high, or max"
+        ),
+    }
+}
+
+
+@pytest.mark.parametrize(
+    "refusal", [OPENROUTER_THINKING_REFUSAL, ZAI_THINKING_REFUSAL], ids=["openrouter", "zai"]
+)
 def test_a_model_that_must_think_is_asked_again_without_the_thinking_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: dict[str, Any]
 ) -> None:
-    """GLM 5.3 Flash on OpenRouter answers 400 "Reasoning is mandatory" to the request that
-    switches thinking off, which the judge sends by default: it drops the field and asks again."""
+    """GLM 5.3 Flash answers 400 to the request that switches thinking off, which the judge
+    sends by default on OpenRouter and Z.ai: it drops the field and asks again. Z.ai words it
+    differently (error 1210), and that one was not recognised: every call failed unless the
+    project set `thinking: default` by hand."""
     result, server, _ = _openai_compatible_score(
         tmp_path,
         monkeypatch,
         200,
         {"thinking": "disabled"},
-        reasoning_required=True,
+        reasoning_required=refusal,
     )
     assert result.status is ExecutionStatus.OK, result.reason
     first, *later = server.requests
