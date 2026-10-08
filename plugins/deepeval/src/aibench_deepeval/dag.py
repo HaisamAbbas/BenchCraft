@@ -14,7 +14,13 @@ The graph is data, not code, and it is checked here before DeepEval sees it:
   is ignored, and is refused all the same),
 * at most `MAX_NODES` nodes, `MAX_DEPTH` deep, every text at most `MAX_TEXT` characters,
 * every field a node shows the judge is one the plan names in `evaluation_params`, so the
-  harness knows which case fields to send to the worker.
+  harness knows which case fields to send to the worker,
+* mistakes upstream only reports while judging (a starting node that reads nothing, a yes/no
+  node without both answers) are reported before any case runs.
+
+`deepeval.conversational_dag` is the same graph over a conversation (DeepEval's
+ConversationalDAGMetric): nodes read conversation fields (`role`, `content`, ...) and may look
+at a `turn_window` [first, last] of turns; each turn is scored on the conversation so far.
 """
 
 from __future__ import annotations
@@ -24,6 +30,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from aibench.core.models import EvaluatorManifest
+from aibench.evaluators.protocol import EvaluationView
+from aibench_deepeval.conversational import (
+    _GEVAL_EXTRA,
+    ConversationalMetric,
+    ConversationSpec,
+)
+from aibench_deepeval.conversational import _manifest as _conversation_manifest
 from aibench_deepeval.judges import JUDGE_SCHEMA, build_judge
 from aibench_deepeval.metrics import (
     FIELDS,
@@ -36,10 +49,16 @@ from aibench_deepeval.metrics import (
 MAX_NODES = 40
 MAX_DEPTH = 8
 MAX_TEXT = 4000
+MAX_TURN = 1000
 
-# Fields a DAG node may show the judge, beyond the question and the answer it always has.
+# Fields a single-turn node may show the judge; the question and the answer always.
 DAG_FIELDS = ("input", "actual_output", "expected_output", "retrieval_context", "context")
 _EXTRA_FIELDS = tuple(name for name in DAG_FIELDS if name not in ("input", "actual_output"))
+# A conversation's: each turn's role and content always, and what the plan names besides.
+# Upstream's conversation nodes read their fields off each message (Turn), so only what a
+# message carries: a conversation-level field such as expected_outcome failed while judging.
+_CONVERSATION_EXTRA = ("retrieval_context", "tools_called")
+CONVERSATION_FIELDS = ("role", "content", *_CONVERSATION_EXTRA)
 
 _NODE_KEYS = {
     "TaskNode": {"type", "instructions", "output_label", "label", "evaluation_params", "children"},
@@ -56,7 +75,9 @@ _REQUIRED = {
 _GEVAL_KEYS = {"type", "name", "criteria", "evaluation_steps", "evaluation_params"}
 
 
-def validate_dag(document: Any, allowed_fields: tuple[str, ...] = DAG_FIELDS) -> list[str]:
+def validate_dag(
+    document: Any, allowed_fields: tuple[str, ...] = DAG_FIELDS, *, multiturn: bool = False
+) -> list[str]:
     """Every problem with a DAG document, or an empty list when it is safe to build."""
     if not isinstance(document, Mapping) or set(document) != {"nodes"}:
         return ["the DAG must be an object with exactly one key, 'nodes'"]
@@ -68,7 +89,7 @@ def validate_dag(document: Any, allowed_fields: tuple[str, ...] = DAG_FIELDS) ->
     problems: list[str] = []
     children: dict[str, list[str]] = {}
     for node_id, node in nodes.items():
-        problems += _check_node(str(node_id), node, nodes, allowed_fields)
+        problems += _check_node(str(node_id), node, nodes, allowed_fields, multiturn)
         children[str(node_id)] = _children_of(node)
     if problems:
         return problems
@@ -82,7 +103,7 @@ def validate_dag(document: Any, allowed_fields: tuple[str, ...] = DAG_FIELDS) ->
             return [
                 (
                     f"node '{root}' starts the graph, so it needs 'evaluation_params' "
-                    '(the fields it reads, for example ["input", "actual_output"])'
+                    f"(the fields it reads, for example {list(allowed_fields[:2])})"
                 )
             ]
     depth = _depth(children, roots)
@@ -123,17 +144,51 @@ def _check_params(where: str, value: Any, allowed_fields: tuple[str, ...]) -> li
     return []
 
 
+def _check_window(where: str, window: Any) -> list[str]:
+    if (
+        not isinstance(window, list)
+        or len(window) != 2
+        or not all(isinstance(t, int) and not isinstance(t, bool) for t in window)
+        or not 0 <= window[0] < window[1] <= MAX_TURN
+    ):
+        return [
+            (
+                f"{where}: 'turn_window' must be [first, last] message numbers, "
+                f"0 <= first < last <= {MAX_TURN} (0 is the first user message, 1 the "
+                "first answer)"
+            )
+        ]
+    return []
+
+
+def window_end(document: Mapping[str, Any]) -> int | None:
+    """The last message any node's `turn_window` reaches, or None without windows."""
+    ends = [
+        node["turn_window"][1]
+        for node in document["nodes"].values()
+        if isinstance(node, Mapping) and node.get("turn_window")
+    ]
+    return max(ends) if ends else None
+
+
 def _check_node(
-    node_id: str, node: Any, nodes: Mapping[str, Any], allowed_fields: tuple[str, ...]
+    node_id: str,
+    node: Any,
+    nodes: Mapping[str, Any],
+    allowed_fields: tuple[str, ...],
+    multiturn: bool,
 ) -> list[str]:
     where = f"node '{node_id}'"
     if not isinstance(node, Mapping) or node.get("type") not in _NODE_KEYS:
         return [f"{where}: 'type' must be one of {sorted(_NODE_KEYS)}"]
     kind = str(node["type"])
+    allowed_keys = set(_NODE_KEYS[kind])
+    if multiturn and kind != "VerdictNode":
+        allowed_keys.add("turn_window")
     problems = [
         f"{where}: key '{key}' is not allowed on a {kind}"
         for key in node
-        if key not in _NODE_KEYS[kind]
+        if key not in allowed_keys
     ]
     for key in _REQUIRED[kind]:
         if key not in node:
@@ -145,6 +200,8 @@ def _check_node(
         problems += _check_params(
             f"{where}: 'evaluation_params'", node["evaluation_params"], allowed_fields
         )
+    if "turn_window" in node and "turn_window" in allowed_keys:
+        problems += _check_window(where, node["turn_window"])
     if kind == "VerdictNode":
         return problems + _check_verdict(where, node, nodes, allowed_fields)
     if kind == "BinaryJudgementNode":
@@ -240,16 +297,51 @@ def _depth(children: dict[str, list[str]], roots: list[str]) -> int | None:
     return None if any(level is None for level in levels) else max(levels)  # type: ignore[type-var]
 
 
-def node_fields(document: Mapping[str, Any]) -> set[str]:
-    """Every field any node of a (valid) document shows the judge."""
-    shown: set[str] = set()
-    for node in document["nodes"].values():
-        shown.update(node.get("evaluation_params") or [])
-        child = node.get("child")
-        if isinstance(child, Mapping) and child.get("type") == "geval":
-            shown.update(child.get("evaluation_params") or [])
-    return shown
+def build_graph(document: Mapping[str, Any], judge: Any, *, multiturn: bool) -> Any:
+    """A fresh graph for one case: a graph keeps what the judge decided on its nodes. Upstream
+    builds each G-Eval child with DeepEval's default model (an OpenAI key); here it is built
+    with the plan's judge."""
+    import deepeval.metrics.dag.serialization.serialization as upstream
+    from deepeval.metrics import ConversationalGEval, GEval
+    from deepeval.metrics.dag import dag_from_dict
+    from deepeval.test_case import MultiTurnParams, SingleTurnParams
 
+    def build_geval(spec: dict[str, Any], multiturn: bool) -> Any:
+        if multiturn:
+            cls: Any = ConversationalGEval
+            params: Any = MultiTurnParams
+            default = ("role", "content")
+        else:
+            cls, params, default = GEval, SingleTurnParams, ("input", "actual_output")
+        return cls(
+            name=spec.get("name") or "decision tree step",
+            criteria=spec.get("criteria"),
+            evaluation_steps=spec.get("evaluation_steps"),
+            evaluation_params=[params(name) for name in spec.get("evaluation_params") or default],
+            model=judge,
+        )
+
+    original = upstream._build_geval
+    upstream._build_geval = build_geval  # type: ignore[assignment]
+    try:  # no await between the two lines: nothing else sees the patched function
+        return dag_from_dict(copy.deepcopy(dict(document)), multiturn=multiturn)
+    finally:
+        upstream._build_geval = original  # type: ignore[assignment]
+
+
+_DAG_SCHEMA = {
+    "type": "object",
+    "required": ["nodes"],
+    "additionalProperties": False,
+    "properties": {"nodes": {"type": "object", "minProperties": 1, "maxProperties": MAX_NODES}},
+}
+_TREE_LIMITS = (
+    "The tree is part of the metric: runs with different trees are not comparable.",
+    (
+        f"The tree is limited to {MAX_NODES} nodes and {MAX_DEPTH} levels, with only task, "
+        "judgement and verdict nodes and G-Eval children."
+    ),
+)
 
 DAG_SPEC = Spec(
     "dag",
@@ -273,11 +365,7 @@ class Dag(DeepEvalMetric):
             ),
             "limitations": (
                 "Judge-dependent: scores from different judge models are not comparable.",
-                "The tree is part of the metric: runs with different trees are not comparable.",
-                (
-                    f"The tree is limited to {MAX_NODES} nodes and {MAX_DEPTH} levels, with "
-                    "only task, judgement and verdict nodes and G-Eval children."
-                ),
+                *_TREE_LIMITS,
             ),
             "parameter_requirements": {
                 "evaluation_params": {
@@ -292,18 +380,7 @@ class Dag(DeepEvalMetric):
                 "properties": {
                     "judge": JUDGE_SCHEMA,
                     "name": {"type": "string", "minLength": 1, "maxLength": 80},
-                    "dag": {
-                        "type": "object",
-                        "required": ["nodes"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "nodes": {
-                                "type": "object",
-                                "minProperties": 1,
-                                "maxProperties": MAX_NODES,
-                            }
-                        },
-                    },
+                    "dag": _DAG_SCHEMA,
                     "evaluation_params": {
                         "type": "array",
                         "uniqueItems": True,
@@ -315,8 +392,7 @@ class Dag(DeepEvalMetric):
     )
 
     def _allowed_fields(self) -> tuple[str, ...]:
-        extra = tuple(self.params.get("evaluation_params") or ())
-        return ("input", "actual_output", *extra)
+        return ("input", "actual_output", *(self.params.get("evaluation_params") or ()))
 
     async def prepare(self, params: Any) -> None:
         self.params = dict(params)
@@ -324,45 +400,118 @@ class Dag(DeepEvalMetric):
         if problems:
             raise ValueError("the DAG is not valid: " + "; ".join(problems))
         await super().prepare(params)
-        self._build(build_judge(self.params["judge"]))  # fail here, not on the first case
+        # Build once now so a graph upstream refuses fails here, not on the first case.
+        build_graph(self.params["dag"], build_judge(self.params["judge"]), multiturn=False)
 
     def _fields(self) -> tuple[str, ...]:
         return tuple(name for name in DAG_FIELDS if name in self._allowed_fields())
-
-    def _build(self, judge: Any) -> Any:
-        """A fresh graph for one case: it keeps what the judge decided on its nodes. Upstream
-        builds each G-Eval child with DeepEval's default model (an OpenAI key); it is built
-        with the plan's judge here instead."""
-        import deepeval.metrics.dag.serialization.serialization as upstream
-        from deepeval.metrics import GEval as UpstreamGEval
-        from deepeval.metrics.dag import dag_from_dict
-        from deepeval.test_case import SingleTurnParams
-
-        def build_geval(spec: dict[str, Any], multiturn: bool) -> Any:
-            return UpstreamGEval(
-                name=spec.get("name") or "decision tree step",
-                criteria=spec.get("criteria"),
-                evaluation_steps=spec.get("evaluation_steps"),
-                evaluation_params=[
-                    SingleTurnParams(name)
-                    for name in spec.get("evaluation_params") or ("input", "actual_output")
-                ],
-                model=judge,
-            )
-
-        original = upstream._build_geval
-        upstream._build_geval = build_geval  # type: ignore[assignment]
-        try:  # no await between the two lines: nothing else sees the patched function
-            return dag_from_dict(copy.deepcopy(self.params["dag"]))
-        finally:
-            upstream._build_geval = original  # type: ignore[assignment]
 
     def _new_metric(self, judge: Any) -> Any:
         from deepeval.metrics import DAGMetric
 
         return DAGMetric(
             name=self.params.get("name") or "decision tree",
-            dag=self._build(judge),
+            dag=build_graph(self.params["dag"], judge, multiturn=False),
+            model=judge,
+            threshold=0.5,
+            include_reason=True,
+            async_mode=True,
+            strict_mode=False,
+            verbose_mode=False,
+        )
+
+
+# --------------------------------------------------------------------------- conversations
+
+CONVERSATIONAL_DAG_SPEC = ConversationSpec(
+    "conversational_dag",
+    "ConversationalDAGMetric",
+    "a judge walks a decision tree you write over the conversation",
+    ("custom_criteria",),
+)
+
+
+class ConversationalDag(ConversationalMetric):
+    """The DAG over a conversation: nodes read the turns' role and content, and the fields the
+    plan names in `evaluation_params`; each may narrow to a `turn_window`."""
+
+    spec = CONVERSATIONAL_DAG_SPEC
+    manifest = EvaluatorManifest(
+        **{
+            **_conversation_manifest(CONVERSATIONAL_DAG_SPEC).model_dump(),
+            "description": (
+                f"DeepEval {PINNED_DEEPEVAL} ConversationalDAGMetric: a judge walks the "
+                "decision tree the plan states over the conversation up to each turn (0 to 1)."
+            ),
+            "limitations": (
+                "Judge-dependent: scores from different judge models are not comparable.",
+                *_TREE_LIMITS,
+                (
+                    "Each turn is scored on the conversation so far; an episode's last turn "
+                    "carries the whole conversation's score."
+                ),
+                (
+                    "Nodes read what each message carries (role, content, retrieved passages, "
+                    "tool calls), not the expected outcome: upstream reads node fields per "
+                    "message. A turn_window counts messages, user and assistant alike; a turn "
+                    "whose conversation does not reach it yet is not applicable."
+                ),
+            ),
+            "parameter_requirements": {
+                "evaluation_params": {k: _GEVAL_EXTRA[k] for k in _CONVERSATION_EXTRA}
+            },
+            "parameters_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["judge", "dag"],
+                "properties": {
+                    "judge": JUDGE_SCHEMA,
+                    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                    "dag": _DAG_SCHEMA,
+                    "evaluation_params": {
+                        "type": "array",
+                        "uniqueItems": True,
+                        "items": {"enum": list(_CONVERSATION_EXTRA)},
+                    },
+                },
+            },
+        }
+    )
+
+    def _allowed_fields(self) -> tuple[str, ...]:
+        return ("role", "content", *(self.params.get("evaluation_params") or ()))
+
+    def _reads(self) -> tuple[bool, bool, bool]:
+        chosen = self._allowed_fields()
+        return (
+            "retrieval_context" in chosen,
+            "tools_called" in chosen,
+            "expected_outcome" in chosen,
+        )
+
+    def _test_case(self, view: EvaluationView) -> tuple[Any | None, str | None]:
+        """A turn is scored on the conversation so far, so an early turn may not reach a node's
+        window yet: upstream fails such a case, here it is not applicable."""
+        test_case, not_applicable = super()._test_case(view)
+        end = window_end(self.params["dag"])
+        if test_case is not None and end is not None and end >= len(test_case.turns):
+            return None, f"turn_window_beyond_conversation:{len(test_case.turns)}"
+        return test_case, not_applicable
+
+    async def prepare(self, params: Any) -> None:
+        self.params = dict(params)
+        problems = validate_dag(self.params.get("dag"), self._allowed_fields(), multiturn=True)
+        if problems:
+            raise ValueError("the DAG is not valid: " + "; ".join(problems))
+        await super().prepare(params)
+        build_graph(self.params["dag"], build_judge(self.params["judge"]), multiturn=True)
+
+    def _new_metric(self, judge: Any) -> Any:
+        from deepeval.metrics import ConversationalDAGMetric
+
+        return ConversationalDAGMetric(
+            name=self.params.get("name") or "decision tree",
+            dag=build_graph(self.params["dag"], judge, multiturn=True),
             model=judge,
             threshold=0.5,
             include_reason=True,

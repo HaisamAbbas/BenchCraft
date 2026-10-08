@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from aibench.core.models import ExecutionStatus
+from aibench.core.models import ExecutionStatus, ReferenceAnswer
 from aibench.registry import BindingValidationError, EvaluatorRegistry
 from tests.deepeval_support import JUDGES, PLUGIN_ENV, plugin_python, requires_plugin_env
 from tests.scoring_support import Seeded, case, execution
@@ -217,3 +217,113 @@ def test_a_graph_that_reads_the_expected_answer_needs_it_named_and_present(tmp_p
     assert result.value.value == 1.0
     unnamed = _score(tmp_path / "unnamed", {"dag": reads_expected}, expected="x")
     assert unnamed.status is ExecutionStatus.ERROR  # the graph reads a field the plan never named
+
+
+# --------------------------------------------------------------------------- conversations
+
+CONVERSATION: dict[str, Any] = {
+    "nodes": {
+        "asked": {
+            "type": "BinaryJudgementNode",
+            "criteria": "Did the assistant ask the user a question at some point?",
+            "evaluation_params": ["role", "content"],
+            "turn_window": [0, 1],
+            "children": ["yes", "no"],
+        },
+        "yes": {"type": "VerdictNode", "verdict": True, "score": 10},
+        "no": {
+            "type": "VerdictNode",
+            "verdict": False,
+            "child": {
+                "type": "geval",
+                "name": "helpful",
+                "criteria": "The assistant moves the conversation forward.",
+            },
+        },
+    }
+}
+CONVERSATION_FIELDS = ["role", "content"]
+
+
+def test_a_turn_window_belongs_to_conversations_only() -> None:
+    def problems(document: Any, multiturn: bool) -> list[str]:
+        return plugin_python(
+            "import json;from aibench_deepeval.dag import validate_dag;"
+            f"print(json.dumps(validate_dag({document!r}, tuple({CONVERSATION_FIELDS!r}) "
+            f"if {multiturn!r} else ('input', 'actual_output'), multiturn={multiturn!r})))"
+        )
+
+    assert problems(CONVERSATION, True) == []
+    single = copy.deepcopy(CONVERSATION)
+    single["nodes"]["asked"]["evaluation_params"] = ["input", "actual_output"]
+    assert any("'turn_window' is not allowed" in p for p in problems(single, False))
+    for window in ([5, 2], [3, 3], [-1, 2]):  # upstream needs first < last, both >= 0
+        backwards = copy.deepcopy(CONVERSATION)
+        backwards["nodes"]["asked"]["turn_window"] = window
+        assert "0 <= first < last" in problems(backwards, True)[0], window
+    wrong_fields = copy.deepcopy(CONVERSATION)
+    wrong_fields["nodes"]["asked"]["evaluation_params"] = ["input"]
+    assert "evaluation_params allow only" in problems(wrong_fields, True)[0]
+
+
+def _conversation(tmp_path: Path, params: dict[str, Any], references: bool = False) -> Any:
+    seeded = Seeded(tmp_path)
+    t2 = case("t2", group_id="ep")
+    if references:
+        t2 = t2.model_copy(update={"reference": ReferenceAnswer(answer="Order A17 is refunded.")})
+    seeded.seed(
+        [case("t1", group_id="ep"), t2, case("solo")],
+        [
+            execution("t1", "When did you buy it?"),
+            execution("t2", "Order A17 is refunded."),
+            execution("solo", "Hello."),
+        ],
+    )
+    binding = {"metric": "deepeval.conversational_dag", "params": {"judge": AGREEING, **params}}
+    report = seeded.score([binding], registry=_registry(), timeout_seconds=300)
+    return {r.case_id: r for r in report.results}
+
+
+def test_a_conversation_graph_scores_each_turn_on_the_conversation_so_far(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each turn of an episode is judged on the conversation up to it; a case in no episode
+    is not applicable; the G-Eval child needs no OpenAI key."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    by_case = _conversation(tmp_path, {"dag": CONVERSATION, "name": "asks first"})
+    for turn in ("t1", "t2"):
+        assert by_case[turn].status is ExecutionStatus.OK, by_case[turn].reason
+        assert by_case[turn].value.value == 1.0
+    assert (by_case["solo"].status, by_case["solo"].reason) == (
+        ExecutionStatus.NOT_APPLICABLE,
+        "missing:case.group_id",
+    )
+
+
+def test_a_conversation_graph_reads_what_each_message_carries_not_the_expected_outcome(
+    tmp_path: Path,
+) -> None:
+    """Upstream's conversation nodes read their fields off each message: a node told to read
+    the expected outcome failed while judging ("'Turn' object has no attribute"). It is refused
+    before any case runs; retrieved passages, which a message carries, are allowed."""
+    reads_outcome = copy.deepcopy(CONVERSATION)
+    reads_outcome["nodes"]["asked"]["evaluation_params"] = ["role", "content", "expected_outcome"]
+    with pytest.raises(BindingValidationError):
+        _conversation(tmp_path, {"dag": reads_outcome, "evaluation_params": ["expected_outcome"]})
+    unnamed = _conversation(tmp_path / "unnamed", {"dag": reads_outcome})
+    assert unnamed["t2"].status is ExecutionStatus.ERROR
+    assert "expected_outcome" in (unnamed["t2"].reason or "")
+
+
+def test_a_turn_that_does_not_reach_the_window_yet_is_not_applicable(tmp_path: Path) -> None:
+    """Upstream fails a case whose conversation is shorter than a node's window. A turn is
+    scored on the conversation so far, so the first turn (2 messages) cannot reach messages
+    2 and 3 yet, and is not applicable; the second turn (4 messages) is scored."""
+    later = copy.deepcopy(CONVERSATION)
+    later["nodes"]["asked"]["turn_window"] = [2, 3]
+    by_case = _conversation(tmp_path, {"dag": later})
+    assert (by_case["t1"].status, by_case["t1"].reason) == (
+        ExecutionStatus.NOT_APPLICABLE,
+        "turn_window_beyond_conversation:2",
+    )
+    assert by_case["t2"].status is ExecutionStatus.OK, by_case["t2"].reason

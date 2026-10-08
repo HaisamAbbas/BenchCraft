@@ -35,7 +35,7 @@ benchcraft              # say what to check; /plan, /run, /report
 
 For a RAG app, add `--context-path /sources` (and `--context-text-path /text` when each
 source is an object) so metrics such as faithfulness see the documents it retrieved.
-`/plugins install deepeval` in the chat adds DeepEval's 37 metrics from the same release.
+`/plugins install deepeval` in the chat adds DeepEval's 39 metrics from the same release.
 
 ## Quickstart
 

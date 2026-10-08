@@ -34,6 +34,27 @@ toxicity and the other safety metrics that way), and is decided by the plan's ru
 | `exact_match` | answer, reference answer | nothing |
 | `pattern_match` | answer | `pattern` |
 | `g_eval` | what `evaluation_params` names (default: question, answer) | judge, `name`, `criteria` or `evaluation_steps`; optional `rubric`, `repeats` (1 to 9, default 3: the median of that many judge scores; scores more than 0.3 apart are reported as unstable) |
+| `dag` | what its nodes' `evaluation_params` name; beyond question and answer, only fields the plan's `evaluation_params` lists | judge, `dag`; optional `name`, `evaluation_params` |
+
+**DAG: a decision tree as JSON.** The judge walks the tree; the verdict it lands on gives the
+score (0 to 10, reported as 0 to 1) or hands over to a G-Eval for the grade. A starting node
+names the fields it reads; a node under a task node reads that task's output, plus whatever
+its own `evaluation_params` adds. A yes/no node needs one `true` and one `false` verdict:
+
+```json
+{"metric": "deepeval.dag", "params": {"name": "states one amount", "dag": {"nodes": {
+  "judge": {"type": "BinaryJudgementNode", "criteria": "Does the answer state exactly one amount?",
+            "evaluation_params": ["input", "actual_output"], "children": ["yes", "no"]},
+  "yes": {"type": "VerdictNode", "verdict": true, "child": {"type": "geval", "name": "clarity",
+          "criteria": "The amount is stated clearly.", "evaluation_params": ["input", "actual_output"]}},
+  "no": {"type": "VerdictNode", "verdict": false, "score": 0}}}}}
+```
+
+Checked before any case runs: only the node types `TaskNode`, `BinaryJudgementNode`,
+`NonBinaryJudgementNode` and `VerdictNode` and the keys each needs; a verdict's child is a node
+or a `geval`, never a `metric` (upstream builds those with their own default model, not the
+plan's judge); at most 40 nodes, 8 levels and 4000 characters per text. A G-Eval child is
+graded by the plan's judge (upstream would use DeepEval's default model and need an OpenAI key).
 
 Field mapping: `case.input` -> `input`, `execution.output` -> `actual_output`,
 `case.reference.answer` -> `expected_output`, `execution.retrieved_context` ->
@@ -68,6 +89,13 @@ not complete.
 | `turn_contextual_precision`, `turn_contextual_recall` | retrieved passages; this turn's reference answer as the expected outcome | judge |
 | `turn_contextual_relevancy` | retrieved passages | judge |
 | `conversational_g_eval` | what `evaluation_params` names (default role and content) | judge, `name`, `criteria` or `evaluation_steps` |
+| `conversational_dag` | what its nodes name: `role`, `content`, and `retrieval_context` or `tools_called` when the plan's `evaluation_params` lists them | judge, `dag`; optional `name`, `evaluation_params` |
+
+The conversation DAG is the DAG above over the conversation, with the same checks. A node may
+look at a `turn_window` [first, last] of **messages** (0 is the first user message, 1 the first
+answer, and so on; first < last). A turn whose conversation does not reach a window yet is not
+applicable (`turn_window_beyond_conversation:<messages>`). Nodes read what each message carries,
+so the expected outcome is not available to them (upstream reads node fields per message).
 
 A score outside 0..1 (a judge answer DeepEval did not bound) is an evaluator error, never a
 recorded score.
