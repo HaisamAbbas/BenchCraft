@@ -266,9 +266,16 @@ def test_a_remote_endpoint_needs_an_approved_origin_and_secret() -> None:
 def _engine_ready() -> str | None:
     if shutil.which("docker") is None:
         return "no container engine (docker) on PATH"
-    done = subprocess.run(
-        ["docker", "image", "inspect", IMAGE], capture_output=True, text=True, check=False
-    )
+    try:  # a container engine that does not answer (Docker Desktop after sleep) is not ready
+        done = subprocess.run(
+            ["docker", "image", "inspect", IMAGE],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+    except subprocess.TimeoutExpired:
+        return "container engine not answering"
     if done.returncode != 0:
         return f"container engine not running or fixture image {IMAGE} not pulled"
     return None

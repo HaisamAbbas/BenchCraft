@@ -80,9 +80,10 @@ def generate(
         if denials := path_denials(loaded_policy, tuple(sources)):
             raise CandidateGenerationError("; ".join(denials))
         config = OpenAICompatibleConfig.model_validate(load_mapping_file(provider_config))
-        # Candidate jobs have a hard output-token cap even if a shared planner config is
-        # configured for a larger response.
-        if config.max_output_tokens > GENERATION_OUTPUT_TOKENS:
+        # Candidate jobs have their own output allowance, whatever a shared planner config
+        # says: a smaller one cannot hold the cases of a model that thinks first, a larger one
+        # is not needed.
+        if config.max_output_tokens != GENERATION_OUTPUT_TOKENS:
             config = config.model_copy(update={"max_output_tokens": GENERATION_OUTPUT_TOKENS})
         if denials := provider_denials(config, loaded_policy):
             raise CandidateGenerationError("; ".join(denials))

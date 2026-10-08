@@ -89,7 +89,7 @@ from aibench.sessions.summary import session_summary
 class TurnLimits:
     max_model_calls: int = 6
     max_tool_calls: int = 12
-    max_total_tokens: int | None = 60_000
+    max_total_tokens: int | None = 150_000  # a model that thinks first spends a lot per call
     max_questions: int = 2  # §3: "normally one or two at a time"
     history_turns: int = 12
     max_turn_chars: int = 4_000  # per turn sent to the model

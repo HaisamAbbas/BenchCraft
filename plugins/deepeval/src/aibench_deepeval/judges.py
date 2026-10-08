@@ -382,10 +382,15 @@ class _OpenAICompatible:
                 self.tokens[ours] = self.tokens.get(ours, 0) + usage[theirs]
         choice = payload["choices"][0]
         if choice.get("finish_reason") == "length":
+            advice = (
+                "raise the judge's max_output_tokens or use a judge that thinks less"
+                if self._thinking == "disabled"
+                else "raise the judge's max_output_tokens, set its \"thinking\" to \"disabled\" "
+                "(a model that must think cannot), or use a judge that thinks less"
+            )
             raise _CutOff(
                 f"judge output was cut off at {self._max_tokens} tokens (a reasoning model "
-                "spends them thinking before it answers): raise the judge's max_output_tokens "
-                'or set its "thinking" to "disabled"'
+                f"spends them thinking before it answers): {advice}"
             )
         content = choice["message"].get("content") or ""
         text = _FENCE.sub("", content.strip())

@@ -107,7 +107,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc9" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc10" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -611,6 +611,13 @@ def test_a_reply_cut_off_by_the_allowance_is_asked_again_with_more_room(
     assert "cut off at 32768 tokens" in (result.reason or "")
     assert "thinking" in (result.reason or "")
     assert "JSONDecodeError" not in (result.reason or "")
+
+    # A judge that was already told not to think is not advised to be told so.
+    result, _, _ = _openai_compatible_score(
+        tmp_path / "told", monkeypatch, 200, {"thinking": "disabled"}, thinking_tokens=100_000
+    )
+    assert "cut off at 32768 tokens" in (result.reason or "")
+    assert '"disabled"' not in (result.reason or "")
 
 
 def test_the_judge_asks_a_model_not_to_think_when_told_to_and_by_default_on_zai(

@@ -69,7 +69,12 @@ def test_a_host_path_with_a_comma_is_one_quoted_mount_field(tmp_path: Path) -> N
 def _engine_ready() -> bool:
     if shutil.which("docker") is None:
         return False
-    done = subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True, check=False)
+    try:  # a container engine that does not answer (Docker Desktop after sleep) is not ready
+        done = subprocess.run(
+            ["docker", "image", "inspect", IMAGE], capture_output=True, check=False, timeout=20
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return done.returncode == 0
 
 

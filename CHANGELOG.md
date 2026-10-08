@@ -5,6 +5,28 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc28 — the limits a model that thinks first runs into
+
+Found running a 15-case LightRAG benchmark with GLM 5.3 Flash, a model that always thinks.
+
+- `/cases generate` asks for its own 16,000-token allowance. It used the smaller of that and the
+  assistant's setting, so a 12,000 (or the default 4,000) setting made a model that thinks first
+  run out before it wrote the cases ("must return exactly one write_candidates tool call").
+- An assistant turn may use up to 150,000 tokens (was 60,000): several steps of a model that
+  thinks first, over a long plan, reached the old limit and stopped the turn.
+- The status counts an evaluation the run never got to (it stopped at its time limit) as
+  needing attention; it counted only errored ones, so it said 1 when 2 were unfinished.
+- A judge that cannot stop thinking is no longer told to switch thinking off when its output is
+  cut off; the message names the options that apply.
+- **Faithfulness says what it measures.** Its description claimed the share of claims
+  "supported by" the retrieved context. Upstream counts a claim the context says nothing about as
+  faithful (`borderline`), so only contradictions lower the score: answers with invented facts
+  scored 1.00. The description and limitations now say so, and name `penalize_ambiguous_claims`,
+  the existing setting that counts such claims as unfaithful.
+- `/cases` no longer says "not word for word in that quote: check it" on nearly every case.
+  It shows how much of the answer's wording is in the quote: nothing for a quotation, a quiet
+  note for a paraphrase, a warning only when under half is there.
+
 ## 0.1.0rc27 — "needs attention" no longer counts a failure the new judge settings replaced
 
 Found re-scoring the LightRAG pilot after changing the judge's model and timeout: every

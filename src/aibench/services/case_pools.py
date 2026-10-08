@@ -22,6 +22,7 @@ from aibench.datasets.candidates import (
     GENERATION_OUTPUT_TOKENS,
     MAX_SOURCE_FILES,
     CandidateGenerationError,
+    answer_support,
     generate_candidate_pool,
     source_surroundings,
     verify_source_quote,
@@ -93,7 +94,9 @@ def draft_pool(
     # own timeout (it answers a message in seconds) would cut it off.
     capped = config.model_copy(
         update={
-            "max_output_tokens": min(config.max_output_tokens, GENERATION_OUTPUT_TOKENS),
+            # Its own allowance, not the assistant's: one call writes every case, and a model
+            # that thinks first needs the room (a 4,000-token chat setting cannot generate).
+            "max_output_tokens": GENERATION_OUTPUT_TOKENS,
             "timeout_seconds": max(config.timeout_seconds, GENERATION_TIMEOUT_SECONDS),
         }
     )
@@ -164,8 +167,9 @@ def _row(number: int, candidate: DatasetCandidate) -> dict[str, Any]:
         before, quote_text, after, heading, heading_after = source_surroundings(span)
         quote: str | None = quote_text
         verbatim = verify_source_quote(candidate).outcome == "passed"
+        support = 1.0 if verbatim else answer_support(reference.answer, quote_text)
     except ValidationError:
-        quote, verbatim = None, False  # the document changed or moved since generation
+        quote, verbatim, support = None, False, 0.0  # the document changed or moved since
     return {
         "number": number,
         "candidate_id": candidate.candidate_id,
@@ -175,6 +179,7 @@ def _row(number: int, candidate: DatasetCandidate) -> dict[str, Any]:
         "source": f"{Path(span.source_ref).name}:{span.start_line}",
         "quote": quote,
         "verbatim": verbatim,
+        "support": support,
         "heading": heading,
         "heading_after": heading_after,
         "before": before,
