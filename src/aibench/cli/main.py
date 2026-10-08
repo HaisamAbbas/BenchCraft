@@ -85,6 +85,13 @@ def _program() -> str:
 def main(
     ctx: typer.Context,
     version: bool = typer.Option(False, "--version", help="Show the aibench version and exit."),
+    continue_latest: bool = typer.Option(
+        False, "--continue", "-c", help="Continue the latest session with work in it."
+    ),
+    resume: str | None = typer.Option(
+        None, "--resume", help="Continue a session: a SESSION_ID, or 'latest'."
+    ),
+    new: bool = typer.Option(False, "--new", help="Start a new session."),
 ) -> None:
     if version:
         typer.echo(f"{_program()} {__version__}")
@@ -97,8 +104,8 @@ def main(
             ctx.invoke(
                 chat_cli.chat,
                 project=None,
-                resume=None,
-                new=False,
+                resume=resume,
+                new=new,
                 app=None,
                 dataset=None,
                 policy=None,
@@ -107,6 +114,7 @@ def main(
                 send=None,
                 json_output=False,
                 objectives=[],
+                continue_latest=continue_latest,
             )
             return
         typer.echo(ctx.get_help())

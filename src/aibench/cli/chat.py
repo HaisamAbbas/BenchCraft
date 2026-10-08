@@ -179,6 +179,17 @@ def _choose(sessions: list[SessionLine], hidden_empty: int = 0) -> str | None:
         console.print("Type a number from the list, or n.")
 
 
+def latest_session(store: SessionStore, root: Path) -> str:
+    """`--resume` without an ID: the project's most recently used session that has an
+    objective or a run, else its most recent session at all."""
+    existing = [s for s in store.list_sessions() if Path(s.project_root) == root]
+    if not existing:
+        raise _fail(f"no session to resume in project {root}; `benchcraft` starts one")
+    lines = sorted(describe_sessions(store, existing), key=lambda line: line.updated_at)
+    worth = [line for line in lines if not line.empty]
+    return (worth or lines)[-1].session_id
+
+
 def _pick(
     lines: list[SessionLine],
     *,
@@ -204,7 +215,14 @@ def _pick(
 
 
 _PROJECT = typer.Option(None, "--project", help="Project directory (default: cwd).")
-_RESUME = typer.Option(None, "--resume", help="Session to continue.")
+# A user coming back means the session they last worked in: `--continue` (or
+# `--resume latest`) opens it without looking up an ID. `--resume` itself keeps its value
+# required: an optional value would read the next option (`--resume --send ...`) as the ID.
+LATEST = "latest"
+_RESUME = typer.Option(None, "--resume", help="Session to continue: a SESSION_ID, or 'latest'.")
+_CONTINUE = typer.Option(
+    False, "--continue", "-c", help="Continue the latest session with work in it."
+)
 _NEW = typer.Option(False, "--new", help="Start a new session.")
 _APP = typer.Option(None, "--app", help="Application config (overrides the project config).")
 _DATASET = typer.Option(None, "--dataset", help="Dataset (overrides the project config).")
@@ -234,6 +252,7 @@ def chat(
     send: str | None = _SEND,
     json_output: bool = _JSON,
     objectives: list[str] = _OBJECTIVE,
+    continue_latest: bool = _CONTINUE,
 ) -> None:
     """Open the benchmark conversation for a project."""
     if send is None and not interactive_terminal():
@@ -241,8 +260,10 @@ def chat(
             "chat needs an interactive terminal; for scripts use `aibench chat --send TEXT "
             "--json` or the headless commands (aibench --help)"
         )
-    if resume and new:
-        raise _fail("use --resume or --new, not both")
+    if sum((bool(resume), new, continue_latest)) > 1:
+        raise _fail("use one of --resume, --continue and --new")
+    if continue_latest:
+        resume = LATEST
     root = (project or Path.cwd()).resolve()
     try:
         settings = project_settings(root, app, dataset, policy)
@@ -480,6 +501,8 @@ def _session(
     dataset_notices: list[str] | None = None,
 ) -> SessionController:
     store = SessionStore(storage)
+    if resume == LATEST:
+        resume = latest_session(store, root)
     if resume is not None:
         session = store.get_session(resume)
         if session is None or Path(session.project_root) != root:
