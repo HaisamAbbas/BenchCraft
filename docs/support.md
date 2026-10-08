@@ -23,12 +23,13 @@ The core install ships the native evaluators: `native.exact_match`, `native.json
 and custom Python evaluators you trust. Evaluator frameworks are never imported into the
 aibench process. They run in their own environment, driven by a worker.
 
-**DeepEval** (39 metrics, pinned to `deepeval==4.2.5`): faithfulness, answer
+**DeepEval** (40 metrics, pinned to `deepeval==4.2.5`): faithfulness, answer
 relevancy, contextual precision/recall/relevancy, hallucination, bias, toxicity, PII
 leakage, misuse, non-advice, role violation, prompt alignment, summarization, task
 completion, argument and tool correctness, tool permission, exact and pattern match, and
 G-Eval with your own criteria, and DAG: a decision tree you write as JSON that the
-judge walks to a score. For multi-turn applications it adds 13 conversation
+judge walks to a score, and a head-to-head judge of two runs' answers (`/compare
+BASELINE CURRENT --judge "CRITERIA"`). For multi-turn applications it adds 13 conversation
 metrics (completeness, knowledge retention, role and topic adherence, goal accuracy, tool
 use, turn-level relevancy, faithfulness and retrieval, conversational G-Eval and DAG), each scored on
 the conversation up to every turn of an episode, and 4 agent-trace metrics (step

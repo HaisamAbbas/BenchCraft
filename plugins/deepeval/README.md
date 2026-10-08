@@ -8,8 +8,9 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 ## Metrics
 
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
-recorded data can feed (39). Not here: image, audio and voice metrics (including agent
-responsiveness, a voice-latency metric), the MCP metrics, and arena metrics. JSON correctness
+recorded data can feed (40, with the head-to-head judge below). Not here: image, audio
+and voice metrics (including agent responsiveness, a voice-latency metric) and the MCP
+metrics. JSON correctness
 is covered by `native.json_schema`: upstream's score is the same pass/fail schema check, with
 the judge only writing the explanation. Each is an
 evaluator `deepeval.<name>@1`, scores 0 to 1 with higher better (DeepEval normalizes bias,
@@ -83,6 +84,23 @@ uses it, and a value given in a plan still wins:
   "deepeval.faithfulness": {"penalize_ambiguous_claims": true}
 }
 ```
+
+### Head-to-head: which run's answers are better
+
+`deepeval.arena_g_eval` (DeepEval's ArenaGEval) judges two runs against each other rather than
+one run, so it is not a plan metric. It runs from the comparison of two stored runs:
+
+```
+/compare BASELINE_RUN CURRENT_RUN --judge "the more accurate and complete answer"
+```
+
+For every case both runs answered, the project's judge says which answer is better by the
+criteria you state: `current`, `baseline` or `tie`, beside the comparison's usual statistics.
+Each case is judged twice, with the answers in both orders; the same winner twice decides it,
+and a split verdict is a tie, so a judge that favours the first or second answer cannot decide
+a case. (Upstream shuffles the answers into a random order on every call, which does not
+guarantee both orders; the arena holds that shuffle and gives the two orders itself.) The
+application is never called; the verdicts belong to the comparison, not to either run.
 
 ### Conversation metrics
 
