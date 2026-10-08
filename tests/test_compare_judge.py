@@ -87,6 +87,7 @@ def test_a_judge_says_which_runs_answers_are_better_and_a_split_verdict_is_a_tie
         assert result.ok or "arena" in result.data, result.data
         arena = result.data["arena"]
         assert arena["criteria"] == "the more helpful and correct answer"
+        assert arena["judge"] == "aibench_test_judges:arena_judge"  # not just "judge"
         verdicts = {row["case_id"]: row["verdict"] for row in arena["rows"]}
         assert "error" not in verdicts.values(), arena["rows"]
         # c: neither answer stands out, and the judge picks whichever it reads first: the
@@ -106,7 +107,12 @@ def test_a_judge_says_which_runs_answers_are_better_and_a_split_verdict_is_a_tie
         shown = " ".join(console.file.getvalue().split())  # type: ignore[attr-defined]
         assert "judged head-to-head" in shown
         assert "current better 1 of 3" in shown and "baseline better 1 of 3" in shown
-        assert "tie 1 of 3" in shown and "a: baseline:" in shown
+        assert "tie 1 of 3" in shown
+        assert "(aibench_test_judges:arena_judge, each case in both orders)" in shown
+        # The verdict once, then the judge's reason with the answers named plainly (it read
+        # "a: baseline: baseline: $baseline$ ...").
+        assert "a: baseline: baseline and current compared" in shown, shown
+        assert "baseline: baseline:" not in shown and "$" not in shown
 
         plain = asyncio.run(Commands(ctl).run(f"/compare {baseline} {current}"))
         assert "arena" not in plain.data  # no judge unless asked for

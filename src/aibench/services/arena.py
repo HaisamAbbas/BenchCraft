@@ -84,10 +84,9 @@ async def judge(
     finally:
         await evaluator.close()
     counts = Counter(row["verdict"] for row in rows)
+    judge = (deep_unfreeze(metric.binding.params) or {}).get("judge")  # params are frozen
     return {
-        "judge": metric.binding.params.get("judge", {}).get("model")
-        if isinstance(metric.binding.params.get("judge"), dict)
-        else None,
+        "judge": (judge.get("model") or judge.get("factory")) if isinstance(judge, dict) else None,
         "criteria": metric.binding.params.get("criteria"),
         "pairs": len(found),
         "counts": {name: counts.get(name, 0) for name in (*VERDICTS, "not_applicable", "error")},

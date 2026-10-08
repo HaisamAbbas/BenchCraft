@@ -171,7 +171,11 @@ class ArenaGEval(Evaluator):
                         ArenaTestCase(contestants=contestants), _show_indicator=False
                     )
                 winners.append(str(winner))
-                reasons.append(str(getattr(metric, "reason", "") or ""))
+                # The judge names the answers as written in its prompt: "$baseline$".
+                reason = str(getattr(metric, "reason", "") or "")
+                reasons.append(
+                    reason.replace(f"${BASELINE}$", BASELINE).replace(f"${CURRENT}$", CURRENT)
+                )
         finally:
             if metric is not None:
                 report_judge_usage(ctx, metric, judge)

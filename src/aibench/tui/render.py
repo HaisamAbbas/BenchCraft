@@ -654,10 +654,9 @@ def arena(console: Console, data: dict[str, Any]) -> None:
         )
     for row in data["rows"]:
         if row["verdict"] in ("baseline", "error"):  # what to look at first
-            out(
-                console,
-                f"    {safe(row['case_id'])}: {safe(row['verdict'])}: {safe(row['reason'][:200])}",
-            )
+            reason = row["reason"]  # the judge's reason starts with its verdict
+            said = reason if reason.startswith(row["verdict"]) else f"{row['verdict']}: {reason}"
+            out(console, f"    {safe(row['case_id'])}: {safe(said[:200])}")
 
 
 def comparison(console: Console, data: dict[str, Any]) -> None:
