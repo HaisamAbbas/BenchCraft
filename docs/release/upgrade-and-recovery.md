@@ -65,6 +65,16 @@ affected metric and accepts only stored text. See ADR 0013 for the compensating 
 
 ## Upgrading
 
+### Updating a plugin
+
+After upgrading BenchCraft, update each plugin with `/plugins install NAME` in the chat (for
+example `/plugins install deepeval`). It installs the new adapter and this version's aibench
+together in the plugin's environment; the project's judge settings are kept.
+
+Do not install only the adapter's wheel into that environment (`pip install --no-deps`): the
+environment keeps its older aibench, and an adapter that needs the newer one does not load. A
+plugin that fails to load says so when a session is reopened, and names the version mismatch.
+
 ### What happens to a workspace
 
 A project's workspace is its `.aibench/` directory:

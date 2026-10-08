@@ -5,6 +5,31 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc34 — failures that looked like success
+
+Found by comparing LightRAG's `hybrid` and `mix` retrieval modes with `/compare --judge`.
+
+- **A plugin that fails to load says why.** A DeepEval adapter updated without the matching
+  core (`pip install --no-deps` of the new wheel into an environment holding aibench rc24)
+  could not import. The reopened session said "loaded this project's plugins" in dim text, its
+  new draft had lost every DeepEval metric, and the only explanation, given when `/run`
+  refused, was pydantic's last line: "For further information visit https://errors.pydantic.dev".
+  The error is now the exception itself; when the plugin's environment holds a different
+  BenchCraft it says so and that `/plugins install NAME` updates it; and the chat says in
+  yellow, when the session opens, that the plan cannot run. The upgrade guide says how to update
+  a plugin.
+- **A run where every case got the same answer says so.** With its embedding server down,
+  LightRAG answered "No relevant context found for the query." to all 15 questions with HTTP
+  200; the run said "completed" with 15 successful executions. A finished run's status (`/status`,
+  `benchcraft runs status`) now warns when every case got the same answer.
+- **OpenRouter's "Provider returned error" is asked again.** OpenRouter passes on a failure of
+  the provider it routed to as HTTP 400 ("The request was rejected. Possible causes: input
+  exceeds the model's maximum context length..."); the same request went through a minute
+  later. The assistant and the judge now retry that 400; any other 400 stays final.
+- **`/compare --judge` output.** The judge is named (its model, or its factory), not "judge";
+  each listed verdict is said once ("baseline: baseline:" before); and the judge's `$baseline$`
+  and `$current$` read as plain names.
+
 ## 0.1.0rc33 — a judge's head-to-head verdict on two runs
 
 - **`/compare BASELINE CURRENT --judge "CRITERIA"`**: beside the stored comparison, a judge
