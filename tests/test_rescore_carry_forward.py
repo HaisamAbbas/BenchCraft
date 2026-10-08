@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 from rich.console import Console
 
 from aibench.core.models import (
+    Decision,
     EvaluatorManifest,
     ExecutionStatus,
     FieldRequirement,
@@ -353,8 +354,26 @@ def test_an_evaluation_the_run_never_reached_needs_attention_until_a_rescore_sco
             )
         )
     seeded.storage.update_run_status(RUN_ID, "budget_exhausted")
+    # c was skipped because its execution failed: that failure is listed on its own, so the
+    # evaluation is not listed a second time.
+    assert run_status(seeded.storage, RUN_ID)["needs_attention"] == []
+
+    # b was never reached: the run stopped at its time limit.
+    reached = next(r for r in first.results if r.case_id == "b")
+    never_reached = reached.model_copy(
+        update={
+            "result_id": reached.result_id + ":late",
+            "status": ExecutionStatus.SKIPPED,
+            "reason": "not_evaluated:max_wall_seconds=3600.0 reached",
+            "value": None,
+            "decision": Decision.NOT_EVALUATED,
+            "scoring_id": "score-after-the-limit",
+        }
+    )
+    seeded.storage.commit_metric_result(never_reached)
     status = run_status(seeded.storage, RUN_ID)
     assert [i["task_key"] for i in status["needs_attention"]] == [
-        evaluation_key("c", 0, binding_hash)
+        evaluation_key("b", 0, binding_hash)
     ]
+    assert "max_wall_seconds" in (status["needs_attention"][0]["reason"] or "")
     assert status["counts"]["evaluation"] == {"succeeded": 2, "failed": 1}

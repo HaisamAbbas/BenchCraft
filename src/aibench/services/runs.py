@@ -746,8 +746,12 @@ class _EvaluationStates:
         for result in results:
             binding = result.binding_hash[7:23] if result.binding_hash else None
             # An evaluation the run never got to (a limit was reached) is as unfinished as one
-            # that failed: it needs attention and a rescore picks it up.
-            failed = result.status in (ExecutionStatus.ERROR, ExecutionStatus.SKIPPED)
+            # that failed: it needs attention and a rescore picks it up. One skipped because
+            # its execution failed is not: that failure is already listed on its own.
+            failed = result.status is ExecutionStatus.ERROR or (
+                result.status is ExecutionStatus.SKIPPED
+                and str(result.reason or "").startswith("not_evaluated:")
+            )
             state = (not failed, result.reason if failed else None)
             self._by_binding[(result.case_id, result.repetition_id, binding)] = state
             self._metric_of[binding] = result.metric_id
