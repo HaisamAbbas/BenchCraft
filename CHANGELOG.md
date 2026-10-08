@@ -5,6 +5,31 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc31 — judge cost, Z.ai's thinking refusal, clearer limits, fewer refusals
+
+- **Z.ai's "thinking cannot be disabled" (error 1210) is recognised.** The judge switches thinking
+  off on Z.ai and OpenRouter; for a model that always thinks it is asked again without that.
+  Only OpenRouter's wording was known, so every Z.ai GLM 5.3 Flash call failed unless the
+  project set `thinking: default` by hand.
+- **Judge cost.** The provider's own figure when it reports one (OpenRouter's `usage.cost`), else
+  tokens at the judge config's `price_per_million_tokens`; one call with neither leaves the
+  total unknown, never zero. The status line says what is known and what is not: "spend
+  partial: $0.0123 known; cost unknown for 15 app call(s)" instead of "spend partial (92
+  call(s) with unknown cost)".
+- **Time limit.** `connect http` writes a 4-hour run limit (was 1 hour, which stopped a 15-case
+  run with a thinking judge 2 evaluations short). A run a limit stopped says which limit, and
+  that `/rescore` scores what it did not reach.
+- **Fewer refusals from the plan assistant.** A concept counts as stated when the user names it
+  in words ("custom criteria") or names a metric that serves it ("use deepeval.g_eval for that
+  one"); `custom_criteria` itself is a word no user types, and was refused twice in a real
+  session. A concept still refused tells the assistant to ask which metric, not to reword.
+- **The most specific default wins.** `deepeval.contextual_precision` in `aibench.json` was
+  overwritten by `deepeval.*` when the file listed it first.
+- **Retrieval metrics and judges, measured.** Contextual precision with a judge that does not
+  think scored a case 0.14, 0.20 and 0.14; with an always-thinking judge it failed past 32,768
+  tokens. The plugin README shows how to give a metric its own judge. Strict faithfulness as a
+  project default (`penalize_ambiguous_claims` beside the judge) is now proven and documented.
+
 ## 0.1.0rc30 — Esc stops a long command; --continue; checking cases against their source
 
 - **Esc (or Ctrl+C) stops a long command** when the assistant is not replying. A `/rescore`
