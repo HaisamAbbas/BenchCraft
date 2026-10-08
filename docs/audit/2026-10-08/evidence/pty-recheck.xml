@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="4" time="116.216" timestamp="2026-10-09T00:04:39.271728+05:00" hostname="Haisam-Abbas-G11"><testcase classname="tests.test_cli_chat_pty" name="test_bare_aibench_opens_chat_and_accepts_terminal_controls" time="26.407"><failure message="AssertionError: terminal did not display '▌ ❯ Ask BenchCraft to do anything': #x1B[1t#x1B[c#x1B[?1004h#x1B[?9001h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?12l#x1B[?25h#x1B[?7h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?7h&#13;&#10;  ██████╗ ███████╗███╗   ██╗ ██████╗██╗  ██╗&#13;&#10;  ██╔══██╗██╔════╝████╗  ██║██╔════╝██║  ██║&#13;&#10;  ██████╔╝█████╗  ██╔██╗ ██║██║     ███████║&#13;&#10;  ██╔══██╗██╔══╝  ██║╚██╗██║██║     ██╔══██║&#13;&#10;  ██████╔╝███████╗██║ ╚████║╚██████╗██║  ██║&#13;&#10;  ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝&#13;&#10;   ██████╗██████╗  █████╗ ███████╗████████╗&#13;&#10;  ██╔════╝██╔══██╗██╔══██╗██╔════╝╚══██╔══╝&#13;&#10;  ██║     ██████╔╝███████║█████╗     ██║&#13;&#10;  ██║     ██╔══██╗██╔══██║██╔══╝     ██║&#13;&#10;  ╚██████╗██║  ██║██║  ██║██║        ██║&#13;&#10;   ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝        ╚═╝&#13;&#10;  &#10;  ╭─ BenchCraft v0.1.0rc34 ──────────────────────────────────────────────────────╮&#13;&#10;  │                                                                              │&#13;&#10;  │  Project                              Commands                               │&#13;&#10;  │  D:\BenchCraft\.pytest-tmp\68b7b7e    plan: /plan /run /world /app           │&#13;&#10;  │  f\test_bare_aibench_opens_chat_a0    run: /status /pause /resume /stop      │&#13;&#10;  │  \project                             /budget                                │&#13;&#10;  │                                       results: /failures /case /traces       │&#13;&#10;  │  Session                              /rescore /report /compare              │&#13;&#10;  │  ses-66c47ae8a369 · draft revision    data: /cases                           │&#13;&#10;  │  1                                    session: /sessions /new /integrations  │&#13;&#10;  │                                       /plugins /themes /help /exit           │&#13;&#10;  │  Assistant model                                                             │&#13;&#10;  │  none · commands only                 theme crimson · /themes to change      │&#13;&#10;  │                                                                              │&#13;&#10;  ╰──────────────────────────────────────────────────────────────────────────────╯&#13;&#10;  Type /help for commands · Enter sends · Esc Enter adds a line&#13;&#10;  ▌ ❯ #x1B[?7l#x1B[?7h1 open question(s): /plan shows them&#13;&#10;  &#10;assert False&#10; +  where False = shows('▌ ❯ Ask BenchCraft to do anything')&#10; +    where shows = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD35370&gt;.shows">tmp_path = WindowsPath('D:/BenchCraft/.pytest-tmp/68b7b7ef/test_bare_aibench_opens_chat_a0')
+
+    def test_bare_aibench_opens_chat_and_accepts_terminal_controls(tmp_path: Path) -&gt; None:
+        terminal = _Terminal(_project(tmp_path))
+        try:
+            terminal.expect("Type /help for commands", timeout=STARTUP_SECONDS)
+            # The input is drawn as a box across the bottom, marked and with its hint in it.
+&gt;           terminal.expect("▌ ❯ Ask BenchCraft to do anything")
+
+tests\test_cli_chat_pty.py:104: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD35370&gt;
+fragment = '▌ ❯ Ask BenchCraft to do anything', timeout = 12.0
+
+    def expect(self, fragment: str, timeout: float = 12.0) -&gt; None:
+        deadline = time.monotonic() + timeout
+        while not self.shows(fragment) and time.monotonic() &lt; deadline:
+            try:
+                self.observed += self._chunks.get(timeout=0.1)
+            except queue.Empty:
+                if not self.process.isalive():
+                    break
+&gt;       assert self.shows(fragment), (
+            f"terminal did not display {fragment!r}: {self.observed[-2000:]}"
+        )
+E       AssertionError: terminal did not display '▌ ❯ Ask BenchCraft to do anything': #x1B[1t#x1B[c#x1B[?1004h#x1B[?9001h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?12l#x1B[?25h#x1B[?7h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?7h
+E         ██████╗ ███████╗███╗   ██╗ ██████╗██╗  ██╗
+E         ██╔══██╗██╔════╝████╗  ██║██╔════╝██║  ██║
+E         ██████╔╝█████╗  ██╔██╗ ██║██║     ███████║
+E         ██╔══██╗██╔══╝  ██║╚██╗██║██║     ██╔══██║
+E         ██████╔╝███████╗██║ ╚████║╚██████╗██║  ██║
+E         ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝
+E          ██████╗██████╗  █████╗ ███████╗████████╗
+E         ██╔════╝██╔══██╗██╔══██╗██╔════╝╚══██╔══╝
+E         ██║     ██████╔╝███████║█████╗     ██║
+E         ██║     ██╔══██╗██╔══██║██╔══╝     ██║
+E         ╚██████╗██║  ██║██║  ██║██║        ██║
+E          ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝        ╚═╝
+E         
+E         ╭─ BenchCraft v0.1.0rc34 ──────────────────────────────────────────────────────╮
+E         │                                                                              │
+E         │  Project                              Commands                               │
+E         │  D:\BenchCraft\.pytest-tmp\68b7b7e    plan: /plan /run /world /app           │
+E         │  f\test_bare_aibench_opens_chat_a0    run: /status /pause /resume /stop      │
+E         │  \project                             /budget                                │
+E         │                                       results: /failures /case /traces       │
+E         │  Session                              /rescore /report /compare              │
+E         │  ses-66c47ae8a369 · draft revision    data: /cases                           │
+E         │  1                                    session: /sessions /new /integrations  │
+E         │                                       /plugins /themes /help /exit           │
+E         │  Assistant model                                                             │
+E         │  none · commands only                 theme crimson · /themes to change      │
+E         │                                                                              │
+E         ╰──────────────────────────────────────────────────────────────────────────────╯
+E         Type /help for commands · Enter sends · Esc Enter adds a line
+E         ▌ ❯ #x1B[?7l#x1B[?7h1 open question(s): /plan shows them
+E         
+E       assert False
+E        +  where False = shows('▌ ❯ Ask BenchCraft to do anything')
+E        +    where shows = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD35370&gt;.shows
+
+tests\test_cli_chat_pty.py:65: AssertionError</failure></testcase><testcase classname="tests.test_cli_chat_pty" name="test_themes_switch_is_saved_and_shown_on_the_next_launch" time="14.525" /><testcase classname="tests.test_cli_chat_pty" name="test_slash_menu_opens_in_a_short_terminal" time="45.196"><failure message="AssertionError: terminal did not display 'Ask BenchCraft to do anything': #x1B[1t#x1B[c#x1B[?1004h#x1B[?9001h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?12l#x1B[?25h#x1B[?7h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?7h&#13;&#10;  ██████╗ ███████╗███╗   ██╗ ██████╗██╗  ██╗&#13;&#10;  ██╔══██╗██╔════╝████╗  ██║██╔════╝██║  ██║&#13;&#10;  ██████╔╝█████╗  ██╔██╗ ██║██║     ███████║&#13;&#10;  ██╔══██╗██╔══╝  ██║╚██╗██║██║     ██╔══██║&#13;&#10;  ██████╔╝███████╗██║ ╚████║╚██████╗██║  ██║&#13;&#10;  ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝&#13;&#10;   ██████╗██████╗  █████╗ ███████╗████████╗&#13;&#10;  ██╔════╝██╔══██╗██╔══██╗██╔════╝╚══██╔══╝&#13;&#10;  ██║     ██████╔╝███████║█████╗     ██║&#13;&#10;  ██║     ██╔══██╗██╔══██║██╔══╝     ██║&#13;&#10;  ╚██████╗██║  ██║██║  ██║██║        ██║&#13;&#10;   ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝        ╚═╝&#13;&#10;  &#10;  ╭─ BenchCraft v0.1.0rc34 ──────────────────────────────────────────────────────╮&#13;&#10;  │                                                                              │&#13;&#10;  │  Project                              Commands                               │&#13;&#10;  │  D:\BenchCraft\.pytest-tmp\68b7b7e    plan: /plan /run /world /app           │&#13;&#10;  │  f\test_slash_menu_opens_in_a_sho0    run: /status /pause /resume /stop      │&#13;&#10;  │  \project                             /budget                                │&#13;&#10;  │                                       results: /failures /case /traces       │&#13;&#10;  │  Session                              /rescore /report /compare              │&#13;&#10;  │  ses-325a1cc2e6cb · draft revision    data: /cases                           │&#13;&#10;  │  1                                    session: /sessions /new /integrations  │&#13;&#10;  │                                       /plugins /themes /help /exit           │&#13;&#10;  │  Assistant model                                                             │&#13;&#10;  │  none · commands only                 theme crimson · /themes to change      │&#13;&#10;  │                                                                              │&#13;&#10;  ╰──────────────────────────────────────────────────────────────────────────────╯&#13;&#10;  Type /help for commands · Enter sends · Esc Enter adds a line&#13;&#10;  #x1B[?7l▌ ❯ #x1B[?7h1 open question(s): /plan shows them&#13;&#10;  &#10;assert False&#10; +  where False = shows('Ask BenchCraft to do anything')&#10; +    where shows = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD36AE0&gt;.shows">tmp_path = WindowsPath('D:/BenchCraft/.pytest-tmp/68b7b7ef/test_slash_menu_opens_in_a_sho0')
+
+    def test_slash_menu_opens_in_a_short_terminal(tmp_path: Path) -&gt; None:
+        """A short terminal has no free rows above the box; typing "/" must still list the
+        commands (the prompt grows to fit a shorter menu) and never blank the prompt."""
+        terminal = _Terminal(_project(tmp_path), dimensions=(10, 100))
+        try:
+&gt;           terminal.expect("Ask BenchCraft to do anything", timeout=STARTUP_SECONDS)
+
+tests\test_cli_chat_pty.py:147: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD36AE0&gt;
+fragment = 'Ask BenchCraft to do anything', timeout = 45.0
+
+    def expect(self, fragment: str, timeout: float = 12.0) -&gt; None:
+        deadline = time.monotonic() + timeout
+        while not self.shows(fragment) and time.monotonic() &lt; deadline:
+            try:
+                self.observed += self._chunks.get(timeout=0.1)
+            except queue.Empty:
+                if not self.process.isalive():
+                    break
+&gt;       assert self.shows(fragment), (
+            f"terminal did not display {fragment!r}: {self.observed[-2000:]}"
+        )
+E       AssertionError: terminal did not display 'Ask BenchCraft to do anything': #x1B[1t#x1B[c#x1B[?1004h#x1B[?9001h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?12l#x1B[?25h#x1B[?7h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?7h
+E         ██████╗ ███████╗███╗   ██╗ ██████╗██╗  ██╗
+E         ██╔══██╗██╔════╝████╗  ██║██╔════╝██║  ██║
+E         ██████╔╝█████╗  ██╔██╗ ██║██║     ███████║
+E         ██╔══██╗██╔══╝  ██║╚██╗██║██║     ██╔══██║
+E         ██████╔╝███████╗██║ ╚████║╚██████╗██║  ██║
+E         ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝
+E          ██████╗██████╗  █████╗ ███████╗████████╗
+E         ██╔════╝██╔══██╗██╔══██╗██╔════╝╚══██╔══╝
+E         ██║     ██████╔╝███████║█████╗     ██║
+E         ██║     ██╔══██╗██╔══██║██╔══╝     ██║
+E         ╚██████╗██║  ██║██║  ██║██║        ██║
+E          ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝        ╚═╝
+E         
+E         ╭─ BenchCraft v0.1.0rc34 ──────────────────────────────────────────────────────╮
+E         │                                                                              │
+E         │  Project                              Commands                               │
+E         │  D:\BenchCraft\.pytest-tmp\68b7b7e    plan: /plan /run /world /app           │
+E         │  f\test_slash_menu_opens_in_a_sho0    run: /status /pause /resume /stop      │
+E         │  \project                             /budget                                │
+E         │                                       results: /failures /case /traces       │
+E         │  Session                              /rescore /report /compare              │
+E         │  ses-325a1cc2e6cb · draft revision    data: /cases                           │
+E         │  1                                    session: /sessions /new /integrations  │
+E         │                                       /plugins /themes /help /exit           │
+E         │  Assistant model                                                             │
+E         │  none · commands only                 theme crimson · /themes to change      │
+E         │                                                                              │
+E         ╰──────────────────────────────────────────────────────────────────────────────╯
+E         Type /help for commands · Enter sends · Esc Enter adds a line
+E         #x1B[?7l▌ ❯ #x1B[?7h1 open question(s): /plan shows them
+E         
+E       assert False
+E        +  where False = shows('Ask BenchCraft to do anything')
+E        +    where shows = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD36AE0&gt;.shows
+
+tests\test_cli_chat_pty.py:65: AssertionError</failure></testcase><testcase classname="tests.test_cli_chat_pty" name="test_resizing_the_terminal_keeps_the_chat_working" time="25.891"><failure message="AssertionError: terminal did not display '▌ ❯ Ask BenchCraft to do anything':                          session: /sessions /new /integrations  │&#13;&#10;  │                                       /plugins /themes /help /exit           │&#13;&#10;  │  Assistant model                                                             │&#13;&#10;  │  none · commands only                 theme crimson · /themes to change      │&#13;&#10;  │                                                                              │&#13;&#10;  ╰──────────────────────────────────────────────────────────────────────────────╯&#13;&#10;  Type /help for commands · Enter sends · Esc Enter adds a line&#13;&#10;  ▌ ❯ #x1B[?7l/#x1B[?7h#x1B[?7lr#x1B[?7h#x1B[?7le#x1B[?7h#x1B[?7ls#x1B[?7h#x1B[?7li#x1B[?7h#x1B[?7lz#x1B[?7h#x1B[?7le#x1B[?7h#x1B[?7ld#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7l#x1B[?7h1 open question(s): /plan shows them&#13;&#10;  #x1B[?7l&#13;&#10;  #x1B[?7h#x1B[?7l▌ ❯ #x1B[?7h&#13;&#10;                                                                                  &#13;&#10;    ›                                                                             &#13;&#10;    /resizedxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  &#13;&#10;    xx                                                                            &#13;&#10;                                                                                  &#13;&#10;  unknown command &#13;&#10;  /resizedxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; &#13;&#10;  type /help&#13;&#10;  &#10;assert False&#10; +  where False = shows('▌ ❯ Ask BenchCraft to do anything')&#10; +    where shows = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD37560&gt;.shows">tmp_path = WindowsPath('D:/BenchCraft/.pytest-tmp/68b7b7ef/test_resizing_the_terminal_kee0')
+
+    def test_resizing_the_terminal_keeps_the_chat_working(tmp_path: Path) -&gt; None:
+        """§23 terminal resizing (13-T1): shrink and grow the console while the chat is open.
+        Input keeps working, a line longer than the narrow width is read whole, and nothing
+        crashes."""
+        terminal = _Terminal(_project(tmp_path))
+        try:
+            terminal.expect("Type /help for commands", timeout=STARTUP_SECONDS)
+            terminal.process.setwinsize(12, 40)
+            assert terminal.process.getwinsize() == (12, 40)
+            terminal.send("/resized" + "x" * 70)  # wraps at 40 columns
+            terminal.expect("type /help")  # the unknown-command reply
+            assert terminal.shows("unknown command /resized" + "x" * 70)  # read whole
+&gt;           terminal.expect("▌ ❯ Ask BenchCraft to do anything")  # the box follows the width
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_cli_chat_pty.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD37560&gt;
+fragment = '▌ ❯ Ask BenchCraft to do anything', timeout = 12.0
+
+    def expect(self, fragment: str, timeout: float = 12.0) -&gt; None:
+        deadline = time.monotonic() + timeout
+        while not self.shows(fragment) and time.monotonic() &lt; deadline:
+            try:
+                self.observed += self._chunks.get(timeout=0.1)
+            except queue.Empty:
+                if not self.process.isalive():
+                    break
+&gt;       assert self.shows(fragment), (
+            f"terminal did not display {fragment!r}: {self.observed[-2000:]}"
+        )
+E       AssertionError: terminal did not display '▌ ❯ Ask BenchCraft to do anything':                          session: /sessions /new /integrations  │
+E         │                                       /plugins /themes /help /exit           │
+E         │  Assistant model                                                             │
+E         │  none · commands only                 theme crimson · /themes to change      │
+E         │                                                                              │
+E         ╰──────────────────────────────────────────────────────────────────────────────╯
+E         Type /help for commands · Enter sends · Esc Enter adds a line
+E         ▌ ❯ #x1B[?7l/#x1B[?7h#x1B[?7lr#x1B[?7h#x1B[?7le#x1B[?7h#x1B[?7ls#x1B[?7h#x1B[?7li#x1B[?7h#x1B[?7lz#x1B[?7h#x1B[?7le#x1B[?7h#x1B[?7ld#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7l#x1B[?7h1 open question(s): /plan shows them
+E         #x1B[?7l
+E         #x1B[?7h#x1B[?7l▌ ❯ #x1B[?7h
+E                                                                                         
+E           ›                                                                             
+E           /resizedxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+E           xx                                                                            
+E                                                                                         
+E         unknown command 
+E         /resizedxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; 
+E         type /help
+E         
+E       assert False
+E        +  where False = shows('▌ ❯ Ask BenchCraft to do anything')
+E        +    where shows = &lt;tests.test_cli_chat_pty._Terminal object at 0x0000028DBCD37560&gt;.shows
+
+tests\test_cli_chat_pty.py:65: AssertionError</failure></testcase></testsuite></testsuites>

@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="69.949" timestamp="2026-10-09T00:35:19.596285+05:00" hostname="Haisam-Abbas-G11"><testcase classname="tests.test_mvp_acceptance" name="test_a_larger_cheap_workload_stays_bounded_and_resumes" time="68.869" /></testsuite></testsuites>

@@ -1,0 +1,20 @@
+id,priority,title,detail
+F01,P1,Rescoring bypasses runtime budget enforcement,Runtime reproduction
+F02,P1,Carry-forward ignores implementation compatibility and relabels old values,Runtime reproduction
+F03,P1,String false exposes a hidden fixture to the application,CLI end-to-end reproduction
+F04,P1,Resume mixes changed application code under an unchanged identity,Engine/recovery reproduction
+F05,P1,Non-finite dataset input is silently changed during execution,CLI end-to-end reproduction
+F06,P1,Scoring/rescoring returns success for incomplete or failed evaluation,CLI reproduction
+F07,P1,Rescore CLI shrinks selected denominators and inflates coverage,CLI/report reproduction
+F08,P2,Project settings ignore the resolved `project_root`,Config/doctor reproduction
+F09,P2,Headless slash commands lose the configured provider,CLI reproduction
+F10,P2,Malformed input escapes CLI error handling and breaks JSON output,Multiple CLI reproductions
+F11,P2,JSON report export omits the redaction applied to other formats,CLI/report reproduction
+F12,P2,Numeric expected judge repeats are undercounted,Statistical helper reproduction
+F13,P2,Standalone reports use repetition-weighted means instead of default case macro means,Aggregation reproduction and spec
+F14,P2,The current type-check gate fails,Mypy execution
+F15,P2,Some advertised size caps act after the whole response is read,Mock stream reproduction and source
+F16,P2,Plugin environments retain advisory-affected dependencies,Dependency scan; exploitability unproven
+F17,P2,Smoke testing rejects a changed revision of an existing application,CLI reproduction
+F18,P2,Terminal regression tests inherit capability/color flags and report false failures,Original and normalized-environment rechecks
+F19,P1,Comparison ignores selected work and uses workspace-wide dataset cases as its denominator,Distinct-run CLI reproduction

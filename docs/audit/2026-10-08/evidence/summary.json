@@ -1,0 +1,560 @@
+{
+  "source_commit": "154fb45a",
+  "source_version": "0.1.0rc34",
+  "findings": [
+    {
+      "id": "F01",
+      "priority": "P1",
+      "title": "Rescoring bypasses runtime budget enforcement",
+      "detail": "Runtime reproduction"
+    },
+    {
+      "id": "F02",
+      "priority": "P1",
+      "title": "Carry-forward ignores implementation compatibility and relabels old values",
+      "detail": "Runtime reproduction"
+    },
+    {
+      "id": "F03",
+      "priority": "P1",
+      "title": "String false exposes a hidden fixture to the application",
+      "detail": "CLI end-to-end reproduction"
+    },
+    {
+      "id": "F04",
+      "priority": "P1",
+      "title": "Resume mixes changed application code under an unchanged identity",
+      "detail": "Engine/recovery reproduction"
+    },
+    {
+      "id": "F05",
+      "priority": "P1",
+      "title": "Non-finite dataset input is silently changed during execution",
+      "detail": "CLI end-to-end reproduction"
+    },
+    {
+      "id": "F06",
+      "priority": "P1",
+      "title": "Scoring/rescoring returns success for incomplete or failed evaluation",
+      "detail": "CLI reproduction"
+    },
+    {
+      "id": "F07",
+      "priority": "P1",
+      "title": "Rescore CLI shrinks selected denominators and inflates coverage",
+      "detail": "CLI/report reproduction"
+    },
+    {
+      "id": "F08",
+      "priority": "P2",
+      "title": "Project settings ignore the resolved `project_root`",
+      "detail": "Config/doctor reproduction"
+    },
+    {
+      "id": "F09",
+      "priority": "P2",
+      "title": "Headless slash commands lose the configured provider",
+      "detail": "CLI reproduction"
+    },
+    {
+      "id": "F10",
+      "priority": "P2",
+      "title": "Malformed input escapes CLI error handling and breaks JSON output",
+      "detail": "Multiple CLI reproductions"
+    },
+    {
+      "id": "F11",
+      "priority": "P2",
+      "title": "JSON report export omits the redaction applied to other formats",
+      "detail": "CLI/report reproduction"
+    },
+    {
+      "id": "F12",
+      "priority": "P2",
+      "title": "Numeric expected judge repeats are undercounted",
+      "detail": "Statistical helper reproduction"
+    },
+    {
+      "id": "F13",
+      "priority": "P2",
+      "title": "Standalone reports use repetition-weighted means instead of default case macro means",
+      "detail": "Aggregation reproduction and spec"
+    },
+    {
+      "id": "F14",
+      "priority": "P2",
+      "title": "The current type-check gate fails",
+      "detail": "Mypy execution"
+    },
+    {
+      "id": "F15",
+      "priority": "P2",
+      "title": "Some advertised size caps act after the whole response is read",
+      "detail": "Mock stream reproduction and source"
+    },
+    {
+      "id": "F16",
+      "priority": "P2",
+      "title": "Plugin environments retain advisory-affected dependencies",
+      "detail": "Dependency scan; exploitability unproven"
+    },
+    {
+      "id": "F17",
+      "priority": "P2",
+      "title": "Smoke testing rejects a changed revision of an existing application",
+      "detail": "CLI reproduction"
+    },
+    {
+      "id": "F18",
+      "priority": "P2",
+      "title": "Terminal regression tests inherit capability/color flags and report false failures",
+      "detail": "Original and normalized-environment rechecks"
+    },
+    {
+      "id": "F19",
+      "priority": "P1",
+      "title": "Comparison ignores selected work and uses workspace-wide dataset cases as its denominator",
+      "detail": "Distinct-run CLI reproduction"
+    }
+  ],
+  "feature_gaps": [
+    {
+      "id": "G01",
+      "priority": "P1",
+      "title": "Consistent global configuration and scripting options",
+      "detail": "**Missing/partial; specified.** Root options do not provide global `--config`, `--json`, `--non-interactive`, or policy selection. Equivalent controls are scattered among commands."
+    },
+    {
+      "id": "G02",
+      "priority": "P1",
+      "title": "Stable machine-output API",
+      "detail": "**Partial.** Successful commands often support JSON; failures, envelope/schema, exit details, and event output are inconsistent. F06/F07/F10 demonstrate the consequences."
+    },
+    {
+      "id": "G03",
+      "priority": "P1",
+      "title": "Regression policies for CI",
+      "detail": "**Partial.** Absolute release gates and compatible run deltas exist. `compare` exits for compatibility/coverage, not a configured degradation in score, latency, or cost. Add predeclared regression tolerances and fail rules."
+    },
+    {
+      "id": "G04",
+      "priority": "P1",
+      "title": "Complete case-result export",
+      "detail": "**Partial.** Report JSON contains summaries and non-passing evidence. There is no general headless export of every passing/failing case and repetition to JSONL/CSV, with explicit content controls."
+    },
+    {
+      "id": "G05",
+      "priority": "P1",
+      "title": "CI report adapters",
+      "detail": "**Missing.** Benchmark-result JUnit/SARIF-style exports are absent. The repository's pytest JUnit files are test evidence, not a user feature."
+    },
+    {
+      "id": "G06",
+      "priority": "P1",
+      "title": "Named baselines, tags, and searchable run history",
+      "detail": "**Partial.** Run IDs, status filters, and a limit exist. Baseline aliases, run tags/notes, metadata search, pagination, and promotion of an approved baseline are missing."
+    },
+    {
+      "id": "G07",
+      "priority": "P1",
+      "title": "Convenient bounded run controls",
+      "detail": "**Partial.** Plans support selection, repeats, concurrency, retries, timeouts, budgets, caches, and quotas. `run` largely requires editing a plan file. Add validated direct overrides and a dry-run that prints the exact frozen scope."
+    },
+    {
+      "id": "G08",
+      "priority": "P1",
+      "title": "Reproducibility controls and provenance",
+      "detail": "**Partial.** Selection/bootstrap seeds and frozen configuration exist. The run CLI does not expose the engine's `run_seed`; local source/dependency/commit provenance is incomplete, as F04 shows."
+    },
+    {
+      "id": "G09",
+      "priority": "P1",
+      "title": "Release gates in conversation drafts",
+      "detail": "**Missing; documented limitation.** Gates can be authored in executable plans but not declared through session draft choices/patches."
+    },
+    {
+      "id": "G10",
+      "priority": "P2",
+      "title": "Retry only failed application work",
+      "detail": "**Partial.** Engine transient retries and unfinished judge rescoring exist. There is no convenient headless command creating a bounded child run from failed/selected application cases with parent lineage."
+    },
+    {
+      "id": "G11",
+      "priority": "P2",
+      "title": "Headless run supervision",
+      "detail": "**Deferred/partial.** Status exists; live pause/stop controls belong to the owning terminal/session. Detached execution and durable external pause/resume/cancel requests are absent."
+    },
+    {
+      "id": "G12",
+      "priority": "P2",
+      "title": "Configuration management",
+      "detail": "**Partial.** Config files, setup, and doctor exist. There is no `config show/validate/set` workflow showing effective values and source precedence with secrets redacted, or named provider profiles."
+    },
+    {
+      "id": "G13",
+      "priority": "P2",
+      "title": "Structured progress and durable logs",
+      "detail": "**Partial.** Terminal progress and persisted run events exist. Scripts lack a consistent JSONL event stream, log-file selection, verbosity/quiet controls, and documented noninteractive logging contract."
+    },
+    {
+      "id": "G14",
+      "priority": "P2",
+      "title": "Warmup and measurement phases",
+      "detail": "**Missing; performance extension.** No bounded warmup count or exclusion phase before latency sampling. Warmup effects and spend need to be accounted explicitly."
+    },
+    {
+      "id": "G15",
+      "priority": "P2",
+      "title": "Richer performance statistics",
+      "detail": "**Partial.** Successful final-attempt p50/p95 and failure counts exist. User-facing throughput, p99, dispersion, retry-inclusive elapsed latency, and cold/warm separation are absent."
+    },
+    {
+      "id": "G16",
+      "priority": "P2",
+      "title": "Streaming model performance",
+      "detail": "**Missing; performance extension.** Application benchmarking records JSON responses, not streaming token events. TTFT, inter-token latency, output tokens/sec, and streaming completion integrity are unavailable. Assistant reply streaming is already implemented and is a separate capability."
+    },
+    {
+      "id": "G17",
+      "priority": "P2",
+      "title": "Segment/slice analysis",
+      "detail": "**Partial.** Case predicates and independent grouping for comparisons exist. Reports lack general summaries by metadata segment, customer, language, difficulty, or model configuration."
+    },
+    {
+      "id": "G18",
+      "priority": "P2",
+      "title": "Dataset utilities and versioned suites",
+      "detail": "**Partial.** Validation, candidate review/promotion, episodes, and content hashes exist. General schema-aware CSV/JSON/Parquet import, diff/dedup/split tools, and a named suite catalog are missing."
+    },
+    {
+      "id": "G19",
+      "priority": "P2",
+      "title": "Workspace maintenance and portability",
+      "detail": "**Partial.** Migrations and an artifact GC library exist. CLI backup/restore, portable run/session bundles, workspace integrity/repair, retention/storage usage, and safe GC commands are missing. Absolute recorded paths complicate migration."
+    },
+    {
+      "id": "G20",
+      "priority": "P2",
+      "title": "Judge repeat/calibration workflow",
+      "detail": "**Partial.** Statistical primitives, native calibration, and comparisons exist. A practical command that repeats/calibrates the configured model judges against reviewed labels is incomplete; F12 affects a helper branch."
+    },
+    {
+      "id": "G21",
+      "priority": "P2",
+      "title": "Platform and release confidence",
+      "detail": "**Partial.** Windows/Linux CI is configured; macOS CI is absent, current cross-platform results were not observed, and published support/readiness documents still center on older candidates."
+    },
+    {
+      "id": "G22",
+      "priority": "P3",
+      "title": "Advanced scale, load, and modality workflows",
+      "detail": "**Deferred.** Distributed workers, a scalable work queue, open-loop/ramping load profiles, multimodal evaluators, and a dashboard are product extensions. Ordinary concurrency and RPS quotas already exist."
+    }
+  ],
+  "full_suite": {
+    "tests": 1310,
+    "passed": 1289,
+    "failed_or_error": 16,
+    "skipped": 5,
+    "failures": [
+      {
+        "test": "tests.test_bootstrap::test_package_imports",
+        "kind": "failure",
+        "message": "AssertionError: assert '0.1.0rc34' == '0.1.0rc33'\n  \n  - 0.1.0rc33\n  ?         ^\n  + 0.1.0rc34\n  ?         ^"
+      },
+      {
+        "test": "tests.test_cli_chat_pty::test_bare_aibench_opens_chat_and_accepts_terminal_controls",
+        "kind": "failure",
+        "message": "AssertionError: terminal did not display '\u258c \u276f Ask BenchCraft to do anything': #x1B[1t#x1B[c#x1B[?1004h#x1B[?9001h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?12l#x1B[?25h#x1B[?7h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?7h\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2557   \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557\r\n  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2551  \u2588\u2588\u2551\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2554\u2588\u2588\u2557 \u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\r\n  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u255d  \u2588\u2588\u2551\u255a\u2588\u2588\u2557\u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551 \u255a\u2588\u2588\u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\r\n  \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\r\n   \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\r\n  \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255d\r\n  \u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2557     \u2588\u2588\u2551\r\n  \u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u255d     \u2588\u2588\u2551\r\n  \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551        \u2588\u2588\u2551\r\n   \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d        \u255a\u2550\u255d\r\n  \n  \u256d\u2500 BenchCraft v0.1.0rc34 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\r\n  \u2502                                                                              \u2502\r\n  \u2502  Project                              Commands                               \u2502\r\n  \u2502  D:\\BenchCraft\\.pytest-tmp\\677327f    plan: /plan /run /world /app           \u2502\r\n  \u2502  4\\test_bare_aibench_opens_chat_a0    run: /status /pause /resume /stop      \u2502\r\n  \u2502  \\project                             /bud"
+      },
+      {
+        "test": "tests.test_cli_chat_pty::test_slash_menu_opens_in_a_short_terminal",
+        "kind": "failure",
+        "message": "AssertionError: terminal did not display 'Ask BenchCraft to do anything': #x1B[1t#x1B[c#x1B[?1004h#x1B[?9001h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?12l#x1B[?25h#x1B[?7h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?7h\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2557   \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557\r\n  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2551  \u2588\u2588\u2551\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2554\u2588\u2588\u2557 \u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\r\n  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u255d  \u2588\u2588\u2551\u255a\u2588\u2588\u2557\u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551 \u255a\u2588\u2588\u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\r\n  \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\r\n   \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\r\n  \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255d\r\n  \u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2557     \u2588\u2588\u2551\r\n  \u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u255d     \u2588\u2588\u2551\r\n  \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551        \u2588\u2588\u2551\r\n   \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d        \u255a\u2550\u255d\r\n  \n  \u256d\u2500 BenchCraft v0.1.0rc34 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\r\n  \u2502                                                                              \u2502\r\n  \u2502  Project                              Commands                               \u2502\r\n  \u2502  D:\\BenchCraft\\.pytest-tmp\\677327f    plan: /plan /run /world /app           \u2502\r\n  \u2502  4\\test_slash_menu_opens_in_a_sho0    run: /status /pause /resume /stop      \u2502\r\n  \u2502  \\project                             /budget "
+      },
+      {
+        "test": "tests.test_cli_chat_pty::test_resizing_the_terminal_keeps_the_chat_working",
+        "kind": "failure",
+        "message": "AssertionError: terminal did not display '\u258c \u276f Ask BenchCraft to do anything':                          session: /sessions /new /integrations  \u2502\r\n  \u2502                                       /plugins /themes /help /exit           \u2502\r\n  \u2502  Assistant model                                                             \u2502\r\n  \u2502  none \u00b7 commands only                 theme crimson \u00b7 /themes to change      \u2502\r\n  \u2502                                                                              \u2502\r\n  \u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\r\n  Type /help for commands \u00b7 Enter sends \u00b7 Esc Enter adds a line\r\n  #x1B[?7l\u258c \u276f #x1B[?7h1 open question(s): /plan shows them\r\n  #x1B[?7l/#x1B[?7h#x1B[?7lr#x1B[?7h#x1B[?7le#x1B[?7h#x1B[?7ls#x1B[?7h#x1B[?7li#x1B[?7h#x1B[?7lz#x1B[?7h#x1B[?7le#x1B[?7h#x1B[?7ld#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?"
+      },
+      {
+        "test": "tests.test_tui_reply::test_user_band_is_tinted_full_width_with_a_marker",
+        "kind": "failure",
+        "message": "AssertionError: assert '48;2;74;38;41' in '                                                                                \\n  \\x1b[1m\u203a \\x1b[0mhi               ...                                  \\n                                                                                \\n'"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_real_worker_receives_only_manifest_fields",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_worker_results_are_canonical_and_the_plugin_is_never_imported_here",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_worker_raw_payload_shows_isolation_and_one_worker_per_binding",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_stdout_noise_from_plugin_code_cannot_corrupt_the_protocol",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_worker_failures_are_errors_and_the_next_case_gets_a_fresh_worker[raise-worker_error:ValueError: judge exploded]",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_worker_failures_are_errors_and_the_next_case_gets_a_fresh_worker[crash-worker_failed:worker exited]",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_timeout_kills_the_worker_and_state_restarts_fresh",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_usage_is_passed_through_and_unknown_cost_stays_unknown",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_configured_secrets_reach_the_worker_but_are_redacted_from_results",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_worker_usage_strings_are_redacted_before_persistence",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      },
+      {
+        "test": "tests.test_worker_evaluator::test_negative_worker_token_counts_are_rejected",
+        "kind": "failure",
+        "message": "AssertionError: manifest worker exited 1: D:\\BenchCraft\\.venv\\Scripts\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\nassert \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" is None\n +  where \"manifest worker exited 1: D:\\\\BenchCraft\\\\.venv\\\\Scripts\\\\python.exe: Error while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\" = ManifestLoad(plugin=DiscoveredPlugin(name='probe', target='aibench_worker_test_plugin:EVALUATORS', distribution='vendo...ror while finding module specification for 'aibench.registry.worker' (ModuleNotFoundError: No module named 'aibench')\").error"
+      }
+    ],
+    "skips": [
+      {
+        "test": "tests.test_candidate_workflow::test_distinct_case_sensitive_paths_are_not_treated_as_the_same_source",
+        "reason": "the test filesystem is case-insensitive"
+      },
+      {
+        "test": "tests.test_dataset_discovery::test_inventory_refuses_unapproved_root_and_symlinked_candidate",
+        "reason": "directory symlinks are not available in this environment"
+      },
+      {
+        "test": "tests.test_deepeval_adapter::test_live_provider_smoke",
+        "reason": "live-provider smoke needs AIBENCH_LIVE_DEEPEVAL=1 and OPENAI_API_KEY (one small judge call budget)"
+      },
+      {
+        "test": "tests.test_http_runner::test_tls_verification_is_on_by_default_and_a_ca_bundle_can_be_trusted",
+        "reason": "openssl not available to generate a test certificate"
+      },
+      {
+        "test": "tests.test_mvp_acceptance::test_a_larger_cheap_workload_stays_bounded_and_resumes",
+        "reason": "about 4 minutes; set AIBENCH_WORKLOAD_TESTS=1 to run the 1,000-case workload"
+      }
+    ],
+    "seconds": 3780.379
+  },
+  "installed_journeys": {
+    "tests": 32,
+    "passed": 32,
+    "failed_or_error": 0,
+    "skipped": 0,
+    "failures": [],
+    "skips": [],
+    "seconds": 299.427
+  },
+  "terminal_recheck": {
+    "tests": 4,
+    "passed": 1,
+    "failed_or_error": 3,
+    "skipped": 0,
+    "failures": [
+      {
+        "test": "tests.test_cli_chat_pty::test_bare_aibench_opens_chat_and_accepts_terminal_controls",
+        "kind": "failure",
+        "message": "AssertionError: terminal did not display '\u258c \u276f Ask BenchCraft to do anything': #x1B[1t#x1B[c#x1B[?1004h#x1B[?9001h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?12l#x1B[?25h#x1B[?7h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?7h\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2557   \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557\r\n  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2551  \u2588\u2588\u2551\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2554\u2588\u2588\u2557 \u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\r\n  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u255d  \u2588\u2588\u2551\u255a\u2588\u2588\u2557\u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551 \u255a\u2588\u2588\u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\r\n  \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\r\n   \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\r\n  \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255d\r\n  \u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2557     \u2588\u2588\u2551\r\n  \u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u255d     \u2588\u2588\u2551\r\n  \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551        \u2588\u2588\u2551\r\n   \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d        \u255a\u2550\u255d\r\n  \n  \u256d\u2500 BenchCraft v0.1.0rc34 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\r\n  \u2502                                                                              \u2502\r\n  \u2502  Project                              Commands                               \u2502\r\n  \u2502  D:\\BenchCraft\\.pytest-tmp\\68b7b7e    plan: /plan /run /world /app           \u2502\r\n  \u2502  f\\test_bare_aibench_opens_chat_a0    run: /status /pause /resume /stop      \u2502\r\n  \u2502  \\project                             /bud"
+      },
+      {
+        "test": "tests.test_cli_chat_pty::test_slash_menu_opens_in_a_short_terminal",
+        "kind": "failure",
+        "message": "AssertionError: terminal did not display 'Ask BenchCraft to do anything': #x1B[1t#x1B[c#x1B[?1004h#x1B[?9001h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?12l#x1B[?25h#x1B[?7h#x1B[?7l#x1B[?7h#x1B[?7l#x1B[?7h\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2557   \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557\r\n  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2551  \u2588\u2588\u2551\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2554\u2588\u2588\u2557 \u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\r\n  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u255d  \u2588\u2588\u2551\u255a\u2588\u2588\u2557\u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\r\n  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551 \u255a\u2588\u2588\u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\r\n  \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\r\n   \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\r\n  \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255d\r\n  \u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2557     \u2588\u2588\u2551\r\n  \u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u255d     \u2588\u2588\u2551\r\n  \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551        \u2588\u2588\u2551\r\n   \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d        \u255a\u2550\u255d\r\n  \n  \u256d\u2500 BenchCraft v0.1.0rc34 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\r\n  \u2502                                                                              \u2502\r\n  \u2502  Project                              Commands                               \u2502\r\n  \u2502  D:\\BenchCraft\\.pytest-tmp\\68b7b7e    plan: /plan /run /world /app           \u2502\r\n  \u2502  f\\test_slash_menu_opens_in_a_sho0    run: /status /pause /resume /stop      \u2502\r\n  \u2502  \\project                             /budget "
+      },
+      {
+        "test": "tests.test_cli_chat_pty::test_resizing_the_terminal_keeps_the_chat_working",
+        "kind": "failure",
+        "message": "AssertionError: terminal did not display '\u258c \u276f Ask BenchCraft to do anything':                          session: /sessions /new /integrations  \u2502\r\n  \u2502                                       /plugins /themes /help /exit           \u2502\r\n  \u2502  Assistant model                                                             \u2502\r\n  \u2502  none \u00b7 commands only                 theme crimson \u00b7 /themes to change      \u2502\r\n  \u2502                                                                              \u2502\r\n  \u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\r\n  Type /help for commands \u00b7 Enter sends \u00b7 Esc Enter adds a line\r\n  \u258c \u276f #x1B[?7l/#x1B[?7h#x1B[?7lr#x1B[?7h#x1B[?7le#x1B[?7h#x1B[?7ls#x1B[?7h#x1B[?7li#x1B[?7h#x1B[?7lz#x1B[?7h#x1B[?7le#x1B[?7h#x1B[?7ld#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1B[?7lx#x1B[?7h#x1"
+      }
+    ],
+    "skips": [],
+    "seconds": 112.01899999999999
+  },
+  "installed_bootstrap": {
+    "tests": 3,
+    "passed": 3,
+    "failed_or_error": 0,
+    "skipped": 0,
+    "failures": [],
+    "skips": [],
+    "seconds": 2.633
+  },
+  "normalized_failure_recheck": {
+    "tests": 21,
+    "passed": 21,
+    "failed_or_error": 0,
+    "skipped": 0,
+    "failures": [],
+    "skips": [],
+    "seconds": 169.548
+  },
+  "workload_1000": {
+    "tests": 1,
+    "passed": 1,
+    "failed_or_error": 0,
+    "skipped": 0,
+    "failures": [],
+    "skips": [],
+    "seconds": 68.869
+  },
+  "coverage_totals": {
+    "covered_lines": 18671,
+    "num_statements": 21166,
+    "percent_covered": 88.21222715676085,
+    "percent_covered_display": "88",
+    "missing_lines": 2495,
+    "excluded_lines": 47,
+    "percent_statements_covered": 88.21222715676085,
+    "percent_statements_covered_display": "88"
+  },
+  "lowest_suite_coverage": [
+    {
+      "file": "src\\aibench\\__main__.py",
+      "percent": 0.0,
+      "missing_lines": 3
+    },
+    {
+      "file": "src\\aibench\\evaluators\\schema_worker.py",
+      "percent": 0.0,
+      "missing_lines": 10
+    },
+    {
+      "file": "src\\aibench\\registry\\eval_worker.py",
+      "percent": 0.0,
+      "missing_lines": 69
+    },
+    {
+      "file": "src\\aibench\\registry\\worker.py",
+      "percent": 0.0,
+      "missing_lines": 22
+    },
+    {
+      "file": "src\\aibench\\runners\\python_shim.py",
+      "percent": 0.0,
+      "missing_lines": 69
+    },
+    {
+      "file": "src\\aibench\\cli\\experiments.py",
+      "percent": 43.96551724137931,
+      "missing_lines": 65
+    },
+    {
+      "file": "src\\aibench\\cli\\candidates.py",
+      "percent": 54.81481481481482,
+      "missing_lines": 61
+    },
+    {
+      "file": "src\\aibench\\cli\\inspect.py",
+      "percent": 67.74193548387096,
+      "missing_lines": 40
+    },
+    {
+      "file": "src\\aibench\\cli\\project.py",
+      "percent": 69.72477064220183,
+      "missing_lines": 99
+    },
+    {
+      "file": "src\\aibench\\tui\\render.py",
+      "percent": 73.10513447432763,
+      "missing_lines": 110
+    }
+  ],
+  "dependency_audits": {
+    "core_lock": {
+      "affected_packages": [],
+      "unique_package_advisory_pairs": 0,
+      "raw_advisory_rows": 0
+    },
+    "deepeval_environment": {
+      "affected_packages": [
+        {
+          "package": "pip",
+          "version": "25.0.1",
+          "advisories": [
+            "PYSEC-2026-1795",
+            "PYSEC-2026-1796",
+            "PYSEC-2026-196",
+            "PYSEC-2026-2875",
+            "PYSEC-2026-2876",
+            "PYSEC-2026-3721"
+          ],
+          "raw_rows": 12
+        }
+      ],
+      "unique_package_advisory_pairs": 6,
+      "raw_advisory_rows": 12
+    },
+    "ragas_environment": {
+      "affected_packages": [
+        {
+          "package": "diskcache",
+          "version": "5.6.3",
+          "advisories": [
+            "PYSEC-2026-2447"
+          ],
+          "raw_rows": 2
+        },
+        {
+          "package": "langchain-openai",
+          "version": "1.1.9",
+          "advisories": [
+            "PYSEC-2026-76"
+          ],
+          "raw_rows": 2
+        },
+        {
+          "package": "langgraph-sdk",
+          "version": "0.4.2",
+          "advisories": [
+            "CVE-2026-104873"
+          ],
+          "raw_rows": 1
+        },
+        {
+          "package": "marshmallow",
+          "version": "3.26.1",
+          "advisories": [
+            "PYSEC-2026-1605"
+          ],
+          "raw_rows": 2
+        },
+        {
+          "package": "ragas",
+          "version": "0.4.3",
+          "advisories": [
+            "PYSEC-2026-3046"
+          ],
+          "raw_rows": 2
+        }
+      ],
+      "unique_package_advisory_pairs": 5,
+      "raw_advisory_rows": 9
+    }
+  }
+}

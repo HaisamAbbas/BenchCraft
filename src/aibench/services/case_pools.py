@@ -159,6 +159,7 @@ def pool_rows(storage: Storage, pool_id: str) -> list[dict[str, Any]]:
 def _row(number: int, candidate: DatasetCandidate) -> dict[str, Any]:
     reference = candidate.case.reference
     assert reference is not None
+    answer = reference.answer
     span = candidate.source_spans[0]
     heading: str | None = None
     heading_after: str | None = None
@@ -166,8 +167,10 @@ def _row(number: int, candidate: DatasetCandidate) -> dict[str, Any]:
     try:
         before, quote_text, after, heading, heading_after = source_surroundings(span)
         quote: str | None = quote_text
+        if answer is None:
+            raise ValidationError("candidate has no answer reference to verify")
         verbatim = verify_source_quote(candidate).outcome == "passed"
-        support = 1.0 if verbatim else answer_support(reference.answer, quote_text)
+        support = 1.0 if verbatim else answer_support(answer, quote_text)
     except ValidationError:
         quote, verbatim, support = None, False, 0.0  # the document changed or moved since
     return {

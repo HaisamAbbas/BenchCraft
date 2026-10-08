@@ -1,0 +1,402 @@
+[
+  {
+    "command": "(root)",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "score",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "inspect",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "run",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "resume",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "evaluate",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "chat",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "init",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "doctor",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "benchmark",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "report",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "compare",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "setup",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset validate",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset candidates",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset candidates generate",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset candidates list",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset candidates show",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset candidates review",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset candidates verify",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset candidates promote",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset episodes",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "dataset episodes validate",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "experiments",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "experiments create",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "experiments run",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "experiments resume",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "experiments status",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "experiments report",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "experiments evaluate-holdout",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "experiments propose-adoption",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "runs",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "runs list",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "runs show",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "runs status",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "sessions",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "sessions list",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "sessions show",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "sessions delete",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "traces",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "traces import",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "traces show",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "connect",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "connect http",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "cache",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "cache list",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "cache clear",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-oss",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-oss run",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-api",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-api submit",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-api resume",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-api status",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-api cancel",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-api fetch",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "openai-evals-api jobs",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "langfuse",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "langfuse import-dataset",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "langfuse import-traces",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "langfuse export-scores",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "langfuse status",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "integrations",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "integrations list",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "app",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "app describe",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "app smoke",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "evaluators",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "evaluators list",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "evaluators describe",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "evaluators plugin",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "evaluators calibrate",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "plan",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "plan opportunities",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "plan validate",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "plan benchmark",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "plugins",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "plugins list",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "plugins status",
+    "exit_code": 0,
+    "error": null
+  },
+  {
+    "command": "plugins install",
+    "exit_code": 0,
+    "error": null
+  }
+]
