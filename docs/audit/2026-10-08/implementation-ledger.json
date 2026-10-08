@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F05",
+  "current_item": "F19",
   "items": [
     {
       "id": "F01",
@@ -66,7 +66,7 @@
       "title": "Non-finite dataset input is silently changed during execution",
       "detail": "CLI end-to-end reproduction",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "146 affected tests passed",
         "Mypy: 140 source files passed",
@@ -75,8 +75,8 @@
         "Dataclass gap found during review and fixed before delivery"
       ],
       "review": "evidence/F05-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "299d74cac6077639f380e84d076ab7838b31b5cc",
+      "pushed": true
     },
     {
       "id": "F06",
@@ -244,9 +244,14 @@
       "title": "Comparison ignores selected work and uses workspace-wide dataset cases as its denominator",
       "detail": "Distinct-run CLI reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "86 affected tests passed",
+        "Mypy: 140 source files passed",
+        "Ruff src/tests/plugins: passed",
+        "CLI limits/samples/predicates/repetitions/partial/rescore selected denominators verified"
+      ],
+      "review": "evidence/F19-review.md",
       "commit": null,
       "pushed": false
     },

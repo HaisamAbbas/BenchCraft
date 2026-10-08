@@ -45,6 +45,7 @@ from aibench.core.models import (
     deep_unfreeze,
 )
 from aibench.core.plans import ExecutablePlan
+from aibench.engine.engine import parse_work_item_key
 from aibench.reporting.aggregation import reason_code
 from aibench.reporting.statistics import (
     ComparisonSide,
@@ -1875,21 +1876,17 @@ def _global_identity(
 def _parse_work_keys(run: _RunFacts) -> dict[str, set[PairKey]]:
     by_binding: dict[str, set[PairKey]] = defaultdict(set)
     for item in run.work_items:
-        if item.kind != "evaluation" or not item.task_key.startswith("eval:"):
+        if item.kind != "evaluation":
             continue
-        # Case IDs are user-defined and may contain colons (including ``:r``).
-        # Decode the generated repetition and binding suffixes from the right edge;
-        # splitting the whole key on ``:`` would silently pair the wrong case.
-        body = item.task_key[len("eval:") :]
-        case_and_repetition, separator, binding_key = body.rpartition(":")
-        if not separator or not case_and_repetition or not binding_key:
+        try:
+            case_id, repetition, binding_key = parse_work_item_key(item.task_key, item.kind)
+        except ValueError:
             continue
-        case_id, repetition_separator, repetition_text = case_and_repetition.rpartition(":r")
-        if not repetition_separator or not case_id or not repetition_text.isdecimal():
+        if not binding_key:
             continue
         # Work-item keys retain a short binding prefix.  Keep it as the map key;
         # _selected_keys matches it to the full frozen binding hash.
-        by_binding[binding_key].add(PairKey(case_id, int(repetition_text)))
+        by_binding[binding_key].add(PairKey(case_id, repetition))
     return by_binding
 
 
@@ -1897,13 +1894,34 @@ def _selected_keys(run: _RunFacts, spec: _MetricSpec) -> set[PairKey]:
     keys: set[PairKey] = set()
     matched_work = False
     work_map = _parse_work_keys(run)
+    metric_hash = spec.binding_hash.removeprefix("sha256:")
     for binding, values in work_map.items():
-        if binding == spec.binding_hash or spec.binding_hash.startswith(binding) or binding.startswith(spec.binding_hash):
+        binding_hash = binding.removeprefix("sha256:")
+        if (
+            binding_hash == metric_hash
+            or metric_hash.startswith(binding_hash)
+            or binding_hash.startswith(metric_hash)
+        ):
             keys.update(values)
             matched_work = True
     for result in spec.results:
         keys.add(PairKey(result.case_id, result.repetition_id))
     if not matched_work:
+        # New rescore bindings need the same selected executions, including work
+        # that never produced an output. Workspace case catalogs contain other
+        # runs' selections and cannot replace the frozen work graph.
+        execution_work: set[PairKey] = set()
+        for item in run.work_items:
+            if item.kind != "execution":
+                continue
+            try:
+                case_id, repetition, _ = parse_work_item_key(item.task_key, item.kind)
+            except ValueError:
+                continue
+            execution_work.add(PairKey(case_id, repetition))
+        if execution_work:
+            keys.update(execution_work)
+            return keys
         final: dict[tuple[str, int], ExecutionResult] = {}
         for execution in run.executions:
             key = (execution.case_id, execution.repetition_id)
