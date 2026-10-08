@@ -124,13 +124,18 @@ def _normalize_fixtures(fixtures_raw: Any, *, line: int) -> tuple[Fixture, ...]:
                 line=line,
                 field="fixtures",
             )
-        fixtures.append(
-            Fixture(
-                name=entry["name"],
-                content=entry.get("content"),
-                app_visible=bool(entry.get("app_visible", False)),
+        try:
+            fixtures.append(
+                Fixture(
+                    name=entry["name"],
+                    content=entry.get("content"),
+                    app_visible=entry.get("app_visible", False),
+                )
             )
-        )
+        except PydanticValidationError as exc:
+            raise ValidationError(
+                f"invalid fixtures[{idx}]: {exc}", line=line, field=f"fixtures[{idx}]"
+            ) from exc
     return tuple(fixtures)
 
 

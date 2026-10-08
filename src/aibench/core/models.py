@@ -245,7 +245,7 @@ class Fixture(FrozenModel):
 
     name: str
     content: FrozenValue = None
-    app_visible: bool = False
+    app_visible: bool = Field(default=False, strict=True)
 
 
 class Provenance(FrozenModel):
@@ -281,7 +281,9 @@ class BenchmarkCase(FrozenModel):
         return {
             "case_id": self.case_id,
             "input": deep_unfreeze(self.input),
-            "fixtures": {f.name: deep_unfreeze(f.content) for f in self.fixtures if f.app_visible},
+            "fixtures": {
+                f.name: deep_unfreeze(f.content) for f in self.fixtures if f.app_visible is True
+            },
         }
 
 

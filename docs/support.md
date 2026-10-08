@@ -106,6 +106,14 @@ doesn't read one; the isolated DeepEval and Ragas adapters do not load project `
 `aibench doctor` reports whether each reference is set, without printing its value. Secrets
 are redacted from captured output, stored conversation turns and reports.
 
+## Dataset fixture visibility
+
+Fixture `app_visible` flags must be JSON booleans. Only `"app_visible": true` exposes
+fixture content to the application; `false` and an omitted flag keep it judge-only.
+Strings such as `"false"` or `"true"`, numbers, and null are invalid and fail dataset
+validation before any application call. The same rule applies when constructing cases
+through the Python API. Reference answers remain judge-only.
+
 ## Supported now
 
 - **Conversational benchmarking:** in a terminal, `aibench`/`aibench chat` handles planning, runs, live status, pause/resume/stop, failures, case evidence and reports. Sessions survive exit and crashes, and are never restarted automatically.

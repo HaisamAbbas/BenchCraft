@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F14",
+  "current_item": "F03",
   "items": [
     {
       "id": "F01",
@@ -37,9 +37,14 @@
       "title": "String false exposes a hidden fixture to the application",
       "detail": "CLI end-to-end reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "140 affected tests passed",
+        "Mypy: 140 source files passed",
+        "Ruff src/tests/plugins: passed",
+        "Real application receives only explicit true fixtures; invalid flags dispatch nothing"
+      ],
+      "review": "evidence/F03-review.md",
       "commit": null,
       "pushed": false
     },
@@ -169,15 +174,15 @@
       "title": "The current type-check gate fails",
       "detail": "Mypy execution",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "Mypy: 140 source files passed",
         "Ruff src/tests/plugins: passed",
         "24 tests passed; 1 case-sensitive-filesystem test skipped"
       ],
       "review": "evidence/F14-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "68f3604d46fb8db2df95b165ccaad501f88d3184",
+      "pushed": true
     },
     {
       "id": "F15",
