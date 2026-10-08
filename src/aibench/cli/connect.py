@@ -31,6 +31,7 @@ console = Console(highlight=False, emoji=False)
 err_console = Console(stderr=True, highlight=False, emoji=False)
 _APP_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
 JUDGE_CALLS_PER_APPLICATION_CALL = 20
+DEFAULT_WALL_SECONDS = 4 * 3600  # a run's time limit in the policy `connect http` writes
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
@@ -208,7 +209,9 @@ def setup_http(
                 # A judged metric makes several model calls per case (faithfulness about
                 # four); one ceiling for both stopped a 15-case run at 97 of 100 calls.
                 max_evaluator_calls=max_calls * JUDGE_CALLS_PER_APPLICATION_CALL,
-                max_wall_seconds=3600,
+                # A judge that thinks first scores slowly: a 15-case run took 61 minutes and
+                # an hour stopped it with 2 evaluations to go.
+                max_wall_seconds=DEFAULT_WALL_SECONDS,
             ),
         }
         policy = ExecutionPolicy.model_validate(policy_fields)

@@ -91,6 +91,8 @@ def test_http_setup_creates_a_bounded_no_repository_project_without_network_call
     assert policy["ceilings"]["max_application_calls"] == 7
     # Judged metrics make several calls per case: the judge ceiling is not the app's.
     assert policy["ceilings"]["max_evaluator_calls"] == 7 * 20
+    # A judge that thinks first is slow: an hour stopped a 15-case run 2 evaluations short.
+    assert policy["ceilings"]["max_wall_seconds"] == 4 * 3600
     assert "SUPPORT_API_TOKEN" not in json.dumps(report)
 
 
