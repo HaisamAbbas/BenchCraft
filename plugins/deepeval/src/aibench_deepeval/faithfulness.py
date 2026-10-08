@@ -99,9 +99,11 @@ class Faithfulness(Evaluator):
         ),
         limitations=(
             "Judge-dependent: scores from different judge models are not comparable.",
-            "Only a claim the context contradicts lowers the score: a claim it says nothing "
-            "about is graded borderline and counts as faithful, so invented detail scores 1.0. "
-            "Set penalize_ambiguous_claims to count such claims as unfaithful.",
+            (
+                "Only a claim the context contradicts lowers the score: a claim it says nothing "
+                "about is graded borderline and counts as faithful, so invented detail scores "
+                "1.0. Set penalize_ambiguous_claims to count such claims as unfaithful."
+            ),
             "Needs observed retrieval; never uses the Golden's reference context.",
             "Not numerically equivalent to Ragas faithfulness.",
             "An answer with no extractable claims is not applicable (upstream would give 1.0).",
