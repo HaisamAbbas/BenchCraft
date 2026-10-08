@@ -134,7 +134,10 @@ def test_a_killed_effectful_run_leaves_unknown_effect_work_for_the_user(tmp_path
         json.dumps({"allow_trusted_local": True, "max_effects": "reversible"}), encoding="utf-8"
     )
     storage, artifacts = h.storage()
-    data = h.dataset({c: "slow 0.8" for c in "abc"})
+    # The kill must land while a case is still in the app. At 0.8 s per case a busy machine
+    # (a full suite with other work running) sometimes killed only after the case had
+    # finished, leaving nothing in flight to report; 3 s leaves room for a slow kill.
+    data = h.dataset({c: "slow 3" for c in "abc"})
     config = json.loads((h.root / h.cli_app(effects="reversible")).read_text())
     assert config["effects"] == "reversible"
     ctl = SessionController.create(

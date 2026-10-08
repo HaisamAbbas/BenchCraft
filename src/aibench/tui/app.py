@@ -16,8 +16,9 @@ assistant turns, run progress and the engine, each independently cancellable.
   toolbar shows project, session, revision and the run's live state.
 - A sent message is redrawn as a tinted band; while the assistant replies, a spinning
   `Working (Ns)` line sits above the input.
-- Esc or Ctrl+C interrupts the assistant's reply, never a benchmark; with a run active it points
-  to /pause and /stop. /stop is the explicit cancel. Leaving (/exit, Ctrl+D) stops new
+- Esc or Ctrl+C interrupts the assistant's reply, or else stops a long command (an install
+  excepted: it is never left half built), never a benchmark; with a run active it points to
+  /pause and /stop. /stop is the explicit cancel. Leaving (/exit, Ctrl+D) stops new
   dispatch, lets in-flight work finish and keeps the run resumable; reopening a session
   never restarts work (09-T4).
 """
@@ -71,12 +72,35 @@ LONG_COMMANDS = frozenset({"/rescore", "/report", "/compare"})
 # run's traces, `/traces import` reads a file.
 LONG_SUBCOMMANDS = {"/plugins": "install", "/cases": "generate", "/traces": "import"}
 _PROGRESS_SECONDS = 10.0  # how often a long command says how far it is
+_HEARTBEAT_SECONDS = 30.0  # how often a command with nothing to count says it is still waiting
 
 # Commands of the interactive terminal itself: they change only how it looks, so they are
 # handled here rather than recorded in the session like the benchmark controls.
 TERMINAL_COMMANDS: dict[str, str] = {
     "/themes": "/themes [NAME] - list colour themes, or switch (saved for this project)",
 }
+
+
+def is_install(text: str) -> bool:
+    """`/plugins install ...`: builds an environment, so it is never stopped half way."""
+    words = text.lower().split()
+    return words[:2] == ["/plugins", "install"]
+
+
+def stopped_note(text: str) -> str:
+    """What stopping a long command part way leaves behind, in the user's terms."""
+    name = text.split()[0].lower() if text.split() else text
+    if name == "/rescore":
+        return (
+            f"{text} stopped. The evaluations it finished are stored and kept; /rescore "
+            "continues from them."
+        )
+    if name == "/cases":
+        return (
+            f"{text} stopped. Nothing was stored; the request already sent to the model may "
+            "still finish, and its reply is discarded."
+        )
+    return f"{text} stopped."
 
 
 def is_long_command(text: str) -> bool:
@@ -189,6 +213,12 @@ def render_result(console: Console, result: CommandResult) -> None:
         render.cases_decided(console, data)
     elif kind == "cases_saved":
         render.cases_saved(console, data)
+    elif kind == "cases_check":
+        render.cases_check(console, data)
+    elif kind == "cases_verified":
+        render.cases_verified(console, data)
+    elif kind == "cases_added":
+        render.cases_added(console, data)
     elif kind == "traces":
         render.traces(console, data)
     elif kind == "traces_imported":
@@ -229,6 +259,7 @@ class ChatApp:
         progress_interval: float = 0.5,
         coalesce_seconds: float = 2.0,
         command_progress_seconds: float = _PROGRESS_SECONDS,
+        command_heartbeat_seconds: float = _HEARTBEAT_SECONDS,
     ) -> None:
         self.provider = provider
         self.limits = limits
@@ -247,10 +278,12 @@ class ChatApp:
         self.progress_interval = progress_interval
         self.coalesce_seconds = coalesce_seconds
         self.command_progress_seconds = command_progress_seconds
+        self.command_heartbeat_seconds = command_heartbeat_seconds
         self._command: asyncio.Task[None] | None = None
         self._pending_commands: list[str] = []
         self._command_name = ""
         self._command_active = False
+        self._command_stopped = False  # the user stopped it (Esc), not leaving the chat
         self._command_started = 0.0
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._turn: asyncio.Task[TurnOutcome] | None = None
@@ -325,9 +358,16 @@ class ChatApp:
             if not self.commanding():
                 return []
             took = int(time.monotonic() - self._command_started)
+            if not self.command_stoppable():
+                return [
+                    ("class:working.spinner", f"{frame} "),
+                    ("class:working", f"Working: {self._command_name} ({took}s)\n"),
+                ]
             return [
                 ("class:working.spinner", f"{frame} "),
-                ("class:working", f"Working: {self._command_name} ({took}s)\n"),
+                ("class:working", f"Working: {self._command_name} ({took}s {dot} "),
+                ("class:working.key", "esc"),
+                ("class:working", " to stop)\n"),
             ]
         elapsed = int(time.monotonic() - self._turn_started)
         return [
@@ -471,9 +511,35 @@ class ChatApp:
         if self._turn is not None and not self._turn.done():
             self._turn.cancel()
 
-    def on_ctrl_c(self) -> None:
+    def command_stoppable(self) -> bool:
+        """Whether the long command running now can be stopped part way: not an install,
+        which stopped half way would leave a half-built environment behind."""
+        return self.commanding() and not is_install(self._command_name)
+
+    def interrupt_command(self) -> None:
+        """Esc or Ctrl+C with no reply in progress: stop the long command running now. What
+        it already stored is kept; a queued command still runs after it."""
+        if self._command is None or self._command.done():
+            return
+        if not self.command_stoppable():
+            self.say(
+                f"[yellow]{safe(self._command_name)} cannot be stopped half way (it would leave a "
+                "half-built environment); it finishes on its own.[/yellow]"
+            )
+            return
+        self._command_stopped = True
+        self._command.cancel()
+
+    def interrupt(self) -> None:
+        """Esc or Ctrl+C: the assistant's reply first, else a long command; never a run."""
         if self.replying():
             self.interrupt_reply()
+        elif self.commanding():
+            self.interrupt_command()
+
+    def on_ctrl_c(self) -> None:
+        if self.replying() or self.commanding():
+            self.interrupt()
             return
         run = self.controller.active_run()
         if run:
@@ -561,12 +627,15 @@ class ChatApp:
     async def _run_command(self, text: str) -> None:
         """A long command, in the background: the prompt stays open and a Working line shows
         until it ends. A failure is reported, never left as silence."""
+        self._command_stopped = False
         progress = asyncio.ensure_future(self._command_progress(text))
         try:
             await self._run_and_show(text)
         except asyncio.CancelledError:
-            self.say(f"[yellow]{safe(text)} was cancelled.[/yellow]")
-            raise
+            if not self._command_stopped:  # leaving the chat: let the cancellation through
+                self.say(f"[yellow]{safe(text)} was cancelled.[/yellow]")
+                raise
+            self.say(f"[yellow]{safe(stopped_note(text))}[/yellow]")
         except Exception as exc:  # noqa: BLE001 - one command's failure must not end the chat
             self.say(f"[red]{safe(text)} failed: {safe(str(exc))}[/red]")
         finally:
@@ -578,8 +647,19 @@ class ChatApp:
                 self._start_command(self._pending_commands.pop(0))
 
     async def _command_progress(self, text: str) -> None:
-        """While `/rescore` runs, say how many of the run's evaluations are stored again."""
+        """While a long command runs, say how far it is: `/rescore` counts the evaluations
+        stored again; `/cases generate`, one model call with nothing to count, says now and
+        then that it is still waiting for the model."""
         words = text.split()
+        if words[0].lower() == "/cases":
+            waited = 0.0
+            while True:
+                await asyncio.sleep(self.command_heartbeat_seconds)
+                waited += self.command_heartbeat_seconds
+                self.say(
+                    f"[dim]still waiting for the model to write the cases ({int(waited)}s; "
+                    "often 1 to 3 minutes; Esc stops it)[/dim]"
+                )
         if words[0].lower() != "/rescore":
             return
         try:
@@ -644,9 +724,9 @@ class ChatApp:
         bindings = key_bindings()
 
         # Esc then Enter still adds a line: prompt_toolkit waits briefly for the second key.
-        @bindings.add("escape", filter=Condition(self.replying))
+        @bindings.add("escape", filter=Condition(lambda: self.replying() or self.commanding()))
         def _interrupt(event: KeyPressEvent) -> None:
-            self.interrupt_reply()
+            self.interrupt()
 
         session: PromptSession[str] = PromptSession(
             history=self.history,

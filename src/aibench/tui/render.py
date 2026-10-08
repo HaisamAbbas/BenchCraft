@@ -217,7 +217,7 @@ def cases(console: Console, data: dict[str, Any]) -> None:
             out(console, "   [yellow]source changed or missing: this case cannot be used[/yellow]")
             continue
         quote = row["quote"] if len(row["quote"]) <= 240 else row["quote"][:237] + "..."
-        out(console, f"   [dim]{safe(row['source'])}:[/dim] \"{safe(quote)}\"")
+        out(console, f'   [dim]{safe(row["source"])}:[/dim] "{safe(quote)}"')
         if row.get("heading"):
             out(console, f"   [dim]nearest heading above (a guess):[/dim] {safe(row['heading'])}")
         if row.get("heading_after"):
@@ -272,6 +272,74 @@ def cases_saved(console: Console, data: dict[str, Any]) -> None:
         console,
         f'  to benchmark with them, tell me: "use the dataset {safe(data["path"])}"; '
         "the answers in it were written by a model and accepted by you",
+    )
+
+
+_STATUS_WORDS = {
+    "source_verified": "verified against its source",
+    "human_authored": "written by a person",
+    "human_reviewed": "model-written, accepted after a read",
+    "synthetic_unverified": "model-written, not reviewed",
+}
+
+
+def cases_check(console: Console, data: dict[str, Any]) -> None:
+    """`/cases check FILE`: cases laid out for a person to confirm against their source."""
+    counts = ", ".join(
+        f"{n} {_STATUS_WORDS.get(status, status)}" for status, n in data["counts"].items()
+    )
+    out(console, f"{safe(data['path'])}: {data['total']} case(s): {safe(counts)}")
+    if not data["rows"]:
+        out(console, "  nothing left to check: every case is verified or written by a person")
+        return
+    for row in data["rows"]:
+        out(console, "")
+        out(console, f"[bold]{row['number']}.[/bold] {safe(str(row['question']))}")
+        out(console, f"   [dim]expected answer:[/dim] {safe(row['answer'])}")
+        out(console, f"   [dim]now:[/dim] {safe(_STATUS_WORDS.get(row['status'], row['status']))}")
+        if "problem" in row:
+            out(console, f"   [yellow]cannot be checked here: {safe(row['problem'])}[/yellow]")
+            continue
+        heading = f" (under: {safe(row['heading'])})" if row.get("heading") else ""
+        out(console, f"   [dim]source:[/dim] {safe(row['source'])}{heading}")
+        out(
+            console,
+            f"   [dim]...{safe(row['before'])}[/dim] [bold]{safe(row['quote'])}[/bold] "
+            f"[dim]{safe(row['after'])}...[/dim]",
+        )
+        support = row.get("support")
+        if support is not None and support < 0.5:
+            out(
+                console,
+                f"   [yellow]only {round(support * 100)}% of the answer's words are in the "
+                "quote: read it closely[/yellow]",
+            )
+    out(console, "")
+    out(
+        console,
+        "Does each passage say what the expected answer says? Then "
+        f"/cases verify {safe(data['path'])} N... marks those as checked. The file's source "
+        "text is read as it is now; a source edited since the case was written can differ.",
+    )
+
+
+def cases_verified(console: Console, data: dict[str, Any]) -> None:
+    done = ", ".join(str(n) for n in data["verified"]) or "none"
+    out(
+        console,
+        f"[green]verified against their source:[/green] {done} (by {safe(data['reviewer'])})",
+    )
+    for item in data["skipped"]:
+        out(console, f"  [yellow]not verified: {item['number']}: {safe(item['reason'])}[/yellow]")
+    if data["verified"]:
+        out(console, f"  written to {safe(data['path'])}; a session using it picks the change up")
+
+
+def cases_added(console: Console, data: dict[str, Any]) -> None:
+    out(
+        console,
+        f"[green]added case {data['number']}[/green] ({safe(data['case_id'])}, written by "
+        f"{safe(data['author'])}) to {safe(data['path'])}",
     )
 
 
@@ -532,9 +600,12 @@ def report(console: Console, data: dict[str, Any]) -> None:
 def comparison(console: Console, data: dict[str, Any]) -> None:
     """Compact paired-comparison card; no per-case ledger or raw judge content."""
     status = str(data.get("status", "unknown"))
-    colour = {"qualified": "green", "comparable": "green", "blocked": "red", "exploratory": "yellow"}.get(
-        status, "yellow"
-    )
+    colour = {
+        "qualified": "green",
+        "comparable": "green",
+        "blocked": "red",
+        "exploratory": "yellow",
+    }.get(status, "yellow")
     out(
         console,
         f"[bold]comparison[/bold] [{colour}]{safe(status)}[/colour]"
@@ -587,9 +658,7 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
         disagreement = {
             "decision_matrix": dict(matrix_counts),
             "paired_count": sum(
-                int(item.get("paired_count", 0))
-                for item in disagreement
-                if isinstance(item, dict)
+                int(item.get("paired_count", 0)) for item in disagreement if isinstance(item, dict)
             ),
         }
     if disagreement.get("paired_count") or disagreement.get("total"):

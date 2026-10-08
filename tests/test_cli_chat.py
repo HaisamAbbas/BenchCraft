@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from aibench.cli.main import app
@@ -228,3 +229,84 @@ def test_noninteractive_new_chat_asks_for_material_dataset_ambiguity(tmp_path: P
     assert "datasets/first.jsonl" in result.output
     assert "datasets/second.jsonl" in result.output
     assert "--dataset PATH" in result.output
+
+
+def _send(project: Path, *options: str) -> dict:
+    application, dataset = project / "app.json", project / "data.jsonl"
+    result = runner.invoke(
+        app,
+        [
+            "chat",
+            "--project",
+            str(project),
+            "--app",
+            str(application),
+            "--dataset",
+            str(dataset),
+            *options,
+            "--send",
+            "/sessions",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return json.loads(result.stdout)
+
+
+def test_continue_opens_the_latest_session_with_work_in_it(tmp_path: Path) -> None:
+    """A user coming back had to look up a session ID: `--resume` alone failed with "Option
+    '--resume' requires an argument". `--continue` (or `--resume latest`) opens the most
+    recently used session that has an objective or a run; a newer empty one (opened and
+    left) is passed over. `--resume` keeps its value required, so the next option is never
+    read as an ID."""
+    project = tmp_path / "project"
+    _project(project)
+    older = _send(project, "--new", "--objective", "catch wrong answers")["session_id"]
+    latest = _send(project, "--new", "--objective", "check fine amounts")["session_id"]
+    empty = _send(project, "--new")["session_id"]
+    assert len({older, latest, empty}) == 3
+
+    assert _send(project, "--continue")["session_id"] == latest
+    assert _send(project, "-c")["session_id"] == latest
+    assert _send(project, "--resume", "latest")["session_id"] == latest
+    assert _send(project, "--resume", older)["session_id"] == older  # an ID still works
+
+
+def test_continue_without_a_session_says_how_to_start_one(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    application, dataset = _project(project)
+    base = ["chat", "--project", str(project), "--app", str(application)]
+    base += ["--dataset", str(dataset), "--send", "/sessions", "--json"]
+    result = runner.invoke(app, [*base, "--continue"])
+    assert result.exit_code != 0
+    assert "no session to resume" in result.output
+    both = runner.invoke(app, [*base, "--continue", "--new"])
+    assert both.exit_code != 0 and "one of --resume, --continue and --new" in both.output
+
+
+@pytest.mark.parametrize(
+    ("arguments", "resume", "new", "latest"),
+    [
+        ([], None, False, False),
+        (["--continue"], None, False, True),
+        (["-c"], None, False, True),
+        (["--resume", "ses-0123"], "ses-0123", False, False),
+        (["--new"], None, True, False),
+    ],
+)
+def test_bare_benchcraft_takes_continue_resume_and_new(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: list[str],
+    resume: str | None,
+    new: bool,
+    latest: bool,
+) -> None:
+    """`benchcraft --continue` opens the conversation like `benchcraft chat --continue`."""
+    import aibench.cli.chat as chat_cli
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(chat_cli, "interactive_terminal", lambda: True)
+    monkeypatch.setattr(chat_cli, "chat", lambda **kwargs: seen.update(kwargs))
+    result = runner.invoke(app, arguments)
+    assert result.exit_code == 0, result.output
+    assert (seen["resume"], seen["new"], seen["continue_latest"]) == (resume, new, latest)

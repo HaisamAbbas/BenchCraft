@@ -37,7 +37,10 @@ COMMANDS: dict[str, str] = {
     "/traces": "/traces [import FILE] [RUN_ID] - a run's imported traces, or attach an export",
     "/rescore": "/rescore [all] [RUN_ID] - score stored outputs; only what failed or is missing",
     "/case": "/case CASE_ID - one case's evidence",
-    "/cases": "/cases generate FILE... | accept N... | reject N... | save - test cases from documents",
+    "/cases": (
+        "/cases generate FILE... | accept N... | reject N... | save - test cases from documents; "
+        "/cases check|verify|add FILE.jsonl - check cases against their source, write your own"
+    ),
     "/budget": "ceilings, committed spend and unknown accounting",
     "/app": "the application's runner: what it observes, missing evidence, resets, test worlds",
     "/world": "/world NAME|none - select one of the application's test worlds (a new draft)",
@@ -49,6 +52,13 @@ COMMANDS: dict[str, str] = {
     "/new": "start a fresh session in this project",
     "/exit": "leave; an active run stops dispatching and stays resumable",
 }
+
+
+def _unquote(word: str) -> str:
+    """A word as `shlex.split(posix=False)` keeps it, without its surrounding quotes."""
+    if len(word) >= 2 and word[0] == word[-1] and word[0] in "\"'":
+        return word[1:-1]
+    return word
 
 
 @dataclass
@@ -258,7 +268,9 @@ class Commands:
 
         usage = (
             "usage: /cases generate FILE_OR_FOLDER... [--max N]  |  /cases  |  "
-            "/cases accept N... | all  |  /cases reject N...  |  /cases save [FILE.jsonl]"
+            "/cases accept N... | all  |  /cases reject N...  |  /cases save [FILE.jsonl]  |  "
+            "/cases check FILE.jsonl [N... | all]  |  /cases verify FILE.jsonl N...  |  "
+            '/cases add FILE.jsonl "QUESTION" "ANSWER"'
         )
         words = shlex.split(argument, posix=False)
         sub = words[0].lower() if words else "show"
@@ -273,7 +285,11 @@ class Commands:
             limit = 20
             if "--max" in rest:
                 at = rest.index("--max")
-                if at + 1 >= len(rest) or not rest[at + 1].isdigit() or not 1 <= int(rest[at + 1]) <= 50:
+                if (
+                    at + 1 >= len(rest)
+                    or not rest[at + 1].isdigit()
+                    or not 1 <= int(rest[at + 1]) <= 50
+                ):
                     return failed("--max takes a number from 1 to 50")
                 limit = int(rest[at + 1])
                 rest = rest[:at] + rest[at + 2 :]
@@ -306,6 +322,8 @@ class Commands:
                     "generated": True,
                 },
             )
+        if sub in ("check", "verify", "add"):
+            return self._golden(sub, rest, root)
         pool_id = case_pools.newest_pool_id(storage)
         if sub == "show":
             if pool_id is None:
@@ -342,6 +360,34 @@ class Commands:
             path, count = case_pools.save_accepted(storage, pool_id, target)
             return CommandResult("/cases", "cases_saved", {"path": str(path), "count": count})
         return failed(usage)
+
+    def _golden(self, sub: str, words: list[str], root: Path) -> CommandResult:
+        """`/cases check|verify|add FILE ...`: work on a saved dataset towards a golden one
+        (see `aibench.services.golden`). They read and write only that file."""
+        from aibench.services import golden
+
+        examples = {
+            "check": "/cases check FILE.jsonl [N... | all]",
+            "verify": "/cases verify FILE.jsonl N...",
+            "add": '/cases add FILE.jsonl "QUESTION" "ANSWER"',
+        }
+        if not words:
+            return CommandResult("/cases", "error", {"error": f"usage: {examples[sub]}"}, ok=False)
+        target = Path(_unquote(words[0]))
+        path = target if target.is_absolute() else root / target
+        rest = [_unquote(w) for w in words[1:]]
+        if sub == "check":
+            return CommandResult("/cases", "cases_check", golden.check_rows(path, rest))
+        if sub == "verify":
+            return CommandResult("/cases", "cases_verified", golden.verify(path, rest))
+        if len(rest) != 2:
+            return CommandResult(
+                "/cases",
+                "error",
+                {"error": f"usage: {examples['add']} (quote each)"},
+                ok=False,
+            )
+        return CommandResult("/cases", "cases_added", golden.add(path, rest[0], rest[1]))
 
     async def _traces(self, argument: str) -> CommandResult:
         """`/traces [RUN_ID]`: what the run's imported traces add. `/traces import FILE

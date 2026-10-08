@@ -45,7 +45,8 @@ aibench chat --new --objective "answers are correct"     # then /plan, /run, /re
 ```
 
 This creates a 10-case local project with a fixture app and opens the benchmark
-conversation. See [docs/quickstart.md](docs/quickstart.md)
+conversation. Later, `benchcraft --continue` (or `-c`) reopens the session you last worked in;
+`--resume SESSION_ID` opens a particular one. See [docs/quickstart.md](docs/quickstart.md)
 and, for what is and isn't supported, [docs/support.md](docs/support.md).
 
 To connect a configured JSON HTTP endpoint without its repository, see the bounded

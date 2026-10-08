@@ -5,6 +5,34 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc30 — Esc stops a long command; --continue; checking cases against their source
+
+- **Esc (or Ctrl+C) stops a long command** when the assistant is not replying. A `/rescore`
+  stuck in a judge call ended only by leaving the chat; now Esc ends it within seconds, kills
+  the worker process the judge call was blocking, and keeps every evaluation already stored
+  (`/rescore` continues from them). `/cases generate` stops waiting and stores nothing.
+  `/plugins install` is never stopped half way, and says so. The Working line shows
+  "esc to stop", and a queued command still runs after the stopped one.
+- `/cases generate` says every 30 s that it is still waiting for the model; it has nothing to
+  count while one model call writes the cases.
+- **`benchcraft --continue` (or `-c`)** opens the latest session with work in it, passing over
+  newer empty ones; `--resume latest` does the same and `--resume SESSION_ID` still names one.
+  `benchcraft` itself now takes `--continue`, `--resume` and `--new`. A bare `--resume`
+  still needs its value: an optional one would read the next option as a session ID.
+- **Towards a golden dataset**, on a saved dataset file:
+  - `/cases check FILE.jsonl [N... | all]` lays cases out to confirm: question, expected
+    answer, the source passage it cites with the text around it and the heading above, and
+    how much of the answer's wording the passage has. By default a few unverified cases at
+    random.
+  - `/cases verify FILE.jsonl N...` marks the cases a person confirmed `source_verified`
+    (with who checked). A case whose source cannot be read is not marked, and says why.
+  - `/cases add FILE.jsonl "QUESTION" "ANSWER"` appends a case a person wrote
+    (`human_authored`), creating the file if it is new.
+  Only the lines verified or added change, in the file's own line endings; the write is
+  atomic and the result is read back as a dataset before it replaces the file.
+- Two tests that failed on a busy machine hold now (CPU time against one start-up sample; a
+  kill that has to land while a 0.8 s case is in flight).
+
 ## 0.1.0rc29 — DAG metrics: a decision tree written in the plan
 
 The first of the DeepEval metrics BenchCraft did not have. The DeepEval plugin now has 39.
