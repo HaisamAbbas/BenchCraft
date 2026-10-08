@@ -384,6 +384,12 @@ def build_catalog(
     return sorted(options, key=lambda o: (not o.evaluator_id.startswith("native."), o.metric))
 
 
+def _specificity(pattern: str) -> tuple[int, int]:
+    """Sort key, least specific first: patterns with more wildcards, then shorter ones."""
+    wildcards = sum(pattern.count(c) for c in "*?[")
+    return (-wildcards, len(pattern))
+
+
 def with_default_params(
     manifests: Iterable[EvaluatorManifest],
     defaults: Mapping[str, Mapping[str, object]],
@@ -393,11 +399,15 @@ def with_default_params(
     `deepeval.*`) fills only parameters the evaluator's schema declares, so a judge default
     never reaches a metric that takes no judge; parameters the user gave win."""
     merged: dict[str, dict[str, object]] = {k: dict(v) for k, v in params.items()}
+    # The most specific pattern wins, whatever order the file lists them in: with
+    # `deepeval.contextual_precision` written before `deepeval.*`, the general judge used to
+    # overwrite the one meant for that metric alone.
+    ordered = sorted(defaults.items(), key=lambda item: _specificity(item[0]))
     for manifest in manifests:
         schema = deep_unfreeze(manifest.parameters_schema) or {}
         accepted = set(schema.get("properties") or {})
         filled: dict[str, object] = {}
-        for pattern, values in defaults.items():
+        for pattern, values in ordered:
             if fnmatchcase(manifest.evaluator_id, pattern):
                 filled.update({k: v for k, v in values.items() if k in accepted})
         if filled:

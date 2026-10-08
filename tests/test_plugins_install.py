@@ -106,6 +106,25 @@ def test_default_params_fill_only_what_a_metric_accepts_and_never_override_the_u
     }
 
 
+def test_a_default_for_one_metric_wins_over_the_wildcard_in_any_order() -> None:
+    """A judge that does not think suits the retrieval metrics (a thinking one ran past 32,768
+    tokens judging 16 passages, and scored one case 0.00 then 0.84), so a project gives
+    contextual precision its own judge. Written before `deepeval.*`, it was overwritten by the
+    general judge: defaults were applied in file order."""
+    manifests = [
+        _manifest("deepeval.contextual_precision", {"judge": {}}),
+        _manifest("deepeval.bias", {"judge": {}}),
+    ]
+    quick = {"kind": "openai_compatible", "model": "glm-4.6", "thinking": "disabled"}
+    for defaults in (
+        {"deepeval.contextual_precision": {"judge": quick}, "deepeval.*": {"judge": JUDGE}},
+        {"deepeval.*": {"judge": JUDGE}, "deepeval.contextual_precision": {"judge": quick}},
+    ):
+        merged = with_default_params(manifests, defaults, {})
+        assert merged["deepeval.contextual_precision"] == {"judge": quick}
+        assert merged["deepeval.bias"] == {"judge": JUDGE}
+
+
 # --------------------------------------------------------------------------- install
 
 

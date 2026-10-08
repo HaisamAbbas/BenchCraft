@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from aibench.conversation.agent import ConversationAgent, patch_fix
+from aibench.conversation.agent import ConversationAgent, concept_stated, patch_fix
 from aibench.sessions.controller import unavailable_settings
 from tests.session_support import ScriptedProvider, SessionHarness, patch_step, say
 
@@ -126,3 +126,62 @@ def test_empty_settings_for_a_metric_are_ignored_not_refused(tmp_path: Path) -> 
         assert user in ctl.state()["draft"]["objectives"]
     finally:
         ctl.storage.db.close()
+
+
+def test_naming_a_metric_states_the_concept_it_serves() -> None:
+    """ "Use deepeval.g_eval for that one" was refused twice: the patch named the concept
+    `custom_criteria`, a word no user types, and the user had to be told to type it. A metric
+    the user names states the concept it serves; the concept in words does too."""
+    serving = {"custom_criteria": ("deepeval.g_eval",), "correctness": ("native.exact_match",)}
+    assert concept_stated("custom_criteria", "use deepeval.g_eval for that one", serving)
+    assert concept_stated("custom_criteria", "check it with g-eval", serving)
+    assert concept_stated("custom_criteria", "score it against custom criteria", serving)
+    assert not concept_stated("custom_criteria", "make the answers better", serving)
+    # A metric the user did not name states nothing, even one that serves the concept.
+    assert not concept_stated("correctness", "use deepeval.g_eval for that one", serving)
+
+
+def test_a_concept_the_user_names_by_its_metric_is_applied(tmp_path: Path) -> None:
+    """End to end through the assistant: the user names the metric, the model attaches the
+    concept that metric serves, and the change is applied instead of refused."""
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"})
+    user = "Add the objective answers match exactly, and use native.exact_match for it"
+    objective = "answers match exactly"
+    concept = next(
+        c
+        for option in ctl.inputs().catalog
+        if option.evaluator_id == "native.exact_match"
+        for c in option.concepts
+    )
+    assert concept not in user  # the concept's own name is not in the message
+    provider = ScriptedProvider(
+        [
+            patch_step(
+                user,
+                add_objectives=[objective],
+                objective_concepts={objective: [concept]},
+            ),
+            say("Added."),
+        ]
+    )
+    agent = ConversationAgent(ctl, provider)
+    try:
+        outcome = asyncio.run(agent.handle_message(user))
+        assert outcome.rejected == [], outcome.rejected
+        assert objective in ctl.state()["draft"]["objectives"]
+    finally:
+        ctl.storage.db.close()
+
+
+def test_a_concept_the_user_did_not_name_is_not_reworded_but_asked_about() -> None:
+    problems = [
+        (
+            "concept for 'answers match the expected answers' 'custom_criteria' does not "
+            "appear in the user's message"
+        )
+    ]
+    fix = patch_fix(problems, "answers match the expected answers")
+    assert fix is not None
+    assert "Do not retry with other wording" in fix and "custom_criteria" in fix
+    assert "use deepeval.g_eval" in fix
