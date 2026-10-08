@@ -90,6 +90,9 @@ _ERROR_TEXT_LIMIT = 300
 # still fails cleanly before the harness's own per-case limit. Errors that repeating cannot
 # fix (a wrong key, a bad request) are never retried.
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+# OpenRouter passes on a failure of the provider it routed to as HTTP 400 "Provider returned
+# error"; the next attempt may go to another provider.
+_UPSTREAM_FAILURE = re.compile(r'"message"\s*:\s*"Provider returned error"')
 # A provider out of credit can answer 429 like a rate limit (Z.ai, error 1113: "Insufficient
 # balance or no resource package. Please recharge."). Waiting cannot fix that: no retry.
 _OUT_OF_CREDIT = re.compile(
@@ -375,7 +378,11 @@ class _OpenAICompatible:
         success or an error retrying cannot fix), or attempts or time are used up. A
         transient failure has no reply (`response` None)."""
         if response is not None and response.status_code not in _RETRY_STATUSES:
-            return None
+            upstream = response.status_code == 400 and _UPSTREAM_FAILURE.search(
+                response.text[:_ERROR_TEXT_LIMIT]
+            )
+            if not upstream:
+                return None
         if response is not None and _OUT_OF_CREDIT.search(response.text[:_ERROR_TEXT_LIMIT]):
             return None  # an empty balance does not refill by waiting
         last = attempt == _ATTEMPTS - 1

@@ -82,6 +82,45 @@ def test_a_wrong_key_or_bad_request_is_not_retried() -> None:
             assert len(server.requests) == 1, status
 
 
+# OpenRouter's wording when the provider it routed to failed (seen from DeepSeek V4 Flash).
+UPSTREAM_FAILED = (
+    400,
+    {
+        "error": {
+            "message": "Provider returned error",
+            "code": 400,
+            "metadata": {
+                "raw": '{"error":{"code":"invalid_request_error","message":"The request was '
+                "rejected. Possible causes: input exceeds the model's maximum context length, "
+                'or the request contains invalid parameters."}}',
+                "provider_name": "SailResearch",
+            },
+        }
+    },
+)
+
+
+def test_a_failure_of_the_provider_openrouter_routed_to_is_asked_again() -> None:
+    """The assistant stopped with HTTP 400 "Provider returned error"; the same request went
+    through a minute later. A 400 of the routed-to provider is retried; any other 400 is not
+    (the test above)."""
+    for streamed in (False, True):
+        replies = [UPSTREAM_FAILED, (200, text_stream("hi") if streamed else COMPLETION)]
+        with chat_server(replies) as server:
+            provider = _provider(server.base_url)
+            try:
+                if streamed:
+                    reply = provider.complete_stream(
+                        [{"role": "user", "content": "hi"}], [], lambda _t: None
+                    )
+                else:
+                    reply = provider.complete([{"role": "user", "content": "hi"}], [])
+            finally:
+                provider.close()
+            assert len(server.requests) == 2, streamed
+        assert reply.text in ("hi", "hello")
+
+
 def test_a_dropped_connection_is_retried_but_a_stream_cut_after_text_is_not() -> None:
     calls = {"n": 0}
 

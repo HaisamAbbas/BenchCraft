@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
@@ -43,6 +44,10 @@ MAX_RESPONSE_BYTES = 2_000_000
 # growing wait (the server's `Retry-After` when given); the user is waiting, so not for long.
 # Errors that repeating cannot fix (a wrong key, a bad request) are never retried.
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+# OpenRouter passes on a failure of the provider it routed to as HTTP 400 "Provider returned
+# error" (DeepSeek V4 Flash once answered "the request was rejected" to a request that went
+# through unchanged a minute later). The next attempt may go to another provider.
+_UPSTREAM_FAILURE = re.compile(r'"message"\s*:\s*"Provider returned error"')
 _ATTEMPTS = 4
 _MAX_WAIT_SECONDS = 15.0
 
@@ -123,11 +128,15 @@ class OpenAICompatibleProvider:
     def close(self) -> None:
         self._client.close()
 
-    def _pause(self, attempt: int, status: int | None, retry_after: str | None) -> float | None:
+    def _pause(
+        self, attempt: int, status: int | None, retry_after: str | None, text: str = ""
+    ) -> float | None:
         """Seconds to wait before trying again, or None to give up: the reply is final (an
         error retrying cannot fix) or the attempts are used. `status` is None for a failed
         connection."""
-        if attempt == _ATTEMPTS - 1 or (status is not None and status not in _RETRY_STATUSES):
+        retryable = status is None or status in _RETRY_STATUSES
+        retryable = retryable or (status == 400 and bool(_UPSTREAM_FAILURE.search(text)))
+        if attempt == _ATTEMPTS - 1 or not retryable:
             return None
         wait = min(_MAX_WAIT_SECONDS, self.config.retry_wait_seconds * 2**attempt)
         if retry_after is not None:
@@ -173,7 +182,10 @@ class OpenAICompatibleProvider:
                         raw = response.read()[:MAX_RESPONSE_BYTES]
                         text = self._redactor.text(raw.decode("utf-8", errors="replace"))
                         pause = self._pause(
-                            attempt, response.status_code, response.headers.get("retry-after")
+                            attempt,
+                            response.status_code,
+                            response.headers.get("retry-after"),
+                            text,
                         )
                         if pause is None:
                             raise PlannerError(f"HTTP {response.status_code}: {text[:300]}")
@@ -216,7 +228,7 @@ class OpenAICompatibleProvider:
             text = self._redactor.text(raw.decode("utf-8", errors="replace"))
             if status == 200:
                 return parse_reply(text)
-            pause = self._pause(attempt, status, retry_after)
+            pause = self._pause(attempt, status, retry_after, text)
             if pause is None:
                 raise PlannerError(f"HTTP {status}: {text[:300]}")
             time.sleep(pause)

@@ -376,8 +376,12 @@ class _JudgeServer(ThreadingHTTPServer):
         garbled_first: int = 0,
         reasoning_required: bool | dict[str, Any] = False,
         reported_cost: float | None = None,
+        upstream_failed_first: int = 0,
     ) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
+        # The first requests fail as OpenRouter reports a failure of the provider it routed
+        # to: HTTP 400 "Provider returned error".
+        self.upstream_failed_first = upstream_failed_first
         self.status = status
         # A reasoning model: it needs this many tokens for thinking before it writes the JSON,
         # and a request that allows fewer gets an empty, cut-off reply (finish_reason "length").
@@ -423,6 +427,21 @@ class _JudgeHandler(BaseHTTPRequestHandler):
         return
 
     def do_POST(self) -> None:
+        if self.server.upstream_failed_first > 0:
+            self.server.upstream_failed_first -= 1
+            self.server.requests.append(
+                {"body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))}
+            )
+            data = (
+                b'{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":'
+                b'"The request was rejected.","provider_name":"SailResearch"}}}'
+            )
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.server.out_of_credit:
             self.server.requests.append(
                 {"body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))}
@@ -858,6 +877,19 @@ def test_a_call_that_keeps_trickling_bytes_still_ends_at_its_deadline(
     assert result.status is ExecutionStatus.ERROR
     assert took < 25, f"the call outlived its deadline: {took:.0f}s"  # unfixed: the full 30 s
     assert len(server.requests) >= 2  # a timed-out call is asked again before giving up
+
+
+def test_a_failure_of_the_provider_openrouter_routed_to_is_asked_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenRouter reports a failure of the provider it routed to as HTTP 400 "Provider
+    returned error"; the next attempt may go to another provider. Any other 400 is final."""
+    result, server, _ = _openai_compatible_score(
+        tmp_path, monkeypatch, 200, upstream_failed_first=1
+    )
+    assert result.status is ExecutionStatus.OK, result.reason
+    first, second = server.requests[0]["body"], server.requests[1]["body"]
+    assert first == second  # the same request, asked again
 
 
 def test_a_compressed_reply_is_read_on_the_blocking_path_too() -> None:
