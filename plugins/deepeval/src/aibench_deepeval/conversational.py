@@ -80,6 +80,13 @@ CONVERSATION_SPECS: tuple[ConversationSpec, ...] = (
         "KnowledgeRetentionMetric",
         "whether the assistant keeps what the user told it earlier in the conversation",
         ("knowledge_retention",),
+        limitations=(
+            (
+                "A clarifying question can be counted as forgetting: on a real support chat the "
+                "judge read the user's opening complaint as already answering the assistant's "
+                "question, and scored a well-handled conversation 0.0 once and 0.5 once."
+            ),
+        ),
     ),
     ConversationSpec(
         "role_adherence",
