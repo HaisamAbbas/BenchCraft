@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F03",
+  "current_item": "F05",
   "items": [
     {
       "id": "F01",
@@ -37,7 +37,7 @@
       "title": "String false exposes a hidden fixture to the application",
       "detail": "CLI end-to-end reproduction",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "140 affected tests passed",
         "Mypy: 140 source files passed",
@@ -45,8 +45,8 @@
         "Real application receives only explicit true fixtures; invalid flags dispatch nothing"
       ],
       "review": "evidence/F03-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "e5f6ec0f9ea0a662af2d4e71d04385868e6e1f9e",
+      "pushed": true
     },
     {
       "id": "F04",
@@ -66,9 +66,15 @@
       "title": "Non-finite dataset input is silently changed during execution",
       "detail": "CLI end-to-end reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "146 affected tests passed",
+        "Mypy: 140 source files passed",
+        "Ruff src/tests/plugins: passed",
+        "Zero dispatch for invalid case numbers; finite storage round trips preserved",
+        "Dataclass gap found during review and fixed before delivery"
+      ],
+      "review": "evidence/F05-review.md",
       "commit": null,
       "pushed": false
     },

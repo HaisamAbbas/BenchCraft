@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import NoReturn, Self
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -141,6 +141,10 @@ class IngestReport:
         return not self.errors
 
 
+def _reject_json_constant(name: str) -> NoReturn:
+    raise ValueError(f"non-standard JSON constant {name} is not allowed")
+
+
 def iter_jsonl_lines(path: Path) -> Iterator[tuple[int, str]]:
     """Yield (line_number, stripped_text) for each nonblank line, streaming one line at a
     time so memory stays bounded regardless of file size."""
@@ -212,10 +216,16 @@ def ingest_dataset(
             occurrence += 1
             hasher.update(line.encode("utf-8"))
             try:
-                raw = json.loads(line)
+                raw = json.loads(line, parse_constant=_reject_json_constant)
             except json.JSONDecodeError as exc:
                 if len(errors) < max_errors:
                     errors.append(LineError(lineno, f"invalid JSON: {exc.msg}"))
+                else:
+                    errors_truncated = True
+                continue
+            except ValueError as exc:
+                if len(errors) < max_errors:
+                    errors.append(LineError(lineno, f"invalid JSON: {exc}"))
                 else:
                     errors_truncated = True
                 continue

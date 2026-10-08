@@ -8,9 +8,11 @@ pydantic and the standard library.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum
-from math import prod
+from math import isfinite, prod
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
@@ -272,6 +274,33 @@ class BenchmarkCase(FrozenModel):
     provenance: Provenance = Field(default_factory=Provenance)
     duplicate_of_line: int | None = None
     source_line: int | None = None
+
+    @model_validator(mode="after")
+    def _finite_case_numbers(self) -> BenchmarkCase:
+        """Reject values JSON serialization would silently replace with null."""
+        pending: list[Any] = [self]
+        seen: set[int] = set()
+        while pending:
+            value = pending.pop()
+            if isinstance(value, float) and not isfinite(value):
+                raise ValueError("case data must not contain non-finite numbers (NaN or infinity)")
+            if isinstance(value, BaseModel):
+                children = list(value.__dict__.values())
+                if value.__pydantic_extra__:
+                    children.append(value.__pydantic_extra__)
+            elif is_dataclass(value) and not isinstance(value, type):
+                children = [getattr(value, field.name) for field in fields(value)]
+            elif isinstance(value, Mapping):
+                children = [*value.keys(), *value.values()]
+            elif isinstance(value, (list, tuple, set, frozenset)):
+                children = list(value)
+            else:
+                continue
+            identity = id(value)
+            if identity not in seen:
+                seen.add(identity)
+                pending.extend(children)
+        return self
 
     def application_input_projection(self) -> dict[str, Any]:
         """The application-visible envelope: input plus fixtures explicitly marked

@@ -114,6 +114,13 @@ Strings such as `"false"` or `"true"`, numbers, and null are invalid and fail da
 validation before any application call. The same rule applies when constructing cases
 through the Python API. Reference answers remain judge-only.
 
+Case numbers must be finite. Dataset validation rejects `NaN`, `Infinity`, `-Infinity`,
+and numeric literals that overflow to infinity, including values nested in input,
+fixtures, expectations, metadata, and extensions. Invalid rows include their source line
+and prevent a run from dispatching. Valid strings such as `"NaN"` remain ordinary text.
+The Python case API applies the same validation to supplied container, model, and
+dataclass fields before storing a case.
+
 ## Supported now
 
 - **Conversational benchmarking:** in a terminal, `aibench`/`aibench chat` handles planning, runs, live status, pause/resume/stop, failures, case evidence and reports. Sessions survive exit and crashes, and are never restarted automatically.
