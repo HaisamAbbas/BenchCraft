@@ -378,7 +378,7 @@ For context, established tools expose practical scriptable controls: Hyperfine d
 | G07 | P1 | Convenient bounded run controls | **Partial.** Plans support selection, repeats, concurrency, retries, timeouts, budgets, caches, and quotas. `run` largely requires editing a plan file. Add validated direct overrides and a dry-run that prints the exact frozen scope. |
 | G08 | P1 | Reproducibility controls and provenance | **Partial.** Selection/bootstrap seeds and frozen configuration exist. The run CLI does not expose the engine's `run_seed`; local source/dependency/commit provenance is incomplete, as F04 shows. |
 | G09 | P1 | Release gates in conversation drafts | **Missing; documented limitation.** Gates can be authored in executable plans but not declared through session draft choices/patches. |
-| G10 | P2 | Retry only failed application work | **Partial.** Engine transient retries and unfinished judge rescoring exist. There is no convenient headless command creating a bounded child run from failed/selected application cases with parent lineage. |
+| G10 | P2 | Retry only failed application work | **Implemented.** `runs retry` creates a bounded child from safe final application failures or explicit parent-scoped cases on finished runs; it rechecks current/frozen policy, dataset identity, and frozen test-world seed, previews with `--dry-run`, and records lineage in run manifests and reports. |
 | G11 | P2 | Headless run supervision | **Deferred/partial.** Status exists; live pause/stop controls belong to the owning terminal/session. Detached execution and durable external pause/resume/cancel requests are absent. |
 | G12 | P2 | Configuration management | **Partial.** Config files, setup, and doctor exist. There is no `config show/validate/set` workflow showing effective values and source precedence with secrets redacted, or named provider profiles. |
 | G13 | P2 | Structured progress and durable logs | **Partial.** Terminal progress and persisted run events exist. Scripts lack a consistent JSONL event stream, log-file selection, verbosity/quiet controls, and documented noninteractive logging contract. |
@@ -405,7 +405,6 @@ benchcraft --config benchcraft.json --json --non-interactive run --plan plan.jso
 benchcraft run --plan plan.json --dry-run --limit 100 --repetitions 3 --seed 42
 benchcraft compare main-baseline RUN_ID --fail-on-regression regression-policy.json
 benchcraft runs export RUN_ID --format jsonl --include-passing
-benchcraft runs retry-failed RUN_ID --new-run
 benchcraft runs cancel RUN_ID
 benchcraft config show --effective --redacted
 benchcraft workspace check

@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G10",
+  "current_item": "G11",
   "items": [
     {
       "id": "F01",
@@ -507,11 +507,17 @@
       "title": "Retry only failed application work",
       "detail": "**Partial.** Engine transient retries and unfinished judge rescoring exist. There is no convenient headless command creating a bounded child run from failed/selected application cases with parent lineage.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "Final retry, interrupted-parent, and changed-test-world regressions: 7 passed",
+        "Broader affected CLI/run/report/model suite before final review guards: 99 passed",
+        "Mypy passed for 149 source files; Ruff src/tests/plugins and git diff --check passed",
+        "Automatic retry excludes every case with any final repetition or work-item dispatch risk; explicit retry reports effect-risk cases",
+        "Current project policy, terminal parent state, unchanged dataset and frozen world seed are revalidated; child lineage appears in manifests and reports"
+      ],
+      "review": "evidence/G10-review.md",
+      "commit": "1efb8bcd",
+      "pushed": true
     },
     {
       "id": "G11",
