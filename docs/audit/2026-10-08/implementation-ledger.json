@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G03",
+  "current_item": "G04",
   "items": [
     {
       "id": "F01",
@@ -386,11 +386,16 @@
       "title": "Regression policies for CI",
       "detail": "**Partial.** Absolute release gates and compatible run deltas exist. `compare` exits for compatibility/coverage, not a configured degradation in score, latency, or cost. Add predeclared regression tolerances and fail rules.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "39 regression-policy, comparison-service, and targeted TUI tests passed; CLI compare policy end-to-end test passed",
+        "Ruff src/tests/plugins passed; mypy checked 145 source files; git diff --check passed",
+        "Higher/lower metric deltas, p95 latency, complete cost, missing measurements, under-coverage precedence, strict tolerance boundaries, and JSON exit parity verified",
+        "Independent review findings on coverage exit precedence, strict thresholds, and human undetermined reasons were fixed; final re-review reported no findings"
+      ],
+      "review": "evidence/G03-review.md",
+      "commit": "40f15c654e9e9a221225a8804160b471866b7620",
+      "pushed": true
     },
     {
       "id": "G04",
