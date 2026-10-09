@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F15",
+  "current_item": "F16",
   "items": [
     {
       "id": "F01",
@@ -272,8 +272,8 @@
         "Final independent review: no findings"
       ],
       "review": "evidence/F15-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "d10a7b0ab437022b29043fc5ec0256fc2593e946",
+      "pushed": true
     },
     {
       "id": "F16",
