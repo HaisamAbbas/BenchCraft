@@ -62,6 +62,8 @@ from aibench.storage.repositories import Storage
 REPORT_SCHEMA = "aibench.report/1"
 EXCERPT_CHARS = 300
 FORMATS = {"json": "json", "markdown": "md", "html": "html"}
+CI_FORMATS = {"junit": "xml", "sarif": "sarif"}
+REPORT_FORMATS = {**FORMATS, **CI_FORMATS}
 _UNHEALTHY = ("failed", "blocked", "cancelled", "unknown_effect")
 
 

@@ -248,7 +248,7 @@ Failure explanations cite stored case evidence. A proposed next experiment shoul
 
 ### 8. Read, export, rescore, and compare results
 
-Reports are rebuilt from stored records; report generation does not rerun the app or judge. They can be emitted as JSON, Markdown, or static HTML, and include:
+Reports are rebuilt from stored records; report generation does not rerun the app or judge. They can be emitted as JSON, Markdown, static HTML, JUnit XML, or SARIF 2.1.0, and include:
 
 - run, app, policy, dataset, evaluator, and seed provenance;
 - metric values with selected/completed/pass/fail/error/not-applicable/unavailable/pending denominators;

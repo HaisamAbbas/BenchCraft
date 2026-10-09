@@ -126,10 +126,15 @@ def build_case_export(
     *,
     scoring_id: str | None = None,
     include_content: bool = True,
+    report_document: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one row for every selected (case, repetition), without invoking plugins."""
 
-    report = build_report(storage, artifacts, run_id, include_content=include_content)
+    report = report_document
+    if report is None:
+        report = build_report(storage, artifacts, run_id, include_content=include_content)
+    elif report.get("run", {}).get("run_id") != run_id:
+        raise ReportError("case export report does not match the requested run")
     run = report["run"]
     scoring_passes = report["scoring_passes"]
     selected_scoring_id = (

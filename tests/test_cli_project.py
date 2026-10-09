@@ -8,6 +8,7 @@ import csv
 import io
 import json
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -411,6 +412,43 @@ def test_report_command_errors_and_options(project: Path) -> None:
     data = json.loads(withheld.output)
     assert data["evidence"]["content"] == "withheld"
     assert all(i["execution"]["output_excerpt"] is None for i in data["evidence"]["items"])
+
+    junit = cli.invoke(
+        app,
+        [
+            "report",
+            run_id,
+            "--workspace",
+            str(project),
+            "--format",
+            "junit",
+            "--out",
+            "-",
+            "--no-content",
+        ],
+    )
+    assert junit.exit_code == 0, junit.output
+    junit_root = ET.fromstring(junit.output)
+    assert junit_root.tag == "testsuites"
+    assert int(junit_root.attrib["tests"]) > 0
+
+    sarif = cli.invoke(
+        app,
+        [
+            "report",
+            run_id,
+            "--workspace",
+            str(project),
+            "--format",
+            "sarif",
+            "--out",
+            "-",
+            "--no-content",
+        ],
+    )
+    assert sarif.exit_code == 0, sarif.output
+    sarif_data = json.loads(sarif.output)
+    assert sarif_data["version"] == "2.1.0"
 
 
 def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> None:

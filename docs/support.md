@@ -99,6 +99,10 @@ is available for spreadsheet and data-frame workflows. Use `--scoring-id` to sel
 pass and `--no-content` to keep case data, outputs, contexts, values and free-text reasons out
 of the export. See [case-result exports](case-result-export.md) for the schema and examples.
 
+`aibench report --format junit` or `aibench report --format sarif` generates CI test-result
+and code-scanning artifacts from stored benchmark results. See
+[CI report adapters](ci-reports.md) for status mappings and content controls.
+
 ## Credentials
 
 Credentials are never written into project files, datasets, plans or chat. Every
@@ -142,7 +146,7 @@ dataclass fields before storing a case.
   - `run`, `resume`, `evaluate` (rescore stored outputs);
   - `runs list/show/status`, `report`, `compare`, `benchmark`;
   - `sessions list/show/delete`, `evaluators list/describe/plugin/calibrate`, `plugins list`, `score`, `app describe/smoke`.
-- **Reports:** JSON, Markdown and static HTML, from stored facts. They include typed metric profiles, full denominators, release gates, latency definitions, cost completeness and case evidence.
+- **Reports:** JSON, Markdown, static HTML, JUnit XML and SARIF 2.1.0, from stored facts. They include typed metric profiles, full denominators, release gates, latency definitions, cost completeness and case evidence.
 - **Release gates** in plans (`gates`): a minimum pass rate or minimum completed coverage for one metric binding, always over selected cases.
 - **Application transports** (Phase 2, Prompt 15): CLI, HTTP, Python callable (`python`), container (`container`) and OpenAI-compatible endpoint (`openai_compatible`). See `docs/runner-protocol.md`.
 - **HTTP API boundary** (Prompt 28): HTTP evaluates an explicitly configured JSON API using `POST`/`PUT` request bindings and response-field bindings. TLS verification is on by default; endpoint/origin policy, secret references, redaction, request/response byte caps, timeouts, effect-aware retry behavior, quotas and run budgets apply. Live endpoints require configured targets and policy approval. This transport does not browse websites, infer URLs from source or provide arbitrary browser actions. Live remote endpoints were not tested.
