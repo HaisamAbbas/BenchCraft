@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from rich.console import Console
 
 from aibench.cli import candidates as candidates_cli
 from aibench.cli import episodes as episodes_cli
 from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import ValidationError
 from aibench.datasets.ingest import ingest_dataset
 
@@ -56,7 +56,7 @@ def validate(
             "duplicate_case_ids": sorted(set(report.duplicate_case_ids)),
             "dedup_disk_backed": report.dedup_disk_backed,
         }
-        console.print_json(data=payload)
+        console.print_json(data=payload, cli_exit_code=0 if report.is_valid else 2)
     else:
         console.print(f"[bold]{path}[/bold]")
         console.print(f"  cases: {case_count}")

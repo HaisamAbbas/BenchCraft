@@ -368,9 +368,15 @@
       "title": "Stable machine-output API",
       "detail": "**Partial.** Successful commands often support JSON; failures, envelope/schema, exit details, and event output are inconsistent. F06/F07/F10 demonstrate the consequences.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "Focused G02 regression batch: 20 passed across output contract, global options, experiment status, planner target gates, and chat JSON paths",
+        "Broader affected CLI and connector batch: 123 passed; the one human-mode policy-details regression was fixed and passed in the focused rerun",
+        "Complete chat CLI suite: 18 passed; independent reviewer focused chat/output/global-options batch: 33 passed",
+        "Ruff src/tests/plugins passed; mypy: 144 source files passed; git diff --check passed",
+        "Root and local JSON errors, output/process exit parity, arrays/scalars, no-ANSI TTY output, WorkspaceTooNew, JSON confirmation refusal, and nonzero planner/experiment outcomes verified"
+      ],
+      "review": "evidence/G02-review.md",
       "commit": null,
       "pushed": false
     },

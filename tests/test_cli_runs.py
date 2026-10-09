@@ -51,9 +51,9 @@ def test_runs_list_json_output(tmp_path) -> None:
     result = runner.invoke(app, ["runs", "list", "--workspace", str(tmp_path), "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert len(payload) == 1
-    assert payload[0]["run_id"] == "r1"
-    assert payload[0]["status"] == "created"
+    assert len(payload["data"]) == 1
+    assert payload["data"][0]["run_id"] == "r1"
+    assert payload["data"][0]["status"] == "created"
 
 
 def test_runs_list_filters_by_status(tmp_path) -> None:
@@ -64,7 +64,7 @@ def test_runs_list_filters_by_status(tmp_path) -> None:
     )
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert [r["run_id"] for r in payload] == ["r2"]
+    assert [r["run_id"] for r in payload["data"]] == ["r2"]
 
 
 def test_runs_show_existing_run(tmp_path) -> None:
@@ -99,5 +99,8 @@ def test_runs_survive_across_separate_cli_invocations(tmp_path) -> None:
     result2 = runner.invoke(app, ["runs", "show", "r1", "--workspace", str(tmp_path), "--json"])
     assert result1.exit_code == 0
     assert result2.exit_code == 0
-    assert json.loads(result1.stdout)[0]["run_id"] == "r1"
+    payload = json.loads(result1.stdout)
+    assert payload["data"][0]["run_id"] == "r1"
+    assert payload["_cli"]["schema"] == "aibench.cli-output/1"
+    assert payload["_cli"]["exit_code"] == result1.exit_code
     assert json.loads(result2.stdout)["run_id"] == "r1"

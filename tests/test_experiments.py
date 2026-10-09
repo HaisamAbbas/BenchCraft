@@ -331,3 +331,9 @@ def test_experiment_cli_creates_and_reports_without_running_trials(tmp_path: Pat
     assert '"development_selection"' in shown.output
     assert '"protected_holdout_evaluation"' in shown.output
     assert '"selection_locked": false' in shown.output
+    status = runner.invoke(
+        app,
+        ["--json", "experiments", "status", "known-objective", "--workspace", str(tmp_path)],
+    )
+    assert status.exit_code == 0, status.output
+    assert json.loads(status.stdout)["_cli"]["exit_code"] == status.exit_code

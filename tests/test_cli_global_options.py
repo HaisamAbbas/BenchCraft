@@ -62,6 +62,50 @@ def test_root_json_and_policy_propagate_and_local_policy_wins(tmp_path: Path) ->
     assert json.loads(overridden.output)["test_worlds"][0]["approved"] is False
 
 
+def test_root_json_uses_error_envelope_for_nested_command_failure(tmp_path: Path) -> None:
+    missing_application = tmp_path / "missing-app.json"
+
+    result = cli.invoke(app, ["--json", "app", "describe", str(missing_application)])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["schema"] == "aibench.cli-error/1"
+    assert payload["_cli"]["schema"] == "aibench.cli-output/1"
+    assert payload["exit_code"] == payload["_cli"]["exit_code"] == result.exit_code
+
+
+def test_noninteractive_setup_failure_is_json_under_root_flag() -> None:
+    result = cli.invoke(app, ["--json", "--non-interactive", "setup"])
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["schema"] == "aibench.cli-error/1"
+    assert payload["_cli"]["exit_code"] == result.exit_code
+
+
+def test_workspace_too_new_is_json_at_entrypoint(monkeypatch, capsys) -> None:
+    import sys
+
+    from aibench.cli import main as main_cli
+    from aibench.core.errors import WorkspaceTooNew
+
+    monkeypatch.setattr(sys, "argv", ["aibench", "--json", "runs", "list"])
+
+    def reject_workspace() -> None:
+        raise WorkspaceTooNew("workspace schema is newer")
+
+    monkeypatch.setattr(main_cli, "app", reject_workspace)
+    with pytest.raises(SystemExit) as raised:
+        main_cli.run()
+
+    assert raised.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "aibench.cli-error/1"
+    assert payload["_cli"]["exit_code"] == 2
+
+
 def test_root_config_overrides_discovery_and_root_policy_overrides_config(
     tmp_path: Path,
 ) -> None:
@@ -191,7 +235,17 @@ def test_non_interactive_plugin_install_requires_explicit_yes(
         ["--non-interactive", "plugins", "install", "deepeval", "--project", str(tmp_path)],
     )
     assert result.exit_code == 2
-    assert "pass --yes in non-interactive mode" in result.output
+    assert "pass --yes" in result.output and "non-interactive" in result.output
+
+    json_result = cli.invoke(
+        app,
+        ["--json", "plugins", "install", "deepeval", "--project", str(tmp_path)],
+    )
+    assert json_result.exit_code == 2
+    payload = json.loads(json_result.stdout)
+    assert payload["schema"] == "aibench.cli-error/1"
+    assert payload["_cli"]["exit_code"] == json_result.exit_code
+    assert "Go ahead?" not in json_result.output
 
 
 def test_root_help_lists_global_scripting_and_selection_options() -> None:

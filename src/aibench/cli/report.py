@@ -17,8 +17,9 @@ import sys
 from pathlib import Path
 
 import typer
-from rich.console import Console
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.reporting.render import render
 from aibench.services.reports import FORMATS, build_report, report_dir, write_text_atomic
@@ -50,20 +51,31 @@ def report(
 ) -> None:
     """Render a run's report (JSON, Markdown or HTML) without rerunning anything."""
     if fmt not in FORMATS:
-        err_console.print(f"[red]unknown format {safe(fmt)}; use html, markdown or json[/red]")
-        raise typer.Exit(code=EXIT_INVALID)
+        raise error_exit(
+            f"unknown format {fmt}; use html, markdown or json",
+            exit_code=EXIT_INVALID,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
     ws = Workspace.at(workspace or Path.cwd())
     if not ws.db_path.is_file():
-        err_console.print(f"[red]no aibench workspace at {safe(str(ws.root))}[/red]")
-        raise typer.Exit(code=EXIT_INVALID)
+        raise error_exit(
+            f"no aibench workspace at {ws.root}",
+            exit_code=EXIT_INVALID,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
     storage = Storage(Database.open_workspace(ws))
     try:
         document = build_report(
             storage, ArtifactStore(ws.artifacts_dir), run_id, include_content=not no_content
         )
     except AibenchError as exc:
-        err_console.print(f"[red]{safe(str(exc))}[/red]")
-        raise typer.Exit(code=EXIT_INVALID) from exc
+        raise error_exit(
+            str(exc), exit_code=EXIT_INVALID, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     finally:
         storage.db.close()
     text = render(document, fmt)

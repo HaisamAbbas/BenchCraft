@@ -12,9 +12,10 @@ from typing import Any
 
 import typer
 from pydantic import ValidationError as PydanticValidationError
-from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.config.resolve import load_mapping_file
 from aibench.core.errors import AibenchError
 from aibench.core.models import MetricBinding
@@ -39,8 +40,9 @@ _TRUST_OPTION = typer.Option(
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
-    err_console.print(f"[red]{escape(message)}[/red]")
-    return typer.Exit(code=code)
+    return error_exit(
+        message, exit_code=code, json_output=False, console=console, err_console=err_console
+    )
 
 
 _PLUGIN_ENV_OPTION = typer.Option(
@@ -276,7 +278,7 @@ def score(
             "gates": report.gates,
             "exit_code": report.exit_code,
         }
-        console.print_json(data=payload)
+        console.print_json(data=payload, cli_exit_code=report.exit_code)
         raise typer.Exit(code=report.exit_code)
     console.print(f"scoring {report.scoring_id} of run {escape(report.run_id)} (recorded outputs)")
     console.print(

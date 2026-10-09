@@ -1,0 +1,23 @@
+G02 — Stable machine-output API
+Date: 2026-10-09
+Branch: fix/plugin-core-match
+
+Focused regression tests:
+- 37 passed: output envelope, dataset errors, root global options, runs list arrays,
+  session output, and affected conversation hardening.
+- 20 passed: output contract, global options, experiment status, planner target exit
+  metadata, and headless chat JSON paths.
+- 20 passed: dataset, runs, sessions, scoring, app, project, global options, OpenAI Evals
+  API/OSS, Langfuse, and cache command regression batch after restoring human-mode error
+  details.
+- 18 passed: complete chat CLI suite, including headless JSON output and non-TTY guidance.
+
+Static checks:
+- Ruff: `ruff check src tests plugins` — passed.
+- Mypy: `mypy src/aibench` — 144 source files passed.
+- `git diff --check` — passed.
+
+Coverage includes root/local --json errors, matching output/process exit codes, list/scalar
+envelopes, ANSI-free JSON under a forced color terminal, WorkspaceTooNew at the entrypoint,
+confirmation refusal without prompts under --json, experiment status, the planner
+`--require-targets` nonzero exit, and non-TTY command guidance.

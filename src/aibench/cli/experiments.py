@@ -11,9 +11,9 @@ from typing import Any
 
 import typer
 from pydantic import ValidationError as PydanticValidationError
-from rich.console import Console
-from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.engine.compile import load_policy
 from aibench.experiments.service import (
@@ -35,8 +35,9 @@ err_console = Console(stderr=True)
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
-    err_console.print(f"[red]{escape(message)}[/red]")
-    return typer.Exit(code=code)
+    return error_exit(
+        message, exit_code=code, json_output=False, console=console, err_console=err_console
+    )
 
 
 def _open(workspace_root: Path | None) -> tuple[Database, Storage, ArtifactStore]:
@@ -95,7 +96,10 @@ def run(
     try:
         database, storage, artifacts = _open(workspace)
         record = _run(execute_experiment(experiment_id, storage=storage, artifacts=artifacts))
-        console.print_json(data=experiment_report(experiment_id, storage=storage, artifacts=artifacts))
+        console.print_json(
+            data=experiment_report(experiment_id, storage=storage, artifacts=artifacts),
+            cli_exit_code=1 if record.status.value == "failed" else 0,
+        )
         if record.status.value == "failed":
             raise typer.Exit(code=1)
     except typer.Exit:
@@ -125,7 +129,10 @@ def resume(
                 actor="cli",
             )
         record = _run(execute_experiment(experiment_id, storage=storage, artifacts=artifacts))
-        console.print_json(data=experiment_report(experiment_id, storage=storage, artifacts=artifacts))
+        console.print_json(
+            data=experiment_report(experiment_id, storage=storage, artifacts=artifacts),
+            cli_exit_code=1 if record.status.value == "failed" else 0,
+        )
         if record.status.value == "failed":
             raise typer.Exit(code=1)
     except typer.Exit:
@@ -187,7 +194,10 @@ def evaluate_holdout(
                 artifacts=artifacts,
             )
         )
-        console.print_json(data=experiment_report(experiment_id, storage=storage, artifacts=artifacts))
+        console.print_json(
+            data=experiment_report(experiment_id, storage=storage, artifacts=artifacts),
+            cli_exit_code=1 if record.status.value == "failed" else 0,
+        )
         if record.status.value == "failed":
             raise typer.Exit(code=1)
     except typer.Exit:

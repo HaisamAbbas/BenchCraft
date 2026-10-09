@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.core.hashes import content_hash
 from aibench.engine.compile import load_policy
@@ -38,8 +39,9 @@ _STYLE = {"observed": "green", "declared": "yellow", "inferred": "cyan", "unknow
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
-    err_console.print(f"[red]{escape(message)}[/red]")
-    return typer.Exit(code=code)
+    return error_exit(
+        message, exit_code=code, json_output=False, console=console, err_console=err_console
+    )
 
 
 def _recorded(
@@ -145,9 +147,14 @@ def inspect(
         )
         summary = summarize_dataset(dataset) if dataset is not None else None
     except ProbeRefused as exc:
-        for denial in exc.denials:
-            err_console.print(f"[red]denied:[/red] {escape(denial)}")
-        raise typer.Exit(code=4) from exc
+        raise error_exit(
+            "inspection denied by policy",
+            exit_code=4,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+            details=list(exc.denials),
+        ) from exc
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
     data = {

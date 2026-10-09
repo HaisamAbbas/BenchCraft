@@ -43,11 +43,12 @@ def test_missing_file_exits_two() -> None:
 def test_missing_file_json_uses_shared_error_document(tmp_path: Path) -> None:
     result = runner.invoke(app, ["dataset", "validate", str(tmp_path / "missing.jsonl"), "--json"])
     assert result.exit_code == 2, result.output
-    assert json.loads(result.stdout) == {
-        "status": "error",
-        "message": f"invalid dataset: dataset file not found: {tmp_path / 'missing.jsonl'}",
-        "exit_code": 2,
-    }
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["message"] == f"invalid dataset: dataset file not found: {tmp_path / 'missing.jsonl'}"
+    assert payload["exit_code"] == payload["_cli"]["exit_code"] == result.exit_code
+    assert payload["schema"] == "aibench.cli-error/1"
+    assert payload["_cli"]["schema"] == "aibench.cli-output/1"
 
 
 def test_invalid_utf8_dataset_is_a_json_input_error(tmp_path: Path) -> None:
@@ -55,11 +56,10 @@ def test_invalid_utf8_dataset_is_a_json_input_error(tmp_path: Path) -> None:
     invalid.write_bytes(b"\xff\xfe\n")
     result = runner.invoke(app, ["dataset", "validate", str(invalid), "--json"])
     assert result.exit_code == 2, result.output
-    assert json.loads(result.stdout) == {
-        "status": "error",
-        "message": f"invalid dataset: dataset file is not valid UTF-8: {invalid}",
-        "exit_code": 2,
-    }
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["message"] == f"invalid dataset: dataset file is not valid UTF-8: {invalid}"
+    assert payload["exit_code"] == payload["_cli"]["exit_code"] == result.exit_code
 
 
 def test_malformed_nested_input_produces_line_errors_not_a_crash() -> None:

@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.console import Console
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.models import deep_unfreeze
 from aibench.security.redaction import sanitize_value
 from aibench.sessions.drafting import draft_summary
@@ -35,8 +36,13 @@ _JSON = typer.Option(False, "--json", help="Machine-readable output.")
 def _open(workspace: Path | None) -> Storage:
     ws = Workspace.at(workspace or Path.cwd())
     if not ws.db_path.is_file():
-        err_console.print(f"[red]no aibench workspace at {safe(str(ws.root))}[/red]")
-        raise typer.Exit(code=2)
+        raise error_exit(
+            f"no aibench workspace at {ws.root}",
+            exit_code=2,
+            json_output=False,
+            console=console,
+            err_console=err_console,
+        )
     return Storage(Database.open_workspace(ws))
 
 
@@ -136,8 +142,13 @@ def show_session(
     finally:
         storage.db.close()
     if data is None:
-        err_console.print(f"[red]no session {safe(session_id)!r}[/red]")
-        raise typer.Exit(code=2)
+        raise error_exit(
+            f"no session {session_id!r}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
     if json_output:
         console.print_json(data=sanitize_value(data))
         return
@@ -180,8 +191,13 @@ def delete_session(
     ws = Workspace.at(workspace or Path.cwd())
     try:
         if SessionStore(storage).get_session(session_id) is None:
-            err_console.print(f"[red]no session {safe(session_id)}[/red]")
-            raise typer.Exit(code=2)
+            raise error_exit(
+                f"no session {session_id}",
+                exit_code=2,
+                json_output=json_output,
+                console=console,
+                err_console=err_console,
+            )
         controller = SessionController(
             session_id,
             storage=storage,
@@ -190,16 +206,19 @@ def delete_session(
         )
         runs = controller.session_runs()
         if not yes:
-            err_console.print(
-                f"This deletes the conversation {safe(session_id)} (turns, decisions, "
-                f"questions, actions). Its {len(runs)} run(s) are kept. Re-run with --yes."
+            raise error_exit(
+                f"deleting session {session_id} needs --yes; its {len(runs)} run(s) will be kept",
+                exit_code=2,
+                json_output=json_output,
+                console=console,
+                err_console=err_console,
             )
-            raise typer.Exit(code=2)
         try:
             result = controller.delete()
         except SessionError as exc:
-            err_console.print(f"[red]{safe(str(exc))}[/red]")
-            raise typer.Exit(code=2) from exc
+            raise error_exit(
+                str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+            ) from exc
     finally:
         storage.db.close()
     if json_output:

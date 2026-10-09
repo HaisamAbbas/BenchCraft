@@ -345,7 +345,9 @@ def test_deleting_a_session_keeps_its_runs_and_their_results(tmp_path: Path) -> 
     assert deleted.exit_code == 0, deleted.output
     assert json.loads(deleted.output)["runs_kept"] == [run_id]
     listed = runner.invoke(app, ["sessions", "list", "--workspace", workspace, "--json"])
-    assert json.loads(listed.output) == []
+    listed_payload = json.loads(listed.output)
+    assert listed_payload["data"] == []
+    assert listed_payload["_cli"]["exit_code"] == listed.exit_code
     shown = runner.invoke(app, ["runs", "show", run_id, "--workspace", workspace, "--json"])
     assert shown.exit_code == 0 and json.loads(shown.output)["status"] == "completed"
 

@@ -109,6 +109,12 @@ def test_plan_benchmark_command(tmp_path: Path) -> None:
     assert json.loads(out.read_text(encoding="utf-8"))["overall"]["fixtures"] == 40
     gated = cli.invoke(app, ["plan", "benchmark", "--fixtures", str(SET), "--require-targets"])
     assert gated.exit_code == 1  # a target is not met
+    gated_json = cli.invoke(
+        app,
+        ["plan", "benchmark", "--fixtures", str(SET), "--require-targets", "--json"],
+    )
+    assert gated_json.exit_code == 1
+    assert json.loads(gated_json.stdout)["_cli"]["exit_code"] == gated_json.exit_code
     no_config = cli.invoke(app, ["plan", "benchmark", "--fixtures", str(SET), "--planner", "model"])
     assert no_config.exit_code == 2
     provider = tmp_path / "provider.json"

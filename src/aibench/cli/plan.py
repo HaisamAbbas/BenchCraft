@@ -22,10 +22,10 @@ from typing import Any
 
 import typer
 from pydantic import ValidationError as PydanticValidationError
-from rich.console import Console
 from rich.markup import escape
 
 from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.cli.score import _PLUGIN_ENV_OPTION, _PLUGIN_PATH_OPTION, _PLUGIN_SECRET_OPTION
 from aibench.config.resolve import load_mapping_file
 from aibench.core.errors import AibenchError
@@ -342,18 +342,19 @@ def plan(
     except AibenchError as exc:
         raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     findings = outcome.validation.findings
+    code = EXIT_DENIED if provider_denied else _exit_for(findings)
     for denial in provider_denied:
         err_console.print(f"[red]denied:[/red] {escape(denial)}")
     if json_output:
-        console.print_json(data=json.loads(document.model_dump_json()))
+        console.print_json(data=json.loads(document.model_dump_json()), cli_exit_code=code)
     else:
         _summary(document)
         _print_findings(findings)
         console.print(f"wrote {escape(str(out))} and its draft document")
     if provider_denied:
         err_console.print("the model planner was not contacted; the draft uses the template")
-        raise typer.Exit(code=EXIT_DENIED)
-    raise typer.Exit(code=_exit_for(findings))
+        raise typer.Exit(code=code)
+    raise typer.Exit(code=code)
 
 
 @plan_app.command("opportunities")
@@ -494,7 +495,7 @@ def validate_plan(
         "estimate": estimate.model_dump(mode="json") if estimate else None,
     }
     if json_output:
-        console.print_json(data=summary)
+        console.print_json(data=summary, cli_exit_code=code)
     else:
         _print_findings(analysis.findings)
         if code == EXIT_OK:
@@ -572,7 +573,10 @@ def benchmark_planner(
         write_text_atomic(out, json.dumps(report, indent=2) + "\n")
     missed = [t for t in report["targets"] if t["status"] != "met"]
     if json_output:
-        console.print_json(data=report)
+        console.print_json(
+            data=report,
+            cli_exit_code=1 if require_targets and missed else EXIT_OK,
+        )
     else:
         o = report["overall"]
         console.print(

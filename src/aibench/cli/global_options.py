@@ -30,6 +30,15 @@ def current_global_options() -> GlobalOptions:
     return root.obj if isinstance(root.obj, GlobalOptions) else GlobalOptions()
 
 
+def json_output_enabled() -> bool:
+    """Whether the active root or leaf command requested machine-readable output."""
+    options = current_global_options()
+    if options.json_output:
+        return True
+    context = get_current_context(silent=True)
+    return bool(context and context.params.get("json_output"))
+
+
 def command_defaults(command: Any, options: GlobalOptions) -> dict[str, Any]:
     """Build Click's nested default map for root flags that also exist on commands.
 

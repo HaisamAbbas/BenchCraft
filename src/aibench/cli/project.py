@@ -29,9 +29,10 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import typer
-from rich.console import Console
 
 from aibench import __version__
+from aibench.cli.errors import error_document, error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.core.models import RunnerKind
 from aibench.quickstart import ProjectExists, create_project
@@ -57,20 +58,32 @@ def init(
     """Create a quickstart project: config, 10-case dataset, fixture app, plan and policy."""
     target = directory.resolve()
     if target.exists() and not target.is_dir():
-        err_console.print(f"[red]{safe(str(target))} exists and is not a directory[/red]")
-        raise typer.Exit(code=EXIT_INVALID)
+        raise error_exit(
+            f"{target} exists and is not a directory",
+            exit_code=EXIT_INVALID,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
     try:
         written = create_project(target, python=sys.executable)
     except ProjectExists as exc:
-        err_console.print(
-            "[red]not written: these files already exist (nothing was changed):[/red]"
-        )
-        for path in exc.paths:
-            err_console.print(f"  {safe(str(path))}")
-        raise typer.Exit(code=EXIT_INVALID) from exc
+        raise error_exit(
+            "project files already exist; nothing was changed",
+            exit_code=EXIT_INVALID,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+            details=[str(path) for path in exc.paths],
+        ) from exc
     except OSError as exc:
-        err_console.print(f"[red]could not create the project: {safe(str(exc))}[/red]")
-        raise typer.Exit(code=EXIT_INVALID) from exc
+        raise error_exit(
+            f"could not create the project: {exc}",
+            exit_code=EXIT_INVALID,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
     if json_output:
         console.print_json(data={"project": str(target), "files": [str(p) for p in written]})
         return
@@ -415,8 +428,9 @@ def plugins_status(project: Path | None = _PROJECT, json_output: bool = _JSON) -
     try:
         rows = plugin_status(root, load_policy(_project_policy(root)))
     except AibenchError as exc:
-        err_console.print(f"[red]{safe(str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     if json_output:
         console.print_json(data={"plugins": rows})
         return
@@ -463,8 +477,9 @@ def plugins_install(
             existing_python=use_env,
         )
     except AibenchError as exc:
-        err_console.print(f"[red]{safe(str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     summary = plan.summary()
     if not json_output:
         for line in install_preview(summary):
@@ -472,19 +487,22 @@ def plugins_install(
     if not yes:
         from aibench.cli.global_options import current_global_options
 
-        if current_global_options().non_interactive:
-            err_console.print(
-                "[red]plugin installation needs confirmation; pass --yes in "
-                "non-interactive mode[/red]"
+        if json_output or current_global_options().non_interactive:
+            raise error_exit(
+                "plugin installation needs explicit confirmation; pass --yes in non-interactive mode (also required for --json)",
+                exit_code=EXIT_INVALID,
+                json_output=json_output,
+                console=console,
+                err_console=err_console,
             )
-            raise typer.Exit(code=EXIT_INVALID)
         if not typer.confirm("Go ahead?", default=False):
             raise typer.Exit(code=1)
     try:
         done = install(plan, progress=lambda line: err_console.print(f"[dim]{safe(line)}[/dim]"))
     except AibenchError as exc:
-        err_console.print(f"[red]{safe(str(exc))}[/red]")
-        raise typer.Exit(code=1) from exc
+        raise error_exit(
+            str(exc), exit_code=1, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     if json_output:
         console.print_json(data=done)
         return
@@ -557,19 +575,15 @@ def compare(
 
     if mode not in {"strict", "exploratory"}:
         message = "--mode must be strict or exploratory"
-        if json_output:
-            console.print_json(data={"status": "error", "message": message})
-        else:
-            err_console.print(f"[red]{message}[/red]")
-        raise typer.Exit(code=EXIT_INVALID)
+        raise error_exit(
+            message, exit_code=EXIT_INVALID, json_output=json_output, console=console, err_console=err_console
+        )
     ws = Workspace.at(workspace or Path.cwd())
     if not ws.db_path.is_file():
         message = f"no aibench workspace at {ws.root}"
-        if json_output:
-            console.print_json(data={"status": "error", "message": message})
-        else:
-            err_console.print(f"[red]{safe(message)}[/red]")
-        raise typer.Exit(code=EXIT_INVALID)
+        raise error_exit(
+            message, exit_code=EXIT_INVALID, json_output=json_output, console=console, err_console=err_console
+        )
     storage = Storage(Database.open_readonly(ws.db_path))
     try:
         report = compare_runs(
@@ -588,11 +602,11 @@ def compare(
         if json_output:
             console.print_json(
                 data={
-                    "status": "error",
+                    **error_document(str(exc), EXIT_INVALID),
                     "baseline": baseline,
                     "current": current,
-                    "message": str(exc),
-                }
+                },
+                cli_exit_code=EXIT_INVALID,
             )
         else:
             err_console.print(f"[red]{safe(str(exc))}[/red]")
@@ -600,7 +614,7 @@ def compare(
     finally:
         storage.db.close()
     if json_output:
-        console.print_json(data=report)
+        console.print_json(data=report, cli_exit_code=comparison_exit_code(report))
     else:
         terminal_render.comparison(console, report)
     raise typer.Exit(code=comparison_exit_code(report))

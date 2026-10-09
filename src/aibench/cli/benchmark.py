@@ -25,9 +25,9 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.console import Console
 
 from aibench.cli.chat import chat, interactive_terminal
+from aibench.cli.output import Console, json_result
 from aibench.cli.plan import _exit_for, _print_findings, _summary
 from aibench.cli.run import _execute, _interrupted_before_dispatch, _report_problems
 from aibench.core.errors import AibenchError
@@ -47,7 +47,7 @@ err_console = Console(stderr=True, highlight=False, emoji=False)
 
 def _emit(data: dict[str, Any], json_output: bool, message: str, code: int) -> typer.Exit:
     if json_output:
-        print(json.dumps({**data, "exit_code": code}, default=str))
+        print(json.dumps(json_result({**data, "exit_code": code}, exit_code=code), default=str))
     else:
         (console if code == 0 else err_console).print(safe(message))
     return typer.Exit(code=code)

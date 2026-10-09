@@ -28,9 +28,9 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 from pydantic import ValidationError as PydanticValidationError
-from rich.console import Console
 
-from aibench.cli.errors import error_document
+from aibench.cli.errors import error_document, error_exit
+from aibench.cli.output import Console, json_result
 from aibench.config.resolve import load_mapping_file, resolve_config
 from aibench.core.errors import AibenchError, ConfigError
 from aibench.core.models import deep_unfreeze
@@ -68,8 +68,9 @@ def interactive_terminal() -> bool:
 
 
 def _fail(message: str, code: int = EXIT_INVALID) -> typer.Exit:
-    err_console.print(f"[red]{safe(message)}[/red]")
-    return typer.Exit(code=code)
+    return error_exit(
+        message, exit_code=code, json_output=False, console=console, err_console=err_console
+    )
 
 
 def project_settings(
@@ -722,7 +723,7 @@ async def _send(
         payload["dataset_selection"] = dataset_notices
     if json_output:
         json_payload = json.loads(json.dumps(payload, default=str))
-        print(json.dumps(sanitize_value(json_payload)))
+        print(json.dumps(json_result(sanitize_value(json_payload), exit_code=code)))
     elif dataset_notices:
         for notice in dataset_notices:
             console.print(f"[dim]{safe(notice)}[/dim]")

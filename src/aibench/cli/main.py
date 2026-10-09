@@ -31,12 +31,14 @@ from aibench.cli import runs as runs_cli
 from aibench.cli import score as score_cli
 from aibench.cli import sessions as sessions_cli
 from aibench.cli import traces as traces_cli
+from aibench.cli.errors import error_document, error_exit
 from aibench.cli.global_options import (
     GlobalOptions,
     command_defaults,
     current_global_options,
     merge_default_maps,
 )
+from aibench.cli.output import Console
 from aibench.core.errors import WorkspaceTooNew
 
 app = typer.Typer(
@@ -73,6 +75,9 @@ app.command("compare")(project_cli.compare)
 app.add_typer(project_cli.plugins_app, name="plugins")
 runs_cli.app.command("status")(run_cli.status)
 
+console = Console()
+err_console = Console(stderr=True)
+
 _GLOBAL_CONFIG = typer.Option(
     None, "--config", help="Project config file used in place of automatic discovery."
 )
@@ -93,8 +98,13 @@ def setup() -> None:
     from aibench import userconfig
 
     if current_global_options().non_interactive:
-        typer.echo("error: setup is interactive; run it without --non-interactive", err=True)
-        raise typer.Exit(code=2)
+        raise error_exit(
+            "setup is interactive; run it without --non-interactive",
+            exit_code=2,
+            json_output=False,
+            console=console,
+            err_console=err_console,
+        )
 
     userconfig.run_setup(typer.echo)
 
@@ -157,7 +167,8 @@ def main(
             return
         typer.echo(ctx.get_help())
         typer.echo(
-            "\nInteractive mode is disabled or no terminal is available: `aibench` opens a "
+            "\nNo interactive terminal is available (or interactive mode is disabled): "
+            "`aibench` opens a "
             "conversation only in an interactive terminal. "
             "For scripts, use the commands above or `aibench chat --send TEXT --json`."
         )
@@ -173,7 +184,13 @@ def run() -> None:
     try:
         app()
     except WorkspaceTooNew as exc:
-        typer.echo(f"error: {exc}", err=True)
+        if "--json" in sys.argv[1:]:
+            console.print_json(
+                data=error_document(str(exc), 2),
+                cli_exit_code=2,
+            )
+        else:
+            typer.echo(f"error: {exc}", err=True)
         raise SystemExit(2) from exc
 
 

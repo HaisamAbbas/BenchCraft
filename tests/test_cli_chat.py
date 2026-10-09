@@ -56,6 +56,7 @@ def test_non_tty_chat_json_is_machine_readable_and_can_resume(tmp_path: Path) ->
     )
     assert first.exit_code == 0, first.stdout
     first_payload = json.loads(first.stdout)
+    assert first_payload["_cli"]["exit_code"] == first.exit_code
     session_id = first_payload["session_id"]
     assert first_payload["command"] == "/help"
     assert "/status" in first_payload["data"]["commands"]
@@ -242,6 +243,7 @@ def test_headless_malformed_slash_command_emits_json_error(tmp_path: Path, comma
     payload = json.loads(result.stdout)
     assert payload["status"] == "error"
     assert payload["exit_code"] == 2
+    assert payload["_cli"]["exit_code"] == result.exit_code
     assert "invalid command quoting" in payload["message"]
     assert "Traceback" not in result.output
 

@@ -9,8 +9,9 @@ from urllib.parse import urlsplit
 
 import typer
 from pydantic import ValidationError as PydanticValidationError
-from rich.console import Console
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.config.model import AibenchConfig
 from aibench.core.errors import AibenchError, ValidationError
 from aibench.core.models import (
@@ -24,7 +25,6 @@ from aibench.core.plans import BudgetLimits
 from aibench.datasets.ingest import ingest_dataset
 from aibench.security.endpoints import is_loopback, origin_of
 from aibench.security.policy import ExecutionPolicy
-from aibench.tui.render import safe
 
 app = typer.Typer(help="Connect an application without providing its repository.")
 console = Console(highlight=False, emoji=False)
@@ -35,8 +35,9 @@ DEFAULT_WALL_SECONDS = 4 * 3600  # a run's time limit in the policy `connect htt
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
-    err_console.print(f"[red]{safe(message)}[/red]")
-    return typer.Exit(code=code)
+    return error_exit(
+        message, exit_code=code, json_output=False, console=console, err_console=err_console
+    )
 
 
 def _prompt(value: str | None, label: str, *, default: str | None = None) -> str:

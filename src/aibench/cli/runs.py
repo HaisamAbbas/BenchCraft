@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import RunRecord, Storage
 
@@ -92,8 +93,13 @@ def show_run(
         storage.db.close()
 
     if record is None:
-        err_console.print(f"[red]no run committed with run_id={run_id!r}[/red]")
-        raise typer.Exit(code=2)
+        raise error_exit(
+            f"no run committed with run_id={run_id!r}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
 
     if json_output:
         console.print_json(data=_run_to_dict(record))

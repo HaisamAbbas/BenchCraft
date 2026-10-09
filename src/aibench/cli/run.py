@@ -23,10 +23,10 @@ import signal
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.markup import escape
 
 from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.engine.compile import (
     PlanInvalid,
