@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F16",
+  "current_item": "F17",
   "items": [
     {
       "id": "F01",
@@ -281,7 +281,7 @@
       "title": "Plugin environments retain advisory-affected dependencies",
       "detail": "Dependency scan; exploitability unproven",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "33 unique affected tests passed; mypy: 142 source files passed; Ruff and workflow YAML checks passed",
         "uv lock --check passed; pip-audit strict scans passed for the locked core requirements and exact installed core, DeepEval, and Ragas snapshots",
@@ -289,8 +289,8 @@
         "Independent review found two audit-coverage gaps; strict exact-version snapshots closed both; final review found no remaining findings"
       ],
       "review": "evidence/F16-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "f513e256d9d39f1d0e158f947d0c0bd6ee5e210b",
+      "pushed": true
     },
     {
       "id": "F17",
