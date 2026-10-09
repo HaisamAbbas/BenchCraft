@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G02",
+  "current_item": "G03",
   "items": [
     {
       "id": "F01",
@@ -368,7 +368,7 @@
       "title": "Stable machine-output API",
       "detail": "**Partial.** Successful commands often support JSON; failures, envelope/schema, exit details, and event output are inconsistent. F06/F07/F10 demonstrate the consequences.",
       "kind": "feature",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "Focused G02 regression batch: 20 passed across output contract, global options, experiment status, planner target gates, and chat JSON paths",
         "Broader affected CLI and connector batch: 123 passed; the one human-mode policy-details regression was fixed and passed in the focused rerun",
@@ -377,8 +377,8 @@
         "Root and local JSON errors, output/process exit parity, arrays/scalars, no-ANSI TTY output, WorkspaceTooNew, JSON confirmation refusal, and nonzero planner/experiment outcomes verified"
       ],
       "review": "evidence/G02-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "53de2c51c04b2e31353153709ddacd0f3da0652f",
+      "pushed": true
     },
     {
       "id": "G03",
