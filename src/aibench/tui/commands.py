@@ -89,6 +89,30 @@ NewSession = Callable[[], SessionController]
 JudgeSource = tuple[dict[str, Any], dict[str, str]]
 
 
+def create_commands(
+    controller: SessionController,
+    new_session: NewSession | None = None,
+    *,
+    provider: Any = None,
+    progress: Callable[[str], None] | None = None,
+) -> Commands:
+    """Build slash commands with the configured assistant provider and plugin judge."""
+    judge: JudgeSource | None = None
+    config = getattr(provider, "config", None)
+    if config is not None and getattr(config, "base_url", None):
+        from aibench.services.plugins import judge_from_provider
+
+        api_key = str(config.api_key) if config.api_key else None
+        judge = judge_from_provider(config.base_url, config.model, api_key)
+    return Commands(
+        controller,
+        new_session,
+        judge=judge,
+        progress=progress,
+        provider=provider,
+    )
+
+
 class Commands:
     def __init__(
         self,

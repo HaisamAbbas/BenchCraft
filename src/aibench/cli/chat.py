@@ -620,14 +620,16 @@ async def _send(
     from aibench.services.reports import build_report
     from aibench.services.runs import run_exit_code
     from aibench.tui.app import render_result
-    from aibench.tui.commands import Commands
+    from aibench.tui.commands import create_commands
 
     live_before = set(controller.live_runs())
     experiment_tasks_before = controller.experiment_task_keys()
     command_code: int | None = None
     try:
         if text.strip().startswith("/"):
-            result = await Commands(controller, new_session).run(text)
+            result = await create_commands(
+                controller, new_session, provider=provider
+            ).run(text)
             payload: dict[str, Any] = {"session_id": controller.session_id, **result.as_dict()}
             ok = result.ok
             command_code = result.exit_code

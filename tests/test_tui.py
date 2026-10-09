@@ -142,6 +142,28 @@ def test_slash_commands_use_real_session_services_and_cover_the_contract(tmp_pat
             controller.storage.db.close()
 
 
+def test_interactive_slash_commands_keep_assistant_provider_and_judge(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"})
+    config = OpenAICompatibleConfig(base_url="http://127.0.0.1:8080/v1", model="assistant")
+    provider = OpenAICompatibleProvider(config)
+    try:
+        chat = ChatApp(ctl, provider=provider, console=Console(file=io.StringIO()))
+        assert chat.commands.provider is provider
+        assert chat.commands.judge == (
+            {
+                "kind": "openai_compatible",
+                "base_url": config.base_url,
+                "model": config.model,
+                "api_key_env": "AIBENCH_JUDGE_KEY",
+            },
+            {},
+        )
+    finally:
+        provider.close()
+        ctl.storage.db.close()
+
+
 def test_compare_slash_command_uses_session_owned_stored_runs(tmp_path: Path) -> None:
     h = SessionHarness(tmp_path)
     ctl = h.open_session(

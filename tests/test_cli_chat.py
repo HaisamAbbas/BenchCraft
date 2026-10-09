@@ -122,6 +122,102 @@ def test_chat_closes_provider_when_command_finishes(tmp_path: Path, monkeypatch)
     assert provider.closed
 
 
+def test_headless_slash_commands_receive_provider_and_plugin_judge(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from aibench.services import plugins
+    from tests.test_openai_provider import chat_server, completion, tool_call
+
+    project = tmp_path / "project"
+    application, dataset = _project(project)
+    source_quote = "Refunds may be requested within 30 days of purchase."
+    (project / "rules.md").write_text(source_quote, encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class InstallPreview:
+        def summary(self) -> dict[str, str]:
+            return {"name": "deepeval"}
+
+    def preview_install(*args, **kwargs):
+        captured.update(kwargs)
+        return InstallPreview()
+
+    monkeypatch.setattr(plugins, "plan_install", preview_install)
+    cases = [
+        {
+            "input": "When can I request a refund?",
+            "expected_answer": source_quote,
+            "source_id": "source_1",
+            "source_quote": source_quote,
+        }
+    ]
+    with chat_server(
+        [(200, completion([tool_call("write_candidates", {"cases": cases})]))]
+    ) as server:
+        host, port = server.server_address[:2]
+        base_url = f"http://{host}:{port}/v1"
+        provider_config = project / "provider.json"
+        provider_config.write_text(
+            json.dumps({"base_url": base_url, "model": "case-writer"}),
+            encoding="utf-8",
+        )
+
+        generated = runner.invoke(
+            app,
+            [
+                "chat",
+                "--project",
+                str(project),
+                "--app",
+                str(application),
+                "--dataset",
+                str(dataset),
+                "--new",
+                "--provider-config",
+                str(provider_config),
+                "--send",
+                "/cases generate rules.md --max 1",
+                "--json",
+            ],
+        )
+        assert generated.exit_code == 0, generated.stdout
+        generated_payload = json.loads(generated.stdout)
+        assert generated_payload["kind"] == "cases"
+        assert generated_payload["data"]["generated"] is True
+        assert len(generated_payload["data"]["rows"]) == 1
+        assert len(server.requests) == 1
+        request = server.requests[0]
+        assert request["path"] == "/v1/chat/completions"
+        assert request["body"]["model"] == "case-writer"
+        assert request["body"]["tools"][0]["function"]["name"] == "write_candidates"
+
+        plugin_preview = runner.invoke(
+            app,
+            [
+                "chat",
+                "--project",
+                str(project),
+                "--resume",
+                generated_payload["session_id"],
+                "--provider-config",
+                str(provider_config),
+                "--send",
+                "/plugins install deepeval",
+                "--json",
+            ],
+        )
+        assert plugin_preview.exit_code == 0, plugin_preview.stdout
+        assert json.loads(plugin_preview.stdout)["kind"] == "plugin_preview"
+
+    assert captured["judge"] == {
+        "kind": "openai_compatible",
+        "base_url": base_url,
+        "model": "case-writer",
+        "api_key_env": "AIBENCH_JUDGE_KEY",
+    }
+    assert captured["secret_env"] == {}
+
+
 def test_chat_send_json_sanitizes_command_data(tmp_path: Path, monkeypatch) -> None:
     from aibench.tui.commands import CommandResult, Commands
 
