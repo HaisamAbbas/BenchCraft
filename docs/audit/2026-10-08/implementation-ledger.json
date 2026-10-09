@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G07",
+  "current_item": "G08",
   "items": [
     {
       "id": "F01",
@@ -455,11 +455,17 @@
       "title": "Convenient bounded run controls",
       "detail": "**Partial.** Plans support selection, repeats, concurrency, retries, timeouts, budgets, caches, and quotas. `run` largely requires editing a plan file. Add validated direct overrides and a dry-run that prints the exact frozen scope.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "44 focused run-control, CLI, validation, policy, and plan-equivalence tests passed",
+        "Ruff passed for src/tests/plugins; Mypy passed for 149 source files",
+        "CLI run help smoke check and git diff --check passed",
+        "Dry-run verified exact selected IDs/effective hash parity, no database creation, and no dispatch",
+        "Non-finite wall budget rejected at model and CLI boundaries"
+      ],
+      "review": "evidence/G07-review.md",
+      "commit": "a0a84f695d7c59a7b4193e5f81ddff9c43cd090a",
+      "pushed": true
     },
     {
       "id": "G08",
