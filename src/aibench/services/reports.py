@@ -13,8 +13,8 @@ What a report states, and on which basis:
   back to the stored results themselves, and say so.
 - **Denominators.** The engine pass counts every planned (case, repetition) item as
   selected; unfinished items are `pending`, so a partial snapshot cannot look better than
-  the finished run. A rescoring pass scored the run's recorded executions, and says that is
-  its basis.
+  the finished run. A rescoring pass retains that selected work, including unavailable
+  items without recorded executions. Legacy runs use final recorded executions.
 - **Application failures** (the app did not produce a usable output) are separate from
   **evaluator failures** (a metric could not be computed). Neither is a low score.
 - **Latency** is the wall time of successful final attempts, p50/p95 by nearest rank.
@@ -53,7 +53,7 @@ from aibench.reporting.aggregation import MetricSummary, reason_code, summarize
 from aibench.reporting.render import render
 from aibench.security.redaction import sanitize
 from aibench.services.runs import _FINISHED, RunError, _frozen_application, _frozen_plan
-from aibench.services.scoring import select_final_executions
+from aibench.services.scoring import rescore_selected_count, select_final_executions
 from aibench.services.suspect_answers import looks_like_error
 from aibench.services.traces import traces_summary
 from aibench.storage.artifacts import ArtifactStore
@@ -552,6 +552,11 @@ def build_report(
     all_attempts = storage.list_evaluation_attempts(run_id)
     engine_scoring = params.get("scoring_id")
     rescoring_profiles, pass_order = _rescoring_profiles(events)
+    rescore_counts = {
+        event["payload"]["scoring_id"]: event["payload"]["selected_count"]
+        for event in events
+        if event["event_type"] == "scoring_pass" and "selected_count" in event["payload"]
+    }
     pass_accounting = {
         event["payload"]["scoring_id"]: event["payload"]
         for event in events
@@ -600,14 +605,17 @@ def build_report(
                 section = _metric_section(
                     profile, binding_hash, bound, planned_by_key.get(binding_hash[7:23])
                 )
-            elif items:
+            elif items or scoring_id in rescore_counts:
                 # A rescore of an engine run: every planned execution is selected, and one
                 # that never produced an execution is unavailable, not silently dropped.
                 section = _metric_section(
                     profile,
                     binding_hash,
                     bound,
-                    max(planned_exec or 0, len(bound)),
+                    max(
+                        rescore_counts.get(scoring_id, rescore_selected_count(items, len(finals))),
+                        len(bound),
+                    ),
                     missing="unavailable",
                 )
             else:

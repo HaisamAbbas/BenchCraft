@@ -43,6 +43,7 @@ from aibench.core.models import (
     RedactionClass,
     UsageEvent,
     UsageRole,
+    WorkItem,
     deep_unfreeze,
 )
 from aibench.core.plans import BudgetLimits, ExecutablePlan, Quota, RetryPolicy
@@ -370,6 +371,15 @@ def select_final_executions(executions: Sequence[ExecutionResult]) -> list[Execu
     return [final[key] for key in sorted(final)]
 
 
+def rescore_selected_count(items: Sequence[WorkItem], recorded_count: int) -> int:
+    """Keep every frozen execution item selected, including work that never ran.
+
+    Legacy runs without a work graph use final recorded executions. The observed count
+    also prevents dropping historical outputs whose work records are unavailable.
+    """
+    return max(sum(item.kind == "execution" for item in items), recorded_count)
+
+
 def decide(
     status: ExecutionStatus, value: MetricValue | None, rule: DecisionRule | None
 ) -> Decision:
@@ -505,7 +515,8 @@ async def score_recorded_run(
     dependency_lock_hash = declared_dependency_identity(resolved)
 
     executions = select_final_executions(storage.list_execution_attempts(run_id))
-    if not executions:
+    selected_count = rescore_selected_count(storage.list_work_items(run_id), len(executions))
+    if not selected_count:
         raise ScoringError(f"run {run_id!r} has no recorded executions to score")
     cases: dict[str, list[BenchmarkCase]] = {}
     stored_cases = storage.list_cases(record.manifest.dataset_hash)
@@ -530,6 +541,7 @@ async def score_recorded_run(
                 "carry_forward_unfinished" if carry_forward else "explicit_stored_output_rescore"
             ),
             "independent_judge_repeat": "not_proven",
+            "selected_count": selected_count,
             "budget_scope": "this_scoring_pass",
             "budgets": limits.model_dump(mode="json"),
             "quotas": [gate.quota.model_dump(mode="json") for gate in dispatch.gates],
@@ -560,6 +572,8 @@ async def score_recorded_run(
                 manifest=metric.manifest,
                 binding_hash=metric.binding_hash,
                 params=deep_unfreeze(metric.binding.params) or {},
+                planned=selected_count,
+                missing="unavailable",
             )
         )
     # A pass is complete only after every resolved binding has returned.  The

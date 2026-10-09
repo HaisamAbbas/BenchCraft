@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F01",
+  "current_item": "F07",
   "items": [
     {
       "id": "F01",
@@ -13,7 +13,7 @@
       "title": "Rescoring bypasses runtime budget enforcement",
       "detail": "Runtime reproduction",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "96 initial affected tests passed; 15 final budget tests passed",
         "38 additional existing report regressions passed",
@@ -22,8 +22,8 @@
         "Unicode hash mismatch identified by review and fixed"
       ],
       "review": "evidence/F01-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "1ac1a021dd436228aaf4a0e7eefe8dcd57b17aea",
+      "pushed": true
     },
     {
       "id": "F02",
@@ -102,9 +102,13 @@
       "title": "Rescore CLI shrinks selected denominators and inflates coverage",
       "detail": "CLI/report reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "13 F07 selection tests and 43 adjacent regressions passed",
+        "Mypy: 140 source files passed; Ruff src/tests/plugins passed",
+        "CLI, session, and stored report agree for missing work, repetitions and changed bindings"
+      ],
+      "review": "evidence/F07-review.md",
       "commit": null,
       "pushed": false
     },
