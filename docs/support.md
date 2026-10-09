@@ -92,6 +92,13 @@ the same service through `compare_runs` and `/compare BASELINE CURRENT`, restric
 started by that session. Ragas' cold catalogue import is bounded by worker preparation; use
 an explicit startup-timeout override on unusually slow hosts.
 
+## Export case results
+
+`aibench export RUN_ID` writes one JSONL row per selected `(case, repetition)`; `--format csv`
+is available for spreadsheet and data-frame workflows. Use `--scoring-id` to select a stored
+pass and `--no-content` to keep case data, outputs, contexts, values and free-text reasons out
+of the export. See [case-result exports](case-result-export.md) for the schema and examples.
+
 ## Credentials
 
 Credentials are never written into project files, datasets, plans or chat. Every

@@ -18,6 +18,7 @@ from aibench.cli import chat as chat_cli
 from aibench.cli import connect as connect_cli
 from aibench.cli import dataset as dataset_cli
 from aibench.cli import experiments as experiments_cli
+from aibench.cli import export as export_cli
 from aibench.cli import inspect as inspect_cli
 from aibench.cli import integrations as integrations_cli
 from aibench.cli import langfuse as langfuse_cli
@@ -71,6 +72,7 @@ app.command("init")(project_cli.init)
 app.command("doctor")(project_cli.doctor)
 app.command("benchmark")(benchmark_cli.benchmark)
 app.command("report")(report_cli.report)
+app.command("export")(export_cli.export)
 app.command("compare")(project_cli.compare)
 app.add_typer(project_cli.plugins_app, name="plugins")
 runs_cli.app.command("status")(run_cli.status)

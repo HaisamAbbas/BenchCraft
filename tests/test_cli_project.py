@@ -4,6 +4,8 @@ the packaged quickstart; its application is a real subprocess."""
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import sys
 from pathlib import Path
@@ -274,6 +276,85 @@ def test_run_resolves_the_plan_from_the_project_config(project: Path) -> None:
     assert "passes 8/10 = 80.0%" in report.output
     assert "support-004" in report.output and "support-010" in report.output
     assert "retrieved (1 of 1): We ship to over 40 countries" in report.output
+
+    jsonl = cli.invoke(
+        app,
+        ["export", data["run_id"], "--workspace", str(project), "--out", "-"],
+    )
+    assert jsonl.exit_code == 0, jsonl.output
+    rows = [json.loads(line) for line in jsonl.output.splitlines()]
+    assert len(rows) == 10
+    assert len({(row["case_id"], row["repetition"]) for row in rows}) == 10
+    assert all(row["schema"] == "aibench.case-result/1" for row in rows)
+    assert all(row["case"]["input"] is not None for row in rows)
+    assert any(row["execution"]["status"] == "ok" for row in rows)
+    assert any(row["execution"]["status"] != "ok" for row in rows)
+    assert all(len(row["metrics"]) == 2 for row in rows)
+
+    withheld = cli.invoke(
+        app,
+        [
+            "export",
+            data["run_id"],
+            "--workspace",
+            str(project),
+            "--out",
+            "-",
+            "--no-content",
+        ],
+    )
+    assert withheld.exit_code == 0, withheld.output
+    withheld_rows = [json.loads(line) for line in withheld.output.splitlines()]
+    assert all(row["case"] is None and row["content"] == "withheld" for row in withheld_rows)
+    for row in withheld_rows:
+        execution = row["execution"]
+        if execution is not None:
+            assert execution["output"] is None
+            assert execution["error"] is None
+            assert execution["retrieved_context"] is None
+            assert execution["usage"] is None
+            assert execution["tool_events"] is None
+            assert execution["world_state"] is None
+        assert all(metric["value"] is None for metric in row["metrics"])
+        assert all(metric["uncertainty"] is None for metric in row["metrics"])
+
+    csv_export = cli.invoke(
+        app,
+        [
+            "export",
+            data["run_id"],
+            "--workspace",
+            str(project),
+            "--format",
+            "csv",
+            "--out",
+            "-",
+        ],
+    )
+    assert csv_export.exit_code == 0, csv_export.output
+    csv_rows = list(csv.DictReader(io.StringIO(csv_export.output)))
+    assert len(csv_rows) == 10
+    assert csv_rows[0]["schema"] == "aibench.case-result/1"
+    assert json.loads(csv_rows[0]["case"])["case_id"] == csv_rows[0]["case_id"]
+
+    output_path = project / "case-results.jsonl"
+    file_export = cli.invoke(
+        app,
+        [
+            "export",
+            data["run_id"],
+            "--workspace",
+            str(project),
+            "--out",
+            str(output_path),
+            "--json",
+        ],
+    )
+    assert file_export.exit_code == 0, file_export.output
+    summary = _json(file_export.output)
+    assert summary["rows"] == 10 and summary["content"] == "included"
+    assert summary["_cli"]["exit_code"] == 0
+    assert len(output_path.read_text(encoding="utf-8").splitlines()) == 10
 
 
 def test_run_refuses_a_dataset_its_configured_plan_does_not_use(
