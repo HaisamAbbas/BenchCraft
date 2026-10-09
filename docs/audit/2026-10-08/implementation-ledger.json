@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G04",
+  "current_item": "G05",
   "items": [
     {
       "id": "F01",
@@ -403,11 +403,17 @@
       "title": "Complete case-result export",
       "detail": "**Partial.** Report JSON contains summaries and non-passing evidence. There is no general headless export of every passing/failing case and repetition to JSONL/CSV, with explicit content controls.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "51 report, report-review, case-export, and project CLI regressions passed",
+        "Final post-review export serializer and quickstart CLI batch: 6 passed; CSV null/empty distinction regression: 5 passed",
+        "Ruff src/tests/plugins passed; mypy checked 147 source files; git diff --check passed",
+        "JSONL and CSV preserve every selected case/repetition and complete execution/metric evidence; content withholding and spreadsheet-safe CSV verified",
+        "Independent review caught partial CSV data loss; fixed and re-reviewed with no remaining findings"
+      ],
+      "review": "evidence/G04-review.md",
+      "commit": "8cbed142b267ab7e7a3994651ec51f11e78dd448",
+      "pushed": true
     },
     {
       "id": "G05",
