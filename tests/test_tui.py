@@ -707,3 +707,30 @@ def test_only_the_commands_that_can_take_minutes_run_in_the_background() -> None
         "",
     ):
         assert not is_long_command(text), text
+
+
+def test_human_comparison_explains_an_undetermined_regression_rule() -> None:
+    from aibench.tui.render import comparison
+
+    output = io.StringIO()
+    comparison(
+        Console(file=output, width=160, highlight=False),
+        {
+            "status": "qualified",
+            "qualified": True,
+            "regression_gate": {
+                "status": "undetermined",
+                "rules": [
+                    {
+                        "rule": "application.latency_p95_ms",
+                        "status": "undetermined",
+                        "observed": None,
+                        "maximum": 10,
+                        "reason": "complete_successful_latency_measurements_required",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert "reason: complete successful latency measurements required" in output.getvalue()

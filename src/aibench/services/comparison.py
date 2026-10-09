@@ -45,7 +45,7 @@ from aibench.core.models import (
     deep_unfreeze,
 )
 from aibench.core.plans import ExecutablePlan
-from aibench.engine.engine import parse_work_item_key
+from aibench.engine.engine import parse_work_item_key, was_dispatched
 from aibench.reporting.aggregation import reason_code
 from aibench.reporting.statistics import (
     ComparisonSide,
@@ -57,6 +57,7 @@ from aibench.reporting.statistics import (
     compare_numeric_metric,
     summarize_judge_stability,
 )
+from aibench.services.scoring import select_final_executions
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import Storage
 
@@ -2814,6 +2815,7 @@ def compare_runs(
             "metrics": [entry["identity_checks"] for entry in metric_entries],
         },
         "application_identity": global_checks["application"],
+        "application_performance": _application_performance(baseline, current),
         "global_checks": list(global_checks.values()),
         "warnings": sorted(warnings, key=lambda item: (item["scope"], item["code"])),
         "warning_codes": sorted({item["code"] for item in warnings}),
@@ -2884,12 +2886,91 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _nearest_rank_p95(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(1, math.ceil(0.95 * len(ordered)))
+    return ordered[rank - 1]
+
+
+def _finite_float(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
+    """Summarize observed runtime signals using the report's measurement rules."""
+
+    finals = select_final_executions(run.executions)
+    latencies: list[float] = []
+    expected_latency_requests = 0
+    for execution in finals:
+        if execution.status is not ExecutionStatus.OK or execution.cache:
+            continue
+        expected_latency_requests += 1
+        timing = deep_unfreeze(execution.timing) or {}
+        wall_ms = timing.get("wall_ms") if isinstance(timing, Mapping) else None
+        latency = _finite_float(wall_ms)
+        if latency is not None and latency >= 0:
+            latencies.append(latency)
+
+    dispatched = [execution for execution in run.executions if was_dispatched(execution)]
+    uncommitted = sum(
+        int(payload.get("uncommitted_dispatches", 0))
+        for event in run.events
+        if event.get("event_type") == "recovered"
+        and isinstance((payload := event.get("payload")), Mapping)
+        and isinstance(payload.get("uncommitted_dispatches", 0), int)
+        and not isinstance(payload.get("uncommitted_dispatches", 0), bool)
+        and payload.get("uncommitted_dispatches", 0) > 0
+    )
+    valid_costs = [
+        cost
+        for execution in dispatched
+        if (cost := _finite_float(execution.cost)) is not None and cost >= 0
+    ]
+    unknown_costs = len(dispatched) - len(valid_costs) + uncommitted
+    known_cost = sum(valid_costs)
+    calls = len(dispatched) + uncommitted
+    return {
+        "latency_p95_ms": _nearest_rank_p95(latencies),
+        "latency_successful_requests": len(latencies),
+        "latency_uncached_successful_requests": expected_latency_requests,
+        "latency_missing_measurements": expected_latency_requests - len(latencies),
+        "latency_definition": (
+            "nearest-rank p95 of final successful uncached request wall times; "
+            "failed requests and cache hits are excluded"
+        ),
+        "total_cost_usd": round(known_cost, 6) if calls and unknown_costs == 0 else None,
+        "cost_dispatches": calls,
+        "cost_dispatches_with_unknown_cost": unknown_costs,
+        "cost_accounting": (
+            "complete" if calls and unknown_costs == 0 else "partial" if calls else "none"
+        ),
+    }
+
+
+def _application_performance(baseline: _RunFacts, current: _RunFacts) -> dict[str, Any]:
+    return {
+        "basis": "committed execution attempts and recovery events",
+        "baseline": _application_performance_side(baseline),
+        "current": _application_performance_side(current),
+    }
+
+
 def comparison_exit_code(report: Mapping[str, Any]) -> int:
     """Map a comparison document to the shared comparison exit codes.
 
-    ``2`` is reserved for a blocked strict comparison, ``1`` for a qualified
-    comparison whose declared paired-coverage gate fails, and ``0`` otherwise
-    (including an explicitly exploratory diagnostic).
+    ``2`` is reserved for a blocked strict comparison, ``3`` for an explicitly
+    requested regression policy with incomplete measurements, and ``1`` for a
+    qualified comparison whose coverage or regression gate fails. ``0`` means
+    all requested gates passed (or the comparison is exploratory).
     """
 
     if report.get("status") == "blocked" and report.get("mode") == "strict":
@@ -2899,6 +2980,12 @@ def comparison_exit_code(report: Mapping[str, Any]) -> int:
         if not isinstance(gate, Mapping):
             gate = report.get("coverage_gate")
         if isinstance(gate, Mapping) and gate.get("passed") is False:
+            return 1
+    regression_gate = report.get("regression_gate")
+    if isinstance(regression_gate, Mapping):
+        if regression_gate.get("status") == "undetermined":
+            return 3
+        if regression_gate.get("status") == "fail":
             return 1
     return 0
 

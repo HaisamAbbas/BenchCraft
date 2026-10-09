@@ -694,6 +694,31 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
             f"  coverage gate: [{gate_colour}]{safe(gate_status)}[/{gate_colour}]"
             f" {safe(str(gate.get('reason') or ''))}",
         )
+    regression_gate = data.get("regression_gate")
+    if isinstance(regression_gate, dict):
+        gate_status = str(regression_gate.get("status", "unknown"))
+        gate_colour = {"pass": "green", "fail": "red"}.get(gate_status, "yellow")
+        out(
+            console,
+            f"  regression policy: [{gate_colour}]{safe(gate_status)}[/{gate_colour}]",
+        )
+        rules = regression_gate.get("rules", [])
+        for rule in rules if isinstance(rules, list) else []:
+            if isinstance(rule, dict):
+                observed = rule.get("observed")
+                maximum = rule.get("maximum")
+                reason = rule.get("reason")
+                explanation = (
+                    f"; reason: {safe(reason.replace('_', ' '))}"
+                    if isinstance(reason, str) and reason
+                    else ""
+                )
+                out(
+                    console,
+                    f"    {safe(rule.get('rule', 'rule'))}: "
+                    f"{safe(rule.get('status', 'unknown'))} "
+                    f"(observed {_number(observed)}, maximum {_number(maximum)}{explanation})",
+                )
     for metric in data.get("metrics", []):
         detail = metric.get("comparison") or metric.get("diagnostic_comparison")
         if not isinstance(detail, dict):

@@ -205,6 +205,42 @@ def test_compare_requires_a_real_workspace_before_reading_runs(tmp_path: Path) -
     assert _json(result.output)["status"] == "error"
 
 
+def test_compare_validates_regression_policy_and_requires_strict_mode(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        json.dumps({"schema": "aibench.regression-policy/1"}), encoding="utf-8"
+    )
+    invalid = cli.invoke(
+        app,
+        [
+            "compare",
+            "run-a",
+            "run-b",
+            "--regression-policy",
+            str(policy_path),
+            "--json",
+        ],
+    )
+    assert invalid.exit_code == 2
+    assert "at least one metric or performance tolerance" in _json(invalid.output)["message"]
+
+    exploratory = cli.invoke(
+        app,
+        [
+            "compare",
+            "run-a",
+            "run-b",
+            "--mode",
+            "exploratory",
+            "--regression-policy",
+            str(policy_path),
+            "--json",
+        ],
+    )
+    assert exploratory.exit_code == 2
+    assert "requires --mode strict" in _json(exploratory.output)["message"]
+
+
 # --------------------------------------------------------------------------- run, report
 
 
@@ -314,6 +350,16 @@ def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> 
         assert result.exit_code in {0, 1, 3}, result.output
         runs.append(_json(result.output)["run_id"])
     before = _execution_attempt_count(project)
+    policy_path = project / "regression-policy.json"
+    policy_path.write_text(
+        json.dumps(
+            {
+                "schema": "aibench.regression-policy/1",
+                "max_latency_p95_increase_ms": 100000,
+            }
+        ),
+        encoding="utf-8",
+    )
     compared = cli.invoke(
         app,
         [
@@ -324,6 +370,8 @@ def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> 
             str(project),
             "--min-paired-coverage",
             "0.85",
+            "--regression-policy",
+            str(policy_path),
             "--json",
         ],
     )
@@ -332,6 +380,8 @@ def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> 
     assert report["status"] == "qualified" and report["qualified"] is True
     assert report["execution_identity"]["classification"] == "fresh_or_unknown_execution_identity"
     assert report["invocation_basis"]["zero_invocations"] is True
+    assert report["regression_gate"]["status"] == "pass"
+    assert report["_cli"]["exit_code"] == 0
     assert _execution_attempt_count(project) == before
 
 

@@ -80,6 +80,10 @@ and blocks an unqualified claim when they differ. `--mode exploratory` is visibl
 non-qualified. `--baseline-scoring` and `--current-scoring` select explicit stored scoring
 passes, which is how two passes over the same run are compared.
 
+Use `--regression-policy policy.json` to fail CI on predeclared native-metric, p95-latency,
+or observed-cost degradation. Policies require strict comparisons and complete measurements;
+see [regression policies](regression-policies.md) for the schema and exit codes.
+
 Complete-pair coverage must pass the predeclared threshold before a result supports a
 quality claim (`claim_qualified=true`). Numeric differences are case-level macro averages
 with a seeded grouped bootstrap interval. DeepEval and Ragas results are shown as separate

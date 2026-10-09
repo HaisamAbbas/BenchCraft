@@ -31,6 +31,10 @@ from aibench.core.models import (
 )
 from aibench.core.plans import ExecutablePlan
 from aibench.services.comparison import ComparisonError, compare_runs, comparison_exit_code
+from aibench.services.regression_policy import (
+    evaluate_regression_policy,
+    parse_regression_policy,
+)
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.db import Database
 from aibench.storage.repositories import Storage
@@ -178,6 +182,9 @@ def _seed_run(
     result_execution_ids: dict[tuple[str, int], str] | None = None,
     missing_execution_keys: set[tuple[str, int]] | None = None,
     cached_pass_ids: set[str] | None = None,
+    timings: dict[tuple[str, int], dict[str, Any]] | None = None,
+    costs: dict[tuple[str, int], float | None] | None = None,
+    cached_execution_keys: set[tuple[str, int]] | None = None,
 ) -> tuple[str, str]:
     scoring_id = scoring_id or f"engine-{run_id}"
     binding, metric_profile = profile or _profile()
@@ -219,6 +226,8 @@ def _seed_run(
         status="completed",
     )
     execution_ids = execution_ids or {}
+    timings = timings or {}
+    costs = costs or {}
     for case in cases:
         for repetition in range(repetitions):
             key = (case.case_id, repetition)
@@ -232,6 +241,9 @@ def _seed_run(
                     attempt_id=0,
                     status=ExecutionStatus.OK,
                     output=f"answer {case.case_id}",
+                    timing=timings.get(key, {}),
+                    cost=costs.get(key),
+                    cache={"key": "test-cache"} if key in (cached_execution_keys or set()) else None,
                 )
             )
             storage.commit_work_item(
@@ -1065,3 +1077,85 @@ def test_comparison_validates_inputs_and_missing_runs() -> None:
         compare_runs(storage, None, "missing", "also-missing")
     with pytest.raises(ComparisonError):
         compare_runs(storage, None, "b", "c", mode="qualified")  # type: ignore[arg-type]
+
+
+def test_comparison_reports_performance_and_applies_predeclared_regression_policy(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(Database.open_in_memory())
+    cases = _cases("a1", "b1")
+    _seed_run(
+        storage,
+        "baseline",
+        cases=cases,
+        values=_values(("a1", 0, 1), ("b1", 0, 1)),
+        timings={("a1", 0): {"wall_ms": 100}, ("b1", 0): {"wall_ms": 200}},
+        costs={("a1", 0): 0.1, ("b1", 0): 0.2},
+    )
+    _seed_run(
+        storage,
+        "current",
+        cases=cases,
+        application_hash="sha256:app-b-intentional-change",
+        values=_values(("a1", 0, 0.5), ("b1", 0, 0.5)),
+        timings={("a1", 0): {"wall_ms": 180}, ("b1", 0): {"wall_ms": 280}},
+        costs={("a1", 0): 0.2, ("b1", 0): 0.35},
+    )
+
+    report = compare_runs(
+        storage,
+        ArtifactStore(tmp_path / "artifacts"),
+        "baseline",
+        "current",
+        bootstrap_replicates=100,
+    )
+    performance = report["application_performance"]
+    assert report["status"] == "qualified"
+    assert performance["baseline"]["latency_p95_ms"] == 200
+    assert performance["current"]["latency_p95_ms"] == 280
+    assert performance["baseline"]["total_cost_usd"] == 0.3
+    assert performance["current"]["total_cost_usd"] == 0.55
+
+    policy = parse_regression_policy(
+        {
+            "schema": "aibench.regression-policy/1",
+            "metric_rules": [{"metric_id": "native.exact_match", "max_degradation": 0.4}],
+            "max_latency_p95_increase_ms": 79,
+            "max_application_cost_increase_usd": 0.24,
+        }
+    )
+    report["regression_gate"] = evaluate_regression_policy(report, policy)
+    gate = report["regression_gate"]
+    assert gate["status"] == "fail"
+    assert gate["rules"][0]["observed"] == pytest.approx(0.5), json.dumps(
+        gate["rules"], indent=2
+    )
+    assert gate["rules"][1]["observed"] == 80
+    assert gate["rules"][2]["observed"] == pytest.approx(0.25)
+    assert comparison_exit_code(report) == 1
+
+
+def test_regression_policy_requires_complete_performance_measurements() -> None:
+    policy = parse_regression_policy(
+        {
+            "schema": "aibench.regression-policy/1",
+            "max_application_cost_increase_usd": 0,
+        }
+    )
+    report = {
+        "status": "qualified",
+        "qualified": True,
+        "overall_coverage_gate": {"passed": True},
+        "application_performance": {
+            "baseline": {"total_cost_usd": 0.1},
+            "current": {"total_cost_usd": None},
+        },
+    }
+
+    report["regression_gate"] = evaluate_regression_policy(report, policy)
+
+    assert report["regression_gate"]["status"] == "undetermined"
+    assert report["regression_gate"]["rules"][0]["reason"] == (
+        "complete_baseline_and_current_measurements_required"
+    )
+    assert comparison_exit_code(report) == 3

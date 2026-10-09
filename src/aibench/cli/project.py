@@ -561,13 +561,24 @@ def compare(
         2_000, "--bootstrap-replicates", min=100, help="Seeded cluster-bootstrap replicates."
     ),
     bootstrap_seed: int = typer.Option(0, "--bootstrap-seed"),
+    regression_policy_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--regression-policy",
+        help="JSON/YAML predeclared regression tolerances; requires strict comparison.",
+    ),
     workspace: Path | None = typer.Option(  # noqa: B008
         None, "--workspace", help="Project root containing .aibench/ (default: cwd)."
     ),
     json_output: bool = _JSON,
 ) -> None:
     """Compare stored runs; no application, evaluator or judge is invoked."""
+    from aibench.config.resolve import load_mapping_file
     from aibench.services.comparison import ComparisonError, compare_runs, comparison_exit_code
+    from aibench.services.regression_policy import (
+        RegressionPolicyError,
+        evaluate_regression_policy,
+        parse_regression_policy,
+    )
     from aibench.storage.artifacts import ArtifactStore
     from aibench.storage.db import Database, Workspace
     from aibench.storage.repositories import Storage
@@ -578,6 +589,25 @@ def compare(
         raise error_exit(
             message, exit_code=EXIT_INVALID, json_output=json_output, console=console, err_console=err_console
         )
+    if regression_policy_file is not None and mode != "strict":
+        message = "--regression-policy requires --mode strict"
+        raise error_exit(
+            message, exit_code=EXIT_INVALID, json_output=json_output, console=console, err_console=err_console
+        )
+    regression_policy = None
+    if regression_policy_file is not None:
+        try:
+            regression_policy = parse_regression_policy(
+                load_mapping_file(regression_policy_file)
+            )
+        except (OSError, AibenchError, RegressionPolicyError) as exc:
+            raise error_exit(
+                str(exc),
+                exit_code=EXIT_INVALID,
+                json_output=json_output,
+                console=console,
+                err_console=err_console,
+            ) from exc
     ws = Workspace.at(workspace or Path.cwd())
     if not ws.db_path.is_file():
         message = f"no aibench workspace at {ws.root}"
@@ -613,8 +643,11 @@ def compare(
         raise typer.Exit(code=EXIT_INVALID) from exc
     finally:
         storage.db.close()
+    if regression_policy is not None:
+        report["regression_gate"] = evaluate_regression_policy(report, regression_policy)
+    exit_code = comparison_exit_code(report)
     if json_output:
-        console.print_json(data=report, cli_exit_code=comparison_exit_code(report))
+        console.print_json(data=report, cli_exit_code=exit_code)
     else:
         terminal_render.comparison(console, report)
-    raise typer.Exit(code=comparison_exit_code(report))
+    raise typer.Exit(code=exit_code)
