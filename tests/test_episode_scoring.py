@@ -145,6 +145,30 @@ def test_retrieval_is_added_to_each_turn_only_when_the_metric_reads_it(tmp_path:
     )
 
 
+def test_scalar_episode_metric_means_weight_cases_equally(tmp_path: Path) -> None:
+    seeded = Seeded(tmp_path)
+    seeded.seed(
+        [case("a1", group_id="episode-a"), case("a2", group_id="episode-a"),
+         case("b1", group_id="episode-b")],
+        [
+            execution("a1", "first"),
+            execution("a1", "repeat", repetition_id=1),
+            execution("a2", "second"),
+            execution("b1", "other"),
+        ],
+    )
+    registry = EvaluatorRegistry.with_native()
+    metric = _conversation_metric(retrieval=False)
+    registry.register(metric)
+    report = seeded.score([{"metric": metric.manifest.evaluator_id}], registry=registry)
+
+    [summary] = report.summaries
+    assert summary.value_summary["mean"] == round((1 + 2 + 1) / 3, 6)
+    assert summary.value_summary["repetition_weighted_mean"] == 1.25
+    assert summary.value_summary["case_count"] == 3
+    assert summary.value_summary["n"] == 4
+
+
 def test_episode_order_follows_the_dataset_and_ignores_other_cases() -> None:
     cases = [
         case("a1", group_id="a"),

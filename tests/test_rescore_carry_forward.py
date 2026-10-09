@@ -478,6 +478,34 @@ def test_the_rescore_command_carries_by_default_and_all_evaluates_everything(
     assert shown.count("carried forward") == 1  # a full rescore says nothing about carrying
 
 
+def test_rescore_tui_labels_case_macro_and_repetition_weighted_means() -> None:
+    console = Console(file=io.StringIO(), width=120, highlight=False)
+    render.rescored(
+        console,
+        {
+            "run_id": "run-1",
+            "scoring_id": "score-1",
+            "carried_forward": 0,
+            "evaluated_now": 3,
+            "summaries": [
+                {
+                    "metric_id": "tests.length",
+                    "completed": 3,
+                    "selected": 4,
+                    "not_applicable": 0,
+                    "errors": 0,
+                    "reasons": {},
+                    "value_summary": {"mean": 0.5, "repetition_weighted_mean": 0.333333},
+                }
+            ],
+            "warnings": [],
+        },
+    )
+    shown = console.file.getvalue()  # type: ignore[attr-defined]
+    assert "case-macro mean 0.5" in shown
+    assert "repetition-weighted 0.333333" in shown
+
+
 def test_needs_attention_clears_once_a_rescore_has_finished_what_the_run_left_failed(
     tmp_path: Path,
 ) -> None:

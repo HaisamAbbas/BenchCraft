@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F12",
+  "current_item": "F13",
   "items": [
     {
       "id": "F01",
@@ -219,7 +219,7 @@
         "Final independent review: no findings"
       ],
       "review": "evidence/F12-review.md",
-      "commit": null,
+      "commit": "f976b8b8ec1a8896a5a5c984f5b9781a779a4c1d",
       "pushed": true
     },
     {
@@ -228,11 +228,18 @@
       "title": "Standalone reports use repetition-weighted means instead of default case macro means",
       "detail": "Aggregation reproduction and spec",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "delivered",
+      "verification": [
+        "Final affected scoring, episode, report, conversation and rescore-TUI batch: 79 passed",
+        "Exact unequal-repeat/pending case reports case-macro 0.5 and repetition-weighted 0.333333; selected/completed/pending remains 4/3/1",
+        "Grouped-episode scoring distinguishes case-macro 1.333333 from repetition-weighted 1.25",
+        "Repeated 1e308 values preserve a finite mean without overflow",
+        "Ruff passed; mypy found no issues in 141 source files; git diff --check passed",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F13-review.md",
       "commit": null,
-      "pushed": false
+      "pushed": true
     },
     {
       "id": "F14",

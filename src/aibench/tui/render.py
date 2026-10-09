@@ -436,8 +436,12 @@ def rescored(console: Console, data: dict[str, Any]) -> None:
             + (" [dim](/rescore all evaluates everything again)[/dim]" if evaluated == 0 else ""),
         )
     for summary in data["summaries"]:
-        mean = summary["value_summary"].get("mean")
-        value = f" mean {_number(mean)}" if mean is not None else ""
+        value_summary = summary["value_summary"]
+        mean = value_summary.get("mean")
+        value = f" case-macro mean {_number(mean)}" if mean is not None else ""
+        repetition_weighted = value_summary.get("repetition_weighted_mean")
+        if repetition_weighted is not None:
+            value += f" (repetition-weighted {_number(repetition_weighted)})"
         line = (
             f"  {safe(summary['metric_id'])}:{value} completed {summary['completed']}/"
             f"{summary['selected']}, not applicable {summary['not_applicable']}, "

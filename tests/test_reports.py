@@ -21,7 +21,7 @@ from aibench.cli.main import app
 from aibench.core.models import Decision, EvaluationResult, ExecutionStatus, MetricValue
 from aibench.engine.compile import compile_plan
 from aibench.engine.engine import RunController
-from aibench.reporting.render import render
+from aibench.reporting.render import _value_summary, render
 from aibench.security.policy import ExecutionPolicy
 from aibench.services.reports import build_report, percentile, report_facts
 from aibench.services.runs import create_run, execute_run, run_budget
@@ -117,6 +117,26 @@ class Project:
             return build_report(storage, artifacts, run_id, **kwargs)
         finally:
             storage.db.close()
+
+
+def test_scalar_text_report_labels_both_mean_denominators() -> None:
+    assert _value_summary(
+        {
+            "value_summary": {
+                "n": 3,
+                "case_count": 2,
+                "mean": 0.5,
+                "min": 0.0,
+                "max": 1.0,
+                "case_mean_min": 0.0,
+                "case_mean_max": 1.0,
+                "repetition_weighted_mean": 0.333333,
+            }
+        }
+    ) == (
+        "case-macro mean 0.5 (case means 0 to 1) across 2 completed case(s); "
+        "repetition-weighted mean 0.333333 across 3 completed repetition(s)"
+    )
 
 
 def _rows(*cases: tuple[str, str, str]) -> list[dict[str, Any]]:

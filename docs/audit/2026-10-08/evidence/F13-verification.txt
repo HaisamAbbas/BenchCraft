@@ -1,0 +1,24 @@
+F13 case-macro aggregation verification
+=======================================
+
+Final affected scoring, episode, report, conversation, and rescore-TUI integration batch:
+  tests/test_scoring_service.py
+  tests/test_episode_scoring.py
+  tests/test_reports.py
+  tests/test_conversation.py
+  tests/test_rescore_carry_forward.py
+  79 passed in 322.17s.
+
+Coverage includes the exact `0, 0` plus `1` reproduction and a pending selected observation:
+  case-macro mean 0.5; repetition-weighted mean 0.333333; selected/completed/pending 4/3/1.
+Grouped-episode scoring distinguishes case-macro 1.333333 from repetition-weighted 1.25.
+Two `1e308` repeats produce the finite mean `1e308` without intermediate overflow. Standalone
+text report and TUI output identify both estimates and their labels.
+
+Static checks:
+  Ruff on changed source and tests: passed.
+  MYPYPATH=src .venv/Scripts/mypy src/aibench
+  Success: no issues found in 141 source files.
+  git diff --check: passed.
+
+Independent review: no findings; reviewer confirmed the edge cases above (5 focused tests passed).

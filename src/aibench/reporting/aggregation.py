@@ -16,14 +16,17 @@ Buckets (per selected case, per binding):
 `attempted = completed + errors + cancelled`. With `planned`, `selected` is the planned
 count rather than the number of results so far, so an unfinished run shows the missing
 work as `pending` instead of silently shrinking its denominators.
-Coverages are relative to `selected`. Rates and means use `completed` as denominator and
-say so. Results are deterministic: inputs are ordered and floats rounded to 6 places.
+Coverages are relative to `selected`. Rates use completed evaluations. Scalar means first
+average numeric repetitions within each case, then give completed cases equal weight; the
+repetition-weighted mean is retained under an explicit diagnostic label. Results are
+deterministic: inputs are ordered and floats rounded to 6 places.
 """
 
 from __future__ import annotations
 
+import math
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
@@ -51,6 +54,17 @@ def reason_code(reason: str | None) -> str | None:
 
 def _ratio(numerator: int, denominator: int) -> float | None:
     return None if denominator == 0 else round(numerator / denominator, _PLACES)
+
+
+def _finite_mean(values: Sequence[float]) -> float:
+    """Average finite floats without overflowing the intermediate sum."""
+    scale = max(abs(value) for value in values)
+    if scale == 0:
+        return 0.0
+    scaled_mean = math.fsum(value / scale for value in values) / len(values)
+    # A mean is bounded by its inputs. Clamp a possible final rounding ulp before
+    # rescaling, which keeps the result finite even for values near float max.
+    return max(-1.0, min(1.0, scaled_mean)) * scale
 
 
 @dataclass(frozen=True)
@@ -123,7 +137,9 @@ def summarize(
     decisions = {d.value: 0 for d in Decision}
     decisions.update(Counter(r.decision.value for r in ordered))
     ok_values = [
-        deep_unfreeze(r.value.value) for r in ordered if r.status is ExecutionStatus.OK and r.value
+        (r.case_id, deep_unfreeze(r.value.value))
+        for r in ordered
+        if r.status is ExecutionStatus.OK and r.value
     ]
 
     return MetricSummary(
@@ -151,7 +167,8 @@ def summarize(
     )
 
 
-def _value_summary(aggregation: str, values: list[Any]) -> dict[str, Any]:
+def _value_summary(aggregation: str, observations: list[tuple[str, Any]]) -> dict[str, Any]:
+    values = [value for _, value in observations]
     n = len(values)
     if aggregation == "rate":
         true = sum(1 for v in values if v is True)
@@ -162,17 +179,38 @@ def _value_summary(aggregation: str, values: list[Any]) -> dict[str, Any]:
             "denominator": "completed",
         }
     if aggregation == "mean":
-        numbers = [
-            float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)
-        ]
+        numbers_by_case: defaultdict[str, list[float]] = defaultdict(list)
+        numbers: list[float] = []
+        for case_id, value in observations:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                number = float(value)
+                numbers.append(number)
+                numbers_by_case[case_id].append(number)
         if not numbers:
-            return {"n": 0, "mean": None, "min": None, "max": None, "denominator": "completed"}
+            return {
+                "n": 0,
+                "case_count": 0,
+                "mean": None,
+                "min": None,
+                "max": None,
+                "case_mean_min": None,
+                "case_mean_max": None,
+                "repetition_weighted_mean": None,
+                "denominator": "completed_cases",
+                "repetition_weighted_denominator": "completed_repetitions",
+            }
+        case_means = [_finite_mean(case_values) for _, case_values in sorted(numbers_by_case.items())]
         return {
             "n": len(numbers),
-            "mean": round(sum(numbers) / len(numbers), _PLACES),
+            "case_count": len(case_means),
+            "mean": round(_finite_mean(case_means), _PLACES),
             "min": round(min(numbers), _PLACES),
             "max": round(max(numbers), _PLACES),
-            "denominator": "completed",
+            "case_mean_min": round(min(case_means), _PLACES),
+            "case_mean_max": round(max(case_means), _PLACES),
+            "repetition_weighted_mean": round(_finite_mean(numbers), _PLACES),
+            "denominator": "completed_cases",
+            "repetition_weighted_denominator": "completed_repetitions",
         }
     if aggregation == "category_counts":
         counts = Counter(str(v) for v in values)

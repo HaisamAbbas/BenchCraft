@@ -16,11 +16,13 @@ import pytest
 from aibench.core.models import (
     ApplicationSpec,
     Decision,
+    EvaluationResult,
     EvaluatorManifest,
     ExecutionStatus,
     FieldRequirement,
     MetricBinding,
     MetricDirection,
+    MetricValue,
 )
 from aibench.evaluators.protocol import (
     EvaluationOutcome,
@@ -218,12 +220,65 @@ def test_decision_uses_the_frozen_rule_and_scalar_mean_is_labelled(tmp_path: Pat
     [summary] = report.summaries
     assert summary.value_summary == {
         "n": 3,
+        "case_count": 3,
         "mean": 0.6,
         "min": 0.3,
         "max": 1.0,
-        "denominator": "completed",
+        "case_mean_min": 0.3,
+        "case_mean_max": 1.0,
+        "repetition_weighted_mean": 0.6,
+        "denominator": "completed_cases",
+        "repetition_weighted_denominator": "completed_repetitions",
     }
     assert report.results[0].rule is not None and report.results[0].rule.threshold == 0.4
+
+
+def test_scalar_mean_gives_unequally_repeated_cases_equal_weight(tmp_path: Path) -> None:
+    values = [
+        EvaluationResult(
+            result_id=f"s:{case_id}:r{repetition}",
+            run_id="run-1",
+            case_id=case_id,
+            metric_id="tests.length",
+            metric_version="1.0.0",
+            value=MetricValue(kind="scalar", value=value),
+            status=OK,
+            decision=Decision.PASS,
+            scoring_id="s",
+            execution_id=f"run-1:{case_id}:r{repetition}:a0",
+            repetition_id=repetition,
+        )
+        for case_id, repetition, value in [("a", 0, 0.0), ("a", 1, 0.0), ("b", 0, 1.0)]
+    ]
+    summary = summarize(values, manifest=_manifest("tests.length"), binding_hash="h", planned=4)
+
+    assert summary.value_summary["mean"] == 0.5
+    assert summary.value_summary["repetition_weighted_mean"] == 0.333333
+    assert summary.value_summary["case_count"] == 2 and summary.value_summary["n"] == 3
+    assert summary.selected == 4 and summary.completed == 3 and summary.pending == 1
+
+
+def test_scalar_mean_does_not_overflow_on_large_finite_repetitions() -> None:
+    values = [
+        EvaluationResult(
+            result_id=f"s:a:r{repetition}",
+            run_id="run-1",
+            case_id="a",
+            metric_id="tests.length",
+            metric_version="1.0.0",
+            value=MetricValue(kind="scalar", value=1e308),
+            status=OK,
+            decision=Decision.PASS,
+            scoring_id="s",
+            execution_id=f"run-1:a:r{repetition}:a0",
+            repetition_id=repetition,
+        )
+        for repetition in (0, 1)
+    ]
+    summary = summarize(values, manifest=_manifest("tests.length"), binding_hash="h")
+
+    assert summary.value_summary["mean"] == 1e308
+    assert summary.value_summary["repetition_weighted_mean"] == 1e308
 
 
 def test_model_usage_is_unknown_unless_reported(tmp_path: Path) -> None:

@@ -121,9 +121,19 @@ def _value_summary(summary: dict[str, Any]) -> str:
     if "mean" in values:
         if values["n"] == 0:
             return "no completed values"
+        case_min = values.get("case_mean_min", values["min"])
+        case_max = values.get("case_mean_max", values["max"])
+        repetition_weighted = values.get("repetition_weighted_mean")
+        diagnostic = (
+            f"; repetition-weighted mean {_number(repetition_weighted)} across "
+            f"{values['n']} completed repetition(s)"
+            if repetition_weighted is not None
+            else ""
+        )
         return (
-            f"mean {_number(values['mean'])} (min {_number(values['min'])}, "
-            f"max {_number(values['max'])}) across {values['n']} completed"
+            f"case-macro mean {_number(values['mean'])} (case means {_number(case_min)} to "
+            f"{_number(case_max)}) across {values.get('case_count', values['n'])} completed "
+            f"case(s){diagnostic}"
         )
     if "counts" in values:
         return ", ".join(f"{k}: {v}" for k, v in values["counts"].items()) or "none"
