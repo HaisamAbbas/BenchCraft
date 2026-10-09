@@ -31,6 +31,12 @@ from aibench.cli import runs as runs_cli
 from aibench.cli import score as score_cli
 from aibench.cli import sessions as sessions_cli
 from aibench.cli import traces as traces_cli
+from aibench.cli.global_options import (
+    GlobalOptions,
+    command_defaults,
+    current_global_options,
+    merge_default_maps,
+)
 from aibench.core.errors import WorkspaceTooNew
 
 app = typer.Typer(
@@ -67,11 +73,28 @@ app.command("compare")(project_cli.compare)
 app.add_typer(project_cli.plugins_app, name="plugins")
 runs_cli.app.command("status")(run_cli.status)
 
+_GLOBAL_CONFIG = typer.Option(
+    None, "--config", help="Project config file used in place of automatic discovery."
+)
+_GLOBAL_JSON = typer.Option(
+    False, "--json", help="Default machine-readable output for commands that support it."
+)
+_GLOBAL_NON_INTERACTIVE = typer.Option(
+    False, "--non-interactive", help="Never enter an interactive prompt or conversation."
+)
+_GLOBAL_POLICY = typer.Option(
+    None, "--policy", help="Default execution policy (a command-local --policy overrides it)."
+)
+
 
 @app.command("setup")
 def setup() -> None:
     """Choose the assistant's model (saved for your user account; the key is not)."""
     from aibench import userconfig
+
+    if current_global_options().non_interactive:
+        typer.echo("error: setup is interactive; run it without --non-interactive", err=True)
+        raise typer.Exit(code=2)
 
     userconfig.run_setup(typer.echo)
 
@@ -86,6 +109,10 @@ def _program() -> str:
 def main(
     ctx: typer.Context,
     version: bool = typer.Option(False, "--version", help="Show the aibench version and exit."),
+    config: Path | None = _GLOBAL_CONFIG,
+    json_output: bool = _GLOBAL_JSON,
+    non_interactive: bool = _GLOBAL_NON_INTERACTIVE,
+    policy: Path | None = _GLOBAL_POLICY,
     continue_latest: bool = typer.Option(
         False, "--continue", "-c", help="Continue the latest session with work in it."
     ),
@@ -94,11 +121,21 @@ def main(
     ),
     new: bool = typer.Option(False, "--new", help="Start a new session."),
 ) -> None:
+    options = GlobalOptions(
+        config=config,
+        json_output=json_output,
+        non_interactive=non_interactive,
+        policy=policy,
+    )
+    ctx.obj = options
+    ctx.default_map = merge_default_maps(
+        ctx.default_map, command_defaults(ctx.command, options)
+    )
     if version:
         typer.echo(f"{_program()} {__version__}")
         raise typer.Exit(code=0)
     if ctx.invoked_subcommand is None:
-        if chat_cli.interactive_terminal():
+        if chat_cli.interactive_terminal() and not non_interactive:
             # `chat` is also registered as a Typer command. Invoking its undecorated
             # callback through Click would pass Typer's OptionInfo objects as defaults;
             # supply the actual no-argument values for the bare entry point.
@@ -120,7 +157,8 @@ def main(
             return
         typer.echo(ctx.get_help())
         typer.echo(
-            "\nNo interactive terminal: `aibench` opens a conversation only in a terminal. "
+            "\nInteractive mode is disabled or no terminal is available: `aibench` opens a "
+            "conversation only in an interactive terminal. "
             "For scripts, use the commands above or `aibench chat --send TEXT --json`."
         )
         raise typer.Exit(code=0)

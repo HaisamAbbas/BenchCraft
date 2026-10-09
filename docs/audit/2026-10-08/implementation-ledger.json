@@ -350,9 +350,15 @@
       "title": "Consistent global configuration and scripting options",
       "detail": "**Missing/partial; specified.** Root options do not provide global `--config`, `--json`, `--non-interactive`, or policy selection. Equivalent controls are scattered among commands.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "Global-option and project-command regression batch: 22 passed, including all 8 dedicated global-option tests",
+        "Mypy: 143 source files passed; Ruff src/tests/plugins and git diff --check passed",
+        "Root config replaces config discovery; root policy overrides project config/env; local policy overrides root policy",
+        "Root JSON and non-interactive defaults propagate through nested command groups; setup/chat/connect/plugin/benchmark prompt behavior is covered",
+        "Independent review found no actionable defects"
+      ],
+      "review": "evidence/G01-review.md",
       "commit": null,
       "pushed": false
     },

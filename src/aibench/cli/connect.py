@@ -42,7 +42,9 @@ def _fail(message: str, code: int = 2) -> typer.Exit:
 def _prompt(value: str | None, label: str, *, default: str | None = None) -> str:
     if value is not None:
         return value
-    if not sys.stdin.isatty():
+    from aibench.cli.global_options import current_global_options
+
+    if current_global_options().non_interactive or not sys.stdin.isatty():
         if default is not None:
             return default
         raise _fail(f"{label} is required in non-interactive mode")
@@ -127,7 +129,13 @@ def setup_http(
             raise ValueError("plain HTTP is supported only for loopback fixtures")
         if parts.scheme == "https" and not is_loopback(parts.hostname):
             approved = authorize_origin
-            if approved is None and sys.stdin.isatty():
+            from aibench.cli.global_options import current_global_options
+
+            if (
+                approved is None
+                and sys.stdin.isatty()
+                and not current_global_options().non_interactive
+            ):
                 approved = typer.prompt(
                     f"To authorize benchmark traffic to exactly {origin}, type that origin"
                 )

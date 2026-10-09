@@ -469,8 +469,17 @@ def plugins_install(
     if not json_output:
         for line in install_preview(summary):
             console.print(line)
-    if not yes and not typer.confirm("Go ahead?", default=False):
-        raise typer.Exit(code=1)
+    if not yes:
+        from aibench.cli.global_options import current_global_options
+
+        if current_global_options().non_interactive:
+            err_console.print(
+                "[red]plugin installation needs confirmation; pass --yes in "
+                "non-interactive mode[/red]"
+            )
+            raise typer.Exit(code=EXIT_INVALID)
+        if not typer.confirm("Go ahead?", default=False):
+            raise typer.Exit(code=1)
     try:
         done = install(plan, progress=lambda line: err_console.print(f"[dim]{safe(line)}[/dim]"))
     except AibenchError as exc:

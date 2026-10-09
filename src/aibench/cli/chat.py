@@ -76,7 +76,15 @@ def project_settings(
     root: Path, app: Path | None, dataset: Path | None, policy: Path | None
 ) -> dict[str, Path | None]:
     """The project's application, dataset, policy and plan: config file < CLI flags."""
-    config_path = next((root / n for n in CONFIG_NAMES if (root / n).is_file()), None)
+    from aibench.cli.global_options import current_global_options
+
+    global_options = current_global_options()
+    config_path = global_options.config
+    if config_path is None:
+        config_path = next((root / n for n in CONFIG_NAMES if (root / n).is_file()), None)
+    elif not config_path.is_absolute():
+        config_path = (Path.cwd() / config_path).resolve()
+    policy = policy or global_options.policy
     overrides = {
         "application_target": str(app.resolve()) if app else None,
         "dataset_path": str(dataset.resolve()) if dataset else None,
@@ -258,7 +266,10 @@ def chat(
     continue_latest: bool = _CONTINUE,
 ) -> None:
     """Open the benchmark conversation for a project."""
-    if send is None and not interactive_terminal():
+    from aibench.cli.global_options import current_global_options
+
+    global_options = current_global_options()
+    if send is None and (not interactive_terminal() or global_options.non_interactive):
         raise _fail(
             "chat needs an interactive terminal; for scripts use `aibench chat --send TEXT "
             "--json` or the headless commands (aibench --help)"
