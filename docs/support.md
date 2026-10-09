@@ -112,6 +112,13 @@ inspect promotion history, and compare directly against its alias. See
 [run history and named baselines](run-history-and-baselines.md) for commands and approval
 rules.
 
+## Direct run controls
+
+Common selection, repetition, concurrency, retry, timeout, budget, and cache options can
+override a plan for one `aibench run`. `--dry-run` validates those overrides and prints the
+effective frozen plan and exact selected case IDs without dispatching. Policy checks remain
+in force. See [direct run controls](run-controls.md) for bounds and examples.
+
 ## Credentials
 
 Credentials are never written into project files, datasets, plans or chat. Every

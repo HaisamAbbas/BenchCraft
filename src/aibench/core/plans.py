@@ -47,7 +47,7 @@ class BudgetLimits(FrozenModel):
     max_application_calls: int | None = Field(default=None, ge=1)
     max_evaluator_calls: int | None = Field(default=None, ge=1)
     max_judge_tokens: int | None = Field(default=None, ge=1)
-    max_wall_seconds: float | None = Field(default=None, gt=0)
+    max_wall_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     max_cost_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)  # soft
     estimated_cost_per_application_call_usd: float | None = Field(
         default=None, ge=0, allow_inf_nan=False

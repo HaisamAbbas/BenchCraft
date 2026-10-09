@@ -55,6 +55,104 @@ def test_missing_plan_json_uses_shared_error_document(tmp_path: Path) -> None:
     assert document["exit_code"] == 2 and document["details"]
 
 
+def test_run_dry_run_shows_exact_overridden_scope_and_dispatch_matches_it(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    plan = h.plan(
+        dataset=h.dataset({"case-a": "hi", "case-b": "hi"}),
+        application=h.cli_app(),
+    )
+    project = str(h.workspace.root.parent)
+    args = [
+        "run",
+        "--plan",
+        str(plan),
+        "--workspace",
+        project,
+        "--trust-local-app",
+        "--limit",
+        "1",
+        "--repetitions",
+        "2",
+        "--application-concurrency",
+        "2",
+        "--evaluation-concurrency",
+        "2",
+        "--max-app-calls",
+        "2",
+        "--max-attempts",
+        "1",
+        "--no-cache-executions",
+        "--cache-evaluations",
+        "--json",
+    ]
+    preview_result = cli.invoke(app, [*args, "--dry-run"])
+    assert preview_result.exit_code == 0, preview_result.output
+    preview = _json(preview_result.stdout)
+    assert preview["schema"] == "aibench.run-preview/1"
+    assert preview["will_dispatch"] is False
+    assert preview["scope"]["case_ids"] == ["case-a"]
+    assert preview["scope"]["execution_items"] == 2
+    assert preview["scope"]["evaluation_items"] == 2
+    assert preview["frozen"]["effective_plan"]["repetitions"] == 2
+    assert preview["frozen"]["effective_plan"]["budgets"]["max_application_calls"] == 2
+    assert preview["frozen"]["effective_plan"]["concurrency"]["evaluation"] == 2
+    assert preview["frozen"]["effective_plan"]["cache"] == {
+        "executions": False,
+        "evaluations": True,
+    }
+    assert h.count() == 0
+    assert not h.workspace.db_path.exists()
+
+    human_preview = cli.invoke(app, [*args[:-1], "--dry-run"])
+    assert human_preview.exit_code == 0, human_preview.output
+    assert json.loads(human_preview.stdout)["scope"]["case_ids"] == ["case-a"]
+    assert not h.workspace.db_path.exists()
+
+    run_result = cli.invoke(app, args)
+    assert run_result.exit_code == 0, run_result.output
+    run_id = _json(run_result.stdout)["run_id"]
+    assert h.count() == 2
+    storage, _ = h.storage()
+    try:
+        record = storage.get_run(run_id)
+        assert record is not None
+        assert record.manifest.plan_hash == preview["frozen"]["plan_hash"]
+    finally:
+        storage.db.close()
+
+
+def test_run_rejects_non_finite_wall_budget_before_preview_or_dispatch(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    plan = h.plan(
+        dataset=h.dataset({"case-a": "hi"}),
+        application=h.cli_app(),
+    )
+    result = cli.invoke(
+        app,
+        [
+            "run",
+            "--plan",
+            str(plan),
+            "--workspace",
+            str(h.workspace.root.parent),
+            "--trust-local-app",
+            "--max-wall-seconds",
+            "inf",
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    document = _json(result.stdout)
+    assert document["status"] == "error"
+    assert "finite number" in " ".join(document["details"])
+    assert h.count() == 0
+    assert not h.workspace.db_path.exists()
+
+
 def test_example_plan_runs_under_the_dev_policy_and_is_denied_by_default(tmp_path: Path) -> None:
     denied = cli.invoke(app, ["run", "--plan", EXAMPLE_PLAN, "--workspace", str(tmp_path)])
     assert denied.exit_code == 4, denied.output

@@ -19,6 +19,7 @@ Ctrl+C before dispatch starts exits 130 too; nothing was dispatched.
 from __future__ import annotations
 
 import asyncio
+import json
 import signal
 from pathlib import Path
 
@@ -28,9 +29,12 @@ from rich.markup import escape
 from aibench.cli.errors import error_exit
 from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
+from aibench.core.hashes import content_hash
 from aibench.engine.compile import (
+    CompiledRun,
     PlanInvalid,
     PolicyDenied,
+    RunPlanOverrides,
     compile_plan,
     load_plan,
     load_policy,
@@ -191,6 +195,59 @@ def _print_outcome(run_id: str, outcome: RunOutcome) -> None:
         console.print(f"  resume with: aibench resume {run_id}")
 
 
+def _run_preview(compiled: CompiledRun) -> dict[str, object]:
+    """Describe the exact compiled inputs and selected work without persisting a run."""
+    plan = compiled.plan
+    executions = len(compiled.cases) * plan.repetitions
+    return {
+        "schema": "aibench.run-preview/1",
+        "status": "dry_run",
+        "will_dispatch": False,
+        "frozen": {
+            "plan_id": plan.plan_id,
+            "plan_hash": compiled.plan_hash,
+            "effective_plan": plan.model_dump(mode="json"),
+            "dataset": {
+                "dataset_id": compiled.dataset.dataset_id,
+                "dataset_hash": compiled.dataset.content_hash,
+                "dataset_case_count": compiled.dataset.case_count,
+            },
+            "application": {
+                "application_id": compiled.application.spec.application_id,
+                "application_hash": content_hash(
+                    compiled.application.spec.model_dump(mode="json")
+                ),
+                "runner": compiled.application.spec.runner.value,
+            },
+            "policy_hash": compiled.policy_hash,
+        },
+        "scope": {
+            "case_ids": [case.case_id for case in compiled.cases],
+            "case_count": len(compiled.cases),
+            "repetitions": plan.repetitions,
+            "execution_items": executions,
+            "evaluation_items": executions * len(compiled.metrics),
+            "metrics": [
+                {
+                    "binding_hash": metric.binding_hash,
+                    "evaluator_id": metric.manifest.evaluator_id,
+                    "version": metric.manifest.version,
+                    "plugin_id": metric.manifest.plugin_id,
+                    "plugin_version": metric.manifest.plugin_version,
+                }
+                for metric in compiled.metrics
+            ],
+        },
+    }
+
+
+def _print_run_preview(preview: dict[str, object], *, json_output: bool) -> None:
+    if json_output:
+        console.print_json(data=preview)
+    else:
+        typer.echo(json.dumps(preview, indent=2, ensure_ascii=False))
+
+
 def _resolve_plan(
     target: Path | None, policy: Path | None, *, json_output: bool = False
 ) -> tuple[Path, Path | None]:
@@ -241,6 +298,72 @@ def run_plan(
     trust_local_app: bool = typer.Option(
         False, "--trust-local-app", help="Grant trusted-local mode for a CLI application."
     ),
+    limit: int | None = typer.Option(
+        None, "--limit", min=1, help="Use the first N cases after the plan's selectors."
+    ),
+    sample_size: int | None = typer.Option(
+        None, "--sample-size", min=1, help="Use a stable seeded sample after the plan's selectors."
+    ),
+    selection_seed: int | None = typer.Option(
+        None, "--selection-seed", min=0, help="Seed for --sample-size (or a plan sample)."
+    ),
+    repetitions: int | None = typer.Option(
+        None, "--repetitions", min=1, max=100, help="Override the plan's repetition count."
+    ),
+    application_concurrency: int | None = typer.Option(
+        None, "--application-concurrency", min=1, max=64,
+        help="Override concurrent application calls.",
+    ),
+    evaluation_concurrency: int | None = typer.Option(
+        None, "--evaluation-concurrency", min=1, max=64,
+        help="Override concurrent evaluator calls.",
+    ),
+    max_attempts: int | None = typer.Option(
+        None, "--max-attempts", min=1, max=10,
+        help="Override total attempts per work item, including the first.",
+    ),
+    evaluation_timeout_seconds: float | None = typer.Option(
+        None, "--evaluation-timeout-seconds", min=0.000001, max=3600,
+        help="Override the per-case non-model evaluator timeout.",
+    ),
+    model_evaluation_timeout_seconds: float | None = typer.Option(
+        None, "--model-evaluation-timeout-seconds", min=0.000001, max=3600,
+        help="Override the per-case model-backed evaluator timeout.",
+    ),
+    max_application_calls: int | None = typer.Option(
+        None, "--max-app-calls", min=1, help="Override the maximum application calls."
+    ),
+    max_evaluator_calls: int | None = typer.Option(
+        None, "--max-evaluator-calls", min=1, help="Override the maximum evaluator calls."
+    ),
+    max_judge_tokens: int | None = typer.Option(
+        None, "--max-judge-tokens", min=1, help="Override the maximum judge tokens."
+    ),
+    max_wall_seconds: float | None = typer.Option(
+        None, "--max-wall-seconds", min=0.000001, help="Override the run wall-time budget."
+    ),
+    max_cost_usd: float | None = typer.Option(
+        None, "--max-cost-usd", min=0, help="Override the soft estimated-cost budget."
+    ),
+    estimated_cost_per_application_call_usd: float | None = typer.Option(
+        None, "--estimated-cost-per-app-call-usd", min=0,
+        help="Estimated spend per application call, required to enforce --max-cost-usd.",
+    ),
+    estimated_cost_per_evaluation_usd: float | None = typer.Option(
+        None, "--estimated-cost-per-evaluation-usd", min=0,
+        help="Estimated spend per evaluator call for model-backed metrics.",
+    ),
+    cache_executions: bool | None = typer.Option(
+        None, "--cache-executions/--no-cache-executions",
+        help="Override execution-cache behavior from the plan.",
+    ),
+    cache_evaluations: bool | None = typer.Option(
+        None, "--cache-evaluations/--no-cache-evaluations",
+        help="Override evaluation-cache behavior from the plan.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate and print the exact frozen scope without creating a run."
+    ),
     workspace: Path | None = _WORKSPACE,
     json_output: bool = _JSON,
 ) -> None:
@@ -256,11 +379,40 @@ def run_plan(
             json_output=json_output,
         )
     try:
-        compiled = compile_plan(plan, policy=load_policy(policy), trusted_local=trust_local_app)
+        compiled = compile_plan(
+            plan,
+            policy=load_policy(policy),
+            trusted_local=trust_local_app,
+            overrides=RunPlanOverrides(
+                limit=limit,
+                sample_size=sample_size,
+                selection_seed=selection_seed,
+                repetitions=repetitions,
+                application_concurrency=application_concurrency,
+                evaluation_concurrency=evaluation_concurrency,
+                max_attempts=max_attempts,
+                evaluation_timeout_seconds=evaluation_timeout_seconds,
+                model_evaluation_timeout_seconds=model_evaluation_timeout_seconds,
+                max_application_calls=max_application_calls,
+                max_evaluator_calls=max_evaluator_calls,
+                max_judge_tokens=max_judge_tokens,
+                max_wall_seconds=max_wall_seconds,
+                max_cost_usd=max_cost_usd,
+                estimated_cost_per_application_call_usd=(
+                    estimated_cost_per_application_call_usd
+                ),
+                estimated_cost_per_evaluation_usd=estimated_cost_per_evaluation_usd,
+                cache_executions=cache_executions,
+                cache_evaluations=cache_evaluations,
+            ),
+        )
     except AibenchError as exc:
         raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(None, json_output=json_output) from exc
+    if dry_run:
+        _print_run_preview(_run_preview(compiled), json_output=json_output)
+        return
     storage, artifacts = _open(workspace, create=True, json_output=json_output)
     run_id: str | None = None
     try:

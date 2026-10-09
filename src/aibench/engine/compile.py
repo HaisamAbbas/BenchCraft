@@ -118,6 +118,30 @@ class SelectedWorld:
     seed_hash: str
 
 
+@dataclass(frozen=True)
+class RunPlanOverrides:
+    """Validated command-line adjustments applied to a plan before it is frozen."""
+
+    limit: int | None = None
+    sample_size: int | None = None
+    selection_seed: int | None = None
+    repetitions: int | None = None
+    application_concurrency: int | None = None
+    evaluation_concurrency: int | None = None
+    max_attempts: int | None = None
+    evaluation_timeout_seconds: float | None = None
+    model_evaluation_timeout_seconds: float | None = None
+    max_application_calls: int | None = None
+    max_evaluator_calls: int | None = None
+    max_judge_tokens: int | None = None
+    max_wall_seconds: float | None = None
+    max_cost_usd: float | None = None
+    estimated_cost_per_application_call_usd: float | None = None
+    estimated_cost_per_evaluation_usd: float | None = None
+    cache_executions: bool | None = None
+    cache_evaluations: bool | None = None
+
+
 @dataclass
 class PlanAnalysis:
     plan: ExecutablePlan
@@ -702,14 +726,88 @@ def analyze_plan(
 
 
 def compile_plan(
-    plan_path: Path, *, policy: ExecutionPolicy, trusted_local: bool = False
+    plan_path: Path,
+    *,
+    policy: ExecutionPolicy,
+    trusted_local: bool = False,
+    overrides: RunPlanOverrides | None = None,
 ) -> CompiledRun:
     """The execution gate: analyze, then refuse on any blocking finding."""
     plan = load_plan(plan_path)
+    if overrides is not None:
+        plan = apply_run_plan_overrides(plan, overrides)
     analysis = analyze_plan(
         plan, plan_path.resolve().parent, policy=policy, trusted_local=trusted_local
     )
     return compiled_from(analysis)
+
+
+def apply_run_plan_overrides(
+    plan: ExecutablePlan, overrides: RunPlanOverrides
+) -> ExecutablePlan:
+    """Apply direct run controls to a plan and validate the complete effective plan."""
+    if overrides.limit is not None and overrides.sample_size is not None:
+        raise PlanInvalid(["--limit and --sample-size cannot be used together"])
+
+    data = plan.model_dump(mode="json")
+    selection = data["selection"]
+    if overrides.limit is not None:
+        selection.update({"limit": overrides.limit, "sample_size": None, "seed": None})
+    if overrides.sample_size is not None:
+        selection["limit"] = None
+        selection["sample_size"] = overrides.sample_size
+    if overrides.selection_seed is not None:
+        if overrides.sample_size is None and selection["sample_size"] is None:
+            raise PlanInvalid(
+                ["--selection-seed requires --sample-size or a plan with sample_size"]
+            )
+        selection["seed"] = overrides.selection_seed
+
+    if overrides.repetitions is not None:
+        data["repetitions"] = overrides.repetitions
+    concurrency = data["concurrency"]
+    if overrides.application_concurrency is not None:
+        concurrency["application"] = overrides.application_concurrency
+    if overrides.evaluation_concurrency is not None:
+        concurrency["evaluation"] = overrides.evaluation_concurrency
+    if overrides.max_attempts is not None:
+        data["retry"]["max_attempts"] = overrides.max_attempts
+    for field_name in (
+        "evaluation_timeout_seconds",
+        "model_evaluation_timeout_seconds",
+    ):
+        value = getattr(overrides, field_name)
+        if value is not None:
+            data[field_name] = value
+    budgets = data["budgets"]
+    for field_name in (
+        "max_application_calls",
+        "max_evaluator_calls",
+        "max_judge_tokens",
+        "max_wall_seconds",
+        "max_cost_usd",
+        "estimated_cost_per_application_call_usd",
+        "estimated_cost_per_evaluation_usd",
+    ):
+        value = getattr(overrides, field_name)
+        if value is not None:
+            budgets[field_name] = value
+    cache = data["cache"]
+    for field_name in ("cache_executions", "cache_evaluations"):
+        value = getattr(overrides, field_name)
+        if value is not None:
+            cache[field_name.removeprefix("cache_")] = value
+
+    try:
+        return ExecutablePlan.model_validate(data)
+    except PydanticValidationError as exc:
+        problems = [
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors()
+        ]
+        raise PlanInvalid(
+            [f"invalid direct run override: {problem}" for problem in problems]
+        ) from exc
 
 
 def compiled_from(analysis: PlanAnalysis) -> CompiledRun:
