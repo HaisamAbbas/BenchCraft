@@ -227,6 +227,52 @@ def test_an_environment_without_the_plugin_changes_no_file(tmp_path: Path) -> No
     assert _files(root) == before
 
 
+def test_new_plugin_installs_upgrade_pip_before_installing_packages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from aibench.registry import EvaluatorRegistry
+    from aibench.services.plugins import install
+
+    root = _project(tmp_path)
+    plan = plan_install(
+        "deepeval", root, policy_path=root / "policy.json", judge=JUDGE, secret_env=SECRETS
+    )
+    plan.python.parent.mkdir(parents=True)
+    plan.python.touch()
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        "aibench.services.plugins._run", lambda argv, _progress: commands.append(argv)
+    )
+
+    class LoadedRegistry:
+        def load_plugin_environment(self, _python: Path) -> list[Any]:
+            return [SimpleNamespace(error=None)]
+
+        def manifests(self) -> list[Any]:
+            return [SimpleNamespace(evaluator_id="deepeval.test")]
+
+    monkeypatch.setattr(
+        EvaluatorRegistry,
+        "with_native",
+        classmethod(lambda _cls: LoadedRegistry()),
+    )
+
+    install(plan, progress=lambda _line: None)
+
+    assert commands[0] == [
+        str(plan.python),
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "--disable-pip-version-check",
+        "pip>=26.2.1,<27",
+    ]
+    assert commands[1][:4] == [str(plan.python), "-m", "pip", "install"]
+
+
 @requires_plugin_env
 def test_cli_install_writes_config_and_policy_with_a_backup(tmp_path: Path) -> None:
     root = _project(tmp_path)

@@ -221,8 +221,10 @@ By hand, from the repository root:
 
 ```
 python -m venv plugins/deepeval/.venv
-plugins/deepeval/.venv/Scripts/pip install -e . -e plugins/deepeval     # Windows
-plugins/deepeval/.venv/bin/pip install -e . -e plugins/deepeval         # Linux/macOS
+plugins/deepeval/.venv/Scripts/python.exe -m pip install --upgrade "pip>=26.2.1,<27"  # Windows
+plugins/deepeval/.venv/Scripts/python.exe -m pip install -e . -e plugins/deepeval     # Windows
+plugins/deepeval/.venv/bin/python -m pip install --upgrade 'pip>=26.2.1,<27'           # Linux/macOS
+plugins/deepeval/.venv/bin/python -m pip install -e . -e plugins/deepeval              # Linux/macOS
 aibench score RUN_ID --metrics metrics.json \
   --plugin-env plugins/deepeval/.venv/Scripts/python.exe \
   --plugin-secret JUDGE_KEY=env:ZAI_API_KEY

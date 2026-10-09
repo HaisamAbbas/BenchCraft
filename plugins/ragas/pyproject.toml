@@ -19,9 +19,17 @@ dependencies = [
     # API surface tested with the pinned Ragas release from drifting into an
     # incompatible major release.
     "langchain-community>=0.3.27,<0.4",
-    "instructor>=1.3.2,<1.4",
-    "langchain-openai>=1.1.9,<1.2",
-    "openai>=1.109.1,<2",
+    # Instructor 1.17 is the first pinned API line in this adapter contract that supports
+    # the OpenAI SDK 2.x required by the patched langchain-openai release.
+    "instructor>=1.17.0,<1.18",
+    # CVE-2026-41488 is fixed in 1.1.14; keep the compatible 1.1 API family.
+    "langchain-openai>=1.1.14,<1.2",
+    # Ragas pulls both transitively; keep them at the reviewed security floors.
+    "langgraph-sdk>=0.4.6,<0.5",
+    "marshmallow>=3.26.2,<4",
+    # langchain-openai 1.1.14+ requires OpenAI SDK 2.26; the adapter's llm_factory path
+    # is contract-tested against the v2 client API.
+    "openai>=2.26,<3",
 ]
 
 [project.entry-points."aibench.evaluators"]

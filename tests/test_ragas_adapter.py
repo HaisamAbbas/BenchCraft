@@ -181,6 +181,34 @@ def test_llm_factory_binding_is_structurally_supported_without_credentials_in_pa
     assert "worker environment" in " ".join(resolved.manifest.credentials)
 
 
+def test_llm_factory_constructs_with_the_advisory_fixed_openai_sdk() -> None:
+    result = _plugin_python(
+        """
+import asyncio, importlib.metadata, json, os
+os.environ["OPENAI_API_KEY"] = "sk-test-only"
+from ragas.llms.base import InstructorBaseRagasLLM
+from aibench_ragas.faithfulness import Faithfulness
+
+async def main():
+    evaluator = Faithfulness()
+    await evaluator.prepare({"judge": {"kind": "llm_factory", "model": "gpt-4o-mini"}})
+    judge = evaluator._new_judge()
+    return {
+        "is_ragas_judge": isinstance(judge, InstructorBaseRagasLLM),
+        "instructor": importlib.metadata.version("instructor"),
+        "openai": importlib.metadata.version("openai"),
+    }
+
+print(json.dumps(asyncio.run(main())))
+"""
+    )
+    from packaging.version import Version
+
+    assert result["is_ragas_judge"] is True
+    assert Version("1.17.0") <= Version(result["instructor"]) < Version("1.18")
+    assert Version("2.26") <= Version(result["openai"]) < Version("3")
+
+
 # ---------------------------------------------------------------- real worker scores
 
 
@@ -295,6 +323,41 @@ print(json.dumps({"status": outcome.status.value, "reason": outcome.reason, "val
         "reason": "unscorable_context:object",
         "value": None,
     }
+
+
+def test_text_metric_does_not_enter_unpatched_multimodal_or_diskcache_paths() -> None:
+    result = _plugin_python(
+        """
+import asyncio, json
+from ragas.cache import DiskCacheBackend
+from ragas.metrics.collections.multi_modal_faithfulness import util
+from aibench.core.models import BenchmarkCase, ExecutionResult
+from aibench.evaluators.protocol import EvaluatorContext, EvaluationView
+from aibench_ragas.faithfulness import Faithfulness
+
+def forbidden(*args, **kwargs):
+    raise AssertionError("out-of-scope Ragas path was called")
+
+async def main():
+    evaluator = Faithfulness()
+    await evaluator.prepare({"judge": {"kind": "python_factory", "factory": "aibench_test_ragas_judges:token_judge"}})
+    util.process_image_to_base64 = forbidden
+    DiskCacheBackend.__init__ = forbidden
+    view = EvaluationView(
+        case=BenchmarkCase(case_id="c", input="q"),
+        execution=ExecutionResult(
+            execution_id="e", run_id="r", case_id="c", status="ok",
+            output="CLAIM:FACT-A", retrieved_context=("FACT-A is documented.",),
+        ),
+    )
+    return await evaluator.evaluate(view, EvaluatorContext(run_id="r", scoring_id="s"))
+
+outcome = asyncio.run(main())
+print(json.dumps({"status": outcome.status.value, "value": outcome.value.value}))
+"""
+    )
+    assert result["status"] == "ok"
+    assert result["value"] == 1.0
 
 
 # ---------------------------------------------------------------- isolation and drift

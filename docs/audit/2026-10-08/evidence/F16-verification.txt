@@ -1,0 +1,37 @@
+﻿F16 verification
+================
+
+Dependency resolution and installed versions
+-------------------------------------------
+- `uv lock --check`: resolved 61 packages; lock is current.
+- The real Ragas plug-in environment resolved to pip 26.2.1, ragas 0.4.3,
+  instructor 1.17.0, langchain-openai 1.1.16, langgraph-sdk 0.4.6,
+  marshmallow 3.26.2, and openai 2.54.0.
+- The DeepEval plug-in environment uses pip 26.2.1.
+- The project-managed installer regression verifies pip is upgraded before
+  installing plugin requirements. Adopted external environments remain
+  unchanged by the installer and have an explicit documented upgrade command.
+
+Vulnerability scans
+-------------------
+- Core lock: `.venv/Scripts/python.exe -m pip_audit --requirement requirements-dev.lock.txt --no-deps --disable-pip --strict` — no known vulnerabilities.
+- Actual core/dev environment: `pip freeze --all --exclude-editable`, then strict pip-audit on the exact-version snapshot — no known vulnerabilities. This includes pip, pip-audit, and the resolved packages CI runs against.
+- DeepEval: same snapshot from its own interpreter, strict pip-audit — no known vulnerabilities.
+- Ragas: same snapshot and strict audit, ignoring only `GHSA-95ww-475f-pr4f` and `GHSA-w8v5-vhqr-4h9v` — no known vulnerabilities; four duplicate advisory records ignored for those two unique upstream advisories.
+- Editable checkout distributions are excluded from environment snapshots; strict scanner mode fails on any other collection/audit error. The committed core lock and the actual CI installation are both audited.
+
+Other validation
+----------------
+- `tests/test_ragas_adapter.py tests/test_cross_ecosystem.py tests/test_plugins_install.py`: after correcting the new test's MetricValue JSON extraction, all 33 unique affected tests passed across the full run and focused post-fix rerun.
+- `.venv/Scripts/mypy.exe src/aibench`: no issues in 142 source files.
+- `.venv/Scripts/ruff.exe check src tests plugins`: passed.
+- `.venv/Scripts/python.exe` with PyYAML `safe_load` on `.github/workflows/ci.yml`: parsed successfully.
+- `git diff --check`: passed.
+
+Security exceptions
+-------------------
+Only the two exact Ragas advisory IDs above are ignored in that environment's
+CI audit. The adapter's text-only context validation, real text-metric test,
+and test guards around multimodal image processing and DiskCache construction
+are described in `plugins/ragas/SECURITY.md`. The exception is scoped to this
+adapter path and is not a general sandbox claim.

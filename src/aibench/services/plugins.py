@@ -257,6 +257,7 @@ def _judge_label(judge: dict[str, Any] | None) -> str | None:
 
 
 JUDGE_KEY_ENV = "AIBENCH_JUDGE_KEY"
+_PLUGIN_PIP_REQUIREMENT = "pip>=26.2.1,<27"
 
 
 def judge_from_provider(
@@ -405,6 +406,19 @@ def install(plan: InstallPlan, progress: Callable[[str], None]) -> dict[str, Any
         if not plan.python.is_file():
             progress(f"creating {plan.create}")
             _run([sys.executable, "-m", "venv", str(plan.create)], progress)
+        progress("updating pip in the plugin environment")
+        _run(
+            [
+                str(plan.python),
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--disable-pip-version-check",
+                _PLUGIN_PIP_REQUIREMENT,
+            ],
+            progress,
+        )
         progress(f"installing {plan.plugin.distribution} and {plan.plugin.package}")
         _run(
             [

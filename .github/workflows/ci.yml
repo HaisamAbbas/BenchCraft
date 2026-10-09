@@ -19,8 +19,22 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Update installer
+        run: python -m pip install --upgrade "pip>=26.2.1,<27"
+
       - name: Install project with dev dependencies
         run: python -m pip install -e ".[dev]"
+
+      - name: Audit locked core and development dependencies
+        run: python -m pip_audit --requirement requirements-dev.lock.txt --no-deps --disable-pip --strict
+
+      - name: Audit installed core and development dependencies
+        shell: bash
+        run: |
+          CORE_REQUIREMENTS=$(mktemp)
+          trap 'rm -f "$CORE_REQUIREMENTS"' EXIT
+          python -m pip freeze --all --exclude-editable > "$CORE_REQUIREMENTS"
+          python -m pip_audit --requirement "$CORE_REQUIREMENTS" --no-deps --strict
 
       - name: Lint (ruff)
         run: python -m ruff check src tests plugins
@@ -53,6 +67,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Update installer
+        run: python -m pip install --upgrade "pip>=26.2.1,<27"
+
       - name: Install core with dev dependencies
         run: python -m pip install -e ".[dev]"
 
@@ -65,10 +82,24 @@ jobs:
           else
             PLUGIN_PY=plugins/deepeval/.venv/bin/python
           fi
+          "$PLUGIN_PY" -m pip install --upgrade --disable-pip-version-check 'pip>=26.2.1,<27'
           "$PLUGIN_PY" -m pip install -e . -e plugins/deepeval
           # The test default resolves the native repository path. Avoid writing
           # an MSYS `/d/...` path into GITHUB_ENV on Windows, which Windows
           # Python cannot open and could silently skip the real contract suite.
+
+      - name: Audit DeepEval plugin environment
+        shell: bash
+        run: |
+          if [ -f plugins/deepeval/.venv/Scripts/python.exe ]; then
+            PLUGIN_PY=plugins/deepeval/.venv/Scripts/python.exe
+          else
+            PLUGIN_PY=plugins/deepeval/.venv/bin/python
+          fi
+          PLUGIN_REQUIREMENTS=$(mktemp)
+          trap 'rm -f "$PLUGIN_REQUIREMENTS"' EXIT
+          "$PLUGIN_PY" -m pip freeze --all --exclude-editable > "$PLUGIN_REQUIREMENTS"
+          python -m pip_audit --requirement "$PLUGIN_REQUIREMENTS" --no-deps --strict
 
       - name: Worker and DeepEval adapter tests (real package, deterministic judge)
         run: python -m pytest -q -rs tests/test_worker_evaluator.py tests/test_deepeval_adapter.py
@@ -87,6 +118,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Update installer
+        run: python -m pip install --upgrade "pip>=26.2.1,<27"
+
       - name: Install core with dev dependencies
         run: python -m pip install -e ".[dev]"
 
@@ -99,6 +133,7 @@ jobs:
           else
             PLUGIN_PY=plugins/ragas/.venv/bin/python
           fi
+          "$PLUGIN_PY" -m pip install --upgrade --disable-pip-version-check 'pip>=26.2.1,<27'
           "$PLUGIN_PY" -m pip install -e . -e plugins/ragas
           # The test default resolves the native repository path. Avoid writing
           # an MSYS `/d/...` path into GITHUB_ENV on Windows, which Windows
@@ -110,6 +145,22 @@ jobs:
             DEEPEVAL_PY=plugins/deepeval/.venv/bin/python
           fi
           "$DEEPEVAL_PY" -m pip install -e . -e plugins/deepeval
+
+      - name: Audit Ragas plugin environment
+        shell: bash
+        run: |
+          if [ -f plugins/ragas/.venv/Scripts/python.exe ]; then
+            PLUGIN_PY=plugins/ragas/.venv/Scripts/python.exe
+          else
+            PLUGIN_PY=plugins/ragas/.venv/bin/python
+          fi
+          PLUGIN_REQUIREMENTS=$(mktemp)
+          trap 'rm -f "$PLUGIN_REQUIREMENTS"' EXIT
+          "$PLUGIN_PY" -m pip freeze --all --exclude-editable > "$PLUGIN_REQUIREMENTS"
+          # These two unpatched package advisories are narrowly scoped; see plugins/ragas/SECURITY.md.
+          python -m pip_audit --requirement "$PLUGIN_REQUIREMENTS" --no-deps --strict \
+            --ignore-vuln GHSA-95ww-475f-pr4f \
+            --ignore-vuln GHSA-w8v5-vhqr-4h9v
 
       - name: Worker, Ragas adapter, and same-output cross-ecosystem tests
         run: >-
