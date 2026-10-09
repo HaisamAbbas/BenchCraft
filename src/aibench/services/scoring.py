@@ -46,7 +46,7 @@ from aibench.core.models import (
     WorkItem,
     deep_unfreeze,
 )
-from aibench.core.plans import BudgetLimits, ExecutablePlan, Quota, RetryPolicy
+from aibench.core.plans import BudgetLimits, ExecutablePlan, Quota, ReleaseGate, RetryPolicy
 from aibench.engine.budget import BudgetLedger
 from aibench.engine.cache import evaluation_from_cache, evaluation_key
 from aibench.engine.quota import QuotaGate
@@ -112,6 +112,84 @@ class ScoringReport:
     budget: dict[str, Any] = field(default_factory=dict)
     quotas: list[dict[str, object]] = field(default_factory=list)
     stop_reason: str | None = None
+    gates: list[dict[str, Any]] = field(default_factory=list)
+    outcome: dict[str, Any] = field(default_factory=dict)
+    exit_code: int = 0
+
+
+def scoring_pass_outcome(
+    summaries: Sequence[MetricSummary], gates: Sequence[ReleaseGate] = ()
+) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
+    """Shared automation result. A low score is complete; errors, missing work or
+    cancellation are incomplete. Release gates fail with exit 1 only after all work has
+    been evaluated. The returned exit code is shared by CLI and chat rescoring.
+    """
+    unhealthy = {
+        "no_metrics": int(not summaries),
+        "errors": sum(summary.errors for summary in summaries),
+        "cancelled": sum(summary.cancelled for summary in summaries),
+        "unavailable": sum(summary.unavailable for summary in summaries),
+        "pending": sum(summary.pending for summary in summaries),
+    }
+    unhealthy = {key: value for key, value in unhealthy.items() if value}
+    complete = not unhealthy
+    gate_results: list[dict[str, Any]] = []
+    for gate in gates:
+        summary = summaries[gate.binding] if gate.binding < len(summaries) else None
+        entry: dict[str, Any] = {
+            "gate_id": gate.gate_id,
+            "binding": gate.binding,
+            "min_pass_rate": gate.min_pass_rate,
+            "min_completed_coverage": gate.min_completed_coverage,
+            "denominator": "selected",
+        }
+        if summary is None:
+            gate_results.append(
+                {**entry, "status": "undecided", "reason": "no results for this binding"}
+            )
+        elif not complete:
+            gate_results.append(
+                {**entry, "status": "undecided", "reason": "the scoring pass is incomplete"}
+            )
+        elif summary.selected == 0:
+            gate_results.append(
+                {**entry, "selected": 0, "status": "fail", "reason": "no selected cases"}
+            )
+        else:
+            passes = summary.decisions.get("pass", 0)
+            failures = []
+            if gate.min_pass_rate is not None and passes / summary.selected < gate.min_pass_rate:
+                failures.append(f"pass rate {passes}/{summary.selected} below {gate.min_pass_rate}")
+            if (
+                gate.min_completed_coverage is not None
+                and summary.completed / summary.selected < gate.min_completed_coverage
+            ):
+                failures.append(
+                    f"completed coverage {summary.completed}/{summary.selected} below "
+                    f"{gate.min_completed_coverage}"
+                )
+            gate_results.append(
+                {
+                    **entry,
+                    "selected": summary.selected,
+                    "passes": passes,
+                    "completed": summary.completed,
+                    "pass_rate": round(passes / summary.selected, 6),
+                    "completed_coverage": summary.completed_coverage,
+                    "status": "fail" if failures else "pass",
+                    "reason": "; ".join(failures) or None,
+                }
+            )
+    failed = [gate["gate_id"] for gate in gate_results if gate["status"] == "fail"]
+    undecided = [gate["gate_id"] for gate in gate_results if gate["status"] == "undecided"]
+    outcome = {
+        "complete": complete,
+        "unhealthy_work": unhealthy,
+        "gates_failed": failed,
+        "gates_undecided": undecided,
+    }
+    exit_code = 3 if not complete else 1 if failed else 0
+    return outcome, gate_results, exit_code
 
 
 class RescoreDispatch:
@@ -475,6 +553,7 @@ async def score_recorded_run(
     budgets: BudgetLimits | None = None,
     quotas: Sequence[Quota] | None = None,
     retry: RetryPolicy | None = None,
+    gates: Sequence[ReleaseGate] = (),
 ) -> ScoringReport:
     """`application` overrides the catalog lookup (the engine passes the run's frozen spec).
 
@@ -542,6 +621,7 @@ async def score_recorded_run(
             ),
             "independent_judge_repeat": "not_proven",
             "selected_count": selected_count,
+            "release_gates": [gate.model_dump(mode="json") for gate in gates],
             "budget_scope": "this_scoring_pass",
             "budgets": limits.model_dump(mode="json"),
             "quotas": [gate.quota.model_dump(mode="json") for gate in dispatch.gates],
@@ -579,6 +659,7 @@ async def score_recorded_run(
     # A pass is complete only after every resolved binding has returned.  The
     # marker lets a later comparison distinguish a finished rescore from a
     # process that crashed after writing the opening scoring_pass event.
+    report.outcome, report.gates, report.exit_code = scoring_pass_outcome(report.summaries, gates)
     report.budget = dispatch.ledger.summary()
     report.quotas = [gate.summary() for gate in dispatch.gates]
     report.stop_reason = dispatch.stop_reason
@@ -592,6 +673,9 @@ async def score_recorded_run(
             "budget": report.budget,
             "quotas": report.quotas,
             "stop_reason": report.stop_reason,
+            "outcome": report.outcome,
+            "exit_code": report.exit_code,
+            "gates": report.gates,
         },
     )
     return report

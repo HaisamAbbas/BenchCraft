@@ -145,7 +145,7 @@ def test_cli_partial_selected_repetitions_keep_frozen_denominator(tmp_path: Path
             "--json",
         ],
     )
-    assert result.exit_code == 0, result.output  # F06 handles incomplete-pass exits next.
+    assert result.exit_code == 3, result.output
     payload = json.loads(result.output)
     [summary] = payload["summaries"]
     assert (summary["selected"], summary["completed"], summary["unavailable"]) == (4, 1, 3)

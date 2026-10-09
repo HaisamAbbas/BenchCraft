@@ -429,7 +429,14 @@ class Commands:
         report = await self.controller.rescore(
             words[0] if words else None, carry_forward=not everything
         )
-        return CommandResult("/rescore", "rescored", report)
+        exit_code = report.get("exit_code")
+        return CommandResult(
+            "/rescore",
+            "rescored",
+            report,
+            ok=exit_code in (None, 0, 1),
+            exit_code=exit_code if isinstance(exit_code, int) else None,
+        )
 
     async def _app(self, _: str) -> CommandResult:
         return CommandResult("/app", "application", self.controller.describe_application())

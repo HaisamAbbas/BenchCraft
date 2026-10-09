@@ -912,6 +912,7 @@ async def evaluate_run(
         budgets=plan.budgets,
         quotas=plan.quotas,
         retry=plan.retry,
+        gates=plan.gates,
     )
 
 

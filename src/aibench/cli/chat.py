@@ -638,6 +638,13 @@ async def _send(
             outcome = await ConversationAgent(controller, provider).handle_message(text)
             payload = {"session_id": controller.session_id, "outcome": outcome.as_dict()}
             ok = outcome.stopped is None or outcome.stopped == "no assistant model is configured"
+            rescore_codes = [
+                result["exit_code"]
+                for result in outcome.rescores
+                if type(result.get("exit_code")) is int and result["exit_code"] in _EXIT_SEVERITY
+            ]
+            if rescore_codes:
+                command_code = max(rescore_codes, key=_EXIT_SEVERITY.index)
             actions = list(outcome.actions) + [
                 {"state": item.get("status", "rejected")} for item in outcome.rejected
             ]
@@ -681,7 +688,8 @@ async def _send(
         return 130
     states = {a.get("state") for a in actions}
     if run_codes:
-        code = max(run_codes, key=_EXIT_SEVERITY.index)
+        codes = [*run_codes, *([command_code] if command_code in _EXIT_SEVERITY else [])]
+        code = max(codes, key=_EXIT_SEVERITY.index)
     elif command_code is not None:
         code = command_code
     elif states & {"denied", "confirmation_required"}:

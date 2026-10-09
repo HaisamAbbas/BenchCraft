@@ -507,7 +507,11 @@ def test_a_rescoring_pass_is_reported_separately_and_is_not_run_spend(tmp_path: 
     result = CliRunner().invoke(
         app, ["evaluate", run_id, "--plan", str(rescore), "--workspace", str(tmp_path), "--json"]
     )
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 3, result.output
+    outcome = json.loads(result.output)
+    assert outcome["outcome"]["complete"] is False
+    assert outcome["outcome"]["unhealthy_work"] == {"unavailable": 1}
+    assert outcome["exit_code"] == 3
     assert project.calls() == calls  # the application was not invoked
 
     report = project.report(run_id)

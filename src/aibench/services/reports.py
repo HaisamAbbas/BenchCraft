@@ -655,6 +655,9 @@ def build_report(
                 "budget": pass_accounting.get(scoring_id, {}).get("budget"),
                 "quotas": pass_accounting.get(scoring_id, {}).get("quotas"),
                 "stop_reason": pass_accounting.get(scoring_id, {}).get("stop_reason"),
+                "outcome": pass_accounting.get(scoring_id, {}).get("outcome"),
+                "exit_code": pass_accounting.get(scoring_id, {}).get("exit_code"),
+                "gates": pass_accounting.get(scoring_id, {}).get("gates"),
             }
         )
     if derived:

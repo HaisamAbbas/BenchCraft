@@ -1,0 +1,17 @@
+F06 focused verification (2026-10-09)
+
+Command:
+.venv/Scripts/pytest.exe -q tests/test_scoring_outcomes.py tests/test_cli_score.py tests/test_cli_run.py tests/test_rescore_selection.py tests/test_rescore_budgets.py tests/test_rescore_carry_forward.py tests/test_scoring_service.py tests/test_reports.py
+Result: 84 passed in 93.79s.
+
+After closing the natural-language headless-chat review finding:
+.venv/Scripts/pytest.exe -q tests/test_scoring_outcomes.py tests/test_cli_chat.py tests/test_conversation.py
+Result: 48 passed in 74.61s. This supplementary run overlaps the F06 outcome module above.
+
+Command:
+.venv/Scripts/ruff.exe check src tests
+Result: All checks passed.
+
+Command:
+.venv/Scripts/mypy.exe src/aibench
+Result: Success: no issues found in 140 source files.

@@ -303,7 +303,7 @@ def test_cli_rescore_obeys_declared_or_frozen_budget_without_rerunning_app(
         )
         args = ["score", run_id, "--metrics", str(metrics)]
     result = CliRunner().invoke(app, [*args, "--workspace", str(h.workspace.root.parent), "--json"])
-    assert result.exit_code == 0, result.output  # F06 separately fixes incomplete-pass exit codes.
+    assert result.exit_code == 3, result.output
     data = json.loads(result.output)
     assert data["budget"]["evaluator"]["calls"] == 1
     assert data["summaries"][0]["completed"] == 1

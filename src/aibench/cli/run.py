@@ -302,13 +302,22 @@ def evaluate(
         "budget": report.budget,
         "quotas": report.quotas,
         "stop_reason": report.stop_reason,
+        "outcome": report.outcome,
+        "gates": report.gates,
+        "exit_code": report.exit_code,
     }
     if json_output:
         console.print_json(data=data)
-        return
+        raise typer.Exit(code=report.exit_code)
     console.print(
         f"rescored run {escape(run_id)} as {report.scoring_id} (the application was not invoked)"
     )
+    console.print(
+        f"  outcome: {'complete' if report.outcome.get('complete') else 'incomplete'} "
+        f"(exit code {report.exit_code})"
+    )
+    for gate in report.gates:
+        console.print(f"  release gate {escape(str(gate['gate_id']))}: {gate['status']}")
     if report.carried:
         console.print(f"  carried forward {report.carried} finished result(s)")
     if report.stop_reason:
@@ -318,6 +327,8 @@ def evaluate(
             f"  {s.metric_id}@{s.metric_version}: completed={s.completed}/{s.selected} "
             f"decisions={s.decisions}"
         )
+    if report.exit_code:
+        raise typer.Exit(code=report.exit_code)
 
 
 def status(

@@ -1427,6 +1427,9 @@ class SessionController:
             "budget": report.budget,
             "quotas": report.quotas,
             "stop_reason": report.stop_reason,
+            "outcome": report.outcome,
+            "gates": report.gates,
+            "exit_code": report.exit_code,
             "evaluated_now": len(report.results) - report.carried,
         }
 

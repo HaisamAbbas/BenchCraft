@@ -272,16 +272,25 @@ def score(
             "budget": report.budget,
             "quotas": report.quotas,
             "stop_reason": report.stop_reason,
+            "outcome": report.outcome,
+            "gates": report.gates,
+            "exit_code": report.exit_code,
         }
         console.print_json(data=payload)
-        return
+        raise typer.Exit(code=report.exit_code)
     console.print(f"scoring {report.scoring_id} of run {escape(report.run_id)} (recorded outputs)")
+    console.print(
+        f"  outcome: {'complete' if report.outcome.get('complete') else 'incomplete'} "
+        f"(exit code {report.exit_code})"
+    )
     for summary in report.summaries:
         _print_summary(summary)
     if report.stop_reason:
         console.print(f"  stopped: {escape(report.stop_reason)}")
     for warning in report.warnings:
         console.print(f"[yellow]warning:[/yellow] {escape(warning)}")
+    if report.exit_code:
+        raise typer.Exit(code=report.exit_code)
 
 
 @evaluators_app.command("calibrate")

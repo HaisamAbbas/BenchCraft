@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F07",
+  "current_item": "F06",
   "items": [
     {
       "id": "F01",
@@ -90,9 +90,15 @@
       "title": "Scoring/rescoring returns success for incomplete or failed evaluation",
       "detail": "CLI reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "84 focused score/evaluate/rescore/report regressions passed",
+        "48 supplementary outcome, CLI chat, and conversation tests passed after review fix",
+        "Mypy: 140 source files passed; Ruff src/tests passed",
+        "Incomplete evaluator/application work exits 3; valid low scores exit 0; failed gates exit 1",
+        "Slash-command and natural-language headless rescore propagate outcome and exit code"
+      ],
+      "review": "evidence/F06-review.md",
       "commit": null,
       "pushed": false
     },
@@ -102,15 +108,15 @@
       "title": "Rescore CLI shrinks selected denominators and inflates coverage",
       "detail": "CLI/report reproduction",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "13 F07 selection tests and 43 adjacent regressions passed",
         "Mypy: 140 source files passed; Ruff src/tests/plugins passed",
         "CLI, session, and stored report agree for missing work, repetitions and changed bindings"
       ],
       "review": "evidence/F07-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "8050013e71befb67c26c6076c13ccfe0ad395efb",
+      "pushed": true
     },
     {
       "id": "F08",
