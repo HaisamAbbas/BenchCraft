@@ -474,6 +474,57 @@ def test_repeated_judge_missing_passes_and_missing_units_are_explicit() -> None:
     assert e3["missing_pass_count"] == 2
 
 
+@pytest.mark.parametrize(
+    ("observed_count", "expected_count", "missing_count"),
+    [(2, 2, 0), (1, 2, 1), (1, 5, 4)],
+)
+def test_numeric_repeat_expectations_preserve_missing_multiplicity(
+    observed_count: int, expected_count: int, missing_count: int
+) -> None:
+    key = ExecutionKey("execution-1", 0)
+    observations = [
+        JudgeObservation(key, f"pass-{index}", "ok", 0.5, "pass")
+        for index in range(observed_count)
+    ]
+
+    report = summarize_judge_stability(observations, expected_units=[key], expected_repeats=expected_count)
+
+    assert report["denominators"]["missing_repeat_count"] == missing_count
+    [unit] = report["units"]
+    assert unit["missing_pass_count"] == missing_count
+    assert len(report["missing_repeats"]) == missing_count
+    assert all(item["scoring_id"] is None for item in report["missing_repeats"])
+    assert [item["missing_repeat_ordinal"] for item in report["missing_repeats"]] == list(
+        range(1, missing_count + 1)
+    )
+
+
+@pytest.mark.parametrize(
+    ("observed_count", "expected_ids", "missing_ids"),
+    [
+        (2, ["judge-a", "judge-b"], []),
+        (1, ["judge-a", "judge-b"], ["judge-b"]),
+        (1, ["judge-a", "judge-b", "judge-c", "judge-d", "judge-e"], ["judge-b", "judge-c", "judge-d", "judge-e"]),
+    ],
+)
+def test_explicit_repeat_ids_preserve_missing_multiplicity(
+    observed_count: int, expected_ids: list[str], missing_ids: list[str]
+) -> None:
+    key = ExecutionKey("execution-1", 0)
+    observations = [
+        JudgeObservation(key, scoring_id, "ok", 0.5, "pass")
+        for scoring_id in expected_ids[:observed_count]
+    ]
+
+    report = summarize_judge_stability(
+        observations, expected_units=[key], expected_scoring_ids=expected_ids
+    )
+
+    assert report["denominators"]["missing_repeat_count"] == len(missing_ids)
+    assert [item["scoring_id"] for item in report["missing_repeats"]] == missing_ids
+    assert all("missing_repeat_ordinal" not in item for item in report["missing_repeats"])
+
+
 def test_repeated_judge_rejects_non_numeric_scores_and_duplicate_passes() -> None:
     key = ExecutionKey("execution-1", 0)
     with pytest.raises(TypeError, match="not bool"):

@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F11",
+  "current_item": "F12",
   "items": [
     {
       "id": "F01",
@@ -201,7 +201,7 @@
         "Final independent review: no findings"
       ],
       "review": "evidence/F11-review.md",
-      "commit": null,
+      "commit": "5a8e458607d63c1af8ab29b5a5e8adf29d3dde1d",
       "pushed": true
     },
     {
@@ -210,11 +210,17 @@
       "title": "Numeric expected judge repeats are undercounted",
       "detail": "Statistical helper reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "delivered",
+      "verification": [
+        "Direct judge-statistics suite: 29 passed",
+        "Final focused comparison and statistics regressions after correcting one stale F06 exit assertion: 30 passed",
+        "Ruff passed; mypy found no issues in 141 source files; git diff --check passed",
+        "Numeric and explicit-ID expectations preserve zero, one, and multiple missing repeats; unexpected units remain outside the denominator",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F12-review.md",
       "commit": null,
-      "pushed": false
+      "pushed": true
     },
     {
       "id": "F13",

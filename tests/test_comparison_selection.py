@@ -128,7 +128,8 @@ def test_partial_subset_keeps_missing_selected_cases_in_comparison(tmp_path: Pat
                 "--json",
             ],
         )
-        assert evaluated.exit_code == 0, evaluated.output
+        expected_exit = 3 if run_id == current else 0
+        assert evaluated.exit_code == expected_exit, evaluated.output
         passes.append(json.loads(evaluated.stdout)["scoring_id"])
     compared = cli.invoke(
         app,
