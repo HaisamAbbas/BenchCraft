@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F10",
+  "current_item": "F11",
   "items": [
     {
       "id": "F01",
@@ -183,7 +183,7 @@
         "Final independent review: no findings"
       ],
       "review": "evidence/F10-review.md",
-      "commit": null,
+      "commit": "e8f4f8b7d759b3b69129f11e2777dec47fcf6c5a",
       "pushed": true
     },
     {
@@ -192,11 +192,17 @@
       "title": "JSON report export omits the redaction applied to other formats",
       "detail": "CLI/report reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "delivered",
+      "verification": [
+        "Report, report-review, and conversation-hardening regression batch: 39 passed",
+        "Ruff passed; mypy found no issues in 141 source files; git diff --check passed",
+        "Strings and keys are sanitized before every report renderer; aggregate-key collisions retain their numeric values",
+        "Selected/completed denominators are unchanged",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F11-review.md",
       "commit": null,
-      "pushed": false
+      "pushed": true
     },
     {
       "id": "F12",

@@ -405,6 +405,32 @@ def test_hostile_evidence_is_inert_in_html_and_markdown(tmp_path: Path) -> None:
 
     serialized = render(report, "json")
     assert "sk-abcdefghijklmnopqrstuvwx" not in serialized and "\\u001b" not in serialized
+    exported = json.loads(serialized)
+    [exported_item] = exported["evidence"]["items"]
+    assert "[redacted]" in exported_item["execution"]["output_excerpt"]
+
+
+def test_aggregate_category_keys_are_redacted_in_every_export(tmp_path: Path) -> None:
+    project = Project(tmp_path, _rows(("category", "answer", "answer")))
+    report = project.report(project.run())
+    metric = report["scoring_passes"][0]["metrics"][0]
+    summary = metric["summary"]
+    selected, completed = summary["selected"], summary["completed"]
+    secret = "sk-abcdefghijklmnopqrstuvwx"
+    summary["value_summary"] = {"counts": {secret: 3, "[redacted]": 5}}
+
+    serialized = render(report, "json")
+    exported = json.loads(serialized)
+    exported_summary = exported["scoring_passes"][0]["metrics"][0]["summary"]
+    safe_counts = exported_summary["value_summary"]["counts"]
+    assert len(safe_counts) == 2
+    assert sorted(safe_counts.values()) == [3, 5]
+    assert sum(safe_counts.values()) == 8
+    assert all(key.startswith("[redacted]") for key in safe_counts)
+    assert exported_summary["selected"] == selected
+    assert exported_summary["completed"] == completed
+    assert secret not in serialized
+    assert all(secret not in render(report, fmt) for fmt in ("markdown", "html"))
 
 
 def test_case_content_can_be_withheld_and_raw_artifacts_are_only_referenced(

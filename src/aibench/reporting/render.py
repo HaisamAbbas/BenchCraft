@@ -17,19 +17,20 @@ import json
 import re
 from typing import Any
 
-from aibench.security.redaction import sanitize
+from aibench.security.redaction import sanitize, sanitize_value
 
 EVIDENCE_LIMIT = 50  # items shown in Markdown/HTML; the JSON report has all of them
 
 
 def render(report: dict[str, Any], fmt: str) -> str:
+    if fmt not in ("json", "markdown", "html"):
+        raise ValueError(f"unknown report format {fmt!r}")
+    safe_report = sanitize_value(report)
     if fmt == "json":
-        return json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        return json.dumps(safe_report, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     if fmt == "markdown":
-        return _markdown(report)
-    if fmt == "html":
-        return _html(report)
-    raise ValueError(f"unknown report format {fmt!r}")
+        return _markdown(safe_report)
+    return _html(safe_report)
 
 
 # --------------------------------------------------------------------------- numbers
