@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G08",
+  "current_item": "G09",
   "items": [
     {
       "id": "F01",
@@ -473,11 +473,16 @@
       "title": "Reproducibility controls and provenance",
       "detail": "**Partial.** Selection/bootstrap seeds and frozen configuration exist. The run CLI does not expose the engine's `run_seed`; local source/dependency/commit provenance is incomplete, as F04 shows.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "Full affected run, CLI, and recovery batch: 55 passed; final focused Git provenance batch: 6 passed; final runs-show batch: 12 passed",
+        "Ruff passed for src/tests/plugins; Mypy passed for 149 source files; git diff --check passed",
+        "Explicit engine seed, dry-run random-seed preview, output seed, JSON/human provenance, bounded tracked and untracked Git identity, resume drift refusal, and Windows junction fail-closed regression verified",
+        "Independent review found untracked-file drift and Windows junction escape; both fixed and final review reported no findings"
+      ],
+      "review": "evidence/G08-review.md",
+      "commit": "85d379d000b95a1867af4dbcae0f09f3c1718679",
+      "pushed": true
     },
     {
       "id": "G09",
