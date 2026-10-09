@@ -96,8 +96,13 @@ def test_interrupted_run_resumes_through_the_cli_and_rescoring_never_invokes(
     tmp_path: Path,
 ) -> None:
     h = Harness(tmp_path)
+    app_config_path = h.root / h.cli_app()
+    app_config = json.loads(app_config_path.read_text(encoding="utf-8"))
+    app_config["environment_digest"] = "test-runtime-pin"
+    app_config_path.write_text(json.dumps(app_config), encoding="utf-8")
     plan = h.plan(
-        dataset=h.dataset({f"c{i}": "slow 0.2" for i in range(4)}), application=h.cli_app()
+        dataset=h.dataset({f"c{i}": "slow 0.2" for i in range(4)}),
+        application=str(app_config_path),
     )
 
     async def during(ctl: RunController, harness: Harness) -> None:

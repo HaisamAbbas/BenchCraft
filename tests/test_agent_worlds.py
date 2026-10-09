@@ -43,6 +43,9 @@ def world(tmp_path: Path) -> Iterator[tuple[Path, Any]]:
         path = project / name
         text = path.read_text(encoding="utf-8").replace("http://127.0.0.1:8768", base)
         path.write_text(text, encoding="utf-8")
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["revision"] = "agent-world-fixture-v1"
+        path.write_text(json.dumps(config), encoding="utf-8")
     try:
         yield project, server
     finally:

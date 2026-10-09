@@ -82,7 +82,9 @@ def project_settings(
         "policy_path": str(policy.resolve()) if policy else None,
     }
     resolved = resolve_config(config_path=config_path, cli_overrides=overrides, env=os.environ)
-    base = config_path.parent if config_path else root
+    # Relative project settings belong to the configured project root. Without a config,
+    # keep honoring the explicit --project root instead of resolve_config's cwd default.
+    base = resolved.root if config_path else root
     config = resolved.config
 
     def path(value: str | None) -> Path | None:

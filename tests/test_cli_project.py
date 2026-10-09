@@ -100,6 +100,79 @@ def test_doctor_flags_invalid_project_files(project: Path) -> None:
     assert dataset["status"] == "invalid"
 
 
+def test_nested_project_root_works_in_chat_and_doctor_without_widening_policy(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "monorepo"
+    nested = parent / "subproject"
+    initialized = cli.invoke(app, ["init", str(nested)])
+    assert initialized.exit_code == 0, initialized.output
+
+    policy_path = nested / "policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy["data_roots"] = [str(nested.resolve())]
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    (parent / "aibench.json").write_text(
+        json.dumps(
+            {
+                "project_root": "subproject",
+                "application_target": "support.app.json",
+                "dataset_path": "dataset.jsonl",
+                "policy_path": "policy.json",
+                "plan_path": "plan.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    doctor = cli.invoke(app, ["doctor", "--project", str(parent), "--json"])
+    assert doctor.exit_code == 0, doctor.output
+    doctor_checks = {check["name"]: check for check in _json(doctor.output)["checks"]}
+    for name in ("application", "dataset", "plan"):
+        assert doctor_checks[name]["status"] == "ok", doctor_checks[name]
+    assert str(nested) in doctor_checks["application"]["detail"]
+
+    chat = cli.invoke(
+        app,
+        [
+            "chat",
+            "--project",
+            str(parent),
+            "--new",
+            "--send",
+            "/help",
+            "--json",
+        ],
+    )
+    assert chat.exit_code == 0, chat.output
+    assert json.loads(chat.stdout)["command"] == "/help"
+
+    escaped_dataset = parent / "escaped.jsonl"
+    escaped_dataset.write_text(
+        json.dumps(
+            {"case_id": "outside", "input": "hello", "expected_output": "answer"}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    plan_path = nested / "plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["dataset"] = "../escaped.jsonl"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    denied = cli.invoke(app, ["doctor", "--project", str(parent), "--json"])
+    assert denied.exit_code == 0, denied.output  # doctor reports policy denials as warnings
+    [plan_check] = [
+        check for check in _json(denied.output)["checks"] if check["name"].startswith("plan")
+    ]
+    assert plan_check["status"] == "warn"
+    assert "outside the policy's data_roots" in plan_check["detail"]
+
+    run = cli.invoke(app, ["run", str(parent), "--workspace", str(parent), "--json"])
+    assert run.exit_code == 4, run.output
+    assert "nothing was dispatched" in run.output
+    assert "outside the policy's data_roots" in run.output
+
+
 # --------------------------------------------------------------------------- plugins, compare
 
 

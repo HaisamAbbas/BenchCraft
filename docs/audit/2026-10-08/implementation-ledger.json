@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F08",
+  "current_item": "F09",
   "items": [
     {
       "id": "F01",
@@ -77,7 +77,7 @@
         "Final independent review: no findings"
       ],
       "review": "evidence/F04-review.md",
-      "commit": null,
+      "commit": "3f04a12aebef15e13de1260f8c53f835d5441c53",
       "pushed": true
     },
     {
@@ -138,11 +138,17 @@
       "title": "Project settings ignore the resolved `project_root`",
       "detail": "Config/doctor reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "delivered",
+      "verification": [
+        "Related CLI, project, config, and run regression batch: 44 passed",
+        "Nested project chat/doctor/run policy-containment regression: 1 passed",
+        "Resume, fault-injection, storage-failure, agent-world, and CLI-run regressions: 46 passed",
+        "Mypy: 140 source files passed; Ruff on changed Python files and git diff --check passed",
+        "Final independent review: no actionable findings"
+      ],
+      "review": "evidence/F08-review.md",
       "commit": null,
-      "pushed": false
+      "pushed": true
     },
     {
       "id": "F09",

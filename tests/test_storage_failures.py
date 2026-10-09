@@ -75,7 +75,12 @@ def test_a_full_disk_stops_the_run_resumably_and_resume_finishes_it(
 ) -> None:
     h = Harness(tmp_path)
     cases = {f"c{i}": "hi" for i in range(6)}
-    run_id = h.create(h.plan(dataset=h.dataset(cases), application=h.cli_app()))
+    run_id = h.create(
+        h.plan(
+            dataset=h.dataset(cases),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
+        )
+    )
     _fill_disk_after(monkeypatch, writes=3)
     outcome = h.execute(run_id)
     monkeypatch.undo()  # space freed
@@ -113,6 +118,7 @@ def test_a_full_disk_never_repeats_an_effectful_call(
                     "application_id": "booking",
                     "runner": "http",
                     "target": "b",
+                    "revision": "fixture-v1",
                     "effects": "irreversible",
                     "transport": {"kind": "http", "url": f"{base}/book"},
                     "input_binding": {"fields": {"/destination": "/input"}},
@@ -139,7 +145,12 @@ def test_a_full_run_database_is_a_storage_failure_too(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     h = Harness(tmp_path)
-    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi", "b": "hi"}), application=h.cli_app()))
+    run_id = h.create(
+        h.plan(
+            dataset=h.dataset({"a": "hi", "b": "hi"}),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
+        )
+    )
     original = Storage.commit_execution_attempt
     fired = {"n": 0}
 
@@ -180,6 +191,10 @@ def test_the_cli_explains_a_full_disk_and_resume_finishes_the_quickstart(
     """End to end through `aibench`: the packaged quickstart, its real subprocess app."""
     project = tmp_path / "quickstart"
     assert cli.invoke(app, ["init", str(project)]).exit_code == 0
+    app_config_path = project / "support.app.json"
+    app_config = json.loads(app_config_path.read_text(encoding="utf-8"))
+    app_config["environment_digest"] = "test-runtime-pin"
+    app_config_path.write_text(json.dumps(app_config), encoding="utf-8")
     _fill_disk_after(monkeypatch, writes=4)
     stopped = cli.invoke(app, ["run", str(project), "--workspace", str(project)])
     monkeypatch.undo()

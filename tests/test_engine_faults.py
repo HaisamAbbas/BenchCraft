@@ -81,7 +81,12 @@ def test_crash_at_dispatch_boundary_redispatches_effect_free_work(
     import aibench.engine.engine as engine_module
 
     h = Harness(tmp_path)
-    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi", "b": "hi"}), application=h.cli_app()))
+    run_id = h.create(
+        h.plan(
+            dataset=h.dataset({"a": "hi", "b": "hi"}),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
+        )
+    )
     original = engine_module.invoke_and_record
     calls = {"n": 0}
 
@@ -110,7 +115,10 @@ def test_case_ids_with_colons_survive_run_and_recovery(
 
     h = Harness(tmp_path)
     run_id = h.create(
-        h.plan(dataset=h.dataset({"case:with:colons": "hi"}), application=h.cli_app())
+        h.plan(
+            dataset=h.dataset({"case:with:colons": "hi"}),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
+        )
     )
     original = engine_module.invoke_and_record
     calls = {"n": 0}
@@ -136,7 +144,12 @@ def test_crash_at_response_boundary_repeats_only_effect_free_work(
 ) -> None:
     """The application ran, but the process died before its result was committed."""
     h = Harness(tmp_path)
-    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()))
+    run_id = h.create(
+        h.plan(
+            dataset=h.dataset({"a": "hi"}),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
+        )
+    )
     _crash_once(monkeypatch, Storage, "commit_execution_attempt", lambda self, result: True)
     _run_with_crash(h, run_id)
     monkeypatch.undo()
@@ -162,7 +175,12 @@ def test_crash_at_commit_boundary_settles_from_the_committed_attempt(
 ) -> None:
     """The result was committed, but the process died before the item moved on."""
     h = Harness(tmp_path)
-    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi", "b": "hi"}), application=h.cli_app()))
+    run_id = h.create(
+        h.plan(
+            dataset=h.dataset({"a": "hi", "b": "hi"}),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
+        )
+    )
     _crash_once(
         monkeypatch,
         Storage,
@@ -189,7 +207,7 @@ def test_crash_at_evaluation_commit_boundary_does_not_duplicate_results(
     run_id = h.create(
         h.plan(
             dataset=h.dataset({"a": "hi"}),
-            application=h.cli_app(),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
             metrics=[
                 {"metric": "native.exact_match"},
                 {"metric": "native.json_schema", "params": {"schema": {}}},
@@ -224,7 +242,7 @@ def test_ambiguous_effectful_crash_is_unknown_effect_and_never_auto_repeated(
     h = Harness(tmp_path)
     with serving(server) as base:
         (tmp_path / "effect.json").write_text(
-            '{"application_id": "booking", "runner": "http", "target": "b", "effects": "irreversible",'
+            '{"application_id": "booking", "runner": "http", "target": "b", "revision": "fixture-v1", "effects": "irreversible",'
             f'"transport": {{"kind": "http", "url": "{base}/book"}},'
             '"input_binding": {"fields": {"/destination": "/input"}}}',
             encoding="utf-8",
@@ -254,7 +272,12 @@ def test_resume_verifies_frozen_identities(tmp_path: Path) -> None:
     from aibench.services.runs import RunError
 
     h = Harness(tmp_path)
-    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()))
+    run_id = h.create(
+        h.plan(
+            dataset=h.dataset({"a": "hi"}),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
+        )
+    )
     assert h.execute(run_id).state is RunState.COMPLETED
     with pytest.raises(RunError, match="only interrupted or unfinished runs resume"):
         h.execute(run_id)
@@ -281,7 +304,12 @@ def test_a_crash_during_recovery_never_loses_the_uncommitted_dispatch(
     from aibench.services.reports import build_report
 
     h = Harness(tmp_path)
-    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()))
+    run_id = h.create(
+        h.plan(
+            dataset=h.dataset({"a": "hi"}),
+            application=h.cli_app(environment_digest="test-runtime-pin"),
+        )
+    )
     _crash_once(monkeypatch, Storage, "commit_execution_attempt", lambda self, result: True)
     _run_with_crash(h, run_id)
     monkeypatch.undo()

@@ -297,7 +297,8 @@ def test_cancel_stops_dispatch_and_cancels_in_flight_work(tmp_path: Path) -> Non
 def test_interrupt_then_resume_completes_without_duplicates(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     plan = h.plan(
-        dataset=h.dataset({f"c{i}": "slow 0.2" for i in range(5)}), application=h.cli_app()
+        dataset=h.dataset({f"c{i}": "slow 0.2" for i in range(5)}),
+        application=h.cli_app(environment_digest="test-runtime-pin"),
     )
 
     async def during(ctl: RunController, harness: Harness) -> None:

@@ -63,7 +63,12 @@ class Harness:
         (self.root / name).write_text("\n".join(lines) + "\n", encoding="utf-8")
         return name
 
-    def cli_app(self, timeout: float = 20.0, effects: str = "none") -> str:
+    def cli_app(
+        self,
+        timeout: float = 20.0,
+        effects: str = "none",
+        environment_digest: str | None = None,
+    ) -> str:
         config = {
             "application_id": "instrumented",
             "runner": "cli",
@@ -76,6 +81,8 @@ class Harness:
                 "env": {"APP_LOG": str(self.log)},
             },
         }
+        if environment_digest is not None:
+            config["environment_digest"] = environment_digest
         (self.root / "app.json").write_text(json.dumps(config), encoding="utf-8")
         return "app.json"
 

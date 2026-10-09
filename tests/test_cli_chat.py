@@ -310,3 +310,37 @@ def test_bare_benchcraft_takes_continue_resume_and_new(
     result = runner.invoke(app, arguments)
     assert result.exit_code == 0, result.output
     assert (seen["resume"], seen["new"], seen["continue_latest"]) == (resume, new, latest)
+
+
+def test_project_settings_use_resolved_project_root_and_keep_absolute_overrides(
+    tmp_path: Path,
+) -> None:
+    from aibench.cli.chat import project_settings
+
+    parent = tmp_path / "monorepo"
+    nested = parent / "subproject"
+    nested.mkdir(parents=True)
+    config = {
+        "project_root": "subproject",
+        "application_target": "app.json",
+        "dataset_path": "data.jsonl",
+        "policy_path": "policy.json",
+        "plan_path": "plan.json",
+    }
+    (parent / "aibench.json").write_text(json.dumps(config), encoding="utf-8")
+    for name in ("app.json", "data.jsonl", "policy.json", "plan.json"):
+        (nested / name).write_text("{}\n", encoding="utf-8")
+
+    settings = project_settings(parent, None, None, None)
+    assert settings["application"] == (nested / "app.json").resolve()
+    assert settings["dataset"] == (nested / "data.jsonl").resolve()
+    assert settings["policy"] == (nested / "policy.json").resolve()
+    assert settings["plan"] == (nested / "plan.json").resolve()
+
+    override_app = (tmp_path / "override-app.json").resolve()
+    override_dataset = (tmp_path / "override-data.jsonl").resolve()
+    override_policy = (tmp_path / "override-policy.json").resolve()
+    overridden = project_settings(parent, override_app, override_dataset, override_policy)
+    assert overridden["application"] == override_app
+    assert overridden["dataset"] == override_dataset
+    assert overridden["policy"] == override_policy
