@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G05",
+  "current_item": "G06",
   "items": [
     {
       "id": "F01",
@@ -421,11 +421,16 @@
       "title": "CI report adapters",
       "detail": "**Missing.** Benchmark-result JUnit/SARIF-style exports are absent. The repository's pytest JUnit files are test evidence, not a user feature.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "35 report, report-review, CI adapter, and report CLI regressions passed; final post-review adapter and report CLI batch: 5 passed",
+        "Ruff src/tests/plugins passed; mypy checked 148 source files; git diff --check passed",
+        "JUnit status and content controls verified; SARIF 2.1.0 output validated against the official OASIS Errata 01 JSON schema in both content modes",
+        "Independent review found valid supplementary Unicode was dropped from JUnit XML; fixed and final re-review reported no findings"
+      ],
+      "review": "evidence/G05-review.md",
+      "commit": "c925f1ee697e02f88b2b42afd6e4345f7675db96",
+      "pushed": true
     },
     {
       "id": "G06",
