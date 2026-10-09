@@ -42,6 +42,7 @@ def _run_to_dict(
     identity_basis = parameters.get("application_identity_basis")
     return {
         "run_id": manifest["run_id"],
+        "parent_run_id": manifest["parent_run_id"],
         "status": record.status,
         "dataset_hash": manifest["dataset_hash"],
         "application_hash": manifest["application_hash"],
@@ -173,6 +174,8 @@ def show_run(
 
     console.print(f"[bold]{record.manifest.run_id}[/bold]")
     console.print(f"  status: {record.status}")
+    if record.manifest.parent_run_id:
+        console.print(f"  parent_run_id: {escape(record.manifest.parent_run_id)}")
     console.print(f"  dataset_hash: {record.manifest.dataset_hash}")
     console.print(f"  application_hash: {record.manifest.application_hash}")
     identity = record.manifest.parameters.get("application_identity_basis")

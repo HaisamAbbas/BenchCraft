@@ -684,6 +684,7 @@ def build_report(
         "as_of_event_sequence": events[-1]["sequence"] if events else 0,
         "run": {
             "run_id": run_id,
+            "parent_run_id": manifest.parent_run_id,
             "status": record.status,
             "finished": finished,
             # 09 terms: provisional = may still change (not finished); partial = not every

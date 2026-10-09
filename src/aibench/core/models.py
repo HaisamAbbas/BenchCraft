@@ -1311,6 +1311,7 @@ class RunManifest(FrozenModel):
     environment: FrozenValue = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
     application_id: str | None = None  # added in Prompt 04; lets scoring check applicability
+    parent_run_id: str | None = None  # selective reruns preserve the run lineage
 
 
 class ArtifactRef(FrozenModel):

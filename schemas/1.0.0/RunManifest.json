@@ -49,6 +49,18 @@
     "parameters": {
       "title": "Parameters"
     },
+    "parent_run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Run Id"
+    },
     "plan_hash": {
       "title": "Plan Hash",
       "type": "string"

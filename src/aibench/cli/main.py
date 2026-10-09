@@ -76,6 +76,7 @@ app.command("export")(export_cli.export)
 app.command("compare")(project_cli.compare)
 app.add_typer(project_cli.plugins_app, name="plugins")
 runs_cli.app.command("status")(run_cli.status)
+runs_cli.app.command("retry")(run_cli.retry)
 
 console = Console()
 err_console = Console(stderr=True)

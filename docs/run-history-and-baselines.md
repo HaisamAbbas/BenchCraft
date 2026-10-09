@@ -20,6 +20,31 @@ digits, `.`, `_`, or `-` (up to 64 characters). Notes are sanitized before stora
 limited to 2,000 characters. `runs show` and `runs list --json` include each run's tags,
 note, and any baseline aliases that currently point to it.
 
+## Retry application failures
+
+Create a new child run from a finished parent run for final application errors, or select
+particular cases from the parent's planned scope. Resume an interrupted parent before
+retrying it:
+
+```console
+aibench runs retry RUN_ID --dry-run --json
+aibench runs retry RUN_ID --max-cases 25 --repetitions 2
+aibench runs retry RUN_ID --case case-17 --case case-42 --dry-run
+```
+
+Automatic selection includes final application errors only when every final repetition for
+that case is known to have had no effects or was not dispatched. It also skips cases with an
+unknown or in-flight execution work item. Selecting a case explicitly requests its rerun and
+reports any prior execution that may have caused external effects. `--max-cases` defaults to
+100, and `--repetitions` defaults to one. A dry run validates the current application and
+evaluator setup and prints the exact child scope without creating a run.
+
+The child inherits the parent's frozen plan and execution policy, revalidates authorization
+against the current `--policy` or project policy setting (and `--trust-local-app` grant) as
+well as the parent's policy, and revalidates current application/evaluator implementations.
+It refuses if the dataset content changed or a case was outside the parent scope. Child run
+manifests, reports, and `runs show` output retain the parent run ID.
+
 ## Promote and compare a baseline
 
 An operator records explicit quality approval when promoting a baseline. Promotion is

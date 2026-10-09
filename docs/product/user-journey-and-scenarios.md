@@ -277,8 +277,8 @@ The same services can be driven from scripts or CI. The main command groups are:
 | Initialize and check a project | init, doctor |
 | Inspect an app/repository or run a small smoke | inspect, app describe, app smoke |
 | Validate data, episodes, and plans | dataset validate, episodes validate, plan validate, plan opportunities |
-| Draft and execute | plan, benchmark, run, resume, runs status |
-| Read run history | runs list/show/status; sessions list/show/delete |
+| Draft and execute | plan, benchmark, run, resume, runs status/retry |
+| Read run history | runs list/show/status/retry; sessions list/show/delete |
 | Score and report | score, evaluate, report, compare |
 | Inspect evaluator availability | evaluators list/describe/plugin; plugins list |
 | Candidate-data lifecycle | dataset candidates generate/list/show/review/verify/promote |

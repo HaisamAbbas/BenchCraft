@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from aibench.cli.main import app
 from aibench.engine.engine import RunController, RunState
+from aibench.security.policy import ExecutionPolicy
 from tests.engine_support import Harness
 from tests.runner_support import REPO_ROOT
 
@@ -244,6 +245,381 @@ def test_run_exit_code_3_for_failures_and_status_lists_them(tmp_path: Path) -> N
     assert missing.exit_code == 2
 
 
+def test_retry_creates_bounded_child_from_safe_application_failures(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    plan = h.plan(
+        dataset=h.dataset({"bad-a": "crash", "ok": "hi", "bad-b": "crash"}),
+        application=h.cli_app(),
+        retry={"max_attempts": 1},
+    )
+    ws = str(h.workspace.root.parent)
+    parent_result = cli.invoke(
+        app, ["run", "--plan", str(plan), "--trust-local-app", "--workspace", ws, "--json"]
+    )
+    assert parent_result.exit_code == 3, parent_result.output
+    parent_id = _json(parent_result.output)["run_id"]
+    assert h.count() == 3
+
+    preview_result = cli.invoke(
+        app,
+        [
+            "runs",
+            "retry",
+            parent_id,
+            "--trust-local-app",
+            "--workspace",
+            ws,
+            "--max-cases",
+            "1",
+            "--dry-run",
+            "--json",
+        ],
+    )
+    assert preview_result.exit_code == 0, preview_result.output
+    preview = _json(preview_result.output)
+    assert preview["parent_run_id"] == parent_id
+    assert preview["selected_case_ids"] == ["bad-a"]
+    assert preview["execution_items"] == 1
+    assert preview["truncated_case_ids"] == ["bad-b"]
+    assert preview["will_dispatch"] is False
+    assert h.count() == 3
+
+    human_preview = cli.invoke(
+        app,
+        [
+            "runs", "retry", parent_id, "--trust-local-app", "--workspace", ws,
+            "--max-cases", "1", "--dry-run",
+        ],
+    )
+    assert human_preview.exit_code == 0, human_preview.output
+    assert "bad-a" in human_preview.stdout and "nothing dispatched" in human_preview.stdout
+    assert h.count() == 3
+
+    # Repair the application in place; the retry recompiles current code while checking
+    # that it still consumes the exact parent dataset and policy.
+    app_path = tmp_path / "app.py"
+    app_path.write_text(
+        app_path.read_text(encoding="utf-8").replace(
+            'if text.startswith("crash"):', 'if text.startswith("never-crash"):'
+        ),
+        encoding="utf-8",
+    )
+    child_result = cli.invoke(
+        app,
+        [
+            "runs",
+            "retry",
+            parent_id,
+            "--trust-local-app",
+            "--workspace",
+            ws,
+            "--max-cases",
+            "1",
+            "--json",
+        ],
+    )
+    assert child_result.exit_code == 0, child_result.output
+    child = _json(child_result.output)
+    assert child["parent_run_id"] == parent_id
+    assert child["retry_scope"] == {
+        "selected_case_ids": ["bad-a"],
+        "repetitions": 1,
+        "truncated_case_ids": ["bad-b"],
+        "unsafe_failed_case_ids": [],
+        "selected_effect_risk_case_ids": [],
+    }
+    assert h.count("bad-a") == 2
+    assert h.count("bad-b") == 1
+    assert h.count("ok") == 1
+
+    shown = cli.invoke(app, ["runs", "show", child["run_id"], "--workspace", ws, "--json"])
+    assert shown.exit_code == 0, shown.output
+    assert _json(shown.output)["parent_run_id"] == parent_id
+    report = cli.invoke(
+        app,
+        [
+            "report",
+            child["run_id"],
+            "--format",
+            "json",
+            "--out",
+            "-",
+            "--workspace",
+            ws,
+        ],
+    )
+    assert report.exit_code == 0, report.output
+    assert _json(report.output)["run"]["parent_run_id"] == parent_id
+
+
+def test_retry_validates_parent_scope_and_dataset_identity(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    dataset = h.dataset({"selected": "hi", "other": "hello"})
+    plan = h.plan(dataset=dataset, application=h.cli_app())
+    ws = str(h.workspace.root.parent)
+    parent_result = cli.invoke(
+        app, ["run", "--plan", str(plan), "--trust-local-app", "--workspace", ws, "--json"]
+    )
+    assert parent_result.exit_code == 0, parent_result.output
+    parent_id = _json(parent_result.output)["run_id"]
+    before = h.count()
+
+    revoked = cli.invoke(
+        app,
+        [
+            "runs", "retry", parent_id, "--case", "selected", "--dry-run",
+            "--workspace", ws, "--json",
+        ],
+    )
+    assert revoked.exit_code == 4, revoked.output
+    assert "policy denies this plan" in revoked.output
+    assert h.count() == before
+
+    selected = cli.invoke(
+        app,
+        [
+            "runs",
+            "retry",
+            parent_id,
+            "--trust-local-app",
+            "--case",
+            "selected",
+            "--dry-run",
+            "--workspace",
+            ws,
+            "--json",
+        ],
+    )
+    assert selected.exit_code == 0, selected.output
+    assert _json(selected.output)["selected_case_ids"] == ["selected"]
+
+    outside_scope = cli.invoke(
+        app,
+        [
+            "runs", "retry", parent_id, "--trust-local-app", "--case", "missing",
+            "--dry-run", "--workspace", ws, "--json",
+        ],
+    )
+    assert outside_scope.exit_code == 2
+    assert "not selected by the parent" in outside_scope.output
+    assert h.count() == before
+
+    (tmp_path / dataset).write_text(
+        json.dumps({"case_id": "selected", "input": "changed", "expected_output": "yes"})
+        + "\n"
+        + json.dumps({"case_id": "other", "input": "hello", "expected_output": "yes"})
+        + "\n",
+        encoding="utf-8",
+    )
+    changed = cli.invoke(
+        app,
+        [
+            "runs",
+            "retry",
+            parent_id,
+            "--trust-local-app",
+            "--case",
+            "selected",
+            "--dry-run",
+            "--workspace",
+            ws,
+            "--json",
+        ],
+    )
+    assert changed.exit_code == 2
+    assert "dataset changed" in changed.output
+    assert h.count() == before
+
+
+def test_retry_automatically_skips_failures_that_may_have_caused_effects(
+    tmp_path: Path,
+) -> None:
+    from aibench.core.models import EffectLevel
+
+    h = Harness(tmp_path)
+    policy = ExecutionPolicy(max_effects=EffectLevel.REVERSIBLE)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(policy.model_dump_json(), encoding="utf-8")
+    plan = h.plan(
+        dataset=h.dataset({"bad": "crash"}),
+        application=h.cli_app(effects="reversible"),
+        retry={"max_attempts": 1},
+    )
+    ws = str(h.workspace.root.parent)
+    parent_result = cli.invoke(
+        app,
+        [
+            "run",
+            "--plan",
+            str(plan),
+            "--policy",
+            str(policy_path),
+            "--trust-local-app",
+            "--workspace",
+            ws,
+            "--json",
+        ],
+    )
+    assert parent_result.exit_code == 3, parent_result.output
+    parent_id = _json(parent_result.output)["run_id"]
+    before = h.count()
+
+    automatic = cli.invoke(
+        app,
+        [
+            "runs", "retry", parent_id, "--policy", str(policy_path), "--trust-local-app",
+            "--workspace", ws, "--json",
+        ],
+    )
+    assert automatic.exit_code == 2
+    assert "no safely retryable failed cases" in automatic.output
+    assert h.count() == before
+
+    explicit = cli.invoke(
+        app,
+        [
+            "runs",
+            "retry",
+            parent_id,
+            "--policy",
+            str(policy_path),
+            "--trust-local-app",
+            "--case",
+            "bad",
+            "--dry-run",
+            "--workspace",
+            ws,
+            "--json",
+        ],
+    )
+    assert explicit.exit_code == 0, explicit.output
+    preview = _json(explicit.output)
+    assert preview["selected_case_ids"] == ["bad"]
+    assert preview["unsafe_failed_case_count"] == 1
+    assert h.count() == before
+
+
+def test_retry_rechecks_current_project_policy(tmp_path: Path) -> None:
+    from aibench.core.models import EffectLevel
+
+    h = Harness(tmp_path)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        ExecutionPolicy(max_effects=EffectLevel.REVERSIBLE).model_dump_json(), encoding="utf-8"
+    )
+    (tmp_path / "aibench.json").write_text(
+        json.dumps({"policy_path": "policy.json"}), encoding="utf-8"
+    )
+    plan = h.plan(
+        dataset=h.dataset({"bad": "crash"}),
+        application=h.cli_app(effects="reversible"),
+        retry={"max_attempts": 1},
+    )
+    ws = str(h.workspace.root.parent)
+    parent_result = cli.invoke(
+        app,
+        [
+            "run",
+            "--plan",
+            str(plan),
+            "--policy",
+            str(policy_path),
+            "--trust-local-app",
+            "--workspace",
+            ws,
+            "--json",
+        ],
+    )
+    assert parent_result.exit_code == 3, parent_result.output
+    parent_id = _json(parent_result.output)["run_id"]
+
+    policy_path.write_text(
+        ExecutionPolicy(max_effects=EffectLevel.NONE).model_dump_json(), encoding="utf-8"
+    )
+    retry_result = cli.invoke(
+        app,
+        [
+            "runs",
+            "retry",
+            parent_id,
+            "--trust-local-app",
+            "--case",
+            "bad",
+            "--dry-run",
+            "--workspace",
+            ws,
+            "--json",
+        ],
+    )
+    assert retry_result.exit_code == 4, retry_result.output
+    assert "policy denies this plan" in retry_result.output
+    assert h.count() == 1
+
+
+def test_retry_case_level_safety_checks_every_final_repetition_and_work_item() -> None:
+    from aibench.cli.run import _retry_failure_case_ids
+    from aibench.core.models import (
+        EffectState,
+        ExecutionResult,
+        ExecutionStatus,
+        WorkItem,
+        WorkItemState,
+    )
+
+    def execution(
+        case_id: str,
+        repetition: int,
+        attempt: int,
+        status: ExecutionStatus,
+        effect: EffectState,
+    ) -> ExecutionResult:
+        return ExecutionResult(
+            execution_id=f"run:{case_id}:r{repetition}:a{attempt}",
+            run_id="run",
+            case_id=case_id,
+            repetition_id=repetition,
+            attempt_id=attempt,
+            status=status,
+            effect_state=effect,
+        )
+
+    stranded = WorkItem(
+        work_item_id="work-stranded",
+        run_id="run",
+        task_key="exec:stranded:r1",
+        kind="execution",
+        state=WorkItemState.UNKNOWN_EFFECT,
+    )
+    missing_failure = WorkItem(
+        work_item_id="work-failed-without-result",
+        run_id="run",
+        task_key="exec:missing-result:r0",
+        kind="execution",
+        state=WorkItemState.FAILED,
+        attempt=2,
+    )
+    failed, safe, effect_risk = _retry_failure_case_ids(
+        [
+            execution("mixed", 0, 0, ExecutionStatus.ERROR, EffectState.NOT_DISPATCHED),
+            execution("mixed", 1, 0, ExecutionStatus.CANCELLED, EffectState.UNKNOWN),
+            execution("effectful", 0, 0, ExecutionStatus.OK, EffectState.COMPLETED),
+            execution("effectful", 1, 0, ExecutionStatus.ERROR, EffectState.NOT_DISPATCHED),
+            execution("safe", 0, 0, ExecutionStatus.ERROR, EffectState.NOT_DISPATCHED),
+            execution("recovered", 0, 0, ExecutionStatus.ERROR, EffectState.UNKNOWN),
+            execution("recovered", 0, 1, ExecutionStatus.OK, EffectState.NONE_DECLARED),
+            execution("stranded", 0, 0, ExecutionStatus.ERROR, EffectState.NONE_DECLARED),
+            execution(
+                "missing-result", 0, 1, ExecutionStatus.ERROR, EffectState.NOT_DISPATCHED
+            ),
+        ],
+        [stranded, missing_failure],
+    )
+
+    assert failed == {"mixed", "effectful", "safe", "stranded", "missing-result"}
+    assert safe == {"safe"}
+    assert effect_risk == {"mixed", "effectful", "stranded", "missing-result"}
+
+
 def test_interrupted_run_resumes_through_the_cli_and_rescoring_never_invokes(
     tmp_path: Path,
 ) -> None:
@@ -266,6 +642,24 @@ def test_interrupted_run_resumes_through_the_cli_and_rescoring_never_invokes(
     ws = str(h.workspace.root.parent)
     status = _json(cli.invoke(app, ["runs", "status", run_id, "--workspace", ws, "--json"]).output)
     assert status["status"] == "interrupted"
+
+    retry = cli.invoke(
+        app,
+        [
+            "runs",
+            "retry",
+            run_id,
+            "--case",
+            "c0",
+            "--dry-run",
+            "--workspace",
+            ws,
+            "--json",
+        ],
+    )
+    assert retry.exit_code == 2, retry.output
+    assert "finish or resume it before retrying" in retry.output
+    assert h.count() == 1  # refusing the unfinished parent never dispatches a child
 
     resumed = cli.invoke(app, ["resume", run_id, "--workspace", ws, "--json"])
     assert resumed.exit_code == 0, resumed.output

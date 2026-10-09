@@ -30,6 +30,13 @@ from aibench.cli.errors import error_exit
 from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.core.hashes import content_hash
+from aibench.core.models import (
+    EffectState,
+    ExecutionResult,
+    ExecutionStatus,
+    WorkItem,
+    WorkItemState,
+)
 from aibench.engine.compile import (
     CompiledRun,
     PlanInvalid,
@@ -39,13 +46,15 @@ from aibench.engine.compile import (
     load_plan,
     load_policy,
 )
-from aibench.engine.engine import RunController, RunOutcome, RunState
+from aibench.engine.engine import RunController, RunOutcome, RunState, parse_work_item_key
 from aibench.services.reports import build_report
 from aibench.services.runs import (
     EXIT_DENIED,
     EXIT_INTERRUPTED,
     EXIT_INVALID,
+    RESUMABLE_STATES,
     RunError,
+    compile_retry_run,
     create_run,
     evaluate_run,
     execute_run,
@@ -53,6 +62,7 @@ from aibench.services.runs import (
     run_exit_code,
     run_status,
 )
+from aibench.services.scoring import select_final_executions
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
@@ -144,7 +154,13 @@ async def _execute(run_id: str, storage: Storage, artifacts: ArtifactStore) -> R
 
 
 def _finish(
-    run_id: str, outcome: RunOutcome, storage: Storage, artifacts: ArtifactStore, json_output: bool
+    run_id: str,
+    outcome: RunOutcome,
+    storage: Storage,
+    artifacts: ArtifactStore,
+    json_output: bool,
+    *,
+    retry_scope: dict[str, object] | None = None,
 ) -> int:
     """Print the outcome with its gate verdicts (from the stored report) and return the
     §13 exit code."""
@@ -156,11 +172,13 @@ def _finish(
         console.print_json(
             data={
                 "run_id": run_id,
+                "parent_run_id": run_record.manifest.parent_run_id if run_record else None,
                 "run_seed": run_seed,
                 **outcome_json(outcome),
                 "gates": report["gates"],
                 "outcome": report["outcome"],
                 "exit_code": code,
+                **({"retry_scope": retry_scope} if retry_scope is not None else {}),
             }
         )
         return code
@@ -255,6 +273,57 @@ def _print_run_preview(preview: dict[str, object], *, json_output: bool) -> None
         console.print_json(data=preview)
     else:
         typer.echo(json.dumps(preview, indent=2, ensure_ascii=False))
+
+
+def _retry_failure_case_ids(
+    executions: list[ExecutionResult], work_items: list[WorkItem] | None = None
+) -> tuple[set[str], set[str], set[str]]:
+    """Return failed, automatically safe, and effect-risk case IDs.
+
+    A child repeats work at case granularity. A failed repetition is automatically safe
+    only when every final repetition for that case has a known non-effectful outcome and
+    no execution work item records an ambiguous/in-flight dispatch or an uncommitted failure.
+    """
+    final_executions = select_final_executions(executions)
+    failed = {
+        execution.case_id
+        for execution in final_executions
+        if execution.status is ExecutionStatus.ERROR
+    }
+    effect_risk: set[str] = set()
+    safe_states = (EffectState.NONE_DECLARED, EffectState.NOT_DISPATCHED)
+    recorded_attempts = {
+        (execution.case_id, execution.repetition_id, execution.attempt_id)
+        for execution in executions
+    }
+    for execution in final_executions:
+        if execution.effect_state not in safe_states and execution.status not in (
+            ExecutionStatus.SKIPPED,
+            ExecutionStatus.NOT_APPLICABLE,
+        ):
+            effect_risk.add(execution.case_id)
+    for item in work_items or []:
+        if item.kind != "execution" or item.state not in (
+            WorkItemState.RUNNING,
+            WorkItemState.UNKNOWN_EFFECT,
+            WorkItemState.FAILED,
+        ):
+            continue
+        try:
+            case_id, repetition, _ = parse_work_item_key(item.task_key, "execution")
+        except ValueError:
+            # If an in-flight item cannot be associated with its case, fail closed for
+            # every failed case rather than risk repeating an unknown dispatch.
+            effect_risk.update(failed)
+        else:
+            if item.state is not WorkItemState.FAILED or (
+                case_id,
+                repetition,
+                item.attempt,
+            ) not in recorded_attempts:
+                effect_risk.add(case_id)
+    unsafe_failed = failed & effect_risk
+    return failed, failed - unsafe_failed, effect_risk
 
 
 def _resolve_plan(
@@ -469,6 +538,193 @@ def resume(
         raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(run_id, json_output=json_output) from exc
+    finally:
+        storage.db.close()
+    raise typer.Exit(code=code)
+
+
+def retry(
+    parent_run_id: str = typer.Argument(..., help="Finished parent run to retry from."),
+    policy: Path | None = _POLICY,
+    trust_local_app: bool = typer.Option(
+        False, "--trust-local-app", help="Grant trusted-local mode for a CLI application."
+    ),
+    case_ids: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--case",
+        help="Explicit case to rerun; repeat this option for multiple cases. Defaults to safely failed cases.",
+    ),
+    max_cases: int = typer.Option(
+        100, "--max-cases", min=1, max=1000, help="Maximum failed cases selected automatically."
+    ),
+    repetitions: int = typer.Option(
+        1, "--repetitions", min=1, max=100, help="Application repetitions in the child run."
+    ),
+    run_seed: int | None = typer.Option(
+        None,
+        "--run-seed",
+        min=0,
+        max=2**31 - 1,
+        help="Set the child engine RNG seed; defaults to a recorded random seed.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate and preview the child scope without creating a run."
+    ),
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Create a bounded child run for safe application failures or explicit cases."""
+    if max_cases > 1000:
+        raise _fail("--max-cases must be between 1 and 1000", EXIT_INVALID, json_output=json_output)
+    if case_ids is not None:
+        if len(set(case_ids)) != len(case_ids):
+            raise _fail("--case values must be unique", EXIT_INVALID, json_output=json_output)
+        if len(case_ids) > max_cases:
+            raise _fail(
+                f"{len(case_ids)} explicit cases exceed --max-cases={max_cases}",
+                EXIT_INVALID,
+                json_output=json_output,
+            )
+
+    storage, artifacts = _open(workspace, json_output=json_output)
+    child_run_id: str | None = None
+    try:
+        parent = storage.get_run(parent_run_id)
+        if parent is None:
+            raise RunError(f"no run committed with run_id={parent_run_id!r}")
+        if parent.status in RESUMABLE_STATES:
+            raise RunError(
+                f"run {parent_run_id!r} is {parent.status}; finish or resume it before retrying"
+            )
+        from aibench.cli.chat import project_settings
+
+        parent_plan_dir = Path(
+            str(parent.manifest.parameters.get("plan_dir", Path.cwd()))
+        ).resolve()
+        current_settings = project_settings(parent_plan_dir, None, None, policy)
+
+        failed_case_ids, safe_failed_case_ids, effect_risk_case_ids = _retry_failure_case_ids(
+            storage.list_execution_attempts(parent_run_id), storage.list_work_items(parent_run_id)
+        )
+        unsafe_failed_case_ids = failed_case_ids & effect_risk_case_ids
+
+        truncated_case_ids: list[str] = []
+        if case_ids is None:
+            ordered = sorted(safe_failed_case_ids)
+            selected_case_ids = ordered[:max_cases]
+            truncated_case_ids = ordered[max_cases:]
+            if not selected_case_ids:
+                if failed_case_ids:
+                    raise RunError(
+                        "no safely retryable failed cases; the parent failures may have caused "
+                        "external effects. Select intended cases explicitly with --case"
+                    )
+                raise RunError("the parent run has no failed application cases to retry")
+        else:
+            selected_case_ids = list(case_ids)
+            if not selected_case_ids:
+                raise RunError("provide at least one --case or omit --case to select failures")
+
+        selected_effect_risk_case_ids = sorted(set(selected_case_ids) & effect_risk_case_ids)
+        compiled = compile_retry_run(
+            parent_run_id,
+            selected_case_ids,
+            repetitions,
+            storage=storage,
+            artifacts=artifacts,
+            current_policy=load_policy(current_settings["policy"]),
+            trusted_local=trust_local_app,
+        )
+        preview = {
+            "schema": "aibench.retry-preview/1",
+            "status": "dry_run" if dry_run else "ready",
+            "will_dispatch": not dry_run,
+            "parent_run_id": parent_run_id,
+            "selected_case_ids": [case.case_id for case in compiled.cases],
+            "case_count": len(compiled.cases),
+            "repetitions": compiled.plan.repetitions,
+            "execution_items": len(compiled.cases) * compiled.plan.repetitions,
+            "evaluation_items": len(compiled.cases)
+            * compiled.plan.repetitions
+            * len(compiled.metrics),
+            "failed_case_count": len(failed_case_ids),
+            "unsafe_failed_case_count": len(unsafe_failed_case_ids),
+            "unsafe_failed_case_ids": sorted(unsafe_failed_case_ids),
+            "selected_effect_risk_case_ids": selected_effect_risk_case_ids,
+            "truncated_case_ids": truncated_case_ids,
+            "run_seed": run_seed,
+            "plan_hash": compiled.plan_hash,
+            "dataset_hash": compiled.dataset.content_hash,
+        }
+        if dry_run:
+            if json_output:
+                console.print_json(data=preview)
+            else:
+                console.print(
+                    f"retry preview from {escape(parent_run_id)}: "
+                    f"{len(compiled.cases)} case(s), {repetitions} repetition(s), "
+                    f"{preview['execution_items']} application execution(s); nothing dispatched"
+                )
+                console.print(
+                    "  cases: " + ", ".join(escape(case_id) for case_id in selected_case_ids)
+                )
+                if truncated_case_ids:
+                    console.print(
+                        f"  [yellow]{len(truncated_case_ids)} safe failed case(s) omitted by --max-cases[/yellow]"
+                    )
+                unsafe_selected = selected_effect_risk_case_ids
+                if unsafe_selected:
+                    console.print(
+                        "  [yellow]selected case has prior execution(s) that may have caused "
+                        "external effects; retry can repeat them: "
+                        f"{', '.join(escape(case_id) for case_id in unsafe_selected)}[/yellow]"
+                    )
+            return
+
+        child_run_id = create_run(
+            compiled,
+            storage=storage,
+            artifacts=artifacts,
+            granted_by="cli:runs retry",
+            run_seed=run_seed,
+            parent_run_id=parent_run_id,
+        )
+        if not json_output:
+            console.print(
+                f"child run [bold]{child_run_id}[/bold] created from parent "
+                f"[bold]{escape(parent_run_id)}[/bold] with {len(compiled.cases)} case(s)"
+            )
+            if truncated_case_ids:
+                console.print(
+                    f"[yellow]selected the first {max_cases} safe failures; "
+                    f"{len(truncated_case_ids)} more were omitted by --max-cases[/yellow]"
+                )
+            explicitly_retried_unsafe = selected_effect_risk_case_ids
+            if explicitly_retried_unsafe:
+                console.print(
+                    "[yellow]selected case has prior execution(s) that may have caused "
+                    "external effects; retry can repeat them: "
+                    f"{', '.join(escape(case_id) for case_id in explicitly_retried_unsafe)}[/yellow]"
+                )
+        outcome = asyncio.run(_execute(child_run_id, storage, artifacts))
+        code = _finish(
+            child_run_id,
+            outcome,
+            storage,
+            artifacts,
+            json_output,
+            retry_scope={
+                "selected_case_ids": [case.case_id for case in compiled.cases],
+                "repetitions": compiled.plan.repetitions,
+                "truncated_case_ids": truncated_case_ids,
+                "unsafe_failed_case_ids": sorted(unsafe_failed_case_ids),
+                "selected_effect_risk_case_ids": selected_effect_risk_case_ids,
+            },
+        )
+    except AibenchError as exc:
+        raise _report_problems(exc, json_output=json_output) from exc
+    except KeyboardInterrupt as exc:
+        raise _interrupted_before_dispatch(child_run_id, json_output=json_output) from exc
     finally:
         storage.db.close()
     raise typer.Exit(code=code)

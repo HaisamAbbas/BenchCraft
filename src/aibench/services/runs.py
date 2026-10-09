@@ -65,14 +65,22 @@ from aibench.core.models import (
     RunManifest,
     WorkItem,
     WorkItemState,
+    deep_unfreeze,
 )
-from aibench.core.plans import ExecutablePlan
+from aibench.core.plans import CaseSelection, ExecutablePlan
 from aibench.engine.budget import BudgetLedger
 from aibench.engine.cache import (
     application_code_identity,
     application_resume_identity_problem,
 )
-from aibench.engine.compile import CompiledRun, PlanInvalid, PolicyDenied, load_plan
+from aibench.engine.compile import (
+    CompiledRun,
+    PlanInvalid,
+    PolicyDenied,
+    analyze_plan,
+    compiled_from,
+    load_plan,
+)
 from aibench.engine.engine import (
     RunController,
     RunEngine,
@@ -616,6 +624,7 @@ def create_run(
     granted_by: str,
     run_id: str | None = None,
     run_seed: int | None = None,
+    parent_run_id: str | None = None,
     experiment_context: dict[str, Any] | None = None,
     environ: dict[str, str] | None = None,
 ) -> str:
@@ -657,6 +666,11 @@ def create_run(
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     if not run_id or len(run_id) > 120:
         raise RunError("run_id must be a non-empty value of at most 120 characters")
+    if parent_run_id is not None:
+        if parent_run_id == run_id:
+            raise RunError("a run cannot be its own parent")
+        if storage.get_run(parent_run_id) is None:
+            raise RunError(f"parent run {parent_run_id!r} does not exist")
     if run_seed is not None and (
         isinstance(run_seed, bool) or not isinstance(run_seed, int) or not 0 <= run_seed < 2**31
     ):
@@ -677,6 +691,7 @@ def create_run(
                 and parameters.get("application_vcs_identity") != application_vcs_identity
             )
             or (run_seed is not None and existing_run.manifest.seed != run_seed)
+            or existing_run.manifest.parent_run_id != parent_run_id
             or parameters.get("experiment_context") != experiment_context
         ):
             raise RunError(f"run id {run_id!r} already belongs to different frozen content")
@@ -702,6 +717,7 @@ def create_run(
                     "cases": len(compiled.cases),
                     "repetitions": compiled.plan.repetitions,
                     "metrics": len(compiled.metrics),
+                    "parent_run_id": parent_run_id,
                 },
             )
         return run_id
@@ -754,6 +770,7 @@ def create_run(
         application_hash=content_hash(spec.model_dump(mode="json")),
         plan_hash=compiled.plan_hash,
         application_id=spec.application_id,
+        parent_run_id=parent_run_id,
         dependency_lock_hash=dependency_lock_hash,
         plugin_hashes={
             m.manifest.evaluator_id: f"{m.manifest.plugin_id}=={m.manifest.plugin_version}"
@@ -809,9 +826,106 @@ def create_run(
             "cases": len(compiled.cases),
             "repetitions": compiled.plan.repetitions,
             "metrics": len(compiled.metrics),
+            "parent_run_id": parent_run_id,
         },
     )
     return run_id
+
+
+def compile_retry_run(
+    parent_run_id: str,
+    case_ids: list[str] | tuple[str, ...],
+    repetitions: int,
+    *,
+    storage: Storage,
+    artifacts: ArtifactStore,
+    current_policy: ExecutionPolicy,
+    trusted_local: bool = False,
+) -> CompiledRun:
+    """Compile a bounded child plan from a parent's frozen benchmark inputs.
+
+    The parent must be terminal so its work graph cannot change under a concurrent resume.
+    Re-reading the dataset while compiling the child verifies that case data still has the
+    parent's content hash, while revalidating current application/evaluator implementations
+    and permissions allows a retry after a fix. Test-world seed content must still match the
+    verified seed artifact frozen with the parent.
+    """
+    parent = storage.get_run(parent_run_id)
+    if parent is None:
+        raise RunError(f"no run committed with run_id={parent_run_id!r}")
+    if parent.status in RESUMABLE_STATES:
+        raise RunError(
+            f"run {parent_run_id!r} is {parent.status}; finish or resume it before retrying"
+        )
+    params = deep_unfreeze(parent.manifest.parameters) or {}
+    if params.get("mode") != "manual_plan" or not params.get("plan_artifact_id"):
+        raise RunError("only plan-based benchmark runs can be retried")
+
+    selected = tuple(case_ids)
+    if not selected:
+        raise RunError("retry needs at least one selected case")
+    if len(set(selected)) != len(selected):
+        raise RunError("retry case IDs must be unique")
+    if not 1 <= repetitions <= 100:
+        raise RunError("retry repetitions must be between 1 and 100")
+
+    planned_case_ids: set[str] = set()
+    for item in storage.list_work_items(parent_run_id):
+        if item.kind != "execution":
+            continue
+        try:
+            case_id, _, _ = parse_work_item_key(item.task_key, "execution")
+        except ValueError as exc:
+            raise RunError(f"parent run has an invalid execution work item: {exc}") from exc
+        planned_case_ids.add(case_id)
+    outside_scope = sorted(set(selected) - planned_case_ids)
+    if outside_scope:
+        raise RunError(
+            "retry cases were not selected by the parent run: " + ", ".join(outside_scope)
+        )
+
+    try:
+        plan = _frozen_plan(storage, artifacts, parent.manifest)
+        plan_dir = Path(str(params["plan_dir"])).resolve()
+        parent_policy = ExecutionPolicy.model_validate(params["policy"])
+    except (AibenchError, KeyError, OSError, ValueError) as exc:
+        raise RunError(
+            f"cannot prepare retry from the parent's frozen plan and policy: {exc}"
+        ) from exc
+
+    child_plan = plan.model_copy(
+        update={
+            "selection": CaseSelection(case_ids=selected),
+            "repetitions": repetitions,
+        }
+    )
+    try:
+        active_policy = current_policy.with_trusted_local(trusted_local)
+        if active_policy != parent_policy:
+            # A child is a new authorization decision. Require both the policy frozen
+            # with its parent and today's active policy to allow the dispatch, while
+            # retaining the parent's (possibly narrower) policy in the child manifest.
+            compiled_from(analyze_plan(child_plan, plan_dir, policy=active_policy))
+        analysis = analyze_plan(child_plan, plan_dir, policy=parent_policy)
+    except OSError as exc:
+        raise RunError(f"cannot reload the parent's dataset and application: {exc}") from exc
+    if analysis.dataset is None or analysis.dataset.content_hash != parent.manifest.dataset_hash:
+        raise RunError(
+            "the parent's dataset changed or is unavailable; refusing to retry different cases"
+        )
+    parent_world_id, _ = _frozen_world_seed(storage, artifacts, parent.manifest)
+    frozen_world = params.get("test_world") or {}
+    if analysis.world is not None and (
+        analysis.world.world_id != parent_world_id
+        or analysis.world.seed_hash != frozen_world.get("seed_hash")
+    ):
+        raise RunError(
+            "the current test world seed differs from the parent's frozen seed; "
+            "refusing to retry with different world state"
+        )
+    if analysis.world is None and parent_world_id is not None:
+        raise RunError("the parent's frozen test world is missing from the retry plan")
+    return compiled_from(analysis)
 
 
 def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str) -> None:
@@ -932,9 +1046,7 @@ def _verify_application_resume_identity(
         base_dir,
         environ if environ is not None else os.environ,
     )
-    current_environment_identity = _application_environment_identity(
-        spec, base_dir, environ
-    )
+    current_environment_identity = _application_environment_identity(spec, base_dir, environ)
     if current != baseline:
         raise RunError(
             "the application's source, inherited environment, secrets, or aibench version "

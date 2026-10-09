@@ -334,3 +334,35 @@ def test_the_seed_is_frozen_with_the_run(world: tuple[Path, Any]) -> None:
     with pytest.raises(RunError, match="test world seed"):
         h.execute(run_id)
     assert server.calls["/agent"] == 0
+
+
+def test_retry_refuses_a_changed_test_world_seed(world: tuple[Path, Any]) -> None:
+    from aibench.services.runs import RunError, compile_retry_run
+    from aibench.storage.artifacts import ArtifactStore
+    from tests.engine_support import Harness
+
+    project, server = world
+    policy = ExecutionPolicy.model_validate_json((project / "policy.json").read_text())
+    h = Harness(project / "retry")
+    run_id = h.create(project / "plan.json", policy=policy.resolved_against(project))
+    storage = Storage(Database.open_workspace(h.workspace))
+    try:
+        storage.update_run_status(run_id, "completed")
+        seed_file = project / "worlds" / "two-seats.json"
+        seed_file.write_text(
+            json.dumps({"flights": {"BA117": {"seats": 9}}, "bookings": []}),
+            encoding="utf-8",
+        )
+        with pytest.raises(RunError, match="differs from the parent's frozen seed"):
+            compile_retry_run(
+                run_id,
+                ["book-by-code"],
+                1,
+                storage=storage,
+                artifacts=ArtifactStore(h.workspace.artifacts_dir),
+                current_policy=policy.resolved_against(project).with_trusted_local(True),
+                trusted_local=True,
+            )
+    finally:
+        storage.db.close()
+    assert server.calls["/agent"] == 0
