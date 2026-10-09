@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 
 from aibench.cli.main import app
 from aibench.observations.otel import TraceFormatError, normalize, parse_otlp
+from aibench.services.traces import _read_trace_file
 
 cli = CliRunner()
 # The fixture's two model calls: 12+5 and 20+9 tokens; its agent span repeats the total.
@@ -147,6 +148,7 @@ def test_malformed_nested_trace_shape_is_a_json_input_error(traced: tuple[Path, 
     }
     assert "Traceback" not in result.output
 
+
     malformed.write_text(
         json.dumps(
             {
@@ -189,6 +191,52 @@ def test_malformed_nested_trace_shape_is_a_json_input_error(traced: tuple[Path, 
     assert document["status"] == "error" and document["exit_code"] == 2
     assert "string key" in document["message"]
     assert "Traceback" not in result.output
+
+
+def test_trace_file_preflight_rejects_oversized_file_before_open(tmp_path: Path) -> None:
+    path = tmp_path / "oversized.json"
+    path.write_bytes(b"x" * 1_000)
+
+    class NoOpenPath:
+        name = path.name
+
+        def stat(self):
+            return path.stat()
+
+        def open(self, *_args: object, **_kwargs: object):
+            raise AssertionError("oversized trace should be rejected before opening")
+
+    with pytest.raises(TraceFormatError, match="exceeds the 100-byte limit"):
+        _read_trace_file(NoOpenPath(), 100)  # type: ignore[arg-type]
+
+
+def test_trace_file_read_stops_at_one_byte_over_the_limit() -> None:
+    import io
+    from types import SimpleNamespace
+
+    class TrackingReader(io.BytesIO):
+        bytes_read = 0
+
+        def read(self, size: int = -1) -> bytes:
+            data = super().read(size)
+            self.bytes_read += len(data)
+            return data
+
+    source = TrackingReader(b"x" * 1_000)
+
+    class GrowingPath:
+        name = "growing.json"
+
+        def stat(self):
+            return SimpleNamespace(st_size=100)  # it grows after the preflight check
+
+        def open(self, *_args: object, **_kwargs: object):
+            return source
+
+    with pytest.raises(TraceFormatError, match="exceeds the 100-byte limit"):
+        _read_trace_file(GrowingPath(), 100)  # type: ignore[arg-type]
+
+    assert source.bytes_read == 101
 
 
 @pytest.mark.parametrize(

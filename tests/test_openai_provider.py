@@ -43,7 +43,12 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length) or b"{}")
         self.server.requests.append(
-            {"path": self.path, "auth": self.headers.get("Authorization"), "body": body}
+            {
+                "path": self.path,
+                "auth": self.headers.get("Authorization"),
+                "accept_encoding": self.headers.get("Accept-Encoding"),
+                "body": body,
+            }
         )
         status, payload = self.server.replies.pop(0)
         raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
@@ -114,6 +119,7 @@ def test_request_shape_auth_and_tool_call_parsing() -> None:
     [request] = server.requests
     assert request["path"] == "/v1/chat/completions"
     assert request["auth"] == f"Bearer {KEY}"
+    assert request["accept_encoding"] == "gzip, deflate"
     body = request["body"]
     assert (body["model"], body["tool_choice"], body["temperature"], body["seed"]) == (
         "planner-model",

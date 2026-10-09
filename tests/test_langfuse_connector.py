@@ -15,10 +15,12 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
 from aibench.cli.main import app
+from aibench.connectors.langfuse import ConnectorError, LangfuseClient, LangfuseConfig
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO / "examples" / "langfuse"
@@ -250,6 +252,70 @@ def test_the_live_status_is_explicit() -> None:
     status = json.loads(result.stdout)
     assert "not verified against a live Langfuse deployment" in status["live_verification"]
     assert status["modes"] == ["import-dataset", "import-traces", "export-scores"]
+
+
+@pytest.mark.parametrize("status", [200, 500])
+def test_langfuse_success_and_error_bodies_stop_at_the_response_limit(
+    status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("aibench.connectors.langfuse.MAX_RESPONSE_BYTES", 100)
+
+    class Chunks(httpx.SyncByteStream):
+        def __init__(self) -> None:
+            self.consumed = 0
+
+        def __iter__(self):
+            for _ in range(10):
+                self.consumed += 100
+                yield b"x" * 100
+
+        def close(self) -> None:
+            pass
+
+    stream = Chunks()
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(status, stream=stream, request=request)
+    )
+    client = LangfuseClient(
+        LangfuseConfig(
+            host="https://langfuse.example",
+            public_key="env:PUBLIC",
+            secret_key="env:SECRET",
+        ),
+        {"PUBLIC": "public", "SECRET": "secret"},
+        transport=transport,
+    )
+    try:
+        with pytest.raises(ConnectorError, match="response over 100 bytes"):
+            client._request("GET", "api/public/v2/datasets/quiz")
+    finally:
+        client.close()
+
+    assert 100 < stream.consumed < 1_000
+
+
+def test_langfuse_advertises_only_bounded_content_encodings() -> None:
+    accept_encodings: list[str | None] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        accept_encodings.append(request.headers.get("Accept-Encoding"))
+        return httpx.Response(200, json={"data": []}, request=request)
+
+    client = LangfuseClient(
+        LangfuseConfig(
+            host="https://langfuse.example",
+            public_key="env:PUBLIC",
+            secret_key="env:SECRET",
+        ),
+        {"PUBLIC": "public", "SECRET": "secret"},
+        transport=httpx.MockTransport(respond),
+    )
+    try:
+        client._request("GET", "api/public/v2/datasets/quiz")
+    finally:
+        client.close()
+
+    assert accept_encodings == ["gzip, deflate"]
 
 
 def test_a_rescored_run_exports_one_score_per_trace_and_metric(

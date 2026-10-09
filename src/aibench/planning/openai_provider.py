@@ -23,7 +23,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -34,6 +34,13 @@ from aibench.core.errors import AibenchError
 from aibench.core.models import FrozenModel, SecretRefStr
 from aibench.planning.planner import ModelReply, PlannerError, ToolCall
 from aibench.security.endpoints import is_loopback, origin_of
+from aibench.security.http import (
+    BOUNDED_ACCEPT_ENCODING,
+    ResponseEncodingError,
+    ResponseTooLarge,
+    iter_limited_response,
+    read_limited_response,
+)
 from aibench.security.policy import ExecutionPolicy
 from aibench.security.secrets import Redactor, resolve_secret
 
@@ -110,7 +117,10 @@ class OpenAICompatibleProvider:
         self.name = f"openai_compatible:{origin_of(config.base_url)}"
         self.model = config.model
         env = dict(os.environ) if environ is None else dict(environ)
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
+        }
         secrets: list[tuple[str, str]] = []
         if config.api_key is not None:
             key = resolve_secret(config.api_key, env)  # raises ConfigError if unset
@@ -179,7 +189,18 @@ class OpenAICompatibleProvider:
             try:
                 with self._client.stream("POST", "chat/completions", json=body) as response:
                     if response.status_code != 200:
-                        raw = response.read()[:MAX_RESPONSE_BYTES]
+                        oversized = False
+                        try:
+                            raw = read_limited_response(response, MAX_RESPONSE_BYTES)
+                        except ResponseTooLarge as exc:
+                            raw = exc.partial
+                            oversized = True
+                        except ResponseEncodingError as exc:
+                            raw = b""
+                            oversized = False
+                            encoding_error = str(exc)
+                        else:
+                            encoding_error = ""
                         text = self._redactor.text(raw.decode("utf-8", errors="replace"))
                         pause = self._pause(
                             attempt,
@@ -188,15 +209,24 @@ class OpenAICompatibleProvider:
                             text,
                         )
                         if pause is None:
-                            raise PlannerError(f"HTTP {response.status_code}: {text[:300]}")
+                            detail = (
+                                f"response exceeds {MAX_RESPONSE_BYTES} bytes"
+                                if oversized
+                                else encoding_error or text[:300]
+                            )
+                            raise PlannerError(f"HTTP {response.status_code}: {detail}")
                     else:
-                        received = 0
-                        for line in response.iter_lines():
-                            received += len(line) + 1
-                            if received > MAX_RESPONSE_BYTES:
-                                raise PlannerError(f"response exceeds {MAX_RESPONSE_BYTES} bytes")
-                            if state.feed(line):
-                                break
+                        try:
+                            lines = _sse_lines(
+                                iter_limited_response(
+                                    response, MAX_RESPONSE_BYTES, chunk_size=None
+                                )
+                            )
+                            for line in lines:
+                                if state.feed(line):
+                                    return state.reply()
+                        except (ResponseTooLarge, ResponseEncodingError) as exc:
+                            raise PlannerError(str(exc)) from exc
                         return state.reply()
             except httpx.HTTPError as exc:
                 # Once text or a tool call has streamed, a retry would repeat it.
@@ -212,13 +242,28 @@ class OpenAICompatibleProvider:
             retry_after: str | None = None
             try:
                 with self._client.stream("POST", "chat/completions", json=body) as response:
-                    raw = bytearray()
-                    for chunk in response.iter_bytes():
-                        raw.extend(chunk)
-                        if len(raw) > MAX_RESPONSE_BYTES:
-                            raise PlannerError(f"response exceeds {MAX_RESPONSE_BYTES} bytes")
                     status = response.status_code
                     retry_after = response.headers.get("retry-after")
+                    try:
+                        raw = read_limited_response(response, MAX_RESPONSE_BYTES)
+                    except (ResponseTooLarge, ResponseEncodingError) as exc:
+                        if status == 200:
+                            raise PlannerError(str(exc)) from exc
+                        partial = exc.partial if isinstance(exc, ResponseTooLarge) else b""
+                        text = self._redactor.text(partial.decode("utf-8", errors="replace"))
+                        pause = self._pause(attempt, status, retry_after, text)
+                        if pause is None:
+                            detail = (
+                                f"response exceeds {MAX_RESPONSE_BYTES} bytes"
+                                if isinstance(exc, ResponseTooLarge)
+                                else str(exc)
+                            )
+                            raise PlannerError(
+                                f"HTTP {status}: {detail}"
+                            ) from exc
+                        response.close()
+                        time.sleep(pause)
+                        continue
             except httpx.HTTPError as exc:
                 pause = self._pause(attempt, None, None)
                 if pause is None:
@@ -233,6 +278,29 @@ class OpenAICompatibleProvider:
                 raise PlannerError(f"HTTP {status}: {text[:300]}")
             time.sleep(pause)
         raise PlannerError("no reply after retries")  # unreachable: the last attempt raises
+
+
+def _sse_lines(chunks: Iterable[bytes]) -> Iterator[str]:
+    """Decode SSE lines separated by LF, CRLF, or bare CR, including split separators."""
+    pending = bytearray()
+    skip_lf = False
+    for chunk in chunks:
+        for byte in chunk:
+            if skip_lf:
+                skip_lf = False
+                if byte == 0x0A:
+                    continue
+            if byte == 0x0D:
+                yield bytes(pending).decode("utf-8", errors="replace")
+                pending.clear()
+                skip_lf = True
+            elif byte == 0x0A:
+                yield bytes(pending).decode("utf-8", errors="replace")
+                pending.clear()
+            else:
+                pending.append(byte)
+    if pending:
+        yield bytes(pending).decode("utf-8", errors="replace")
 
 
 def parse_reply(text: str) -> ModelReply:

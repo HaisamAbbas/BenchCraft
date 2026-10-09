@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F13",
+  "current_item": "F15",
   "items": [
     {
       "id": "F01",
@@ -238,7 +238,7 @@
         "Final independent review: no findings"
       ],
       "review": "evidence/F13-review.md",
-      "commit": null,
+      "commit": "a4b00d3a3308bc7ed471385e0e5decb2bd55d9b3",
       "pushed": true
     },
     {
@@ -263,9 +263,15 @@
       "title": "Some advertised size caps act after the whole response is read",
       "detail": "Mock stream reproduction and source",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "delivered",
+      "verification": [
+        "Final affected HTTP, trace, connector, and retry integration batch: 69 passed",
+        "Mypy: 142 source files passed; Ruff src/tests passed; git diff --check passed",
+        "Bounded gzip/deflate decoding, encoding negotiation, HTTP body caps, and trace-file size race verified",
+        "SSE LF/CRLF/CR compatibility and oversized retryable status handling verified",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F15-review.md",
       "commit": null,
       "pushed": false
     },
