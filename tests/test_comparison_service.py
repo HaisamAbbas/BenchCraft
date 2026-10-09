@@ -384,10 +384,30 @@ def test_compatible_runs_pair_case_repetition_and_report_macro_groups(tmp_path: 
         repetitions=2,
         values=_values(("a1", 0, 2), ("a1", 1, 3), ("b1", 0, 4), ("b1", 1, 8)),
     )
+    storage.promote_baseline("production", "baseline", "release-manager")
 
     report = compare_runs(storage, ArtifactStore(tmp_path / "artifacts"), "baseline", "current", bootstrap_replicates=100)
+    aliased = compare_runs(
+        storage,
+        ArtifactStore(tmp_path / "artifacts"),
+        "@production",
+        "current",
+        bootstrap_replicates=100,
+    )
+    named = compare_runs(
+        storage,
+        ArtifactStore(tmp_path / "artifacts"),
+        "Production",
+        "current",
+        bootstrap_replicates=100,
+    )
 
     assert report["status"] == "qualified"
+    assert aliased["baseline_run_id"] == "baseline"
+    assert aliased["baseline_alias"] == "production"
+    assert aliased["qualified"] is True
+    assert named["baseline_run_id"] == "baseline"
+    assert named["baseline_alias"] == "production"
     assert report["qualified"] is True
     assert report["execution_identity"]["classification"] == "fresh_or_unknown_execution_identity"
     assert report["identity_checks"]["application"]["compatible"] is False
@@ -1075,6 +1095,8 @@ def test_comparison_validates_inputs_and_missing_runs() -> None:
     storage = Storage(Database.open_in_memory())
     with pytest.raises(ComparisonError):
         compare_runs(storage, None, "missing", "also-missing")
+    with pytest.raises(ComparisonError, match="no named baseline"):
+        compare_runs(storage, None, "@missing", "also-missing")
     with pytest.raises(ComparisonError):
         compare_runs(storage, None, "b", "c", mode="qualified")  # type: ignore[arg-type]
 

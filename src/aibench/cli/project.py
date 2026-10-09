@@ -539,7 +539,9 @@ def install_preview(summary: dict[str, Any]) -> list[str]:
 
 
 def compare(
-    baseline: str = typer.Argument(..., help="Baseline run ID."),
+    baseline: str = typer.Argument(
+        ..., help="Baseline run ID or named alias; prefix with @ to force alias resolution."
+    ),
     current: str = typer.Argument(..., help="Current run ID."),
     baseline_scoring: str | None = typer.Option(
         None, "--baseline-scoring", help="Explicit baseline scoring-pass ID."

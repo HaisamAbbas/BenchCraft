@@ -565,6 +565,46 @@ _0011_experiments = Migration(
     """,
 )
 
+# Goal 06: searchable run annotations and explicitly approved named baselines.
+_0012_run_catalog = Migration(
+    version=12,
+    name="run_catalog",
+    sql="""
+    CREATE TABLE run_tags (
+        run_id      TEXT NOT NULL REFERENCES runs(run_id),
+        tag         TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        PRIMARY KEY (run_id, tag)
+    );
+    CREATE INDEX idx_run_tags_tag_run ON run_tags(tag, run_id);
+
+    CREATE TABLE run_notes (
+        run_id      TEXT PRIMARY KEY REFERENCES runs(run_id),
+        note        TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE run_baselines (
+        alias        TEXT PRIMARY KEY,
+        run_id       TEXT NOT NULL REFERENCES runs(run_id),
+        approved_by  TEXT NOT NULL,
+        promoted_at  TEXT NOT NULL
+    );
+    CREATE INDEX idx_run_baselines_run ON run_baselines(run_id, alias);
+
+    CREATE TABLE baseline_promotions (
+        promotion_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        alias            TEXT NOT NULL,
+        run_id           TEXT NOT NULL REFERENCES runs(run_id),
+        previous_run_id  TEXT REFERENCES runs(run_id),
+        approved_by      TEXT NOT NULL,
+        promoted_at      TEXT NOT NULL
+    );
+    CREATE INDEX idx_baseline_promotions_alias
+        ON baseline_promotions(alias, promotion_id DESC);
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
@@ -577,6 +617,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _0009_candidate_workflow,
     _0010_remote_jobs,
     _0011_experiments,
+    _0012_run_catalog,
 )
 
 

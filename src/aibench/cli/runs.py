@@ -9,10 +9,21 @@ from rich.markup import escape
 
 from aibench.cli.errors import error_exit
 from aibench.cli.output import Console
+from aibench.core.errors import AibenchError
+from aibench.services.run_catalog import (
+    RunCatalogError,
+    normalize_baseline_alias,
+    normalize_note,
+    normalize_tag,
+    promote_approved_baseline,
+)
+from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
-from aibench.storage.repositories import RunRecord, Storage
+from aibench.storage.repositories import BaselinePromotion, RunBaseline, RunRecord, Storage
 
 app = typer.Typer(help="Inspect committed runs.")
+baseline_app = typer.Typer(help="Inspect and promote approved named baselines.")
+app.add_typer(baseline_app, name="baseline")
 console = Console()
 err_console = Console(stderr=True)
 
@@ -23,7 +34,9 @@ def _open_storage(workspace: Path | None) -> Storage:
     return Storage(db)
 
 
-def _run_to_dict(record: RunRecord) -> dict[str, object]:
+def _run_to_dict(
+    record: RunRecord, metadata: dict[str, object] | None = None
+) -> dict[str, object]:
     manifest = record.manifest.model_dump(mode="json")
     parameters = manifest["parameters"]
     identity_basis = parameters.get("application_identity_basis")
@@ -46,6 +59,9 @@ def _run_to_dict(record: RunRecord) -> dict[str, object]:
         "created_at": record.created_at,
         "committed_at": record.committed_at,
         "updated_at": record.updated_at,
+        "tags": (metadata or {}).get("tags", []),
+        "note": (metadata or {}).get("note"),
+        "baselines": (metadata or {}).get("baselines", []),
     }
 
 
@@ -56,26 +72,68 @@ def list_runs(
     ),
     status: str | None = typer.Option(None, "--status", help="Filter by run status."),
     limit: int = typer.Option(100, "--limit", help="Maximum runs to show."),
+    offset: int = typer.Option(0, "--offset", help="Skip this many matching runs for pagination."),
+    query: str | None = typer.Option(None, "--query", help="Search run IDs, identities, tags, notes and baseline aliases."),
+    tag: str | None = typer.Option(None, "--tag", help="Filter by an exact run tag."),
+    baseline: str | None = typer.Option(None, "--baseline", help="Filter by a promoted baseline alias."),
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
+    if not 1 <= limit <= 1000 or offset < 0:
+        raise error_exit(
+            "--limit must be 1 to 1000 and --offset must be non-negative",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
+    try:
+        normalized_tag = normalize_tag(tag) if tag is not None else None
+        normalized_baseline = (
+            normalize_baseline_alias(baseline) if baseline is not None else None
+        )
+    except RunCatalogError as exc:
+        raise error_exit(
+            str(exc),
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
     storage = _open_storage(workspace)
     try:
-        records = storage.list_runs(status=status, limit=limit)
+        records = storage.search_runs(
+            status=status,
+            query=query.strip() if query and query.strip() else None,
+            tag=normalized_tag,
+            baseline=normalized_baseline,
+            limit=limit,
+            offset=offset,
+        )
+        metadata = storage.list_run_metadata(record.manifest.run_id for record in records)
     finally:
         storage.db.close()
 
     if json_output:
-        console.print_json(data=[_run_to_dict(r) for r in records])
+        console.print_json(
+            data=[_run_to_dict(record, metadata[record.manifest.run_id]) for record in records]
+        )
         return
 
     if not records:
-        console.print("[dim]No runs committed in this workspace.[/dim]")
+        console.print("[dim]No runs matched those criteria.[/dim]")
         return
     for record in records:
+        details = metadata[record.manifest.run_id]
         console.print(
-            f"[bold]{record.manifest.run_id}[/bold]  status={record.status}  "
-            f"created_at={record.created_at}"
+            f"[bold]{escape(record.manifest.run_id)}[/bold]  status={escape(record.status)}  "
+            f"created_at={escape(record.created_at)}"
         )
+        if details["tags"]:
+            console.print(f"  tags: {escape(', '.join(details['tags']))}")
+        if details["baselines"]:
+            console.print(f"  baselines: {escape(', '.join(details['baselines']))}")
+        if details["note"]:
+            console.print(f"  note: {escape(details['note'])}")
 
 
 @app.command("show")
@@ -89,6 +147,7 @@ def show_run(
     storage = _open_storage(workspace)
     try:
         record = storage.get_run(run_id)
+        metadata = storage.list_run_metadata([run_id])[run_id] if record else None
     finally:
         storage.db.close()
 
@@ -101,8 +160,10 @@ def show_run(
             err_console=err_console,
         )
 
+    assert metadata is not None
+
     if json_output:
-        console.print_json(data=_run_to_dict(record))
+        console.print_json(data=_run_to_dict(record, metadata))
         return
 
     console.print(f"[bold]{record.manifest.run_id}[/bold]")
@@ -140,3 +201,233 @@ def show_run(
     console.print(f"  plan_hash: {record.manifest.plan_hash}")
     console.print(f"  created_at: {record.created_at}")
     console.print(f"  updated_at: {record.updated_at}")
+    console.print(f"  tags: {escape(', '.join(metadata['tags']) or '(none)')}")
+    console.print(f"  baselines: {escape(', '.join(metadata['baselines']) or '(none)')}")
+    if metadata["note"]:
+        console.print(f"  note: {escape(metadata['note'])}")
+
+
+@app.command("tag")
+def add_tag(
+    run_id: str = typer.Argument(..., help="Run to tag."),
+    tag: str = typer.Argument(..., help="Tag label (letters, digits, '.', '_' or '-')."),
+    workspace: Path | None = typer.Option(None, "--workspace", help="Project root containing .aibench/."),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    try:
+        tag = normalize_tag(tag)
+        storage = _open_storage(workspace)
+        try:
+            added = storage.add_run_tag(run_id, tag)
+        finally:
+            storage.db.close()
+    except (AibenchError, KeyError) as exc:
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
+    result = {"run_id": run_id, "tag": tag, "added": added}
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(f"{'added' if added else 'already present'} tag {escape(tag)} on {escape(run_id)}")
+
+
+@app.command("untag")
+def remove_tag(
+    run_id: str = typer.Argument(..., help="Run to remove a tag from."),
+    tag: str = typer.Argument(..., help="Tag label to remove."),
+    workspace: Path | None = typer.Option(None, "--workspace", help="Project root containing .aibench/."),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    try:
+        tag = normalize_tag(tag)
+        storage = _open_storage(workspace)
+        try:
+            removed = storage.remove_run_tag(run_id, tag)
+        finally:
+            storage.db.close()
+    except (AibenchError, KeyError) as exc:
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
+    result = {"run_id": run_id, "tag": tag, "removed": removed}
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(f"{'removed' if removed else 'not present'} tag {escape(tag)} on {escape(run_id)}")
+
+
+@app.command("note")
+def set_note(
+    run_id: str = typer.Argument(..., help="Run to annotate."),
+    note: str | None = typer.Argument(None, help="Run note (maximum 2000 characters)."),
+    clear: bool = typer.Option(False, "--clear", help="Remove the current note."),
+    workspace: Path | None = typer.Option(None, "--workspace", help="Project root containing .aibench/."),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    if clear == (note is not None):
+        raise error_exit(
+            "provide NOTE or --clear, but not both",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
+    try:
+        normalized_note = normalize_note(note) if note is not None else None
+        storage = _open_storage(workspace)
+        try:
+            changed = storage.set_run_note(run_id, normalized_note)
+            metadata = storage.list_run_metadata([run_id])[run_id]
+        finally:
+            storage.db.close()
+    except (AibenchError, KeyError) as exc:
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
+    result = {"run_id": run_id, "note": metadata["note"], "changed": changed}
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print("run note cleared" if clear else "run note updated")
+
+
+@baseline_app.command("list")
+def list_baselines(
+    workspace: Path | None = typer.Option(None, "--workspace", help="Project root containing .aibench/."),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    storage = _open_storage(workspace)
+    try:
+        baselines = storage.list_baselines()
+    finally:
+        storage.db.close()
+    payload = [_baseline_to_dict(baseline) for baseline in baselines]
+    if json_output:
+        console.print_json(data=payload)
+    elif not payload:
+        console.print("No named baselines have been promoted.")
+    else:
+        for baseline in baselines:
+            console.print(
+                f"{escape(baseline.alias)} -> {escape(baseline.run_id)} "
+                f"approved_by={escape(baseline.approved_by)} promoted_at={escape(baseline.promoted_at)}"
+            )
+
+
+@baseline_app.command("show")
+def show_baseline(
+    alias: str = typer.Argument(..., help="Named baseline alias."),
+    workspace: Path | None = typer.Option(None, "--workspace", help="Project root containing .aibench/."),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    try:
+        alias = normalize_baseline_alias(alias)
+        storage = _open_storage(workspace)
+        try:
+            baseline = storage.get_baseline(alias)
+        finally:
+            storage.db.close()
+    except RunCatalogError as exc:
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
+    if baseline is None:
+        raise error_exit(
+            f"no baseline promoted with alias={alias!r}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
+    payload = _baseline_to_dict(baseline)
+    if json_output:
+        console.print_json(data=payload)
+    else:
+        console.print(
+            f"{escape(baseline.alias)} -> {escape(baseline.run_id)} "
+            f"approved_by={escape(baseline.approved_by)} promoted_at={escape(baseline.promoted_at)}"
+        )
+
+
+@baseline_app.command("promote")
+def promote_baseline(
+    alias: str = typer.Argument(..., help="Alias to promote, such as production."),
+    run_id: str = typer.Argument(..., help="Completed run to promote."),
+    approved_by: str = typer.Option(..., "--approved-by", help="Human approving this baseline."),
+    workspace: Path | None = typer.Option(None, "--workspace", help="Project root containing .aibench/."),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    ws = Workspace.at(workspace or Path.cwd())
+    storage = Storage(Database.open_workspace(ws))
+    try:
+        result = promote_approved_baseline(
+            storage,
+            ArtifactStore(ws.artifacts_dir),
+            alias,
+            run_id,
+            approved_by=approved_by,
+        )
+    except AibenchError as exc:
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
+    finally:
+        storage.db.close()
+    payload = {**_baseline_to_dict(result.baseline), "changed": result.changed}
+    if json_output:
+        console.print_json(data=payload)
+    else:
+        console.print(
+            f"{'promoted' if result.changed else 'already current'} baseline "
+            f"{escape(result.baseline.alias)} -> {escape(result.baseline.run_id)}"
+        )
+
+
+@baseline_app.command("history")
+def baseline_history(
+    alias: str = typer.Argument(..., help="Named baseline alias."),
+    workspace: Path | None = typer.Option(None, "--workspace", help="Project root containing .aibench/."),  # noqa: B008
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    try:
+        alias = normalize_baseline_alias(alias)
+        storage = _open_storage(workspace)
+        try:
+            history = storage.list_baseline_promotions(alias)
+        finally:
+            storage.db.close()
+    except RunCatalogError as exc:
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
+    payload = [_promotion_to_dict(item) for item in history]
+    if json_output:
+        console.print_json(data=payload)
+    elif not payload:
+        console.print(f"No promotion history for baseline {escape(alias)}.")
+    else:
+        for item in history:
+            console.print(
+                f"{escape(item.promoted_at)} {escape(item.alias)} -> {escape(item.run_id)} "
+                f"approved_by={escape(item.approved_by)}"
+            )
+
+
+def _baseline_to_dict(baseline: RunBaseline) -> dict[str, str]:
+    return {
+        "alias": baseline.alias,
+        "run_id": baseline.run_id,
+        "approved_by": baseline.approved_by,
+        "promoted_at": baseline.promoted_at,
+    }
+
+
+def _promotion_to_dict(promotion: BaselinePromotion) -> dict[str, str | None]:
+    return {
+        "alias": promotion.alias,
+        "run_id": promotion.run_id,
+        "previous_run_id": promotion.previous_run_id,
+        "approved_by": promotion.approved_by,
+        "promoted_at": promotion.promoted_at,
+    }

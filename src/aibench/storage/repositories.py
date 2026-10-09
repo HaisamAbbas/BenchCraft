@@ -64,6 +64,11 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _sqlite_casefold(value: object) -> str | None:
+    """Unicode-aware text folding for literal run-history searches."""
+    return value.casefold() if isinstance(value, str) else None
+
+
 @dataclass(frozen=True)
 class RunLease:
     run_id: str
@@ -156,6 +161,23 @@ class RunRecord:
     created_at: str
     committed_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class RunBaseline:
+    alias: str
+    run_id: str
+    approved_by: str
+    promoted_at: str
+
+
+@dataclass(frozen=True)
+class BaselinePromotion:
+    alias: str
+    run_id: str
+    previous_run_id: str | None
+    approved_by: str
+    promoted_at: str
 
 
 class Storage:
@@ -838,18 +860,72 @@ class Storage:
         )
 
     def list_runs(self, *, status: str | None = None, limit: int = 100) -> list[RunRecord]:
+        return self.search_runs(status=status, limit=limit)
+
+    def search_runs(
+        self,
+        *,
+        status: str | None = None,
+        query: str | None = None,
+        tag: str | None = None,
+        baseline: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunRecord]:
+        """Search committed run identity and annotations in stable newest-first pages."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("run list limit must be between 1 and 1000")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("run list offset must be a non-negative integer")
+        # Every SQLite rowid-backed table has fewer than 2**63 rows, so a larger offset
+        # cannot match anything and must not be bound as an overflowing SQLite integer.
+        if offset > 2**63 - 1:
+            return []
+        conditions: list[str] = []
+        values: list[object] = []
         if status is not None:
-            rows = self.conn.execute(
-                "SELECT data, status, created_at, committed_at, updated_at FROM runs "
-                "WHERE status = ? ORDER BY created_at DESC LIMIT ?",
-                (status, limit),
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT data, status, created_at, committed_at, updated_at FROM runs "
-                "ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            conditions.append("r.status = ?")
+            values.append(status)
+        if query:
+            self.conn.create_function("ai_casefold", 1, _sqlite_casefold, deterministic=True)
+            escaped = (
+                query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            ).casefold()
+            pattern = f"%{escaped}%"
+            conditions.append(
+                "(ai_casefold(r.run_id) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.status) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.dataset_hash) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.application_hash) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.plan_hash) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.data) LIKE ? ESCAPE '\\' "
+                "OR EXISTS (SELECT 1 FROM datasets d WHERE d.content_hash = r.dataset_hash "
+                "AND ai_casefold(d.dataset_id) LIKE ? ESCAPE '\\') "
+                "OR EXISTS (SELECT 1 FROM run_notes n WHERE n.run_id = r.run_id "
+                "AND ai_casefold(n.note) LIKE ? ESCAPE '\\') "
+                "OR EXISTS (SELECT 1 FROM run_tags t WHERE t.run_id = r.run_id "
+                "AND ai_casefold(t.tag) LIKE ? ESCAPE '\\') "
+                "OR EXISTS (SELECT 1 FROM run_baselines b WHERE b.run_id = r.run_id "
+                "AND ai_casefold(b.alias) LIKE ? ESCAPE '\\'))"
+            )
+            values.extend([pattern] * 10)
+        if tag is not None:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM run_tags t WHERE t.run_id = r.run_id AND t.tag = ?)"
+            )
+            values.append(tag)
+        if baseline is not None:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM run_baselines b "
+                "WHERE b.run_id = r.run_id AND b.alias = ?)"
+            )
+            values.append(baseline)
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = self.conn.execute(
+            "SELECT r.data, r.status, r.created_at, r.committed_at, r.updated_at "
+            "FROM runs r" + where + " ORDER BY r.created_at DESC, r.run_id DESC LIMIT ? OFFSET ?",
+            (*values, limit, offset),
+        ).fetchall()
         return [
             RunRecord(
                 manifest=RunManifest.model_validate_json(row["data"]),
@@ -860,6 +936,132 @@ class Storage:
             )
             for row in rows
         ]
+
+    def list_run_metadata(self, run_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+        ids = list(dict.fromkeys(run_ids))
+        metadata: dict[str, dict[str, Any]] = {
+            run_id: {"tags": [], "note": None, "baselines": []} for run_id in ids
+        }
+        if not ids:
+            return metadata
+        # Keep below SQLite's traditional 999 bind-parameter limit so pages of 1000
+        # remain portable to installations that do not use a newer, raised limit.
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            for row in self.conn.execute(
+                f"SELECT run_id, tag FROM run_tags WHERE run_id IN ({placeholders}) "
+                "ORDER BY tag",
+                chunk,
+            ):
+                metadata[row["run_id"]]["tags"].append(row["tag"])
+            for row in self.conn.execute(
+                f"SELECT run_id, note FROM run_notes WHERE run_id IN ({placeholders})", chunk
+            ):
+                metadata[row["run_id"]]["note"] = row["note"]
+            for row in self.conn.execute(
+                f"SELECT run_id, alias FROM run_baselines WHERE run_id IN ({placeholders}) "
+                "ORDER BY alias",
+                chunk,
+            ):
+                metadata[row["run_id"]]["baselines"].append(row["alias"])
+        return metadata
+
+    def add_run_tag(self, run_id: str, tag: str) -> bool:
+        if self.get_run(run_id) is None:
+            raise KeyError(f"no run committed with run_id={run_id!r}")
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO run_tags (run_id, tag, created_at) VALUES (?, ?, ?)",
+            (run_id, tag, _now()),
+        )
+        return cur.rowcount > 0
+
+    def remove_run_tag(self, run_id: str, tag: str) -> bool:
+        if self.get_run(run_id) is None:
+            raise KeyError(f"no run committed with run_id={run_id!r}")
+        cur = self.conn.execute("DELETE FROM run_tags WHERE run_id = ? AND tag = ?", (run_id, tag))
+        return cur.rowcount > 0
+
+    def set_run_note(self, run_id: str, note: str | None) -> bool:
+        if self.get_run(run_id) is None:
+            raise KeyError(f"no run committed with run_id={run_id!r}")
+        if note is None:
+            cur = self.conn.execute("DELETE FROM run_notes WHERE run_id = ?", (run_id,))
+            return cur.rowcount > 0
+        cur = self.conn.execute(
+            "INSERT INTO run_notes (run_id, note, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(run_id) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at "
+            "WHERE run_notes.note <> excluded.note",
+            (run_id, note, _now()),
+        )
+        return cur.rowcount > 0
+
+    def get_baseline(self, alias: str) -> RunBaseline | None:
+        row = self.conn.execute(
+            "SELECT alias, run_id, approved_by, promoted_at FROM run_baselines WHERE alias = ?",
+            (alias,),
+        ).fetchone()
+        return RunBaseline(**dict(row)) if row is not None else None
+
+    def list_baselines(self) -> list[RunBaseline]:
+        rows = self.conn.execute(
+            "SELECT alias, run_id, approved_by, promoted_at FROM run_baselines ORDER BY alias"
+        ).fetchall()
+        return [RunBaseline(**dict(row)) for row in rows]
+
+    def promote_baseline(
+        self, alias: str, run_id: str, approved_by: str
+    ) -> tuple[RunBaseline, bool]:
+        """Atomically move a named baseline and append its promotion audit record."""
+        if self.get_run(run_id) is None:
+            raise KeyError(f"no run committed with run_id={run_id!r}")
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            old = self.conn.execute(
+                "SELECT run_id FROM run_baselines WHERE alias = ?", (alias,)
+            ).fetchone()
+            previous_run_id = old["run_id"] if old is not None else None
+            if (
+                old is not None
+                and previous_run_id == run_id
+                and self.conn.execute(
+                    "SELECT approved_by FROM run_baselines WHERE alias = ?", (alias,)
+                ).fetchone()["approved_by"]
+                == approved_by
+            ):
+                self.conn.execute("COMMIT")
+                current = self.get_baseline(alias)
+                assert current is not None
+                return current, False
+            promoted_at = _now()
+            self.conn.execute(
+                "INSERT INTO baseline_promotions "
+                "(alias, run_id, previous_run_id, approved_by, promoted_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (alias, run_id, previous_run_id, approved_by, promoted_at),
+            )
+            self.conn.execute(
+                "INSERT INTO run_baselines (alias, run_id, approved_by, promoted_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(alias) DO UPDATE SET "
+                "run_id = excluded.run_id, approved_by = excluded.approved_by, "
+                "promoted_at = excluded.promoted_at",
+                (alias, run_id, approved_by, promoted_at),
+            )
+            self.conn.execute("COMMIT")
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+        current = self.get_baseline(alias)
+        assert current is not None
+        return current, True
+
+    def list_baseline_promotions(self, alias: str) -> list[BaselinePromotion]:
+        rows = self.conn.execute(
+            "SELECT alias, run_id, previous_run_id, approved_by, promoted_at "
+            "FROM baseline_promotions WHERE alias = ? ORDER BY promotion_id DESC",
+            (alias,),
+        ).fetchall()
+        return [BaselinePromotion(**dict(row)) for row in rows]
 
     # ---------------------------------------------------------------- work items
 

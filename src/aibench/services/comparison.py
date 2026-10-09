@@ -2442,6 +2442,17 @@ def compare_runs(
     if bootstrap_replicates < 1:
         raise ComparisonError("bootstrap_replicates must be at least 1")
 
+    baseline_alias: str | None = None
+    explicit_alias = baseline_run_id.startswith("@")
+    alias_candidate = baseline_run_id[1:].strip() if explicit_alias else baseline_run_id
+    if explicit_alias or storage.get_run(baseline_run_id) is None:
+        named = storage.get_baseline(alias_candidate.strip().casefold())
+        if named is not None:
+            baseline_alias = named.alias
+            baseline_run_id = named.run_id
+        elif explicit_alias:
+            raise ComparisonError(f"no named baseline promoted with alias={alias_candidate!r}")
+
     baseline = _run_facts(storage, artifacts, baseline_run_id, baseline_scoring_id)
     current = _run_facts(storage, artifacts, current_run_id, current_scoring_id)
     baseline_specs = _specs_for_pass(baseline, baseline.selected)
@@ -2781,6 +2792,7 @@ def compare_runs(
         "claim_qualified": claim_qualified,
         "identity_qualified": qualified,
         "baseline_run_id": baseline_run_id,
+        "baseline_alias": baseline_alias,
         "current_run_id": current_run_id,
         "runs": {
             "baseline": {

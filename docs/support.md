@@ -103,6 +103,15 @@ of the export. See [case-result exports](case-result-export.md) for the schema a
 and code-scanning artifacts from stored benchmark results. See
 [CI report adapters](ci-reports.md) for status mappings and content controls.
 
+## Search and baseline management
+
+`aibench runs list` supports literal metadata search, tag/baseline filters, and stable
+offset pagination. Runs can be tagged and annotated with sanitized notes. Operators can
+promote a completed, healthy run with all declared gates passing, record who approved it,
+inspect promotion history, and compare directly against its alias. See
+[run history and named baselines](run-history-and-baselines.md) for commands and approval
+rules.
+
 ## Credentials
 
 Credentials are never written into project files, datasets, plans or chat. Every
