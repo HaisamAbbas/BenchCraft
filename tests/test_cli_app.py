@@ -58,6 +58,165 @@ def test_smoke_runs_records_and_is_visible_to_runs_commands(tmp_path: Path) -> N
     assert shown.exit_code == 0 and json.loads(shown.output)["status"] == "completed"
 
 
+def test_smoke_freezes_changed_application_revisions_for_scoring(tmp_path: Path) -> None:
+    script = tmp_path / "revisioned_app.py"
+    script.write_text(
+        "import json, sys\n"
+        "json.load(sys.stdin)\n"
+        "print(json.dumps({'output': 'answer', 'tool_events': []}))\n",
+        encoding="utf-8",
+    )
+    dataset = tmp_path / "cases.jsonl"
+    dataset.write_text(
+        json.dumps(
+            {
+                "case_id": "case-1",
+                "input": "question",
+                "reference": {
+                    "answer": "answer",
+                    "tools": {"tool_names": [], "match_mode": "exact"},
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "revisioned.app.json"
+
+    def write_config(revision: str, *, exposes_tool_events: bool) -> None:
+        output_binding = {"output": "/output"}
+        if exposes_tool_events:
+            output_binding["tool_events"] = "/tool_events"
+        config.write_text(
+            json.dumps(
+                {
+                    "application_id": "revisioned",
+                    "revision": revision,
+                    "runner": "cli",
+                    "target": str(script),
+                    "output_binding": output_binding,
+                    "transport": {
+                        "kind": "cli",
+                        "argv": [sys.executable, str(script)],
+                        "timeout_seconds": 10,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def smoke() -> str:
+        result = cli.invoke(
+            app,
+            [
+                "app",
+                "smoke",
+                str(config),
+                "--dataset",
+                str(dataset),
+                "--workspace",
+                str(tmp_path),
+                "--trust-local-app",
+                "--json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        return json.loads(result.output)["run_id"]
+
+    write_config("revision-1", exposes_tool_events=False)
+    first_run = smoke()
+    write_config("revision-2", exposes_tool_events=True)
+    second_run = smoke()
+
+    from aibench.core.models import deep_unfreeze
+    from aibench.storage.artifacts import ArtifactStore
+    from aibench.storage.db import Database, Workspace
+    from aibench.storage.repositories import Storage
+
+    workspace = Workspace.at(tmp_path)
+    storage = Storage(Database.open_workspace(workspace))
+    artifacts = ArtifactStore(workspace.artifacts_dir, create=False)
+    run_records = {}
+    try:
+        catalog_spec = storage.get_application("revisioned")
+        assert catalog_spec is not None and catalog_spec.revision == "revision-1"
+        for run_id, expected_revision in (
+            (first_run, "revision-1"),
+            (second_run, "revision-2"),
+        ):
+            record = storage.get_run(run_id)
+            assert record is not None
+            run_records[run_id] = record
+            artifact_id = (deep_unfreeze(record.manifest.parameters) or {}).get(
+                "application_artifact_id"
+            )
+            assert isinstance(artifact_id, str)
+            artifact_ref = storage.get_artifact(artifact_id)
+            assert artifact_ref is not None
+            frozen = json.loads(artifacts.read_bytes(artifact_ref))
+            assert frozen["revision"] == expected_revision
+        assert (
+            run_records[first_run].manifest.application_hash
+            != run_records[second_run].manifest.application_hash
+        )
+    finally:
+        storage.db.close()
+
+    for run_id, expected_revision in (
+        (first_run, "revision-1"),
+        (second_run, "revision-2"),
+    ):
+        report = cli.invoke(
+            app,
+            [
+                "report",
+                run_id,
+                "--format",
+                "json",
+                "--out",
+                "-",
+                "--workspace",
+                str(tmp_path),
+            ],
+        )
+        assert report.exit_code == 0, report.output
+        assert json.loads(report.output)["run"]["application_revision"] == expected_revision
+
+    metrics = tmp_path / "tool-calls.metrics.json"
+    metrics.write_text(
+        json.dumps({"metrics": [{"metric": "native.tool_calls"}]}), encoding="utf-8"
+    )
+    current_revision_score = cli.invoke(
+        app,
+        ["score", second_run, "--metrics", str(metrics), "--workspace", str(tmp_path), "--json"],
+    )
+    assert current_revision_score.exit_code == 0, current_revision_score.output
+
+    old_revision_score = cli.invoke(
+        app,
+        ["score", first_run, "--metrics", str(metrics), "--workspace", str(tmp_path), "--json"],
+    )
+    assert old_revision_score.exit_code == 2
+    assert "output_binding.tool_events is not declared" in old_revision_score.output
+
+    metrics.write_text(
+        json.dumps({"metrics": [{"metric": "native.exact_match"}]}), encoding="utf-8"
+    )
+    first_revision_score = cli.invoke(
+        app,
+        [
+            "score",
+            first_run,
+            "--metrics",
+            str(metrics),
+            "--workspace",
+            str(tmp_path),
+            "--json",
+        ],
+    )
+    assert first_revision_score.exit_code == 0, first_revision_score.output
+
+
 def test_smoke_exits_nonzero_when_an_invocation_fails(tmp_path: Path) -> None:
     config = tmp_path / "failing.app.json"
     config.write_text(

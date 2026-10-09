@@ -298,9 +298,14 @@
       "title": "Smoke testing rejects a changed revision of an existing application",
       "detail": "CLI reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "48 affected CLI, smoke, scoring, and report tests passed; revision-specific regression also passed in isolation",
+        "Mypy: 142 source files passed; Ruff and git diff --check passed",
+        "Two app revisions under one ID remain frozen and reportable; each score uses the exact output-binding contract for its run",
+        "Independent review found no actionable defects"
+      ],
+      "review": "evidence/F17-review.md",
       "commit": null,
       "pushed": false
     },

@@ -524,7 +524,11 @@ def build_report(
     params = deep_unfreeze(manifest.parameters) or {}
     engine_run = params.get("mode") == "manual_plan"
     plan = _frozen_plan(storage, artifacts, manifest) if engine_run else None
-    spec = _frozen_application(storage, artifacts, manifest) if engine_run else None
+    spec = (
+        _frozen_application(storage, artifacts, manifest)
+        if engine_run or "application_artifact_id" in params
+        else None
+    )
     if spec is None and manifest.application_id:
         spec = storage.get_application(manifest.application_id)
     events = storage.list_run_events(run_id)

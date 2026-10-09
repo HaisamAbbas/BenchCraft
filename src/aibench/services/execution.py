@@ -31,7 +31,7 @@ from aibench.core.models import (
 )
 from aibench.runners.base import BaseRunner, InvocationContext, InvocationOutcome
 from aibench.runners.bindings import AppInputEnvelope
-from aibench.storage.artifacts import ArtifactStore
+from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.repositories import Storage
 
 SMOKE_RUN_PREFIX = "smoke-"
@@ -171,7 +171,16 @@ async def run_developer_smoke(
     if storage.get_dataset(dataset.content_hash) is None:
         storage.commit_dataset(dataset)
     storage.commit_cases(dataset.content_hash, cases)
-    storage.commit_application(spec)
+    # Keep the catalog's first-seen entry stable, like plan-based run creation, and freeze
+    # this smoke's actual application spec on the run so later edits remain scoreable.
+    if storage.get_application(spec.application_id) is None:
+        storage.commit_application(spec)
+    spec_ref = artifacts.write_bytes(
+        spec.model_dump_json().encode("utf-8"),
+        mime_type="application/json",
+        redaction=RedactionClass.NONE,
+    )
+    commit_verified_artifact(artifacts, storage, spec_ref)
     report = SmokeReport(run_id=f"{SMOKE_RUN_PREFIX}{uuid.uuid4().hex[:12]}")
     storage.commit_run(
         RunManifest(
@@ -183,6 +192,7 @@ async def run_developer_smoke(
             ),
             parameters={
                 "mode": "developer_smoke",
+                "application_artifact_id": spec_ref.artifact_id,
                 "scheduler": "none",
                 "retries": 0,
                 "evaluation": "none",
