@@ -145,6 +145,10 @@ The run exits with code 3. Both release gate results are recorded in the JSON ou
 The application failure makes the run incomplete, and incompleteness takes precedence over
 a gate failure. Exit codes are the same headless and in `chat --send`:
 
+Conversation drafts can also declare release gates. For example, ask: “Require a 90% pass rate
+on the exact-match correctness metric.” The draft shows metric binding numbers and gate
+thresholds before you run; the assistant asks if the metric or threshold is ambiguous.
+
 | Code | Meaning |
 |---|---|
 | 0 | Complete, and every release gate passed |

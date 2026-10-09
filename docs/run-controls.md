@@ -27,7 +27,9 @@ Concurrency, repetitions, attempts, timeouts, budgets, and cache flags replace t
 plan field. Existing policy ceilings and plan validators apply to their effective values.
 `--max-cost-usd` is a soft projected-cost limit and requires a declared or directly supplied
 application-call estimate; model-backed evaluations also need an evaluator-call estimate.
-Advanced retry backoff, quotas, plugin settings, and release gates remain plan fields.
+Advanced retry backoff, quotas, plugin settings, and release gates remain plan fields for
+headless execution. Conversation drafts can also declare release gates; see
+[support](support.md#conversation-release-gates).
 
 `--run-seed` sets the engine seed separately from `--selection-seed`, which only controls case
 sampling. It affects seeded engine randomness such as retry backoff; it cannot make an

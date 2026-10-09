@@ -118,7 +118,25 @@ def draft(console: Console, summary: dict[str, Any]) -> None:
     if summary.get("test_world"):
         out(console, f"  test world: {safe(summary['test_world'])} (loaded before each case)")
     for metric in summary.get("metrics", []):
-        out(console, f"  metric {safe(metric['metric'])}: {safe(metric['rationale'])}")
+        out(
+            console,
+            f"  metric binding {metric['binding']} ({safe(metric['metric'])}): "
+            f"{safe(metric['rationale'])}",
+        )
+    for gate in summary.get("gates", []):
+        thresholds = []
+        if gate.get("min_pass_rate") is not None:
+            thresholds.append(f"pass rate >= {gate['min_pass_rate'] * 100:g}%")
+        if gate.get("min_completed_coverage") is not None:
+            thresholds.append(
+                f"completed coverage >= {gate['min_completed_coverage'] * 100:g}%"
+            )
+        metric = gate.get("metric", f"binding {gate['binding']}")
+        out(
+            console,
+            f"  release gate {safe(gate['gate_id'])} on {safe(metric)}: "
+            f"{safe('; '.join(thresholds))}",
+        )
     for gap in summary.get("gaps", []):
         out(console, f"  [yellow]gap[/yellow] {safe(gap['subject'])}: {safe(gap['reason'])}")
     for label, key in (

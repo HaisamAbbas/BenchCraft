@@ -125,6 +125,14 @@ in force. See [direct run controls](run-controls.md) for bounds and examples.
 available application source, runtime, dependency, and Git provenance. See
 [run reproducibility and provenance](reproducibility.md).
 
+## Conversation release gates
+
+Session drafts can carry the same selected-case pass-rate and completed-coverage gates as
+executable plan files. Ask for the metric and threshold in the conversation; the draft preview
+shows each metric's zero-based binding and the gate list before a run can start. A gate patch
+replaces the list, so existing gates are preserved when adding a new one and removed only on
+an explicit request. Headless plan and run commands continue to use the plan file's `gates`.
+
 ## Credentials
 
 Credentials are never written into project files, datasets, plans or chat. Every

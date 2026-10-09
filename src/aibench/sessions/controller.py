@@ -629,6 +629,7 @@ class SessionController:
                 "budgets": choices.budgets.model_dump(mode="json", exclude_none=True),
                 "params": {k: deep_unfreeze(v) for k, v in choices.params.items()},
                 "rules": {k: v.model_dump(mode="json") for k, v in choices.rules.items()},
+                "gates": [gate.model_dump(mode="json") for gate in choices.gates],
             },
             "draft": draft_summary(deep_unfreeze(decision.draft), decision.choices.test_world),
             "open_questions": [
@@ -714,6 +715,10 @@ class SessionController:
                 patch,
                 Path(session.project_root),
                 default_seed=_stable_seed(session.session_id),
+                metric_bindings=tuple(
+                    item["metric"]
+                    for item in deep_unfreeze(current.draft).get("rationale", [])
+                ),
             )
         except PatchRejected as exc:
             return PatchResult("rejected", session.revision, problems=exc.problems)

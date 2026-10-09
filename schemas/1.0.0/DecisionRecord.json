@@ -266,6 +266,14 @@
           "title": "Dataset",
           "type": "string"
         },
+        "gates": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SessionReleaseGate"
+          },
+          "title": "Gates",
+          "type": "array"
+        },
         "objective_concepts": {
           "additionalProperties": {
             "items": {
@@ -324,6 +332,63 @@
         "dataset"
       ],
       "title": "SessionChoices",
+      "type": "object"
+    },
+    "SessionReleaseGate": {
+      "additionalProperties": false,
+      "description": "A session gate targets a stable metric identity, not a draft's moving index.",
+      "properties": {
+        "gate_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Gate Id",
+          "type": "string"
+        },
+        "metric": {
+          "minLength": 1,
+          "title": "Metric",
+          "type": "string"
+        },
+        "min_completed_coverage": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Completed Coverage"
+        },
+        "min_pass_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Pass Rate"
+        },
+        "occurrence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Occurrence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "gate_id",
+        "metric"
+      ],
+      "title": "SessionReleaseGate",
       "type": "object"
     }
   },

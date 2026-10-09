@@ -1,0 +1,17 @@
+G09: release gates in conversation drafts
+
+Affected feature batch:
+  PYTHONPATH=src .venv/Scripts/python.exe -m pytest tests/test_patch_authorization.py tests/test_models.py tests/test_session_controller.py tests/test_conversation.py tests/test_quickstart.py -q
+  139 passed
+
+Authorization module after the final gate-scope and authorization changes:
+  PYTHONPATH=src .venv/Scripts/python.exe -m pytest tests/test_patch_authorization.py -q
+  35 passed
+
+Static checks after the final code change:
+  .venv/Scripts/ruff.exe check src tests plugins
+  All checks passed
+  .venv/Scripts/mypy.exe src plugins
+  Success: no issues found in 170 source files
+  git diff --check
+  Passed (Git printed only existing LF-to-CRLF working-copy notices for three documentation files)

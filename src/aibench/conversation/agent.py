@@ -58,6 +58,7 @@ from aibench.core.models import (
     ExperimentStatus,
     deep_unfreeze,
 )
+from aibench.core.plans import ReleaseGate
 from aibench.core.sessions import (
     ActionKind,
     ActionState,
@@ -129,6 +130,81 @@ def _phrase_in(phrase: str, message: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(wanted)}(?!\w)", _norm(message)) is not None
 
 
+def _gate_id_named(gate_id: str, clause: str) -> bool:
+    """Match a gate ID only when the user labels it as a gate.
+
+    Gate IDs often contain hyphens, so ordinary word boundaries would treat
+    ``correctness`` as a match inside ``correctness-coverage``. Requiring the
+    nearby noun also keeps a metric mention such as ``from correctness`` from
+    being mistaken for the gate's identity.
+    """
+    identifier = rf"(?<![\w.-]){re.escape(_norm(gate_id))}(?![\w.-])"
+    text = _norm(clause)
+    return bool(
+        re.search(rf"{identifier}\s+gates?\b", text)
+        or re.search(rf"\bgates?\s+{identifier}", text)
+    )
+
+
+def _named_gate_ids(clause: str, gate_ids: tuple[str, ...]) -> set[str]:
+    return {gate_id for gate_id in gate_ids if _gate_id_named(gate_id, clause)}
+
+
+def _all_gate_removal_applies(
+    message: str,
+    gate: ReleaseGate,
+    metric_bindings: Mapping[int, tuple[str, ...]] | None,
+    all_gate_ids: tuple[str, ...],
+) -> bool | None:
+    """Return whether a remove-all clause selects this gate; `None` means no such clause."""
+    all_gates = re.compile(
+        r"\b(all|every)\b(?P<middle>.{0,20}?)\b(gates?)\b", re.IGNORECASE
+    )
+    exception_marker = re.compile(
+        r"\b(except|excluding|besides|apart\s+from|other\s+than)\b|"
+        r"\bbut\s+(?:keep|retain|leave)\b",
+        re.IGNORECASE,
+    )
+    for clause in _gate_clauses(message):
+        all_match = all_gates.search(clause)
+        if not _positive_gate_removal(clause) or all_match is None:
+            continue
+        exception = exception_marker.search(clause)
+        target_text = all_match.group("middle") + clause[all_match.end() :]
+        if exception:
+            excluded_clause = clause[exception.end() :]
+            excluded_ids = _named_gate_ids(excluded_clause, all_gate_ids)
+            if excluded_ids:
+                if gate.gate_id in excluded_ids:
+                    return False
+            else:
+                excluded_bindings = {
+                    binding
+                    for binding, aliases in (metric_bindings or {}).items()
+                    if any(_phrase_in(alias, excluded_clause) for alias in aliases)
+                }
+                if gate.binding in excluded_bindings:
+                    return False
+            target_text = clause[: exception.start()]
+            target_text = re.sub(
+                r"\b(all|every)\b.{0,20}\bgates?\b", " ", target_text, flags=re.IGNORECASE
+            )
+        target_ids = _named_gate_ids(target_text, all_gate_ids)
+        if target_ids:
+            return gate.gate_id in target_ids
+        target_bindings = {
+            binding
+            for binding, aliases in (metric_bindings or {}).items()
+            if any(_phrase_in(alias, target_text) for alias in aliases)
+        }
+        if target_bindings:
+            if len(target_bindings) > 1:
+                return False
+            return gate.binding in target_bindings
+        return True
+    return None
+
+
 def _stated(value: Any, message: str, numbers: set[float]) -> bool:
     if isinstance(value, bool) or value is None:
         return False  # a flag is stated through its name; see `_leaves`
@@ -151,6 +227,314 @@ def metric_names(evaluator_id: str) -> tuple[str, ...]:
     return (evaluator_id, short, short.replace("_", " "), short.replace("_", "-"))
 
 
+def _gate_clauses(message: str) -> tuple[str, ...]:
+    """Split a request into small clauses so a threshold cannot borrow another metric's value."""
+    clauses = re.split(
+        r"(?<=[!?;])\s+|(?<!\d)\.(?!\d)\s+|\s*,\s*|\s+\band\b\s+|\n+",
+        message,
+        flags=re.IGNORECASE,
+    )
+    return tuple(clause.strip() for clause in clauses if clause.strip())
+
+
+def _gate_clause(
+    message: str,
+    names: tuple[str, ...],
+    binding: int,
+    all_bindings: Mapping[int, tuple[str, ...]] | None = None,
+) -> str | None:
+    clauses = _gate_clauses(message)
+
+    def targets_this_binding(clause: str) -> bool:
+        aliases_by_binding = all_bindings or {binding: names}
+        target_names = aliases_by_binding.get(binding, names)
+        retargeting = bool(
+            re.search(
+                r"\b(retarget|move|switch|reassign|repoint|change)\b",
+                clause,
+                re.IGNORECASE,
+            )
+        )
+        if retargeting and any(
+            _phrase_in(name, clause)
+            and not any(
+                other_binding != binding
+                and any(_phrase_in(name, other_name) for other_name in aliases)
+                for other_binding, aliases in aliases_by_binding.items()
+            )
+            for name in target_names
+        ):
+            # Both source and destination names are expected in a retarget request;
+            # direction is authorized separately by `_explicit_gate_retarget`.
+            return True
+        matching = {
+            other_binding: [
+                len(_norm(name)) for name in aliases if _phrase_in(name, clause)
+            ]
+            for other_binding, aliases in aliases_by_binding.items()
+        }
+        target_matches = matching.get(binding, [])
+        if not target_matches:
+            return False
+        target_specificity = max(target_matches)
+        return all(
+            max(lengths) < target_specificity
+            for other_binding, lengths in matching.items()
+            if other_binding != binding and lengths
+        )
+
+    named = [clause for clause in clauses if targets_this_binding(clause)]
+    if len(named) > 1:
+        retargeting = [
+            clause
+            for clause in named
+            if re.search(
+                r"\b(retarget|move|switch|reassign|repoint|change)\b",
+                clause,
+                re.IGNORECASE,
+            )
+        ]
+        if len(retargeting) == 1:
+            named = retargeting
+    if named:
+        if len(named) != 1:
+            return None
+        index = clauses.index(named[0])
+        associated = [named[0]]
+        other_names = tuple(
+            name
+            for other_binding, aliases in (all_bindings or {}).items()
+            if other_binding != binding
+            for name in aliases
+        )
+        threshold_words = re.compile(
+            r"\b(pass(?:es|ing|ed)?(?:[- ]rate)?|success(?:ful)?(?:[- ]rate)?|coverage)\b",
+            re.IGNORECASE,
+        )
+        # A neighboring threshold-only clause can extend one metric's request. Stop at
+        # another metric name so one gate cannot borrow a different gate's criterion.
+        for step in (-1, 1):
+            cursor = index + step
+            while 0 <= cursor < len(clauses):
+                adjacent = clauses[cursor]
+                if any(_phrase_in(name, adjacent) for name in other_names):
+                    break
+                if not threshold_words.search(adjacent):
+                    break
+                associated.insert(0, adjacent) if step < 0 else associated.append(adjacent)
+                cursor += step
+        return " ".join(associated)
+    # A binding number is accepted only when the user calls it a binding explicitly and
+    # keeps its threshold in that same clause.
+    binding_phrase = re.compile(rf"\b(?:metric\s+)?binding\s+{binding}\b", re.IGNORECASE)
+    numbered = [clause for clause in clauses if binding_phrase.search(clause)]
+    return numbered[0] if len(numbered) == 1 else None
+
+
+def _threshold_numbers(clause: str, threshold: str) -> set[float]:
+    """Return only the number nearest the requested threshold's own wording."""
+    semantic = (
+        r"\b(?:pass(?:es|ing|ed)?(?:[- ]rate)?|success(?:ful)?(?:[- ]rate)?)\b"
+        if threshold == "pass rate"
+        else r"\bcoverage\b"
+    )
+    labels = list(re.finditer(semantic, clause, re.IGNORECASE))
+    numbers = list(re.finditer(r"(?<![\w.])(\d+(?:\.\d+)?)(\s*%)?", clause))
+    if len(labels) != 1 or not numbers:
+        return set()
+    label = labels[0]
+    number = min(
+        numbers,
+        key=lambda item: min(abs(item.start() - label.end()), abs(label.start() - item.end())),
+    )
+    value = float(number.group(1))
+    return {value, value / 100} if number.group(2) else {value}
+
+
+_GATE_REMOVAL = re.compile(
+    r"\b(clear|remove|drop|delete|replace)\b.{0,40}\bgates?\b"
+    r"|\bgates?\b.{0,40}\b(clear|remove|drop|delete|replace)\b",
+    re.IGNORECASE,
+)
+_REMOVAL_VERB = re.compile(r"\b(clear|remove|drop|delete|replace)\b", re.IGNORECASE)
+_NEGATED_REMOVAL_PREFIX = re.compile(
+    r"\b(?:do\s+not|don't|never|should\s+not|shouldn't|must\s+not|mustn't|"
+    r"cannot|can't|rather\s+not|no\s+need\s+to|not)\b(?:\s+\w+){0,5}\s*$",
+    re.IGNORECASE,
+)
+
+
+def _positive_gate_removal(clause: str) -> bool:
+    """Require a positive gate-removal verb; negated wording cannot authorize a patch."""
+    if not _GATE_REMOVAL.search(clause):
+        return False
+    return any(
+        not _NEGATED_REMOVAL_PREFIX.search(clause[:verb.start()])
+        for verb in _REMOVAL_VERB.finditer(clause)
+    )
+
+
+def _positive_removal(clause: str) -> bool:
+    return any(
+        not _NEGATED_REMOVAL_PREFIX.search(clause[:verb.start()])
+        for verb in _REMOVAL_VERB.finditer(clause)
+    )
+
+
+def _explicit_threshold_removal(message: str, threshold: str) -> bool:
+    name = r"pass(?:[- ]rate|ing(?:[- ]rate)?)?" if threshold == "pass rate" else r"coverage"
+    term = re.compile(rf"\b(clear|remove|drop|delete)\b.{{0,40}}\b{name}\b", re.IGNORECASE)
+    return any(
+        _positive_removal(clause) and term.search(clause)
+        for clause in _gate_clauses(message)
+    )
+
+
+def _explicit_gate_threshold_removal(
+    message: str,
+    threshold: str,
+    gate: ReleaseGate,
+    metric_bindings: Mapping[int, tuple[str, ...]] | None,
+    existing_gates: tuple[ReleaseGate, ...],
+) -> bool:
+    names = (metric_bindings or {}).get(gate.binding, ())
+    clause = _gate_clause(message, names, gate.binding, metric_bindings)
+    if clause is None:
+        return False
+    named_gate_ids = _named_gate_ids(clause, tuple(item.gate_id for item in existing_gates))
+    if named_gate_ids and gate.gate_id not in named_gate_ids:
+        return False
+    if (
+        sum(item.binding == gate.binding for item in existing_gates) > 1
+        and gate.gate_id not in named_gate_ids
+    ):
+        return False
+    return _explicit_threshold_removal(clause, threshold)
+
+
+def _explicit_gate_retarget(
+    message: str,
+    old_names: tuple[str, ...],
+    new_names: tuple[str, ...],
+    gate_id: str,
+    all_gate_ids: tuple[str, ...],
+    *,
+    require_gate_id: bool = False,
+) -> bool:
+    """Require an explicit source-to-destination direction for a gate move."""
+    for clause in _gate_clauses(message):
+        verbs = list(
+            re.finditer(
+                r"\b(retarget|move|switch|reassign|repoint|change)\b",
+                clause,
+                re.IGNORECASE,
+            )
+        )
+        if not verbs:
+            continue
+        named_gate_ids = _named_gate_ids(clause, all_gate_ids)
+        if named_gate_ids and gate_id not in named_gate_ids:
+            continue
+        if require_gate_id and gate_id not in named_gate_ids:
+            continue
+        normalized = _norm(clause)
+        for old_name in old_names:
+            old_phrase = _norm(old_name)
+            old_matches = list(
+                re.finditer(rf"(?<!\w){re.escape(old_phrase)}(?!\w)", normalized)
+            )
+            for new_name in new_names:
+                new_phrase = _norm(new_name)
+                new_matches = list(
+                    re.finditer(rf"(?<!\w){re.escape(new_phrase)}(?!\w)", normalized)
+                )
+                for old in old_matches:
+                    for new in new_matches:
+                        if old.end() >= new.start():
+                            continue
+                        between = normalized[old.end() : new.start()]
+                        if re.search(r"\b(to|onto)\b", between) and any(
+                            verb.start() < old.start() for verb in verbs
+                        ):
+                            return True
+    return False
+
+
+def _gate_removal_requested(
+    message: str,
+    gate: ReleaseGate,
+    metric_bindings: Mapping[int, tuple[str, ...]] | None,
+    all_gate_ids: tuple[str, ...],
+    existing_gates: tuple[ReleaseGate, ...],
+) -> bool:
+    names = (*((metric_bindings or {}).get(gate.binding, ())), gate.gate_id)
+    for clause in _gate_clauses(message):
+        if not _positive_gate_removal(clause):
+            continue
+        all_gate_request = _all_gate_removal_applies(
+            clause, gate, metric_bindings, all_gate_ids
+        )
+        if all_gate_request is not None:
+            if all_gate_request:
+                return True
+            continue
+        named_gate_ids = _named_gate_ids(clause, all_gate_ids)
+        selected: tuple[str, ...]
+        if named_gate_ids:
+            if gate.gate_id in named_gate_ids:
+                selected = (gate.gate_id,)
+            else:
+                continue
+        else:
+            matching_bindings = {
+                binding
+                for binding, aliases in (metric_bindings or {}).items()
+                if any(_phrase_in(name, clause) for name in aliases)
+            }
+            if (
+                sum(item.binding == gate.binding for item in existing_gates) > 1
+                or len(matching_bindings) > 1
+            ):
+                continue
+            selected = tuple(name for name in names if _phrase_in(name, clause))
+        if not selected:
+            continue
+        threshold_clause = clause
+        identity = re.escape(_norm(gate.gate_id))
+        threshold_clause = re.sub(
+            rf"(?<![\w.-]){identity}(?![\w.-])(?=\s+gates?\b)",
+            " ",
+            threshold_clause,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        threshold_clause = re.sub(
+            rf"\bgates?\s+{identity}(?![\w.-])",
+            " ",
+            threshold_clause,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        for alias in (metric_bindings or {}).get(gate.binding, ()):
+            alias_pattern = re.escape(_norm(alias))
+            threshold_clause = re.sub(
+                rf"(?<!\w){alias_pattern}(?!\w)(?=\s+gates?\b)",
+                " ",
+                threshold_clause,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        threshold_terms = re.findall(
+            r"\b(threshold|coverage|pass[- ]rate|passing(?:[- ]rate)?)\b",
+            threshold_clause,
+            re.IGNORECASE,
+        )
+        if threshold_terms:
+            continue
+        return True
+    return False
+
+
 def concept_stated(
     concept: str, message: str, serving: Mapping[str, tuple[str, ...]] | None = None
 ) -> bool:
@@ -168,7 +552,12 @@ def concept_stated(
 
 
 def ungrounded(
-    patch: PlanPatch, message: str, serving: Mapping[str, tuple[str, ...]] | None = None
+    patch: PlanPatch,
+    message: str,
+    serving: Mapping[str, tuple[str, ...]] | None = None,
+    *,
+    metric_bindings: Mapping[int, tuple[str, ...]] | None = None,
+    existing_gates: tuple[ReleaseGate, ...] = (),
 ) -> list[str]:
     """Values in an assistant's patch that the user's message does not state. Every field
     counts: the model may only transcribe what the user said, never fill in a flag,
@@ -224,6 +613,130 @@ def ungrounded(
             problems.append(
                 f"{evaluator_id} comparator {rule.comparator!r} is not stated in the user's message"
             )
+    if patch.gates is not None:
+        retained_ids = {gate.gate_id for gate in patch.gates}
+        existing_by_id = {gate.gate_id: gate for gate in existing_gates}
+        removed = [gate for gate in existing_gates if gate.gate_id not in retained_ids]
+        remove_requested = any(
+            _positive_gate_removal(clause) for clause in _gate_clauses(message)
+        )
+        if removed and not remove_requested:
+            problems.append(
+                "the patch removes or changes existing release gates, but the user's message "
+                "does not ask to remove or replace them"
+            )
+        elif removed:
+            for gate in removed:
+                if not _gate_removal_requested(
+                    message,
+                    gate,
+                    metric_bindings,
+                    tuple(item.gate_id for item in existing_gates),
+                    existing_gates,
+                ):
+                    problems.append(
+                        f"the user's message does not identify release gate {gate.gate_id!r} "
+                        "or name its metric in the removal request"
+                    )
+        for gate in patch.gates:
+            previous = existing_by_id.get(gate.gate_id)
+            if previous == gate:
+                continue  # unchanged gates are frozen choices, not new values to authorize
+            names = (metric_bindings or {}).get(gate.binding, ())
+            clause = _gate_clause(
+                message, names, gate.binding, all_bindings=metric_bindings
+            )
+            if clause is None:
+                label = names[0] if names else f"binding {gate.binding}"
+                problems.append(
+                    f"release gate metric {label!r} and its threshold must appear together in "
+                    "one unambiguous part of the user's message"
+                )
+                continue
+            def need_gate(
+                value: float,
+                description: str,
+                threshold: str,
+                gate_clause: str = clause,
+            ) -> None:
+                if not _stated(value, gate_clause, _threshold_numbers(gate_clause, threshold)):
+                    problems.append(
+                        f"release gate {description} {value!r} is not stated with its metric "
+                        "in the user's message"
+                    )
+
+            if previous is not None:
+                if previous.binding != gate.binding:
+                    old_names = (metric_bindings or {}).get(previous.binding, ())
+                    new_names = names or (f"binding {gate.binding}",)
+                    same_metric_gates = sum(
+                        item.binding == previous.binding for item in existing_gates
+                    )
+                    if not _explicit_gate_retarget(
+                        message,
+                        old_names or (f"binding {previous.binding}",),
+                        new_names,
+                        gate.gate_id,
+                        tuple(item.gate_id for item in existing_gates),
+                        require_gate_id=same_metric_gates > 1,
+                    ):
+                        problems.append(
+                            f"retargeting release gate {gate.gate_id!r} requires an explicit "
+                            "retarget request naming its old and new metrics"
+                        )
+                if (
+                    previous.min_pass_rate is not None
+                    and gate.min_pass_rate is None
+                    and not _explicit_gate_threshold_removal(
+                        message,
+                        "pass rate",
+                        previous,
+                        metric_bindings,
+                        existing_gates,
+                    )
+                ):
+                    problems.append(
+                        f"removing the existing pass-rate threshold from gate "
+                        f"{gate.gate_id!r} requires an explicit removal request"
+                    )
+                if (
+                    previous.min_completed_coverage is not None
+                    and gate.min_completed_coverage is None
+                    and not _explicit_gate_threshold_removal(
+                        message,
+                        "coverage",
+                        previous,
+                        metric_bindings,
+                        existing_gates,
+                    )
+                ):
+                    problems.append(
+                        f"removing the existing coverage threshold from gate "
+                        f"{gate.gate_id!r} requires an explicit removal request"
+                    )
+            if gate.min_pass_rate is not None and (
+                previous is None or previous.min_pass_rate != gate.min_pass_rate
+            ):
+                need_gate(gate.min_pass_rate, "minimum pass rate", "pass rate")
+                if not re.search(
+                    r"\b(pass(?:es|ing|ed)?(?:[- ]rate)?|success(?:ful)?(?:[- ]rate)?)\b",
+                    clause,
+                    re.IGNORECASE,
+                ):
+                    problems.append(
+                        "the user's message does not specify a passing-rate release threshold"
+                    )
+            if gate.min_completed_coverage is not None and (
+                previous is None
+                or previous.min_completed_coverage != gate.min_completed_coverage
+            ):
+                need_gate(gate.min_completed_coverage, "completed coverage", "coverage")
+                if not _phrase_in("coverage", clause):
+                    problems.append(
+                        "the user's message does not specify a completed-coverage release threshold"
+                    )
+        if removed and not patch.gates and not remove_requested:
+            problems.append("clearing release gates requires an explicit removal request")
     if patch.dataset is not None:
         need(patch.dataset, "dataset")
     if patch.test_world is not None:
@@ -253,6 +766,8 @@ def patch_problems(
     *,
     offer: str | None = None,
     serving: Mapping[str, tuple[str, ...]] | None = None,
+    metric_bindings: Mapping[int, tuple[str, ...]] | None = None,
+    existing_gates: tuple[ReleaseGate, ...] = (),
 ) -> list[str]:
     """Why an assistant's patch may not be applied: its quote is not the user's words,
     the quoted sentence or a later correction refuses the change, or a value is not stated.
@@ -263,10 +778,22 @@ def patch_problems(
     if len(_norm(quote)) < 2 or _norm(quote) not in _norm(message):
         return ["the quoted request is not in the user's message"]
     if offer and offer.rstrip().endswith("?") and _AFFIRMATION.match(message.strip()):
-        return ungrounded(patch, offer, serving)
+        return ungrounded(
+            patch,
+            offer,
+            serving,
+            metric_bindings=metric_bindings,
+            existing_gates=existing_gates,
+        )
     if _reversed_from_quote_onward(message, quote, copied=_copied_text(patch)):
         return ["the user's words hold back or refuse this change"]
-    return ungrounded(patch, message, serving)
+    return ungrounded(
+        patch,
+        message,
+        serving,
+        metric_bindings=metric_bindings,
+        existing_gates=existing_gates,
+    )
 
 
 def _without_empty_settings(raw: Any) -> Any:
@@ -655,7 +1182,10 @@ Rules:
   revision and user_quote set to the exact words of the user's latest message that ask for
   the change. Every value in the patch (objective text, numbers, parameters, paths) must
   come from the user's words; never invent a threshold, schema, objective or path. A sample
-  seed may be omitted; the harness records a stable one.
+  seed may be omitted; the harness records a stable one. To set release gates, use the
+  current draft's zero-based metric binding and only the metric and threshold the user named;
+  `gates` replaces the full list, so preserve existing gates unless the user asks to remove them.
+  To move a gate to another metric, require an explicit retarget request naming both metrics.
 - To start, pause, resume or cancel a run, call request_action with user_quote set to the
   user's exact words asking for it. A clear "evaluate/benchmark this app" request authorizes
   its bounded executable plan under the current policy; start in that turn without asking
@@ -776,7 +1306,11 @@ def tool_specs() -> list[dict[str, Any]]:
             "user stated; leave out evaluation_params and anything else they did not say. Every "
             "value, objective text included, must be the user's exact words: do not rename or "
             'shorten them ("traffic correctness" stays "traffic correctness"). If a call '
-            "is rejected, read how_to_fix and retry once with the user's exact words.",
+            "is rejected, read how_to_fix and retry once with the user's exact words. Release "
+            "gates are user-controlled: use the zero-based binding shown in the current draft's "
+            "metrics list, state only a threshold the user specified, preserve current gates "
+            "when adding one, and clear or replace gates only when the user asks. Retarget an "
+            "existing gate only after an explicit request naming its old and new metrics.",
             _object(
                 {
                     "expected_revision": {"type": "integer"},
@@ -1646,7 +2180,18 @@ class _Turn:
         except PydanticValidationError as exc:
             return self._reject("propose_plan_patch", [e["msg"] for e in exc.errors()][:10])
         problems = patch_problems(
-            patch, quote, self.message, offer=self.previous_reply, serving=self._serving()
+            patch,
+            quote,
+            self.message,
+            offer=self.previous_reply,
+            serving=self._serving(),
+            metric_bindings=self._metric_bindings(),
+            existing_gates=tuple(
+                ReleaseGate.model_validate(gate)
+                for gate in deep_unfreeze(self.controller.current_decision().draft).get(
+                    "gates", []
+                )
+            ),
         )
         if problems:
             return self._reject(
@@ -1688,6 +2233,19 @@ class _Turn:
             for concept in option.concepts:
                 serving.setdefault(concept, []).append(option.evaluator_id)
         return {concept: tuple(ids) for concept, ids in serving.items()}
+
+    def _metric_bindings(self) -> dict[int, tuple[str, ...]]:
+        """Names and user objectives served by each zero-based draft metric binding."""
+        draft = deep_unfreeze(self.controller.current_decision().draft)
+        objectives = {item["objective_id"]: item for item in draft.get("objectives", [])}
+        bindings: dict[int, tuple[str, ...]] = {}
+        for index, metric in enumerate(draft.get("rationale", [])):
+            names = list(metric_names(metric["metric"].split("@", 1)[0]))
+            for objective_id in metric.get("objective_ids", []):
+                objective = objectives.get(objective_id, {})
+                names.extend([objective.get("text", ""), *objective.get("concepts", [])])
+            bindings[index] = tuple(dict.fromkeys(name for name in names if name))
+        return bindings
 
     def _reject(self, tool: str, problems: list[str], fix: str | None = None) -> dict[str, Any]:
         self.outcome.rejected.append({"tool": tool, "status": "rejected", "problems": problems})

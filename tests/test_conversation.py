@@ -93,6 +93,48 @@ def test_dialogue_changes_the_sample_explains_a_metric_and_starts_a_real_run(
     ctl.storage.db.close()
 
 
+def test_conversation_can_define_and_run_a_release_gate(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(
+        {},
+        rows=[{"case_id": "wrong", "input": "hi", "expected_output": "no"}],
+        objectives=("answers are correct",),
+    )
+    message = "Add a 100% pass-rate release gate for correctness."
+    provider = ScriptedProvider(
+        [
+            patch_step(
+                message,
+                gates=[
+                    {"gate_id": "correctness", "binding": 0, "min_pass_rate": 1.0}
+                ],
+            ),
+            say("Added a correctness release gate at 100% pass rate."),
+            start_step("Run the benchmark"),
+            say("Started the benchmark."),
+        ]
+    )
+    agent = ConversationAgent(ctl, provider)
+
+    async def scenario() -> str:
+        patched = await agent.handle_message(message)
+        assert patched.decisions and patched.decisions[-1]["revision"] == 2
+        assert patched.rejected == [], patched.rejected
+        assert patched.presented_draft["gates"][0]["min_pass_rate"] == 1.0
+        started = await agent.handle_message("Run the benchmark")
+        assert started.actions and started.actions[-1]["state"] == "done"
+        run_id = started.actions[-1]["run_id"]
+        assert run_id
+        await ctl.wait_for_run(run_id)
+        return run_id
+
+    run_id = asyncio.run(scenario())
+    report = ctl.report(run_id)
+    assert report["gates"][0]["status"] == "fail"
+    assert ctl.state()["choices"]["gates"][0]["gate_id"] == "correctness"
+    ctl.storage.db.close()
+
+
 def test_a_question_during_execution_leaves_the_run_running(tmp_path: Path) -> None:
     """08-G2."""
     h = SessionHarness(tmp_path)

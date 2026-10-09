@@ -27,7 +27,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, Field, PlainSerializer, model_validator
 
 from aibench.core.models import DecisionRule, FrozenModel, FrozenValue, deep_unfreeze, utcnow
-from aibench.core.plans import BudgetLimits, CaseSelection
+from aibench.core.plans import BudgetLimits, CaseSelection, ReleaseGate
 
 _ID = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
 
@@ -68,6 +68,22 @@ class PendingQuestion(FrozenModel):
     status: Literal["open", "answered", "stale"] = "open"
 
 
+class SessionReleaseGate(FrozenModel):
+    """A session gate targets a stable metric identity, not a draft's moving index."""
+
+    gate_id: str = Field(min_length=1, max_length=100)
+    metric: str = Field(min_length=1)
+    occurrence: int = Field(default=0, ge=0)
+    min_pass_rate: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    min_completed_coverage: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _has_threshold(self) -> SessionReleaseGate:
+        if self.min_pass_rate is None and self.min_completed_coverage is None:
+            raise ValueError(f"gate {self.gate_id!r} needs min_pass_rate or min_completed_coverage")
+        return self
+
+
 class SessionChoices(FrozenModel):
     """The user's benchmark decisions at one session revision."""
 
@@ -81,6 +97,7 @@ class SessionChoices(FrozenModel):
     budgets: BudgetLimits = Field(default_factory=BudgetLimits)
     params: FrozenParams = Field(default_factory=dict)  # evaluator_id -> parameters
     rules: FrozenRules = Field(default_factory=dict)  # evaluator_id -> pass/fail rule
+    gates: tuple[SessionReleaseGate, ...] = ()
     # A test world the application declares (15-T3); the policy must approve it.
     test_world: str | None = None
 
@@ -122,6 +139,13 @@ class PlanPatch(FrozenModel):
     budgets: BudgetPatch | None = None
     params: FrozenParams = Field(default_factory=dict)  # evaluator_id -> parameters
     rules: FrozenRules = Field(default_factory=dict)  # evaluator_id -> pass/fail rule
+    gates: tuple[ReleaseGate, ...] | None = Field(
+        default=None,
+        description=(
+            "Replace all release gates for this draft; [] clears them. Each binding is the "
+            "zero-based index into the current draft's metrics list."
+        ),
+    )
     dataset: str | None = Field(default=None, min_length=1)  # relative to the project root
     # Select one of the application's declared test worlds, or clear the selection.
     test_world: str | None = Field(default=None, min_length=1, max_length=200)
@@ -154,6 +178,8 @@ class PlanPatch(FrozenModel):
             fields.add("budgets")
         fields.update(f"params.{key}" for key in self.params)
         fields.update(f"rule.{key}" for key in self.rules)
+        if self.gates is not None:
+            fields.add("gates")
         if self.dataset is not None:
             fields.add("dataset")
         if self.test_world is not None or self.clear_test_world:
@@ -256,6 +282,7 @@ class ConversationTurn(FrozenModel):
 
 SESSION_MODELS = (
     PendingQuestion,
+    SessionReleaseGate,
     SessionChoices,
     PlanPatch,
     DecisionRecord,

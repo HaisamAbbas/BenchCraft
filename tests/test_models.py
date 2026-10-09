@@ -1,8 +1,10 @@
 """01-T1: model immutability, input/reference separation, JSON Schema round trips."""
 
 import json
+from pathlib import Path
 
 import pytest
+from jsonschema import validate
 from pydantic import ValidationError as PydanticValidationError
 
 from aibench.core.models import (
@@ -13,8 +15,15 @@ from aibench.core.models import (
     Fixture,
     ReferenceAnswer,
 )
+from aibench.core.plans import ReleaseGate
 from aibench.core.schema_export import export_schemas
-from aibench.core.sessions import SESSION_MODELS
+from aibench.core.sessions import (
+    SESSION_MODELS,
+    DecisionRecord,
+    PlanPatch,
+    SessionChoices,
+    SessionReleaseGate,
+)
 
 
 def test_benchmark_case_is_frozen() -> None:
@@ -126,3 +135,39 @@ def test_export_schemas_writes_versioned_files(tmp_path) -> None:
         assert path.exists()
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data["$schemaVersion"] == "1.0.0"
+
+    choices = SessionChoices(
+        application="/tmp/app.yaml",
+        dataset="/tmp/cases.jsonl",
+        gates=(
+            SessionReleaseGate(
+                gate_id="correctness",
+                metric="native.exact_match",
+                min_pass_rate=0.9,
+            ),
+        ),
+    )
+    patch = PlanPatch(
+        gates=(ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),)
+    )
+    decision = DecisionRecord(
+        decision_id="s1:d1",
+        session_id="s1",
+        source_turn_id=None,
+        source="user",
+        revision=1,
+        choices=choices,
+        plan_file="plan.json",
+        plan_hash="sha256:abc",
+        executable=False,
+        draft={},
+    )
+    for model, value in (
+        (SessionChoices, choices.model_dump(mode="json")),
+        (PlanPatch, patch.model_dump(mode="json")),
+        (DecisionRecord, decision.model_dump(mode="json")),
+    ):
+        schema = json.loads((tmp_path / "1.0.0" / f"{model.__name__}.json").read_text())
+        validate(instance=value, schema=schema)
+        checked_in = Path(__file__).parents[1] / "schemas" / "1.0.0" / f"{model.__name__}.json"
+        validate(instance=value, schema=json.loads(checked_in.read_text(encoding="utf-8")))

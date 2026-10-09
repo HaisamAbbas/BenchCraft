@@ -43,6 +43,7 @@ from aibench.core.plans import (
     ConcurrencyLimits,
     ExecutablePlan,
     PluginEnvironmentRef,
+    ReleaseGate,
     RetryPolicy,
 )
 from aibench.core.sessions import PendingQuestion
@@ -149,6 +150,7 @@ class PlanDraft(FrozenModel):
     estimate: SpendEstimate | None
     profile_hash: str
     dataset_hash: str
+    gates: tuple[ReleaseGate, ...] = ()
     scope: str = (
         "planned from the declared application config, dataset field counts and installed "
         "evaluator manifests; no source code was read and no hidden labels were used"
@@ -184,6 +186,7 @@ class DraftContext:
     user_params: dict[str, dict[str, object]] = field(default_factory=dict)
     user_rules: dict[str, DecisionRule] = field(default_factory=dict)
     test_world: str | None = None  # the user's selection; validated by the execution gate
+    gates: tuple[ReleaseGate, ...] = ()  # user-declared gates; the planner cannot invent them
 
 
 @dataclass
@@ -223,6 +226,7 @@ def build_plan(proposal: DraftProposal, ctx: DraftContext) -> ExecutablePlan:
         retry=ctx.retry,
         budgets=ctx.budgets,
         plugin_environments=ctx.plugin_environments,
+        gates=ctx.gates,
         test_world=ctx.test_world,
     )
 
@@ -477,6 +481,7 @@ def draft_document(
         planner=planner,
         objectives=proposal.objectives,
         rationale=proposal.metrics,
+        gates=validation.plan.gates,
         gaps=proposal.gaps,
         pending_questions=pending_questions(proposal, ctx.revision),
         findings=tuple(f.as_dict() for f in validation.findings),

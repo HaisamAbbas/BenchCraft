@@ -20,6 +20,8 @@ from typer.testing import CliRunner
 
 from aibench.cli.main import app
 from aibench.conversation.agent import ConversationAgent, check_claims
+from aibench.core.plans import ReleaseGate
+from aibench.core.sessions import PlanPatch
 from aibench.sessions.controller import SessionController
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
@@ -246,10 +248,9 @@ def test_the_quickstart_works_in_conversation_without_a_model(project: Path) -> 
 
 
 def test_command_and_chat_exit_codes_agree(project: Path) -> None:
-    """Headless commands and the conversation map outcomes to the same §13 codes through
+    """Headless commands and the conversation map outcomes to the same exit codes through
     one function (`run_exit_code`): 3 for the quickstart (previous test), 0 for a clean
-    run, 4 for a policy denial. A failed gate (1) is shown headless; a session's own draft
-    cannot declare gates yet, so its clean run exits 0 by the same rule."""
+    run, 1 for a failed release gate, and 4 for a policy denial."""
     dataset = project / "dataset.jsonl"
     rows = [json.loads(line) for line in dataset.read_text(encoding="utf-8").splitlines()]
     dataset.write_text(
@@ -265,11 +266,28 @@ def test_command_and_chat_exit_codes_agree(project: Path) -> None:
     headless = cli.invoke(app, ["run", str(project), "--workspace", str(project), "--json"])
     assert headless.exit_code == 1, headless.output
     _send(project, "--new", "--objective", "answers are correct", "--send", "/plan")
-    chat_run = _send(project, "--send", "/run", "--json")
+    session_list = json.loads(
+        cli.invoke(app, ["sessions", "list", "--workspace", str(project), "--json"]).output
+    )
+    sessions = session_list["data"]
+    session_id = max(sessions, key=lambda row: row["updated_at"])["session_id"]
+    workspace = Workspace.at(project)
+    storage = Storage(Database.open_workspace(workspace))
+    controller = SessionController(
+        session_id,
+        storage=storage,
+        artifacts=ArtifactStore(workspace.artifacts_dir),
+        workspace_root=workspace.root,
+    )
+    gate_patch = controller.apply_patch(
+        PlanPatch(gates=(ReleaseGate(gate_id="correct-answers", binding=0, min_pass_rate=0.9),)),
+        expected_revision=1,
+    )
+    assert gate_patch.status == "applied", gate_patch.problems
+    storage.db.close()
+    chat_run = _send(project, "--resume", session_id, "--send", "/run", "--json")
     data = json.loads(chat_run.stdout.strip().splitlines()[-1])
-    # the session draft has no gates of its own, so a finished run with a failed item is 3
-    # and a clean one is 0; the draft here has no failed items and no gates
-    assert chat_run.exit_code == data["exit_code"] == 0, chat_run.output
+    assert chat_run.exit_code == data["exit_code"] == 1, chat_run.output
 
     denying = project / "deny.policy.json"
     denying.write_text(json.dumps({"data_roots": ["."]}), encoding="utf-8")
@@ -287,9 +305,10 @@ def test_command_and_chat_exit_codes_agree(project: Path) -> None:
         "--send",
         "/plan",
     )
-    sessions = json.loads(
+    session_list = json.loads(
         cli.invoke(app, ["sessions", "list", "--workspace", str(project), "--json"]).output
     )
+    sessions = session_list["data"]
     newest = max(sessions, key=lambda s: s["updated_at"])["session_id"]
     denied_chat = _send(project, "--resume", newest, "--send", "/run", "--json")
     denied = json.loads(denied_chat.stdout.strip().splitlines()[-1])

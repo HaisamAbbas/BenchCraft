@@ -142,7 +142,9 @@ An adversarial review with executed reproductions confirmed 5 major, 7 minor and
 ## Consequences and limits
 
 - **Report shape.** `run_report` now returns the report document, not the old `{metrics, counts, budget}` summary. Callers in this repository were updated.
-- **Gates are authored in plan files.** A session's conversational draft cannot declare gates yet, so exit code 1 comes from plan-file runs.
+- **Gates are authored before dispatch.** They can be declared in executable plan files or
+  frozen into a session draft revision; both paths use the same gate model and exit-code
+  mapping.
 - **Claim checking is lexical.** A correct number in a misleading sentence passes. A number computed from results of an earlier turn is flagged; the assistant must query again in that turn.
 - **Unmatched evidence.** Evidence lists only failed, errored and indeterminate items. Passing cases are only in the counts.
 - **No live model run.** The conversation and quickstart tests use a scripted provider, which proves the harness side only.
