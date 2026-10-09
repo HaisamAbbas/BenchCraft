@@ -50,11 +50,16 @@ def _run_to_dict(
                 "basis": identity_basis,
                 "source": parameters.get("application_code_identity"),
                 "environment": parameters.get("application_environment_identity"),
+                "version_control": parameters.get("application_vcs_identity"),
             }
             if identity_basis is not None
             else None
         ),
         "plan_hash": manifest["plan_hash"],
+        "dependency_lock_hash": manifest["dependency_lock_hash"],
+        "plugin_hashes": manifest["plugin_hashes"],
+        "model_identifiers": manifest["model_identifiers"],
+        "benchmark_environment": manifest["environment"],
         "seed": manifest["seed"],
         "created_at": record.created_at,
         "committed_at": record.committed_at,
@@ -198,7 +203,55 @@ def show_run(
             f"runtime={escape(str(python_environment.get('runtime')))} "
             f"dependencies={escape(str(python_environment.get('dependencies')))}"
         )
+    vcs_identity = record.manifest.parameters.get("application_vcs_identity")
+    if vcs_identity:
+        if vcs_identity.get("kind") == "git":
+            console.print(f"  application_git_commit: {escape(str(vcs_identity['commit']))}")
+            console.print(
+                "  application_git_tracked_worktree: "
+                f"{escape(str(vcs_identity['tracked_worktree']))}"
+            )
+            console.print(
+                "  application_git_tracked_diff_hash: "
+                f"{escape(str(vcs_identity.get('tracked_diff_hash')))}"
+            )
+            console.print(
+                "  application_git_untracked_file_count: "
+                f"{escape(str(vcs_identity.get('untracked_file_count')))}"
+            )
+            console.print(
+                "  application_git_untracked_files_hash: "
+                f"{escape(str(vcs_identity.get('untracked_files_hash')))}"
+            )
+        else:
+            reason = vcs_identity.get("reason", "unknown")
+            console.print(
+                f"  application_vcs_provenance: unavailable ({escape(str(reason))})"
+            )
     console.print(f"  plan_hash: {record.manifest.plan_hash}")
+    if record.manifest.dependency_lock_hash is not None:
+        console.print(
+            f"  evaluator_dependency_lock_hash: {record.manifest.dependency_lock_hash}"
+        )
+    for evaluator_id, plugin_identity in (record.manifest.plugin_hashes or {}).items():
+        console.print(
+            f"  evaluator_plugin: {escape(str(evaluator_id))} "
+            f"{escape(str(plugin_identity))}"
+        )
+    for evaluator_id, model_id in (record.manifest.model_identifiers or {}).items():
+        console.print(
+            f"  evaluator_model: {escape(str(evaluator_id))} {escape(str(model_id))}"
+        )
+    benchmark_environment = record.manifest.environment or {}
+    if benchmark_environment:
+        console.print(
+            "  benchmark_environment: "
+            f"python={escape(str(benchmark_environment.get('python')))} "
+            f"implementation={escape(str(benchmark_environment.get('python_implementation')))} "
+            f"platform={escape(str(benchmark_environment.get('platform')))} "
+            f"platform_abi={escape(str(benchmark_environment.get('platform_abi')))}"
+        )
+    console.print(f"  run_seed: {record.manifest.seed}")
     console.print(f"  created_at: {record.created_at}")
     console.print(f"  updated_at: {record.updated_at}")
     console.print(f"  tags: {escape(', '.join(metadata['tags']) or '(none)')}")

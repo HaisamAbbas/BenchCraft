@@ -150,10 +150,13 @@ def _finish(
     §13 exit code."""
     report = build_report(storage, artifacts, run_id, include_content=False)
     code = run_exit_code(outcome.state, report)
+    run_record = storage.get_run(run_id)
+    run_seed = run_record.manifest.seed if run_record is not None else None
     if json_output:
         console.print_json(
             data={
                 "run_id": run_id,
+                "run_seed": run_seed,
                 **outcome_json(outcome),
                 "gates": report["gates"],
                 "outcome": report["outcome"],
@@ -162,6 +165,8 @@ def _finish(
         )
         return code
     _print_outcome(run_id, outcome)
+    if run_seed is not None:
+        console.print(f"  run_seed: {run_seed}")
     for gate in report["gates"]:
         colour = {"pass": "green", "fail": "red"}.get(gate["status"], "yellow")
         reason = f": {gate['reason']}" if gate.get("reason") else ""
@@ -195,7 +200,7 @@ def _print_outcome(run_id: str, outcome: RunOutcome) -> None:
         console.print(f"  resume with: aibench resume {run_id}")
 
 
-def _run_preview(compiled: CompiledRun) -> dict[str, object]:
+def _run_preview(compiled: CompiledRun, *, run_seed: int | None) -> dict[str, object]:
     """Describe the exact compiled inputs and selected work without persisting a run."""
     plan = compiled.plan
     executions = len(compiled.cases) * plan.repetitions
@@ -203,6 +208,10 @@ def _run_preview(compiled: CompiledRun) -> dict[str, object]:
         "schema": "aibench.run-preview/1",
         "status": "dry_run",
         "will_dispatch": False,
+        "reproducibility": {
+            "run_seed": run_seed,
+            "seed_will_be_random": run_seed is None,
+        },
         "frozen": {
             "plan_id": plan.plan_id,
             "plan_hash": compiled.plan_hash,
@@ -306,6 +315,13 @@ def run_plan(
     ),
     selection_seed: int | None = typer.Option(
         None, "--selection-seed", min=0, help="Seed for --sample-size (or a plan sample)."
+    ),
+    run_seed: int | None = typer.Option(
+        None,
+        "--run-seed",
+        min=0,
+        max=2**31 - 1,
+        help="Set the engine RNG seed; defaults to a random seed recorded with the run.",
     ),
     repetitions: int | None = typer.Option(
         None, "--repetitions", min=1, max=100, help="Override the plan's repetition count."
@@ -411,13 +427,19 @@ def run_plan(
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(None, json_output=json_output) from exc
     if dry_run:
-        _print_run_preview(_run_preview(compiled), json_output=json_output)
+        _print_run_preview(_run_preview(compiled, run_seed=run_seed), json_output=json_output)
         return
     storage, artifacts = _open(workspace, create=True, json_output=json_output)
     run_id: str | None = None
     try:
         granted = "cli:--trust-local-app" if trust_local_app else "policy"
-        run_id = create_run(compiled, storage=storage, artifacts=artifacts, granted_by=granted)
+        run_id = create_run(
+            compiled,
+            storage=storage,
+            artifacts=artifacts,
+            granted_by=granted,
+            run_seed=run_seed,
+        )
         if not json_output:
             console.print(
                 f"run [bold]{run_id}[/bold] created from plan {escape(compiled.plan.plan_id)}"

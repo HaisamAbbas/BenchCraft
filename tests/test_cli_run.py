@@ -85,6 +85,8 @@ def test_run_dry_run_shows_exact_overridden_scope_and_dispatch_matches_it(
         "1",
         "--no-cache-executions",
         "--cache-evaluations",
+        "--run-seed",
+        "1729",
         "--json",
     ]
     preview_result = cli.invoke(app, [*args, "--dry-run"])
@@ -92,6 +94,10 @@ def test_run_dry_run_shows_exact_overridden_scope_and_dispatch_matches_it(
     preview = _json(preview_result.stdout)
     assert preview["schema"] == "aibench.run-preview/1"
     assert preview["will_dispatch"] is False
+    assert preview["reproducibility"] == {
+        "run_seed": 1729,
+        "seed_will_be_random": False,
+    }
     assert preview["scope"]["case_ids"] == ["case-a"]
     assert preview["scope"]["execution_items"] == 2
     assert preview["scope"]["evaluation_items"] == 2
@@ -112,12 +118,15 @@ def test_run_dry_run_shows_exact_overridden_scope_and_dispatch_matches_it(
 
     run_result = cli.invoke(app, args)
     assert run_result.exit_code == 0, run_result.output
-    run_id = _json(run_result.stdout)["run_id"]
+    outcome = _json(run_result.stdout)
+    run_id = outcome["run_id"]
+    assert outcome["run_seed"] == 1729
     assert h.count() == 2
     storage, _ = h.storage()
     try:
         record = storage.get_run(run_id)
         assert record is not None
+        assert record.manifest.seed == 1729
         assert record.manifest.plan_hash == preview["frozen"]["plan_hash"]
     finally:
         storage.db.close()
@@ -149,6 +158,33 @@ def test_run_rejects_non_finite_wall_budget_before_preview_or_dispatch(tmp_path:
     document = _json(result.stdout)
     assert document["status"] == "error"
     assert "finite number" in " ".join(document["details"])
+    assert h.count() == 0
+    assert not h.workspace.db_path.exists()
+
+
+def test_run_rejects_run_seed_outside_engine_range_before_preview(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    plan = h.plan(
+        dataset=h.dataset({"case-a": "hi"}),
+        application=h.cli_app(),
+    )
+    result = cli.invoke(
+        app,
+        [
+            "run",
+            "--plan",
+            str(plan),
+            "--workspace",
+            str(h.workspace.root.parent),
+            "--trust-local-app",
+            "--run-seed",
+            str(2**31),
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
     assert h.count() == 0
     assert not h.workspace.db_path.exists()
 

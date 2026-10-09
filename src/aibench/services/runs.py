@@ -32,14 +32,18 @@ rebuilt from storage without loading any evaluator (11-G1).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import platform
 import random
 import shutil
 import socket
+import stat
+import subprocess
 import sys
 import sysconfig
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -103,6 +107,12 @@ from aibench.storage.repositories import RunLease, Storage, WorkItemSettlement
 
 LEASE_TTL_SECONDS = 60.0  # a lease not heartbeated for this long belongs to a dead session
 MAX_RUNTIME_BINARY_BYTES = 256 * 1024 * 1024
+MAX_GIT_DIFF_BYTES = 64 * 1024 * 1024
+GIT_DIFF_CHUNK_BYTES = 64 * 1024
+MAX_GIT_UNTRACKED_LIST_BYTES = 8 * 1024 * 1024
+MAX_GIT_UNTRACKED_FILES = 2_000
+MAX_GIT_UNTRACKED_BYTES = 64 * 1024 * 1024
+GIT_METADATA_TIMEOUT_SECONDS = 3.0
 # A run in any of these states can be continued by a new session. A run left
 # `cancelling` by a session that died is continued only to finish its cancellation.
 RESUMABLE_STATES = {
@@ -149,6 +159,268 @@ def _runtime_environment_identity() -> dict[str, str]:
         "python_cache_tag": str(sys.implementation.cache_tag or ""),
         "platform": sys.platform,
         "platform_abi": sysconfig.get_platform(),
+    }
+
+
+def _git_tracked_diff_identity(
+    base_dir: Path, environment: dict[str, str]
+) -> tuple[str, str] | None:
+    """Stream a bounded diff hash without retaining user file contents in memory."""
+    try:
+        process = subprocess.Popen(
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "diff",
+                "--binary",
+                "--no-ext-diff",
+                "--no-textconv",
+                "HEAD",
+                "--",
+            ],
+            cwd=base_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+        )
+    except OSError:
+        return None
+    stdout = process.stdout
+    if stdout is None:
+        process.kill()
+        process.wait()
+        return None
+
+    digest = hashlib.sha256()
+    result: dict[str, int | bool] = {"bytes": 0, "too_large": False, "read_error": False}
+
+    def consume_diff() -> None:
+        try:
+            while chunk := stdout.read(GIT_DIFF_CHUNK_BYTES):
+                size = int(result["bytes"]) + len(chunk)
+                if size > MAX_GIT_DIFF_BYTES:
+                    result["too_large"] = True
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                    return
+                digest.update(chunk)
+                result["bytes"] = size
+        except OSError:
+            result["read_error"] = True
+
+    reader = threading.Thread(target=consume_diff, name="aibench-git-diff", daemon=True)
+    reader.start()
+    try:
+        return_code = process.wait(timeout=GIT_METADATA_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        process.wait()
+        reader.join(timeout=3)
+        if reader.is_alive():
+            stdout.close()
+            reader.join(timeout=1)
+        return None
+    reader.join(timeout=3)
+    if reader.is_alive():
+        try:
+            process.kill()
+        except OSError:
+            pass
+        stdout.close()
+        reader.join(timeout=1)
+        return None
+    stdout.close()
+    if return_code != 0 or result["too_large"] or result["read_error"]:
+        return None
+    diff_bytes = int(result["bytes"])
+    return "clean" if diff_bytes == 0 else "dirty", f"sha256:{digest.hexdigest()}"
+
+
+def _git_untracked_files_identity(
+    base_dir: Path, environment: dict[str, str]
+) -> tuple[int, str] | None:
+    """Hash bounded, non-ignored untracked files below the local application root."""
+    try:
+        process = subprocess.Popen(
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                ".",
+            ],
+            cwd=base_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+        )
+    except OSError:
+        return None
+    stdout = process.stdout
+    if stdout is None:
+        process.kill()
+        process.wait()
+        return None
+
+    result: dict[str, int | bool | bytes] = {"bytes": 0, "too_large": False, "read_error": False, "data": b""}
+
+    def capture_names() -> None:
+        captured = bytearray()
+        try:
+            while chunk := stdout.read(GIT_DIFF_CHUNK_BYTES):
+                size = int(result["bytes"]) + len(chunk)
+                if size > MAX_GIT_UNTRACKED_LIST_BYTES:
+                    result["too_large"] = True
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                    return
+                captured.extend(chunk)
+                result["bytes"] = size
+        except OSError:
+            result["read_error"] = True
+        result["data"] = bytes(captured)
+
+    reader = threading.Thread(target=capture_names, name="aibench-git-untracked-list", daemon=True)
+    reader.start()
+    try:
+        return_code = process.wait(timeout=GIT_METADATA_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        process.wait()
+        reader.join(timeout=3)
+        if reader.is_alive():
+            stdout.close()
+            reader.join(timeout=1)
+        return None
+    reader.join(timeout=3)
+    if reader.is_alive():
+        try:
+            process.kill()
+        except OSError:
+            pass
+        stdout.close()
+        reader.join(timeout=1)
+        return None
+    stdout.close()
+    if return_code != 0 or result["too_large"] or result["read_error"]:
+        return None
+
+    names = bytes(result["data"])
+    if names and not names.endswith(b"\0"):
+        return None
+    relative_names = names[:-1].split(b"\0") if names else []
+    if len(relative_names) > MAX_GIT_UNTRACKED_FILES:
+        return None
+
+    digest = hashlib.sha256()
+    total_bytes = 0
+    for raw_name in relative_names:
+        try:
+            relative = Path(os.fsdecode(raw_name))
+            if relative.is_absolute() or relative.drive or not relative.parts or any(
+                part in ("", ".", "..") for part in relative.parts
+            ):
+                return None
+            candidate = base_dir
+            for index, part in enumerate(relative.parts):
+                candidate = candidate / part
+                info = candidate.lstat()
+                if stat.S_ISLNK(info.st_mode) or int(
+                    getattr(info, "st_file_attributes", 0)
+                ) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+                    return None
+                if index < len(relative.parts) - 1 and not stat.S_ISDIR(info.st_mode):
+                    return None
+            if not stat.S_ISREG(info.st_mode):
+                return None
+            file_descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(file_descriptor, "rb") as source:
+                opened_info = os.fstat(source.fileno())
+                if not stat.S_ISREG(opened_info.st_mode) or opened_info.st_size != info.st_size:
+                    return None
+                digest.update(len(raw_name).to_bytes(8, "big"))
+                digest.update(raw_name)
+                digest.update(stat.S_IMODE(opened_info.st_mode).to_bytes(4, "big"))
+                digest.update(opened_info.st_size.to_bytes(8, "big"))
+                read_bytes = 0
+                while chunk := source.read(GIT_DIFF_CHUNK_BYTES):
+                    read_bytes += len(chunk)
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_GIT_UNTRACKED_BYTES:
+                        return None
+                    digest.update(chunk)
+                final_info = os.fstat(source.fileno())
+                if (
+                    read_bytes != opened_info.st_size
+                    or final_info.st_size != opened_info.st_size
+                    or final_info.st_mtime_ns != opened_info.st_mtime_ns
+                ):
+                    return None
+        except (OSError, OverflowError, ValueError):
+            return None
+    return len(relative_names), f"sha256:{digest.hexdigest()}"
+
+
+def _application_vcs_identity(spec: ApplicationSpec, base_dir: Path) -> dict[str, Any]:
+    """Return non-secret Git revision/dirty-state metadata for a local app source tree."""
+    if not isinstance(spec.transport, PythonTransport | CliTransport):
+        return {"kind": "unavailable", "reason": "application_not_local"}
+    if not any((parent / ".git").exists() for parent in (base_dir, *base_dir.parents)):
+        return {"kind": "unavailable", "reason": "not_git_repository"}
+
+    environment = {
+        **os.environ,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
+        environment.pop(name, None)
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=base_dir,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=GIT_METADATA_TIMEOUT_SECONDS,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"kind": "unavailable", "reason": "git_metadata_unavailable"}
+    commit = revision.stdout.strip()
+    if (
+        revision.returncode != 0
+        or len(commit) not in (40, 64)
+        or any(character not in "0123456789abcdefABCDEF" for character in commit)
+    ):
+        return {"kind": "unavailable", "reason": "git_revision_unavailable"}
+
+    diff_identity = _git_tracked_diff_identity(base_dir, environment)
+    tracked_worktree, tracked_diff_hash = diff_identity or ("unknown", None)
+    untracked_identity = _git_untracked_files_identity(base_dir, environment)
+    untracked_file_count, untracked_files_hash = untracked_identity or (None, None)
+    return {
+        "kind": "git",
+        "commit": commit.lower(),
+        "tracked_worktree": tracked_worktree,
+        "tracked_diff_hash": tracked_diff_hash,
+        "untracked_file_count": untracked_file_count,
+        "untracked_files_hash": untracked_files_hash,
     }
 
 
@@ -356,6 +628,32 @@ def create_run(
     application_environment_identity = _application_environment_identity(
         spec, compiled.application.base_dir, environ
     )
+    application_vcs_identity = _application_vcs_identity(
+        spec, compiled.application.base_dir
+    )
+    owner_identity_declared = bool(spec.revision or spec.environment_digest)
+    vcs_error = application_vcs_identity.get("reason") in {
+        "git_metadata_unavailable",
+        "git_revision_unavailable",
+    }
+    if (
+        not owner_identity_declared
+        and (
+            vcs_error
+            or (
+                application_vcs_identity.get("kind") == "git"
+                  and (
+                      application_vcs_identity.get("tracked_diff_hash") is None
+                      or application_vcs_identity.get("untracked_files_hash") is None
+                  )
+            )
+        )
+    ):
+        raise RunError(
+            "cannot safely start this local application because its Git revision, tracked changes, "
+            "or untracked files could not be fingerprinted; install Git, reduce local changes, or declare "
+            "an application revision/environment_digest"
+        )
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     if not run_id or len(run_id) > 120:
         raise RunError("run_id must be a non-empty value of at most 120 characters")
@@ -374,6 +672,10 @@ def create_run(
             or parameters.get("application_code_identity") != application_identity
             or parameters.get("application_environment_identity")
             != application_environment_identity
+            or (
+                "application_vcs_identity" in parameters
+                and parameters.get("application_vcs_identity") != application_vcs_identity
+            )
             or (run_seed is not None and existing_run.manifest.seed != run_seed)
             or parameters.get("experiment_context") != experiment_context
         ):
@@ -468,6 +770,7 @@ def create_run(
             "policy_hash": compiled.policy_hash,
             "application_code_identity": application_identity,
             "application_environment_identity": application_environment_identity,
+            "application_vcs_identity": application_vcs_identity,
             "application_identity_basis": _application_identity_basis(
                 spec, application_identity, application_environment_identity
             ),
@@ -644,6 +947,25 @@ def _verify_application_resume_identity(
             "the application's Python interpreter or installed dependencies changed since this "
             "run was created; restore the original environment or create a new run"
         )
+
+    frozen_vcs_identity = manifest.parameters.get("application_vcs_identity")
+    if frozen_vcs_identity and frozen_vcs_identity.get("kind") == "git":
+        if (
+            frozen_vcs_identity.get("tracked_diff_hash") is None
+            or frozen_vcs_identity.get("untracked_files_hash") is None
+        ):
+            if not (spec.revision or spec.environment_digest):
+                raise RunError(
+                    "cannot safely resume because the application's tracked or untracked Git files "
+                    "could not be fingerprinted; create a new run"
+                )
+        else:
+            current_vcs_identity = _application_vcs_identity(spec, base_dir)
+            if current_vcs_identity != frozen_vcs_identity:
+                raise RunError(
+                    "the application's Git commit or local working tree changed since this run "
+                    "was created; restore the original identity or create a new run"
+                )
 
     frozen_environment = dict(manifest.environment or {})
     runtime = _runtime_environment_identity()

@@ -14,6 +14,7 @@ aibench run --plan benchmark.plan.json --max-attempts 2 --max-app-calls 300 `
 aibench run --plan benchmark.plan.json --max-cost-usd 2.00 `
   --estimated-cost-per-app-call-usd 0.002
 aibench run --plan benchmark.plan.json --no-cache-executions --cache-evaluations
+aibench run --plan benchmark.plan.json --run-seed 1729
 ```
 
 `--limit` and `--sample-size` are mutually exclusive. Both operate after the plan's case IDs
@@ -27,6 +28,11 @@ plan field. Existing policy ceilings and plan validators apply to their effectiv
 `--max-cost-usd` is a soft projected-cost limit and requires a declared or directly supplied
 application-call estimate; model-backed evaluations also need an evaluator-call estimate.
 Advanced retry backoff, quotas, plugin settings, and release gates remain plan fields.
+
+`--run-seed` sets the engine seed separately from `--selection-seed`, which only controls case
+sampling. It affects seeded engine randomness such as retry backoff; it cannot make an
+external application or evaluator deterministic. See
+[run reproducibility and provenance](reproducibility.md) for what the run records.
 
 Add `--dry-run` to validate all overrides and print the exact effective plan, its frozen
 hashes, selected case IDs, metric bindings, and planned execution/evaluation counts without

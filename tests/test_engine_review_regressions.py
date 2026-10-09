@@ -48,6 +48,299 @@ def _events(h: Harness, run_id: str) -> list[dict[str, Any]]:
         storage.db.close()
 
 
+def test_application_vcs_identity_captures_git_commit_and_tracked_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.core.hashes import bytes_hash
+    from aibench.core.models import ApplicationSpec
+    from aibench.services import runs as run_service
+
+    spec = ApplicationSpec.model_validate(
+        {
+            "application_id": "local",
+            "runner": "cli",
+            "target": "app.py",
+            "transport": {"kind": "cli", "argv": ["python", "app.py"]},
+        }
+    )
+    (tmp_path / ".git").mkdir()
+    commit = "a" * 40
+    monkeypatch.setattr(
+        run_service.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=f"{commit}\n"),
+    )
+    monkeypatch.setattr(
+        run_service,
+        "_git_tracked_diff_identity",
+        lambda _path, _environment: ("dirty", bytes_hash(b"binary tracked diff")),
+    )
+    monkeypatch.setattr(
+        run_service,
+        "_git_untracked_files_identity",
+        lambda _path, _environment: (1, bytes_hash(b"untracked prompt")),
+    )
+
+    assert run_service._application_vcs_identity(spec, tmp_path) == {
+        "kind": "git",
+        "commit": commit,
+        "tracked_worktree": "dirty",
+        "tracked_diff_hash": bytes_hash(b"binary tracked diff"),
+        "untracked_file_count": 1,
+        "untracked_files_hash": bytes_hash(b"untracked prompt"),
+    }
+
+
+def test_git_tracked_diff_identity_fails_closed_at_byte_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+
+    from aibench.services import runs as run_service
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.stdout = io.BytesIO(b"twelve bytes")
+            self.returncode = 0
+            self.killed = False
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return self.returncode
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+    process = FakeProcess()
+    monkeypatch.setattr(run_service, "MAX_GIT_DIFF_BYTES", 8)
+    monkeypatch.setattr(run_service, "GIT_DIFF_CHUNK_BYTES", 4)
+    monkeypatch.setattr(run_service.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    assert run_service._git_tracked_diff_identity(tmp_path, {}) is None
+    assert process.killed
+
+
+def test_git_untracked_file_identity_fails_closed_at_name_list_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+
+    from aibench.services import runs as run_service
+
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.stdout = io.BytesIO(b"prompt.md\0config.json\0")
+            self.returncode = 0
+            self.killed = False
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return self.returncode
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+    process = FakeProcess()
+    monkeypatch.setattr(run_service, "MAX_GIT_UNTRACKED_LIST_BYTES", 8)
+    monkeypatch.setattr(run_service, "GIT_DIFF_CHUNK_BYTES", 4)
+    monkeypatch.setattr(run_service.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    assert run_service._git_untracked_files_identity(tmp_path, {}) is None
+    assert process.killed
+
+
+def test_git_untracked_file_identity_hashes_file_names_modes_and_contents(tmp_path: Path) -> None:
+    import subprocess
+
+    from aibench.services import runs as run_service
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "prompt.md").write_text("before", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
+    before = run_service._git_untracked_files_identity(tmp_path, environment)
+    (tmp_path / "prompt.md").write_text("after!", encoding="utf-8")
+    after = run_service._git_untracked_files_identity(tmp_path, environment)
+
+    assert before is not None and before[0] == 1
+    assert before[1] != after[1]  # same untracked name, changed prompt bytes
+    assert before[1].startswith("sha256:")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction regression")
+def test_git_untracked_file_identity_rejects_junctions_outside_app_root(tmp_path: Path) -> None:
+    import subprocess
+
+    from aibench.services import runs as run_service
+
+    app_root = tmp_path / "app"
+    external = tmp_path / "external"
+    app_root.mkdir()
+    external.mkdir()
+    (external / "prompt.md").write_text("outside the app root", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=app_root, check=True)
+    junction = app_root / "linked"
+    junction_environment = {
+        **os.environ,
+        "BENCHCRAFT_TEST_JUNCTION": str(junction),
+        "BENCHCRAFT_TEST_JUNCTION_TARGET": str(external),
+    }
+    subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            (
+                "New-Item -ItemType Junction -Path $env:BENCHCRAFT_TEST_JUNCTION "
+                "-Target $env:BENCHCRAFT_TEST_JUNCTION_TARGET | Out-Null"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=junction_environment,
+    )
+    environment = {**os.environ, "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
+
+    assert run_service._git_untracked_files_identity(app_root, environment) is None
+
+
+def test_run_refuses_unfingerprintable_git_diff_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.services import runs as run_service
+
+    h = Harness(tmp_path)
+    monkeypatch.setattr(
+        run_service,
+        "_application_vcs_identity",
+        lambda _spec, _path: {
+            "kind": "git",
+            "commit": "a" * 40,
+            "tracked_worktree": "unknown",
+            "tracked_diff_hash": None,
+            "untracked_file_count": 0,
+            "untracked_files_hash": None,
+        },
+    )
+    plan = h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app())
+
+    with pytest.raises(RunError, match="tracked changes, or untracked files"):
+        h.create(plan)
+    assert h.count() == 0
+
+
+def test_resume_refuses_application_git_revision_drift_before_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.services import runs as run_service
+
+    h = Harness(tmp_path)
+    frozen_identity = {
+        "kind": "git",
+        "commit": "a" * 40,
+        "tracked_worktree": "clean",
+        "tracked_diff_hash": "sha256:clean",
+        "untracked_file_count": 0,
+        "untracked_files_hash": "sha256:empty",
+    }
+    monkeypatch.setattr(
+        run_service, "_application_vcs_identity", lambda _spec, _path: frozen_identity
+    )
+    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()))
+
+    monkeypatch.setattr(
+        run_service,
+        "_application_vcs_identity",
+        lambda _spec, _path: {
+            "kind": "git",
+            "commit": "b" * 40,
+            "tracked_worktree": "clean",
+            "tracked_diff_hash": "sha256:clean",
+            "untracked_file_count": 0,
+            "untracked_files_hash": "sha256:empty",
+        },
+    )
+    with pytest.raises(RunError, match="Git commit or local working tree changed"):
+        h.execute(run_id)
+    assert h.count() == 0
+
+
+def test_resume_refuses_changed_tracked_data_when_dirty_state_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.services import runs as run_service
+
+    h = Harness(tmp_path)
+    identities = iter(
+        [
+            {
+                "kind": "git",
+                "commit": "a" * 40,
+                "tracked_worktree": "dirty",
+                "tracked_diff_hash": "sha256:before",
+                "untracked_file_count": 0,
+                "untracked_files_hash": "sha256:empty",
+            },
+            {
+                "kind": "git",
+                "commit": "a" * 40,
+                "tracked_worktree": "dirty",
+                "tracked_diff_hash": "sha256:after",
+                "untracked_file_count": 0,
+                "untracked_files_hash": "sha256:empty",
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        run_service, "_application_vcs_identity", lambda _spec, _path: next(identities)
+    )
+    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()))
+
+    with pytest.raises(RunError, match="Git commit or local working tree changed"):
+        h.execute(run_id)
+    assert h.count() == 0
+
+
+def test_resume_refuses_changed_untracked_prompt_when_tracked_state_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.services import runs as run_service
+
+    h = Harness(tmp_path)
+    identities = iter(
+        [
+            {
+                "kind": "git",
+                "commit": "a" * 40,
+                "tracked_worktree": "clean",
+                "tracked_diff_hash": "sha256:clean",
+                "untracked_file_count": 1,
+                "untracked_files_hash": "sha256:prompt-before",
+            },
+            {
+                "kind": "git",
+                "commit": "a" * 40,
+                "tracked_worktree": "clean",
+                "tracked_diff_hash": "sha256:clean",
+                "untracked_file_count": 1,
+                "untracked_files_hash": "sha256:prompt-after",
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        run_service, "_application_vcs_identity", lambda _spec, _path: next(identities)
+    )
+    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()))
+
+    with pytest.raises(RunError, match="Git commit or local working tree changed"):
+        h.execute(run_id)
+    assert h.count() == 0
+
+
 @pytest.mark.parametrize("drift", ["source", "environment"])
 def test_resume_refuses_application_drift_before_dispatch(tmp_path: Path, drift: str) -> None:
     h = Harness(tmp_path)

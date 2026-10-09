@@ -119,6 +119,12 @@ override a plan for one `aibench run`. `--dry-run` validates those overrides and
 effective frozen plan and exact selected case IDs without dispatching. Policy checks remain
 in force. See [direct run controls](run-controls.md) for bounds and examples.
 
+## Run reproducibility
+
+`aibench run --run-seed N` fixes the engine RNG seed. Run records expose the seed and
+available application source, runtime, dependency, and Git provenance. See
+[run reproducibility and provenance](reproducibility.md).
+
 ## Credentials
 
 Credentials are never written into project files, datasets, plans or chat. Every

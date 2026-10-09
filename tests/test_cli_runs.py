@@ -15,7 +15,17 @@ from aibench.storage.repositories import Storage
 runner = CliRunner()
 
 
-def _seed_run(project_root: Path, run_id: str = "r1", status: str = "created") -> None:
+def _seed_run(
+    project_root: Path,
+    run_id: str = "r1",
+    status: str = "created",
+    *,
+    seed: int | None = None,
+    parameters: dict[str, object] | None = None,
+    dependency_lock_hash: str | None = None,
+    plugin_hashes: dict[str, object] | None = None,
+    environment: dict[str, object] | None = None,
+) -> None:
     ws = Workspace.at(project_root)
     db = Database.open_workspace(ws)
     storage = Storage(db)
@@ -25,6 +35,11 @@ def _seed_run(project_root: Path, run_id: str = "r1", status: str = "created") -
             dataset_hash="sha256:d",
             application_hash="sha256:a",
             plan_hash="sha256:p",
+            dependency_lock_hash=dependency_lock_hash,
+            plugin_hashes=plugin_hashes or {},
+            environment=environment or {},
+            seed=seed,
+            parameters=parameters or {},
         )
     )
     if status != "created":
@@ -95,6 +110,62 @@ def test_runs_show_json_output(tmp_path) -> None:
     payload = json.loads(result.stdout)
     assert payload["run_id"] == "r1"
     assert payload["dataset_hash"] == "sha256:d"
+
+
+def test_runs_show_exposes_seed_and_local_source_provenance(tmp_path) -> None:
+    source = {"code": "sha256:source"}
+    environment = {"kind": "python", "dependencies": "sha256:dependencies"}
+    vcs = {
+        "kind": "git",
+        "commit": "a" * 40,
+        "tracked_worktree": "dirty",
+        "tracked_diff_hash": "sha256:diff",
+        "untracked_file_count": 2,
+        "untracked_files_hash": "sha256:untracked",
+    }
+    benchmark_environment = {
+        "python": "3.12.1",
+        "python_implementation": "CPython",
+        "platform": "win32",
+        "platform_abi": "win-amd64",
+    }
+    plugins = {"native.exact_match": "aibench.native==1"}
+    _seed_run(
+        tmp_path,
+        seed=1729,
+        dependency_lock_hash="sha256:evaluator-dependencies",
+        plugin_hashes=plugins,
+        environment=benchmark_environment,
+        parameters={
+            "application_identity_basis": {"kind": "local_source_content_hash"},
+            "application_code_identity": source,
+            "application_environment_identity": environment,
+            "application_vcs_identity": vcs,
+        },
+    )
+
+    result = runner.invoke(
+        app, ["runs", "show", "r1", "--workspace", str(tmp_path), "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["seed"] == 1729
+    assert payload["dependency_lock_hash"] == "sha256:evaluator-dependencies"
+    assert payload["plugin_hashes"] == plugins
+    assert payload["benchmark_environment"] == benchmark_environment
+    assert payload["application_identity"]["source"] == source
+    assert payload["application_identity"]["environment"] == environment
+    assert payload["application_identity"]["version_control"] == vcs
+
+    human = runner.invoke(app, ["runs", "show", "r1", "--workspace", str(tmp_path)])
+    assert human.exit_code == 0, human.output
+    assert "run_seed: 1729" in human.stdout
+    assert "application_git_commit" in human.stdout
+    assert "tracked_worktree: dirty" in human.stdout
+    assert "application_git_untracked_file_count: 2" in human.stdout
+    assert "application_git_untracked_files_hash: sha256:untracked" in human.stdout
+    assert "evaluator_dependency_lock_hash: sha256:evaluator-dependencies" in human.stdout
+    assert "platform=win32" in human.stdout
 
 
 def test_run_annotations_filters_pagination_and_baseline_management(tmp_path) -> None:
