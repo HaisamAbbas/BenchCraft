@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F18",
+  "current_item": "G01",
   "items": [
     {
       "id": "F01",
@@ -315,7 +315,7 @@
       "title": "Terminal regression tests inherit capability/color flags and report false failures",
       "detail": "Original and normalized-environment rechecks",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "Terminal regression batch: 15 passed; focused capable, fallback, RGB, and NO_COLOR checks: 5 passed",
         "Mypy: 142 source files passed; Ruff and git diff --check passed",
@@ -324,8 +324,8 @@
         "Independent review found no remaining findings"
       ],
       "review": "evidence/F18-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "af23a29f781eb07b202b1828ef073972e502ac31",
+      "pushed": true
     },
     {
       "id": "F19",
