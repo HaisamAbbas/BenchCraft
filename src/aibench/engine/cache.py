@@ -225,6 +225,7 @@ def evaluation_key(
     binding_hash: str,
     evaluator: str,
     plugin: str,
+    compatibility_hash: str,
     policy_hash: str,
 ) -> str:
     return content_hash(
@@ -246,6 +247,7 @@ def evaluation_key(
             "binding": binding_hash,
             "evaluator": evaluator,
             "plugin": plugin,
+            "compatibility": compatibility_hash,
             "policy": policy_hash,
         }
     )

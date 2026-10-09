@@ -12,7 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from aibench.cli.main import app
-from aibench.core.models import EvaluatorManifest, ExecutionStatus, MetricBinding
+from aibench.core.models import ApplicationSpec, EvaluatorManifest, ExecutionStatus, MetricBinding
 from aibench.core.plans import BudgetLimits, Quota, RetryPolicy
 from aibench.evaluators.protocol import (
     EvaluationOutcome,
@@ -34,11 +34,17 @@ class Judge(Evaluator):
             "version": "1.0.0",
             "plugin_id": "tests",
             "plugin_version": "1",
+            "package_name": "fixture-budget-judge",
+            "package_version": "1.0.0",
             "description": "local test judge",
             "value_kind": "scalar",
             "direction": "higher",
             "aggregation": "mean",
             "uses_models": True,
+            "parameters_schema": {
+                "type": "object",
+                "properties": {"model": {"type": "string"}},
+            },
             "requires": [{"path": "execution.output", "non_empty": False}],
         }
     )
@@ -82,7 +88,17 @@ def seeded(tmp_path: Path) -> Seeded:
     Judge.failures = 0
     Judge.silent = False
     seeded = Seeded(tmp_path)
-    seeded.seed([case(c, "yes") for c in "abc"], [execution(c, "yes") for c in "abc"])
+    seeded.seed(
+        [case(c, "yes") for c in "abc"],
+        [execution(c, "yes") for c in "abc"],
+        application=ApplicationSpec(
+            application_id="fixture-app",
+            runner="cli",
+            target="fixture.py",
+            input_binding={"input": "/input"},
+            output_binding={"output": "/output", "retrieved_context": "/context"},
+        ),
+    )
     yield seeded
     seeded.storage.db.close()
 
@@ -90,7 +106,11 @@ def seeded(tmp_path: Path) -> Seeded:
 def score(seeded: Seeded, **kwargs: Any):  # type: ignore[no-untyped-def]
     registry = EvaluatorRegistry.with_native()
     registry.register(Judge)
-    return seeded.score([{"metric": Judge.manifest.evaluator_id}], registry=registry, **kwargs)
+    return seeded.score(
+        [{"metric": Judge.manifest.evaluator_id, "params": {"model": "fixture-model"}}],
+        registry=registry,
+        **kwargs,
+    )
 
 
 def test_call_ceiling_is_shared_across_bindings_and_saved(seeded: Seeded) -> None:

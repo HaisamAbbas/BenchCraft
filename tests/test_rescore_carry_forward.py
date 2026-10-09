@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import asyncio
 import io
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
 from rich.console import Console
 
 from aibench.core.models import (
+    ApplicationSpec,
     Decision,
     EvaluatorManifest,
     ExecutionStatus,
     FieldRequirement,
+    MetricBinding,
     MetricDirection,
 )
 from aibench.evaluators.protocol import (
@@ -25,8 +28,15 @@ from aibench.evaluators.protocol import (
     Evaluator,
     EvaluatorContext,
 )
+from aibench.evaluators.worker_client import WorkerSpec
 from aibench.registry import EvaluatorRegistry
-from aibench.services.scoring import is_carried
+from aibench.services.scoring import (
+    BindingScorer,
+    _carry_identity_is_complete,
+    declared_dependency_identity,
+    evaluation_compatibility_identity,
+    is_carried,
+)
 from aibench.tui import render
 from aibench.tui.commands import Commands
 from tests.scoring_support import RUN_ID, Seeded, case, execution
@@ -45,6 +55,8 @@ class Flaky(Evaluator):
             "version": "1.0.0",
             "plugin_id": "tests",
             "plugin_version": "0",
+            "package_name": "fixture-flaky",
+            "package_version": "1.0.0",
             "description": "a judge that is rate limited once",
             "value_kind": "scalar",
             "direction": MetricDirection.HIGHER,
@@ -52,7 +64,13 @@ class Flaky(Evaluator):
             "uses_models": True,
             "requires": (FieldRequirement(path="execution.output", non_empty=False),),
             "default_rule": {"comparator": ">=", "threshold": 0.5},
-            "parameters_schema": {"type": "object", "properties": {"timeout": {"type": "number"}}},
+            "parameters_schema": {
+                "type": "object",
+                "properties": {
+                    "model": {"type": "string"},
+                    "timeout": {"type": "number"},
+                },
+            },
         }
     )
     asked: ClassVar[list[str]] = []
@@ -76,13 +94,23 @@ def _registry() -> EvaluatorRegistry:
 def _seeded(tmp_path: Path) -> Seeded:
     seeded = Seeded(tmp_path)
     ids = ("a", "b", "c")
-    seeded.seed([case(c, "yes") for c in ids], [execution(c, "yes") for c in ids])
+    seeded.seed(
+        [case(c, "yes") for c in ids],
+        [execution(c, "yes") for c in ids],
+        application=ApplicationSpec(
+            application_id="fixture-app",
+            runner="cli",
+            target="fixture.py",
+            input_binding={"input": "/input"},
+            output_binding={"output": "/output"},
+        ),
+    )
     Flaky.asked.clear()
     Flaky.fail_once.clear()
     return seeded
 
 
-BINDING = {"metric": "tests.flaky"}
+BINDING = {"metric": "tests.flaky", "params": {"model": "fixture-model"}}
 
 
 def test_a_carry_forward_pass_evaluates_only_what_failed(tmp_path: Path) -> None:
@@ -107,6 +135,10 @@ def test_a_carry_forward_pass_evaluates_only_what_failed(tmp_path: Path) -> None
     carried = by_case["a"]
     assert carried.value == first.results[0].value  # the value is the earlier one
     assert carried.provenance["carried_forward"]["source_result_id"] == first.results[0].result_id
+    assert (
+        carried.provenance["carried_forward"]["producer_compatibility_hash"]
+        == first.results[0].provenance["compatibility"]["compatibility_hash"]
+    )
     assert "cache" not in carried.provenance
     # Nothing was called for it in this pass, so no calls or cost are attributed to it.
     assert carried.resources["model_calls"] == 0 and carried.resources["cost"] == 0.0
@@ -139,6 +171,263 @@ def test_nothing_is_carried_when_the_metric_settings_changed(tmp_path: Path) -> 
     )
     assert changed.carried == 0 and len(changed.results) == 3
     assert first.carried == 0
+
+
+def test_changed_plugin_or_dependency_identity_forces_fresh_evaluation(tmp_path: Path) -> None:
+    seeded = _seeded(tmp_path)
+    metric_id = "tests.versioned"
+    values = {"v1": 0.1, "plugin-v2": 0.9, "dependency-v2": 0.8}
+    calls = {key: 0 for key in values}
+
+    def versioned_factory(name: str, plugin_version: str, package_version: str):
+        class Versioned(Evaluator):
+            manifest = EvaluatorManifest.model_validate(
+                {
+                    "evaluator_id": metric_id,
+                    "version": "1.0.0",
+                    "plugin_id": "tests",
+                    "plugin_version": plugin_version,
+                    "package_name": "fixture-versioned",
+                    "package_version": package_version,
+                    "description": "versioned carry-forward fixture",
+                    "value_kind": "scalar",
+                    "direction": "higher",
+                    "aggregation": "mean",
+                    "uses_models": True,
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {"model": {"type": "string"}},
+                    },
+                    "requires": [{"path": "execution.output", "non_empty": False}],
+                }
+            )
+
+            async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext):
+                calls[name] += 1
+                return EvaluationOutcome.ok("scalar", values[name])
+
+        return Versioned
+
+    binding = {"metric": metric_id, "params": {"model": "fixture-model"}}
+
+    def run(factory):
+        registry = EvaluatorRegistry.with_native()
+        registry.register(factory)
+        return seeded.score([binding], registry=registry, carry_forward=True)
+
+    try:
+        first = run(versioned_factory("v1", "1.0.0", "1.0.0"))
+        assert first.carried == 0 and calls["v1"] == 3
+        changed_plugin = run(versioned_factory("plugin-v2", "2.0.0", "1.0.0"))
+        assert changed_plugin.carried == 0 and calls["plugin-v2"] == 3
+        assert all(
+            result.provenance["compatibility"]["plugin_version"] == "2.0.0"
+            for result in changed_plugin.results
+        )
+        changed_dependency = run(versioned_factory("dependency-v2", "2.0.0", "2.0.0"))
+        assert changed_dependency.carried == 0 and calls["dependency-v2"] == 3
+        assert all(
+            result.value is not None and result.value.value == 0.8
+            for result in changed_dependency.results
+        )
+    finally:
+        seeded.storage.db.close()
+
+
+def test_worker_environment_identity_includes_dependency_lock_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    seeded = _seeded(tmp_path)
+    metric = _registry().resolve_binding(
+        MetricBinding(metric="tests.flaky", params={"model": "fixture-model"})
+    )
+    try:
+        spec = WorkerSpec(
+            python=Path("plugin-env/python"),
+            target="plugin:factory",
+            dependency_lock_hash="lock-v1",
+            extra_paths_hash="paths-v1",
+            python_runtime_identity="cpython-3.12.10-cp312-win_amd64",
+        )
+        with_worker = replace(
+            metric, factory=type("WorkerFlaky", (metric.factory,), {"spec": spec})
+        )
+        changed_worker = replace(
+            with_worker,
+            factory=type(
+                "WorkerFlakyV2",
+                (metric.factory,),
+                {"spec": replace(spec, dependency_lock_hash="lock-v2")},
+            ),
+        )
+        assert declared_dependency_identity([with_worker]) != declared_dependency_identity(
+            [changed_worker]
+        )
+
+        def cache_key_for(resolved_metric):
+            scorer = BindingScorer(
+                seeded.storage,
+                seeded.artifacts,
+                "score-worker-cache",
+                resolved_metric,
+                30.0,
+                None,
+                application=ApplicationSpec(
+                    application_id="fixture-app",
+                    runner="cli",
+                    target="fixture.py",
+                    input_binding={"input": "/input"},
+                    output_binding={"output": "/output"},
+                ),
+                dependency_lock_hash=declared_dependency_identity([resolved_metric]),
+            )
+            scorer.cache_policy_hash = "policy-v1"
+            return scorer._cache_key(execution("a", "yes"), [case("a", "yes")])
+
+        key_v1 = cache_key_for(with_worker)
+        assert key_v1 is not None and key_v1 != cache_key_for(changed_worker)
+        changed_runtime = replace(
+            with_worker,
+            factory=type(
+                "WorkerWithChangedPython",
+                (metric.factory,),
+                {
+                    "spec": replace(
+                        spec, python_runtime_identity="cpython-3.13.0-cp313-win_amd64"
+                    )
+                },
+            ),
+        )
+        assert key_v1 != cache_key_for(changed_runtime)
+        changed_extra_paths = replace(
+            with_worker,
+            factory=type(
+                "WorkerWithChangedPath",
+                (metric.factory,),
+                {"spec": replace(spec, extra_paths_hash="paths-v2")},
+            ),
+        )
+        assert declared_dependency_identity([with_worker]) != declared_dependency_identity(
+            [changed_extra_paths]
+        )
+
+        unversioned = replace(
+            metric,
+            manifest=metric.manifest.model_copy(
+                update={"package_name": None, "package_version": None}
+            ),
+            factory=type(
+                "UnidentifiedWorker",
+                (metric.factory,),
+                {"spec": replace(spec, dependency_lock_hash=None)},
+            ),
+        )
+        assert declared_dependency_identity([unversioned]) is None
+
+        untracked_extra_path = replace(
+            with_worker,
+            factory=type(
+                "UntrackedPathWorker",
+                (metric.factory,),
+                {
+                    "spec": replace(
+                        spec,
+                        extra_paths=(Path("plugin-env/custom"),),
+                        extra_paths_hash=None,
+                    )
+                },
+            ),
+        )
+        assert declared_dependency_identity([untracked_extra_path]) is None
+
+        native_metric = EvaluatorRegistry.with_native().resolve_binding(
+            MetricBinding(metric="native.exact_match")
+        )
+        native_worker = replace(
+            native_metric,
+            factory=type("NativeWorker", (native_metric.factory,), {"spec": spec}),
+        )
+        native_worker_v2 = replace(
+            native_metric,
+            factory=type(
+                "NativeWorkerV2",
+                (native_metric.factory,),
+                {"spec": replace(spec, dependency_lock_hash="lock-v2")},
+            ),
+        )
+        assert not native_worker.manifest.uses_models
+        assert declared_dependency_identity([native_worker]) != declared_dependency_identity(
+            [native_worker_v2]
+        )
+        unidentified_native_worker = replace(
+            native_metric,
+            factory=type(
+                "UnidentifiedNativeWorker",
+                (native_metric.factory,),
+                {"spec": replace(spec, dependency_lock_hash=None)},
+            ),
+        )
+        assert declared_dependency_identity([unidentified_native_worker]) is None
+        identity = evaluation_compatibility_identity(
+            unidentified_native_worker,
+            application=ApplicationSpec(
+                application_id="fixture-app",
+                runner="cli",
+                target="fixture.py",
+                input_binding={"input": "/input"},
+                output_binding={"output": "/output"},
+            ),
+            dependency_lock_hash=None,
+        )
+        assert not _carry_identity_is_complete(identity, requires_dependency_identity=True)
+    finally:
+        seeded.storage.db.close()
+
+
+def test_evaluation_cache_is_disabled_when_model_identity_is_unknown(tmp_path: Path) -> None:
+    seeded = _seeded(tmp_path)
+    resolved = _registry().resolve_binding(
+        MetricBinding(metric="tests.flaky", params={"model": "fixture-model"})
+    )
+    unversioned = replace(
+        resolved,
+        manifest=resolved.manifest.model_copy(
+            update={"package_name": None, "package_version": None}
+        ),
+    )
+    scorer = BindingScorer(
+        seeded.storage,
+        seeded.artifacts,
+        "score-cache-identity",
+        unversioned,
+        30.0,
+        None,
+        application=ApplicationSpec(
+            application_id="fixture-app",
+            runner="cli",
+            target="fixture.py",
+            input_binding={"input": "/input"},
+            output_binding={"output": "/output"},
+        ),
+        dependency_lock_hash=declared_dependency_identity([unversioned]),
+    )
+    scorer.cache_policy_hash = "policy-v1"
+    try:
+        assert scorer._cache_key(execution("a", "yes"), [case("a", "yes")]) is None
+    finally:
+        seeded.storage.db.close()
+
+
+def test_unverified_instrumentation_identity_disables_carry_forward(tmp_path: Path) -> None:
+    seeded = Seeded(tmp_path)
+    seeded.seed([case("a", "yes")], [execution("a", "yes")])
+    try:
+        first = seeded.score([{"metric": "native.exact_match"}])
+        second = seeded.score([{"metric": "native.exact_match"}], carry_forward=True)
+        assert first.results[0].provenance["compatibility"]["instrumentation"]["verified"] is False
+        assert second.carried == 0
+    finally:
+        seeded.storage.db.close()
 
 
 def test_a_failed_result_is_never_carried_and_a_missing_metric_is_evaluated(

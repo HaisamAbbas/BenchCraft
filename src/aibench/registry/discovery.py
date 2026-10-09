@@ -18,6 +18,7 @@ Installing packages is out of scope: only already-installed distributions are se
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -31,6 +32,7 @@ from pathlib import Path
 
 from pydantic import ValidationError as PydanticValidationError
 
+from aibench.core.hashes import content_hash
 from aibench.core.models import EvaluatorManifest
 from aibench.runners.process_tree import run_contained
 
@@ -83,6 +85,122 @@ def core_version(paths: Sequence[Path]) -> str | None:
         if (dist.metadata["Name"] or "").lower() == "aibench":
             return dist.version
     return None
+
+
+def dependency_lock_hash(paths: Sequence[Path]) -> str | None:
+    """Hash installed distribution names and versions in a plugin environment."""
+    installed = set()
+    for dist in metadata.distributions(path=[str(path) for path in paths]):
+        try:
+            name = dist.metadata["Name"]
+        except KeyError:
+            continue
+        installed.add((re.sub(r"[-_.]+", "-", name).casefold(), dist.version))
+    if not installed:
+        return None
+    return content_hash([{"name": name, "version": version} for name, version in sorted(installed)])
+
+
+def worker_python_identity(
+    python: Path, *, timeout: float = WORKER_TIMEOUT_SECONDS
+) -> str | None:
+    """Identify the worker interpreter implementation, version, ABI and platform."""
+    probe = (
+        "import json, platform, sys, sysconfig; "
+        "print(json.dumps({'implementation': platform.python_implementation(), "
+        "'version': list(sys.version_info[:3]), 'cache_tag': sys.implementation.cache_tag, "
+        "'platform': sysconfig.get_platform(), 'machine': platform.machine()}))"
+    )
+    env = {key: os.environ[key] for key in _WORKER_ENV_KEEP if key in os.environ}
+    try:
+        result = run_contained([str(python), "-I", "-c", probe], timeout=timeout, env=env)
+        if result.timed_out or result.returncode != 0:
+            return None
+        identity = json.loads(result.stdout)
+        if not isinstance(identity, dict) or not all(identity.values()):
+            return None
+        return content_hash(identity)
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def plugin_paths_hash(paths: Sequence[Path]) -> str | None:
+    """Hash code and data visible on plugin ``PYTHONPATH``; fail closed on unreadable/large paths."""
+    max_bytes = 64 * 1024 * 1024
+    max_entries = 10_000
+    entries: list[dict[str, str]] = []
+    total_bytes = 0
+    visited_entries = 0
+    visited: set[Path] = set()
+
+    def files_under(root: Path):
+        nonlocal visited_entries
+        if root.is_file():
+            visited_entries += 1
+            if visited_entries > max_entries:
+                raise OverflowError("plugin path contains too many entries")
+            yield root
+            return
+        if not root.is_dir():
+            return
+        pending = [root]
+        while pending:
+            directory = pending.pop()
+            resolved_dir = directory.resolve()
+            if resolved_dir in visited:
+                continue
+            visited.add(resolved_dir)
+            child_dirs: list[Path] = []
+            with os.scandir(directory) as children:
+                for child in children:
+                    visited_entries += 1
+                    if visited_entries > max_entries:
+                        raise OverflowError("plugin path contains too many entries")
+                    if child.name in {
+                        ".git",
+                        "__pycache__",
+                        ".mypy_cache",
+                        ".ruff_cache",
+                    }:
+                        continue
+                    if child.is_dir(follow_symlinks=True):
+                        child_dirs.append(Path(child.path))
+                    elif child.is_file(follow_symlinks=True):
+                        yield Path(child.path)
+            pending.extend(sorted(child_dirs, reverse=True))
+
+    try:
+        for configured in paths:
+            root = configured.resolve(strict=True)
+            if not root.is_file() and not root.is_dir():
+                return None
+            for candidate in files_under(root):
+                if not candidate.is_file():
+                    continue
+                remaining = max_bytes - total_bytes
+                if len(entries) >= max_entries or candidate.stat().st_size > remaining:
+                    return None
+                digest = hashlib.sha256()
+                file_bytes = 0
+                with candidate.open("rb") as stream:
+                    while chunk := stream.read(min(64 * 1024, remaining - file_bytes + 1)):
+                        file_bytes += len(chunk)
+                        if file_bytes > remaining:
+                            return None
+                        digest.update(chunk)
+                total_bytes += file_bytes
+                entries.append(
+                    {
+                        "root": str(root),
+                        "path": candidate.relative_to(root).as_posix()
+                        if root.is_dir()
+                        else root.name,
+                        "hash": "sha256:" + digest.hexdigest(),
+                    }
+                )
+    except (OSError, OverflowError, RuntimeError):
+        return None
+    return content_hash(sorted(entries, key=lambda entry: (entry["root"], entry["path"])))
 
 
 def worker_failure(stderr: bytes) -> str:

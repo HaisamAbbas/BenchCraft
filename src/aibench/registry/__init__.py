@@ -36,9 +36,12 @@ from aibench.registry.discovery import (
     WORKER_TIMEOUT_SECONDS,
     ManifestLoad,
     core_version,
+    dependency_lock_hash,
     discover_plugins,
     environment_site_paths,
     load_manifests,
+    plugin_paths_hash,
+    worker_python_identity,
 )
 from aibench.security.secrets import resolve_secret
 
@@ -176,16 +179,20 @@ class EvaluatorRegistry:
                 resolve_secret(ref, os.environ)  # fail now, not as an error on every case
             except ConfigError as exc:
                 raise RegistryError(f"plugin secret {name}: {exc}") from exc
+        resolved_extra_paths = tuple(Path(os.path.abspath(path)) for path in extra_paths)
         try:
             site_paths = environment_site_paths(python, timeout=startup_timeout_seconds)
         except OSError as exc:
             raise RegistryError(str(exc)) from exc
+        environment_lock_hash = dependency_lock_hash(site_paths)
+        extra_paths_identity = plugin_paths_hash(resolved_extra_paths)
+        runtime_identity = worker_python_identity(python, timeout=startup_timeout_seconds)
         loads = []
         for plugin in discover_plugins(paths=site_paths):
             loaded = load_manifests(
                 plugin,
                 python=python,
-                extra_paths=extra_paths,
+                extra_paths=resolved_extra_paths,
                 timeout=startup_timeout_seconds,
             )
             if loaded.error:
@@ -196,7 +203,10 @@ class EvaluatorRegistry:
             spec = WorkerSpec(
                 python=python,
                 target=plugin.target,
-                extra_paths=tuple(extra_paths),
+                extra_paths=resolved_extra_paths,
+                dependency_lock_hash=environment_lock_hash,
+                extra_paths_hash=extra_paths_identity,
+                python_runtime_identity=runtime_identity,
                 secret_env=dict(secret_env or {}),
                 startup_timeout_seconds=startup_timeout_seconds,
             )

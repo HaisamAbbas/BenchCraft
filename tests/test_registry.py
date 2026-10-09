@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,11 @@ from aibench.registry import (
     EvaluatorRegistry,
     RegistryError,
     schema_compatible,
+)
+from aibench.registry.discovery import (
+    dependency_lock_hash,
+    plugin_paths_hash,
+    worker_python_identity,
 )
 from tests.runner_support import REPO_ROOT
 
@@ -36,6 +42,51 @@ def _variant(version: str, core_schema: str = ">=1.0.0,<2.0.0") -> type[Evaluato
 
     Variant.manifest = manifest
     return Variant
+
+
+def test_worker_dependency_lock_hash_tracks_installed_versions(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for root, version in ((first, "1.0"), (second, "2.0")):
+        dist_info = root / "fixture_dependency-1.0.dist-info"
+        dist_info.mkdir(parents=True)
+        (dist_info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: Fixture_Dependency\nVersion: {version}\n",
+            encoding="utf-8",
+        )
+
+    first_hash = dependency_lock_hash([first])
+    assert first_hash is not None
+    assert first_hash == dependency_lock_hash([first])
+    assert first_hash != dependency_lock_hash([second])
+
+
+def test_worker_python_identity_reads_the_interpreter_runtime() -> None:
+    assert worker_python_identity(Path(sys.executable)) is not None
+
+
+def test_plugin_import_path_identity_tracks_in_place_source_changes(tmp_path: Path) -> None:
+    plugin_path = tmp_path / "local-plugin"
+    plugin_path.mkdir()
+    source = plugin_path / "judge.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+
+    first_hash = plugin_paths_hash([plugin_path])
+    assert first_hash is not None
+    assert first_hash == plugin_paths_hash([plugin_path])
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    assert first_hash != plugin_paths_hash([plugin_path])
+
+
+def test_plugin_import_path_identity_rejects_oversized_files_before_reading(
+    tmp_path: Path,
+) -> None:
+    plugin_path = tmp_path / "large-plugin"
+    plugin_path.mkdir()
+    oversized = plugin_path / "large.bin"
+    with oversized.open("wb") as stream:
+        stream.truncate(64 * 1024 * 1024 + 1)
+    assert plugin_paths_hash([plugin_path]) is None
 
 
 def test_resolution_by_id_major_minor_and_exact_version() -> None:

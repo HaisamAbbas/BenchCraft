@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F06",
+  "current_item": "F02",
   "items": [
     {
       "id": "F01",
@@ -31,9 +31,16 @@
       "title": "Carry-forward ignores implementation compatibility and relabels old values",
       "detail": "Runtime reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "verified",
+      "verification": [
+        "Broader carry-forward, budget, rescore, scoring, report, comparison, cache, and registry regression batch: 125 tests passed before the final runtime-identity addition",
+        "Final carry-forward, registry, and cache regression batch: 41 tests passed",
+        "Mypy: 140 source files passed; Ruff src/tests passed",
+        "Plugin package and worker dependency versions, custom import-path contents, and interpreter runtime are included in compatibility/cache identity",
+        "Unknown, incomplete, oversized, or unreadable worker identity disables carry-forward and evaluation-cache reuse",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F02-review.md",
       "commit": null,
       "pushed": false
     },
@@ -99,8 +106,8 @@
         "Slash-command and natural-language headless rescore propagate outcome and exit code"
       ],
       "review": "evidence/F06-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "1c864dac89b5e1d8f28e219c02a8ebad00044940",
+      "pushed": true
     },
     {
       "id": "F07",

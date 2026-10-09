@@ -25,6 +25,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import ValidationError
+
 from aibench.core.errors import AibenchError
 from aibench.core.hashes import bytes_hash, content_hash
 from aibench.core.models import (
@@ -389,9 +391,26 @@ def declared_dependency_identity(metrics: Sequence[ResolvedMetric]) -> str | Non
 
     entries = []
     for metric in metrics:
-        if not metric.manifest.uses_models:
-            continue
         worker_spec = getattr(metric.factory, "spec", None)
+        if not metric.manifest.uses_models and worker_spec is None:
+            continue
+        worker_lock_hash = getattr(worker_spec, "dependency_lock_hash", None)
+        worker_extra_paths = getattr(worker_spec, "extra_paths", ())
+        worker_extra_paths_hash = getattr(worker_spec, "extra_paths_hash", None)
+        worker_runtime_identity = getattr(worker_spec, "python_runtime_identity", None)
+        if worker_extra_paths and not worker_extra_paths_hash:
+            # Configured import roots are executable implementation inputs too.
+            return None
+        if worker_spec is not None and not worker_lock_hash:
+            # A worker path/target identifies where code runs, not its installed dependencies.
+            return None
+        if worker_spec is not None and not worker_runtime_identity:
+            # The same venv path can be upgraded to a different Python runtime in place.
+            return None
+        if worker_spec is None and metric.manifest.uses_models and not (
+            metric.manifest.package_name and metric.manifest.package_version
+        ):
+            return None
         environment = None
         if worker_spec is not None:
             environment = {
@@ -406,10 +425,87 @@ def declared_dependency_identity(metrics: Sequence[ResolvedMetric]) -> str | Non
                 "plugin_version": metric.manifest.plugin_version,
                 "package_name": metric.manifest.package_name,
                 "package_version": metric.manifest.package_version,
+                "worker_dependency_lock_hash": worker_lock_hash,
+                "worker_extra_paths_hash": worker_extra_paths_hash,
+                "worker_python_runtime_identity": worker_runtime_identity,
                 "environment": environment,
             }
         )
     return content_hash(sorted(entries, key=lambda item: item["metric_id"])) if entries else None
+
+
+def _verified_producer_identity(
+    result: EvaluationResult,
+    earlier_by_id: Mapping[str, EvaluationResult],
+    seen: frozenset[str] = frozenset(),
+) -> EvaluationCompatibilityIdentity | None:
+    """Resolve and validate the identity of the evaluator that produced a stored value.
+
+    Earlier carry-forward records created before producer identity was recorded link to a
+    source result; follow that chain instead of trusting their pass's possibly relabelled
+    compatibility identity. Missing, malformed, incomplete or cyclic lineage fails closed.
+    """
+    if result.result_id in seen:
+        return None
+    provenance = deep_unfreeze(result.provenance) or {}
+    raw_identity: Mapping[str, Any] | None = None
+    if "carried_forward" in provenance:
+        lineage = provenance["carried_forward"]
+        if not isinstance(lineage, Mapping):
+            return None
+        producer = lineage.get("producer_compatibility")
+        if isinstance(producer, Mapping):
+            raw_identity = producer
+        else:
+            source_id = lineage.get("source_result_id")
+            source = earlier_by_id.get(source_id) if isinstance(source_id, str) else None
+            if source is None:
+                return None
+            identity = _verified_producer_identity(source, earlier_by_id, seen | {result.result_id})
+            claimed_hash = lineage.get("producer_compatibility_hash")
+            if identity is None or (
+                claimed_hash is not None and claimed_hash != identity.compatibility_hash
+            ):
+                return None
+            return identity
+    else:
+        candidate = provenance.get("compatibility")
+        if isinstance(candidate, Mapping):
+            raw_identity = candidate
+    if not isinstance(raw_identity, Mapping):
+        return None
+    try:
+        identity = EvaluationCompatibilityIdentity.model_validate(raw_identity)
+    except ValidationError:
+        return None
+    # The historical record stores the canonical content hash without the schema marker
+    # and hash fields themselves. Verify it before relying on its claimed producer identity.
+    payload = {
+        key: value
+        for key, value in raw_identity.items()
+        if key not in {"schema_version", "compatibility_hash"}
+    }
+    if content_hash(payload) != identity.compatibility_hash:
+        return None
+    if not all(
+        component.verified
+        for component in (identity.judge, identity.rubric, identity.instrumentation)
+    ):
+        return None
+    return identity
+
+
+def _carry_identity_is_complete(
+    identity: EvaluationCompatibilityIdentity, *, requires_dependency_identity: bool
+) -> bool:
+    """Only reuse values when every relevant producer component has a known identity."""
+    return (
+        bool(identity.plugin_id and identity.plugin_version)
+        and identity.judge.verified
+        and identity.rubric.verified
+        and identity.instrumentation.verified
+        and (not requires_dependency_identity or identity.dependency_lock_hash is not None)
+    )
 
 
 def metric_profiles(
@@ -740,6 +836,7 @@ class BindingScorer:
         self.scoring_id = scoring_id
         self.metric = metric
         self.manifest = metric.manifest
+        self._worker_backed = getattr(metric.factory, "spec", None) is not None
         self.rule = rule_for(metric.binding, metric.manifest)
         self.compatibility = evaluation_compatibility_identity(
             metric,
@@ -760,7 +857,9 @@ class BindingScorer:
         # in turn, so each case's time limit counts its own turn, not the line.
         self._turn = asyncio.Lock()
         # Finished results of earlier passes to reuse, by (case, repetition); see `carry_from`.
-        self._carry: dict[tuple[str, int], EvaluationResult] = {}
+        self._carry: dict[
+            tuple[str, int], tuple[EvaluationResult, EvaluationCompatibilityIdentity]
+        ] = {}
 
     async def open(self) -> None:
         """Construct and prepare the evaluator. Construction and prepare() are evaluator
@@ -778,11 +877,19 @@ class BindingScorer:
 
     def carry_from(self, earlier: Sequence[EvaluationResult]) -> None:
         """Offer finished results of earlier passes (oldest first): one for the same case,
-        repetition, stored answer and metric settings is carried into this pass instead of
-        being evaluated again. A result that depends on an imported trace is never carried."""
+        repetition, stored answer, metric settings, and verified producer identity is carried
+        into this pass instead of being evaluated again. A result that depends on an imported
+        trace is never carried."""
         if self._traced:
             return
         manifest = self.manifest
+        earlier_by_id = {result.result_id: result for result in earlier}
+        current_identity = self.compatibility
+        if not _carry_identity_is_complete(
+            current_identity,
+            requires_dependency_identity=manifest.uses_models or self._worker_backed,
+        ):
+            return
         for old in earlier:
             if (
                 old.status is ExecutionStatus.OK
@@ -791,16 +898,21 @@ class BindingScorer:
                 and old.metric_version == manifest.version
                 and old.binding_hash == self.metric.binding_hash
             ):
-                self._carry[(old.case_id, old.repetition_id)] = old  # a later one replaces
+                producer = _verified_producer_identity(old, earlier_by_id)
+                if producer == current_identity:
+                    self._carry[(old.case_id, old.repetition_id)] = (old, producer)
+                    # A later compatible result replaces an older one; an incompatible result
+                    # cannot shadow an older value from this same implementation.
 
     def _carried(self, execution: ExecutionResult) -> EvaluationResult | None:
-        source = self._carry.get((execution.case_id, execution.repetition_id))
+        offered = self._carry.get((execution.case_id, execution.repetition_id))
         if (
-            source is None
+            offered is None
             or execution.status is not ExecutionStatus.OK
-            or source.execution_id != execution.execution_id
+            or offered[0].execution_id != execution.execution_id
         ):
             return None
+        source, producer = offered
         fresh = self._result(execution, EvaluationOutcome(ExecutionStatus.OK))
         copied = evaluation_from_cache(source, fresh, key=f"carried:{source.result_id}")
         provenance = deep_unfreeze(copied.provenance)
@@ -808,6 +920,7 @@ class BindingScorer:
         provenance["carried_forward"] = {
             "source_result_id": source.result_id,
             "source_scoring_id": source.scoring_id,
+            "producer_compatibility_hash": producer.compatibility_hash,
             "note": CARRIED_NOTE,
         }
         return copied.model_copy(
@@ -855,12 +968,18 @@ class BindingScorer:
         ):
             return None
         manifest = self.manifest
+        if not _carry_identity_is_complete(
+            self.compatibility,
+            requires_dependency_identity=manifest.uses_models or self._worker_backed,
+        ):
+            return None
         return evaluation_key(
             execution,
             candidates[0],
             binding_hash=self.metric.binding_hash,
             evaluator=f"{manifest.evaluator_id}@{manifest.version}",
             plugin=f"{manifest.plugin_id}=={manifest.plugin_version}",
+            compatibility_hash=self.compatibility.compatibility_hash,
             policy_hash=self.cache_policy_hash,
         )
 

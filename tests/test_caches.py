@@ -139,6 +139,18 @@ def test_a_changed_plugin_version_invalidates_evaluations(
     assert _hits(h, _run(h)) == ({"a", "b"}, set())
 
 
+def test_a_changed_package_version_invalidates_evaluations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.evaluators.native import ExactMatch
+
+    h = Harness(tmp_path)
+    _run(h)
+    upgraded = ExactMatch.manifest.model_copy(update={"package_version": "9.9.9"})
+    monkeypatch.setattr(ExactMatch, "manifest", upgraded)
+    assert _hits(h, _run(h)) == ({"a", "b"}, set())
+
+
 def test_caches_are_off_unless_asked_and_clear_invalidates(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     _run(h, cache={})
