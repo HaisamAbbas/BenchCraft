@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G06",
+  "current_item": "G07",
   "items": [
     {
       "id": "F01",
@@ -438,11 +438,16 @@
       "title": "Named baselines, tags, and searchable run history",
       "detail": "**Partial.** Run IDs, status filters, and a limit exist. Baseline aliases, run tags/notes, metadata search, pagination, and promotion of an approved baseline are missing.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "Run catalog, run CLI, migration, and full comparison-service regressions: 63 passed",
+        "Ruff src/tests/plugins and Mypy 149 source files passed; git diff --check passed",
+        "Unicode-aware literal search, pagination, 999-variable metadata batching, empty filters, tags/notes, baseline approval/history, and alias comparisons verified",
+        "Independent review found two P3 boundary/UX issues; both were fixed and final review reported no findings"
+      ],
+      "review": "evidence/G06-review.md",
+      "commit": "77ae48b05da8639f1a307353759ba128bc2de185",
+      "pushed": true
     },
     {
       "id": "G07",
