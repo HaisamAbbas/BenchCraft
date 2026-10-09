@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F17",
+  "current_item": "F18",
   "items": [
     {
       "id": "F01",
@@ -298,7 +298,7 @@
       "title": "Smoke testing rejects a changed revision of an existing application",
       "detail": "CLI reproduction",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "48 affected CLI, smoke, scoring, and report tests passed; revision-specific regression also passed in isolation",
         "Mypy: 142 source files passed; Ruff and git diff --check passed",
@@ -306,8 +306,8 @@
         "Independent review found no actionable defects"
       ],
       "review": "evidence/F17-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "6ef87fad008af50584102dd90fa27e2bd31a2a8e",
+      "pushed": true
     },
     {
       "id": "F18",
