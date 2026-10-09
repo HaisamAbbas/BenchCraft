@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G09",
+  "current_item": "G10",
   "items": [
     {
       "id": "F01",
@@ -490,11 +490,16 @@
       "title": "Release gates in conversation drafts",
       "detail": "**Missing; documented limitation.** Gates can be authored in executable plans but not declared through session draft choices/patches.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "Affected authorization, model/schema, session-controller, conversation, and quickstart batch: 139 passed; final authorization module after scope fixes: 35 passed",
+        "Ruff passed for src/tests/plugins; Mypy passed for 170 source files; git diff --check passed",
+        "Conversation-authored gates preserve stable metric identities across reorderings and enter executable plans; missing metrics fail closed; threshold, target, retarget, and removal ambiguity regressions pass",
+        "Independent read-only review found authorization edge cases; all were fixed and the final review reported no findings"
+      ],
+      "review": "evidence/G09-review.md",
+      "commit": "f1022032b83f77fdd817b9dbd5de2db117c9c146",
+      "pushed": true
     },
     {
       "id": "G10",
