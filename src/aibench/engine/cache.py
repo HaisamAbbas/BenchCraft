@@ -29,7 +29,7 @@ shared state (compile checks it).
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -47,10 +47,10 @@ from aibench.core.models import (
     deep_unfreeze,
 )
 
-KEY_VERSION = 2
+KEY_VERSION = 3
 # Source files that make up an application's code, found beside its entry point.
 CODE_SUFFIXES = frozenset(
-    {".py", ".pyi", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".rb", ".php", ".pl", ".lua",
+    {".py", ".pyi", ".pyc", ".pyd", ".so", ".dll", ".dylib", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".rb", ".php", ".pl", ".lua",
      ".r", ".sh", ".bash", ".ps1", ".bat", ".cmd", ".jl"}
 )  # fmt: skip
 _SKIP_DIRS = frozenset(
@@ -89,40 +89,70 @@ def _entry_points(spec: ApplicationSpec, base_dir: Path) -> list[Path]:
         )
         for path in options:
             if path.suffix.lower() in CODE_SUFFIXES and path.is_file():
-                found.append(path.resolve())
+                if path.is_symlink():
+                    raise CodeUnreadable(
+                        f"source file symlink {path} cannot be fingerprinted safely"
+                    )
+                found.append(Path(os.path.abspath(path)))
                 break
     return found
 
 
-def code_files(spec: ApplicationSpec, base_dir: Path) -> list[Path]:
+def code_files(
+    spec: ApplicationSpec, base_dir: Path, *, extra_paths: Sequence[Path] = ()
+) -> list[Path]:
     """The local source roots an application's configured runner can execute or import.
 
-    Besides entry-point directories, this includes the runner's working directory and the
-    explicit Python import paths. Hidden, virtual-environment and dependency directories are
-    excluded. Raises `CodeUnreadable` when there is no local entry point or the tree is too
-    large to fingerprint."""
+    Besides entry-point directories, this includes the runner's working directory, explicit
+    Python import paths and other configured import roots. Hidden, virtual-environment and
+    dependency directories are excluded. Raises `CodeUnreadable` when there is no local entry
+    point or the tree is too large to fingerprint."""
     entries = _entry_points(spec, base_dir)
     if not entries:
         raise CodeUnreadable("no local source file among the application's entry points")
     roots = {entry.parent for entry in entries}
+    import_roots = set(extra_paths)
+    roots.update(import_roots)
     transport = spec.transport
     if isinstance(transport, CliTransport | PythonTransport):
         cwd = Path(transport.cwd) if transport.cwd else base_dir
-        roots.add((cwd if cwd.is_absolute() else base_dir / cwd).resolve())
+        roots.add(Path(os.path.abspath(cwd if cwd.is_absolute() else base_dir / cwd)))
     if isinstance(transport, PythonTransport):
         for extra in transport.paths:
             path = Path(extra)
-            roots.add((path if path.is_absolute() else base_dir / path).resolve())
+            import_roots.add(
+                Path(os.path.abspath(path if path.is_absolute() else base_dir / path))
+            )
+        roots.update(import_roots)
     files: set[Path] = set()
     total = 0
     for directory in sorted(roots):
+        if directory.is_symlink():
+            raise CodeUnreadable(
+                f"source directory symlink {directory} cannot be fingerprinted safely"
+            )
         if not directory.is_dir():
             continue
         for dirpath, dirnames, filenames in os.walk(directory):
-            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+            for dirname in dirnames:
+                if (Path(dirpath) / dirname).is_symlink():
+                    raise CodeUnreadable(
+                        f"source directory symlink {Path(dirpath) / dirname} cannot be "
+                        "fingerprinted safely"
+                    )
+            if directory not in import_roots:
+                dirnames[:] = [
+                    d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")
+                ]
             for name in filenames:
                 path = Path(dirpath) / name
-                if path.suffix.lower() not in CODE_SUFFIXES or path.is_symlink():
+                if path.suffix.lower() not in CODE_SUFFIXES:
+                    continue
+                if path.is_symlink():
+                    raise CodeUnreadable(
+                        f"source file symlink {path} cannot be fingerprinted safely"
+                    )
+                if path in files:
                     continue
                 files.add(path)
                 total += path.stat().st_size
@@ -134,17 +164,53 @@ def code_files(spec: ApplicationSpec, base_dir: Path) -> list[Path]:
     return sorted(files)
 
 
+def _python_import_paths(
+    spec: ApplicationSpec, base_dir: Path, environ: Mapping[str, str]
+) -> tuple[list[Path], bool]:
+    """Return local Python import roots and whether any configured root is opaque.
+
+    PYTHONPATH can introduce executable code outside the app's working directory. Secret
+    backed values and archive/file entries cannot be inventoried as directories, so callers
+    must require an owner supplied environment identity before resuming or caching.
+    """
+    transport = spec.transport
+    if not isinstance(transport, CliTransport | PythonTransport):
+        return [], False
+    if "PYTHONPATH" in transport.secret_env:
+        return [], True
+    raw = transport.env.get("PYTHONPATH")
+    if raw is None and "PYTHONPATH" in transport.inherit_env:
+        raw = environ.get("PYTHONPATH")
+    if not raw:
+        return [], False
+    cwd = Path(transport.cwd) if transport.cwd else base_dir
+    cwd = Path(os.path.abspath(cwd if cwd.is_absolute() else base_dir / cwd))
+    roots: list[Path] = []
+    opaque = False
+    for item in raw.split(os.pathsep):
+        # Python treats an empty path component as the current working directory.
+        candidate = Path(item) if item else cwd
+        if not candidate.is_absolute():
+            candidate = cwd / candidate
+        candidate = Path(os.path.abspath(candidate))
+        if candidate.is_symlink() or (candidate.exists() and not candidate.is_dir()):
+            opaque = True
+        roots.append(candidate)
+    return roots, opaque
+
+
 def application_code_identity(
     spec: ApplicationSpec, base_dir: Path, environ: Mapping[str, str]
 ) -> dict[str, Any]:
     """What an execution depends on beyond the config: the code's content, the inherited
     environment's values (hashed, never stored), and the harness version. A declared
     `revision` or `environment_digest` is already in the config hash."""
+    import_paths, import_paths_untracked = _python_import_paths(spec, base_dir, environ)
     try:
-        files = code_files(spec, base_dir)
+        files = code_files(spec, base_dir, extra_paths=import_paths)
         code: str | None = content_hash([(p.as_posix(), bytes_hash(p.read_bytes())) for p in files])
-    except CodeUnreadable:
-        code = None  # compile refused caching unless revision/environment_digest is declared
+    except (CodeUnreadable, OSError):
+        code = None  # resume/cache guards decide whether an owner-supplied identity is required
     inherited: tuple[str, ...] = getattr(spec.transport, "inherit_env", ())
     transport = spec.transport
     secret_refs = set(getattr(transport, "secret_env", {}).values())
@@ -166,6 +232,10 @@ def application_code_identity(
         # Secret values can change which tenant/account an app addresses. Hash the resolved
         # values into the identity; never persist them in the cache key's source record.
         "explicit_secret_env": content_hash(secret_values),
+        # `code` above includes content beneath each root. This digest also detects changes
+        # to resolution when PYTHONPATH is reordered or redirected to an empty directory.
+        "python_import_paths": content_hash([path.as_posix() for path in import_paths]),
+        "python_import_paths_untracked": import_paths_untracked,
         "aibench": __version__,
     }
 
@@ -182,12 +252,53 @@ def code_identity_problem(spec: ApplicationSpec, base_dir: Path) -> str | None:
                 "changes"
             )
         return None  # the image is pinned by digest in the config
-    try:
-        code_files(spec, base_dir)
-    except CodeUnreadable as exc:
+    identity = application_code_identity(spec, base_dir, os.environ)
+    if identity.get("python_import_paths_untracked"):
         return (
-            f"the cache key can't see its code ({exc}); declare `revision` or "
+            "the application's PYTHONPATH includes a secret-backed, symlinked, or archive "
+            "entry that cannot be fingerprinted; declare `revision` or `environment_digest`"
+        )
+    if identity.get("code") is None:
+        return (
+            "the cache key can't see the application's code; declare `revision` or "
             "`environment_digest` and change it whenever the application changes"
+        )
+    return None
+
+
+def application_resume_identity_problem(
+    spec: ApplicationSpec,
+    base_dir: Path,
+    identity: Mapping[str, Any] | None = None,
+) -> str | None:
+    """Why the current application cannot be verified before resuming a run.
+
+    Unlike cross-run caching, a pinned container image is a sufficient identity unless it
+    has host mounts. Remote services and opaque executables must be versioned by their owner.
+    """
+    if spec.revision or spec.environment_digest:
+        return None
+    if isinstance(spec.transport, ContainerTransport):
+        if spec.transport.mounts:
+            return (
+                "the container has host bind mounts whose contents are not covered by the image "
+                "digest; declare `revision` or `environment_digest` and update it whenever a "
+                "mount changes"
+            )
+        return None
+    if identity is None:
+        identity = application_code_identity(spec, base_dir, os.environ)
+    if identity.get("python_import_paths_untracked"):
+        return (
+            "the application's PYTHONPATH includes a secret-backed, symlinked, or archive entry "
+            "that cannot be fingerprinted; declare `revision` or `environment_digest` and update "
+            "it whenever the import environment changes"
+        )
+    if identity.get("code") is None:
+        return (
+            "the application has no readable local source fingerprint; declare `revision` or "
+            "`environment_digest` and update it whenever the remote application or its "
+            "environment changes"
         )
     return None
 

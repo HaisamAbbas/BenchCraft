@@ -25,7 +25,7 @@ import re
 import shutil
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -43,7 +43,17 @@ ENTRY_POINT_GROUP = "aibench.evaluators"
 # larger value explicitly.
 WORKER_TIMEOUT_SECONDS = 120.0
 MAX_WORKER_OUTPUT_BYTES = 1_048_576
-_WORKER_ENV_KEEP = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "TEMP", "TMP", "TMPDIR", "HOME")
+_WORKER_ENV_KEEP = (
+    "PATH",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "HOME",
+    "USERPROFILE",
+)
 _EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception)(:|$)")
 
 
@@ -109,11 +119,11 @@ def worker_python_identity(
         "import json, platform, sys, sysconfig; "
         "print(json.dumps({'implementation': platform.python_implementation(), "
         "'version': list(sys.version_info[:3]), 'cache_tag': sys.implementation.cache_tag, "
-        "'platform': sysconfig.get_platform(), 'machine': platform.machine()}))"
+        "'platform': sysconfig.get_platform()}))"
     )
     env = {key: os.environ[key] for key in _WORKER_ENV_KEEP if key in os.environ}
     try:
-        result = run_contained([str(python), "-I", "-c", probe], timeout=timeout, env=env)
+        result = run_contained([str(python), "-I", "-S", "-c", probe], timeout=timeout, env=env)
         if result.timed_out or result.returncode != 0:
             return None
         identity = json.loads(result.stdout)
@@ -124,10 +134,10 @@ def worker_python_identity(
         return None
 
 
-def plugin_paths_hash(paths: Sequence[Path]) -> str | None:
+def plugin_paths_hash(
+    paths: Sequence[Path], *, max_bytes: int = 64 * 1024 * 1024, max_entries: int = 10_000
+) -> str | None:
     """Hash code and data visible on plugin ``PYTHONPATH``; fail closed on unreadable/large paths."""
-    max_bytes = 64 * 1024 * 1024
-    max_entries = 10_000
     entries: list[dict[str, str]] = []
     total_bytes = 0
     visited_entries = 0
@@ -217,22 +227,103 @@ def worker_failure(stderr: bytes) -> str:
     return lines[-1][:400] if lines else ""
 
 
-def environment_site_paths(python: Path, *, timeout: float = WORKER_TIMEOUT_SECONDS) -> list[Path]:
-    """The site-packages directories of another Python environment, asked of that
-    environment's own interpreter (nothing is imported from it here)."""
-    probe = "import json, sysconfig; p = sysconfig.get_paths(); print(json.dumps([p['purelib'], p['platlib']]))"
+def environment_paths(
+    python: Path,
+    *,
+    timeout: float = WORKER_TIMEOUT_SECONDS,
+    user_environment: Mapping[str, str] | None = None,
+) -> tuple[list[Path], list[Path], bool]:
+    """Return site-package roots, runtime import roots, and their trackability.
+
+    The interpreter is queried with site startup disabled. `.pth` files are parsed as data;
+    their executable lines are never run. A path-only `.pth` entry and the user site are
+    returned as import roots so callers can fingerprint their code. An executable or
+    unreadable `.pth` is opaque and requires an owner-supplied environment digest.
+    """
+    probe = (
+        "import json, pathlib, site, sys, sysconfig; "
+        "exe = pathlib.Path(sys.argv[1]); "
+        "venv = next((p for p in exe.parents if (p / 'pyvenv.cfg').is_file()), None); "
+        "settings = dict(line.strip().split('=', 1) for line in "
+        "(venv / 'pyvenv.cfg').read_text().splitlines() if '=' in line) if venv else {}; "
+        "settings = {k.strip(): v.strip() for k, v in settings.items()}; "
+        "system = site.getsitepackages(); "
+        "paths = sysconfig.get_paths(vars={'base': str(venv), 'platbase': str(venv), "
+        "'installed_base': str(venv), 'installed_platbase': str(venv)}) if venv else {}; "
+        "roots = [paths['purelib'], paths['platlib']] if venv else system; "
+        "roots += system if venv and settings.get('include-system-site-packages', '').lower() "
+        "== 'true' else []; "
+        "print(json.dumps({'site': roots, 'user': site.getusersitepackages(), "
+        "'stdlib': sys.path}))"
+    )
     env = {k: os.environ[k] for k in _WORKER_ENV_KEEP if k in os.environ}
-    result = run_contained([str(python), "-I", "-c", probe], timeout=timeout, env=env)
+    if user_environment is not None:
+        env.pop("HOME", None)
+        env.pop("USERPROFILE", None)
+        env.update(
+            {key: user_environment[key] for key in ("HOME", "USERPROFILE") if key in user_environment}
+        )
+    result = run_contained(
+        [str(python), "-I", "-S", "-c", probe, str(Path(os.path.abspath(python)))],
+        timeout=timeout,
+        env=env,
+    )
     try:
         if result.timed_out or result.returncode != 0:
             raise ValueError("probe failed")
-        return sorted({Path(p) for p in json.loads(result.stdout)})
+        layout = json.loads(result.stdout)
+        site_roots = list(dict.fromkeys(Path(p) for p in layout["site"]))
+        user_site = Path(layout["user"])
+        stdlib_roots = list(dict.fromkeys(Path(p) for p in layout["stdlib"] if p))
     except (ValueError, TypeError):
         detail = result.stderr.decode("utf-8", "replace").strip().splitlines()
         raise OSError(
             f"could not inspect Python environment {python}: "
             f"{detail[-1] if detail else result.returncode}"
         ) from None
+
+    site_paths: list[Path] = []
+    import_roots = list(stdlib_roots)
+    readable_roots = [user_site, *site_roots]
+    trackable = True
+    for site_root in readable_roots:
+        if site_root not in site_paths:
+            site_paths.append(site_root)
+        if site_root not in import_roots:
+            import_roots.append(site_root)
+        try:
+            for pth_file in sorted(site_root.glob("*.pth")):
+                if pth_file.is_symlink():
+                    trackable = False
+                    continue
+                try:
+                    lines = pth_file.read_text(encoding="utf-8").splitlines()
+                except (OSError, UnicodeError):
+                    trackable = False
+                    continue
+                for line in lines:
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith(("import ", "import\t")):
+                        trackable = False
+                        continue
+                    candidate = Path(line)
+                    if not candidate.is_absolute():
+                        candidate = site_root / candidate
+                    if candidate.exists():
+                        if candidate not in site_paths:
+                            site_paths.append(candidate)
+                        if candidate not in import_roots:
+                            import_roots.append(candidate)
+        except OSError:
+            trackable = False
+    return site_paths, import_roots, trackable
+
+
+def environment_site_paths(python: Path, *, timeout: float = WORKER_TIMEOUT_SECONDS) -> list[Path]:
+    """The site-packages directories of another Python environment, asked of that
+    environment's own interpreter (nothing is imported from it here)."""
+    return environment_paths(python, timeout=timeout)[0]
 
 
 def load_manifests(

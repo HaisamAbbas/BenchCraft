@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "F02",
+  "current_item": "F08",
   "items": [
     {
       "id": "F01",
@@ -31,7 +31,7 @@
       "title": "Carry-forward ignores implementation compatibility and relabels old values",
       "detail": "Runtime reproduction",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "Broader carry-forward, budget, rescore, scoring, report, comparison, cache, and registry regression batch: 125 tests passed before the final runtime-identity addition",
         "Final carry-forward, registry, and cache regression batch: 41 tests passed",
@@ -41,8 +41,8 @@
         "Final independent review: no findings"
       ],
       "review": "evidence/F02-review.md",
-      "commit": null,
-      "pushed": false
+      "commit": "f3e542a4ec7d915f308c98ce15b08e51e577d6ef",
+      "pushed": true
     },
     {
       "id": "F03",
@@ -67,11 +67,18 @@
       "title": "Resume mixes changed application code under an unchanged identity",
       "detail": "Engine/recovery reproduction",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "delivered",
+      "verification": [
+        "Relevant resume, cache, experiment, and registry regression batch: 63 passed",
+        "Focused standard-library drift regression: 1 passed",
+        "Mypy: 140 source files passed; Ruff on all changed Python files passed",
+        "Resume identity fingerprints local source, inherited environment, executable/runtime, ordered import roots, stdlib and installed package contents",
+        "Opaque runtime/import paths require an owner environment digest; resume fails before dispatch on tracked drift",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F04-review.md",
       "commit": null,
-      "pushed": false
+      "pushed": true
     },
     {
       "id": "F05",

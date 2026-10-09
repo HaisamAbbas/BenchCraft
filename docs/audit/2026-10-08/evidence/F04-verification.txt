@@ -1,0 +1,24 @@
+F04 resume identity verification
+================================
+
+Final relevant regression batch:
+  uv run pytest tests/test_engine_review_regressions.py tests/test_caches.py tests/test_experiments.py tests/test_registry.py -q
+  63 passed in 170.61s
+
+Focused standard-library drift regression after stabilizing its environment snapshot:
+  uv run pytest tests/test_engine_review_regressions.py::test_resume_refuses_standard_library_code_drift_before_dispatch -q
+  1 passed in 8.31s
+
+Static checks:
+  uv run ruff check src/aibench/cli/runs.py src/aibench/engine/cache.py src/aibench/engine/engine.py src/aibench/experiments/service.py src/aibench/registry/discovery.py src/aibench/services/runs.py src/aibench/sessions/controller.py tests/engine_support.py tests/test_caches.py tests/test_engine_review_regressions.py tests/test_registry.py
+  All checks passed.
+
+  uv run mypy src/aibench
+  Success: no issues found in 140 source files.
+
+  git diff --check
+  Passed.
+
+Independent review:
+  No findings. The reviewer confirmed stdlib roots are hashed and the venv executable path
+  remains absolute and unresolved for pyvenv.cfg discovery.

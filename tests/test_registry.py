@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +22,7 @@ from aibench.registry import (
 )
 from aibench.registry.discovery import (
     dependency_lock_hash,
+    environment_paths,
     plugin_paths_hash,
     worker_python_identity,
 )
@@ -63,6 +66,78 @@ def test_worker_dependency_lock_hash_tracks_installed_versions(tmp_path: Path) -
 
 def test_worker_python_identity_reads_the_interpreter_runtime() -> None:
     assert worker_python_identity(Path(sys.executable)) is not None
+
+
+def test_environment_paths_tracks_plain_pth_roots_without_running_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.registry import discovery
+
+    site = tmp_path / "site"
+    user_site = tmp_path / "user-site"
+    editable = tmp_path / "editable-source"
+    alternate = tmp_path / "alternate-source"
+    site.mkdir()
+    user_site.mkdir()
+    editable.mkdir()
+    alternate.mkdir()
+    (site / "one.pth").write_text(str(editable) + "\n", encoding="utf-8")
+    (site / "two.pth").write_text(str(alternate) + "\n", encoding="utf-8")
+    (editable / "module.py").write_text("VALUE = 'first'\n", encoding="utf-8")
+    (alternate / "module.py").write_text("VALUE = 'second'\n", encoding="utf-8")
+    monkeypatch.setattr(
+        discovery,
+        "run_contained",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            timed_out=False,
+            returncode=0,
+            stdout=json.dumps(
+                {"site": [str(site), str(site)], "user": str(user_site), "stdlib": []}
+            ).encode(),
+            stderr=b"",
+        ),
+    )
+
+    all_sites, imports, complete = environment_paths(Path(sys.executable))
+
+    assert all_sites == [user_site, site, editable, alternate]
+    assert imports == [user_site, site, editable, alternate]
+    assert complete is True
+
+    (site / "one.pth").write_text(str(alternate) + "\n", encoding="utf-8")
+    (site / "two.pth").write_text(str(editable) + "\n", encoding="utf-8")
+    _sites_after_reorder, imports_after_reorder, complete_after_reorder = environment_paths(
+        Path(sys.executable)
+    )
+    assert complete_after_reorder is True
+    assert imports_after_reorder == [user_site, site, alternate, editable]
+
+
+def test_environment_paths_marks_executable_pth_opaque_without_running_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.registry import discovery
+
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "custom.pth").write_text("import sys; sys.path.append('elsewhere')\n", encoding="utf-8")
+    monkeypatch.setattr(
+        discovery,
+        "run_contained",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            timed_out=False,
+            returncode=0,
+            stdout=json.dumps(
+                {"site": [str(site)], "user": str(tmp_path / "user"), "stdlib": []}
+            ).encode(),
+            stderr=b"",
+        ),
+    )
+
+    _site_paths, imports, complete = environment_paths(Path(sys.executable))
+
+    assert imports == [tmp_path / "user", site]
+    assert complete is False
 
 
 def test_plugin_import_path_identity_tracks_in_place_source_changes(tmp_path: Path) -> None:

@@ -1071,6 +1071,7 @@ class SessionController:
                 storage=self.storage,
                 artifacts=self.artifacts,
                 granted_by=self._granted_by(action_id, action.source),
+                environ=self.environ,
             )
         except Exception as exc:  # noqa: BLE001 - any failure frees the slot and is reported
             self.store.claim_active_run(self.session_id, expected=slot, value=session.active_run_id)

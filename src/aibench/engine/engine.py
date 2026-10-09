@@ -277,6 +277,8 @@ class RunEngine:
     _seq: itertools.count[int] = field(default_factory=itertools.count)
     _stop_reason: str | None = None
     _last_heartbeat: float = field(default_factory=time.monotonic)
+    # Start the reported wall time with the budget ledger, before resume identity and
+    # runner setup, so replayed session time matches what hard wall limits consumed.
     _session_started: float = field(default_factory=time.monotonic)
     warnings: list[str] = field(default_factory=list)
 

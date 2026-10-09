@@ -838,6 +838,7 @@ async def execute_experiment(
                 run_id=trial.run_id,
                 run_seed=record.definition.budget.seed,
                 experiment_context=context,
+                environ=environ,
             )
             current_run = storage.get_run(trial.run_id)
             if current_run is None:
@@ -1177,6 +1178,7 @@ async def evaluate_protected_holdout(
                 run_id=run_id,
                 run_seed=record.definition.budget.seed,
                 experiment_context=context,
+                environ=environ,
             )
             current_run = storage.get_run(run_id)
             if current_run is None:

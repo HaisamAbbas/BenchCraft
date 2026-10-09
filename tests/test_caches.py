@@ -5,6 +5,7 @@ invocation log counts every call."""
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -302,6 +303,46 @@ def test_code_in_a_configured_python_import_path_participates_in_identity(
     after = application_code_identity(spec, base, {})
 
     assert before["code"] != after["code"]
+
+
+def test_source_symlinks_fail_closed_for_code_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.core.models import ApplicationSpec, CliTransport
+    from aibench.engine import cache
+    from aibench.engine.cache import CodeUnreadable, code_files
+
+    root = tmp_path / "app"
+    root.mkdir()
+    target = tmp_path / "linked_source.py"
+    target.write_text("VALUE = 'before'\n", encoding="utf-8")
+    link = root / "linked_source.py"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        # Windows workers may not have symlink privileges. Simulate the filesystem entry so
+        # the fail-closed path still runs on those hosts.
+        original_is_symlink = Path.is_symlink
+        monkeypatch.setattr(
+            cache.os,
+            "walk",
+            lambda _root: [(str(root), [], ["linked_source.py", "main.py"])],
+        )
+        monkeypatch.setattr(
+            Path,
+            "is_symlink",
+            lambda path: path == link or original_is_symlink(path),
+        )
+    (root / "main.py").write_text("from linked_source import VALUE\n", encoding="utf-8")
+    spec = ApplicationSpec(
+        application_id="symlink-app",
+        runner="cli",
+        target="main.py",
+        transport=CliTransport(argv=(sys.executable, "main.py")),
+    )
+
+    with pytest.raises(CodeUnreadable, match="symlink"):
+        code_files(spec, root)
 
 
 def test_container_cache_requires_revision_when_host_mounts_are_mutable(

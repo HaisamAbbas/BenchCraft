@@ -99,17 +99,31 @@ class Harness:
         )
 
     def create(
-        self, plan: Path, policy: ExecutionPolicy | None = None, trusted: bool = True
+        self,
+        plan: Path,
+        policy: ExecutionPolicy | None = None,
+        trusted: bool = True,
+        environ: dict[str, str] | None = None,
     ) -> str:
         compiled = compile_plan(plan, policy=policy or ExecutionPolicy(), trusted_local=trusted)
         storage, artifacts = self.storage()
         try:
-            return create_run(compiled, storage=storage, artifacts=artifacts, granted_by="test")
+            return create_run(
+                compiled,
+                storage=storage,
+                artifacts=artifacts,
+                granted_by="test",
+                environ=environ,
+            )
         finally:
             storage.db.close()
 
     def execute(
-        self, run_id: str, controller: RunController | None = None, during: Any = None
+        self,
+        run_id: str,
+        controller: RunController | None = None,
+        during: Any = None,
+        environ: dict[str, str] | None = None,
     ) -> RunOutcome:
         """Run or resume `run_id` on a fresh connection (as a new process would)."""
         storage, artifacts = self.storage()
@@ -117,7 +131,13 @@ class Harness:
         async def go() -> RunOutcome:
             ctl = controller or RunController()
             task = asyncio.ensure_future(
-                execute_run(run_id, storage=storage, artifacts=artifacts, controller=ctl)
+                execute_run(
+                    run_id,
+                    storage=storage,
+                    artifacts=artifacts,
+                    controller=ctl,
+                    environ=environ,
+                )
             )
             if during is not None:
                 await during(ctl, self)

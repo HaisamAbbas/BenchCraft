@@ -36,8 +36,10 @@ import json
 import os
 import platform
 import random
+import shutil
 import socket
 import sys
+import sysconfig
 import time
 import uuid
 from pathlib import Path
@@ -48,9 +50,12 @@ from aibench.core.hashes import bytes_hash, content_hash
 from aibench.core.models import (
     ApplicationSpec,
     Approval,
+    CliTransport,
+    ContainerTransport,
     EffectLevel,
     ExecutionResult,
     ExecutionStatus,
+    PythonTransport,
     RedactionClass,
     ResetPolicy,
     RunManifest,
@@ -59,7 +64,10 @@ from aibench.core.models import (
 )
 from aibench.core.plans import ExecutablePlan
 from aibench.engine.budget import BudgetLedger
-from aibench.engine.cache import application_code_identity
+from aibench.engine.cache import (
+    application_code_identity,
+    application_resume_identity_problem,
+)
 from aibench.engine.compile import CompiledRun, PlanInvalid, PolicyDenied, load_plan
 from aibench.engine.engine import (
     RunController,
@@ -77,7 +85,11 @@ from aibench.registry import (
     BindingValidationError,
     EvaluatorRegistry,
     RegistryError,
+    dependency_lock_hash,
+    plugin_paths_hash,
+    worker_python_identity,
 )
+from aibench.registry.discovery import environment_paths
 from aibench.runners import LoadedApplication, create_runner, reset_hook
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
 from aibench.services.scoring import (
@@ -90,6 +102,7 @@ from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.repositories import RunLease, Storage, WorkItemSettlement
 
 LEASE_TTL_SECONDS = 60.0  # a lease not heartbeated for this long belongs to a dead session
+MAX_RUNTIME_BINARY_BYTES = 256 * 1024 * 1024
 # A run in any of these states can be continued by a new session. A run left
 # `cancelling` by a session that died is continued only to finish its cancellation.
 RESUMABLE_STATES = {
@@ -128,6 +141,201 @@ def _approval_scope(run_id: str, manifest: RunManifest, policy_hash: str) -> str
     )
 
 
+def _runtime_environment_identity() -> dict[str, str]:
+    """Host runtime facts that must stay stable across sessions of one run."""
+    return {
+        "python": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "python_cache_tag": str(sys.implementation.cache_tag or ""),
+        "platform": sys.platform,
+        "platform_abi": sysconfig.get_platform(),
+    }
+
+
+def _application_identity_basis(
+    spec: ApplicationSpec,
+    identity: dict[str, Any],
+    environment_identity: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Describe the evidence a user must trust when inspecting this run."""
+    if spec.revision or spec.environment_digest:
+        basis: dict[str, Any] = {
+            "kind": "owner_declared",
+            "revision": spec.revision,
+            "environment_digest": spec.environment_digest,
+            "local_source_digest": identity.get("code"),
+        }
+        if isinstance(spec.transport, ContainerTransport):
+            basis["image"] = spec.transport.image
+        if (
+            environment_identity
+            and environment_identity.get("kind") == "python"
+            and not environment_identity.get("dependencies")
+            and not spec.environment_digest
+        ):
+            basis["resume_requirement"] = (
+                "environment_digest for untracked Python runtime/import paths"
+            )
+        if (
+            environment_identity
+            and environment_identity.get("kind") == "cli_executable"
+            and not spec.environment_digest
+        ):
+            basis["resume_requirement"] = "environment_digest for installed CLI dependencies"
+        return basis
+    if isinstance(spec.transport, ContainerTransport) and not spec.transport.mounts:
+        return {"kind": "container_image_digest", "image": spec.transport.image}
+    if environment_identity and environment_identity.get("kind") == "cli_executable":
+        return {
+            "kind": "local_source_and_cli_executable_hash",
+            "local_source_digest": identity.get("code"),
+            "executable": environment_identity.get("executable"),
+            "executable_digest": environment_identity.get("binary"),
+            "resume_requirement": "environment_digest for installed CLI dependencies",
+        }
+    if identity.get("code") is not None:
+        basis = {"kind": "local_source_content_hash", "digest": identity["code"]}
+        if (
+            environment_identity
+            and environment_identity.get("kind") == "python"
+            and not environment_identity.get("dependencies")
+            and not spec.environment_digest
+        ):
+            basis["resume_requirement"] = (
+                "environment_digest for untracked Python runtime/import paths"
+            )
+        return basis
+    return {"kind": "owner_identity_required_before_resume"}
+
+
+def _application_environment_identity(
+    spec: ApplicationSpec,
+    base_dir: Path,
+    environ: dict[str, str] | None,
+) -> dict[str, Any] | None:
+    """Inventory the interpreter runtime and installed distributions for Python apps."""
+    transport = spec.transport
+    if not isinstance(transport, PythonTransport | CliTransport):
+        return None
+    cwd = base_dir / transport.cwd if transport.cwd else base_dir
+    program = transport.python if isinstance(transport, PythonTransport) else transport.argv[0]
+    configured = Path(program)
+    if configured.is_absolute() or len(configured.parts) > 1:
+        executable = configured if configured.is_absolute() else cwd / configured
+        executable = Path(os.path.abspath(executable))
+        if not executable.is_file():
+            return {
+                "kind": "python" if _is_python_executable(executable) else "cli_executable",
+                "executable": str(executable),
+                "binary": None,
+                "runtime": None,
+                "dependencies": None,
+            }
+    else:
+        base_env = environ if environ is not None else os.environ
+        path = transport.env.get("PATH")
+        if path is None and "PATH" in transport.inherit_env:
+            path = base_env.get("PATH")
+        if "PATH" in transport.secret_env:
+            found = None
+        else:
+            found = shutil.which(program, path=path)
+        if found is None:
+            return {
+                "kind": "python" if _is_python_executable(configured) else "cli_executable",
+                "executable": None,
+                "binary": None,
+                "runtime": None,
+                "dependencies": None,
+            }
+        executable = Path(os.path.abspath(found))
+
+    is_python = isinstance(transport, PythonTransport) or _is_python_executable(executable)
+    binary_digest = _runtime_binary_digest(executable)
+    if not is_python:
+        return {
+            "kind": "cli_executable",
+            "executable": str(executable),
+            "binary": binary_digest,
+            "runtime": None,
+            "dependencies": None,
+        }
+
+    runtime = worker_python_identity(executable)
+    effective_env = environ if environ is not None else os.environ
+    custom_user_base = transport.env.get("PYTHONUSERBASE")
+    if custom_user_base is None and "PYTHONUSERBASE" in transport.inherit_env:
+        custom_user_base = effective_env.get("PYTHONUSERBASE")
+    opaque_user_base = "PYTHONUSERBASE" in transport.secret_env
+    custom_python_home = transport.env.get("PYTHONHOME")
+    if custom_python_home is None and "PYTHONHOME" in transport.inherit_env:
+        custom_python_home = effective_env.get("PYTHONHOME")
+    opaque_python_home = "PYTHONHOME" in transport.secret_env
+    user_environment: dict[str, str] = {}
+    opaque_user_home = False
+    for name in ("HOME", "USERPROFILE"):
+        if name in transport.secret_env:
+            opaque_user_home = True
+        elif name in transport.env:
+            user_environment[name] = transport.env[name]
+        elif name in transport.inherit_env and name in effective_env:
+            user_environment[name] = effective_env[name]
+    try:
+        site_paths, import_paths, import_paths_trackable = environment_paths(
+            executable, user_environment=user_environment
+        )
+        dependency_versions = dependency_lock_hash(site_paths) or content_hash([])
+        import_source_hash = (
+            plugin_paths_hash(
+                [path for path in import_paths if path.exists()],
+                max_bytes=512 * 1024 * 1024,
+                max_entries=100_000,
+            )
+            if import_paths_trackable
+            else None
+        )
+        dependencies = (
+            content_hash(
+                {
+                    "versions": dependency_versions,
+                    "import_roots": [path.as_posix() for path in import_paths],
+                    "imported_source": import_source_hash,
+                }
+            )
+            if import_paths_trackable
+            and import_source_hash is not None
+            and custom_user_base is None
+            and not opaque_user_base
+            and custom_python_home is None
+            and not opaque_python_home
+            and not opaque_user_home
+            else None
+        )
+    except (OSError, ValueError):
+        dependencies = None
+    return {
+        "kind": "python",
+        "executable": str(executable),
+        "binary": binary_digest,
+        "runtime": runtime,
+        "dependencies": dependencies,
+    }
+
+
+def _is_python_executable(path: Path) -> bool:
+    name = path.name.casefold()
+    return name.startswith(("python", "pypy"))
+
+
+def _runtime_binary_digest(executable: Path) -> str | None:
+    try:
+        if executable.stat().st_size > MAX_RUNTIME_BINARY_BYTES:
+            return None
+        return bytes_hash(executable.read_bytes())
+    except OSError:
+        return None
+
+
 def create_run(
     compiled: CompiledRun,
     *,
@@ -137,8 +345,17 @@ def create_run(
     run_id: str | None = None,
     run_seed: int | None = None,
     experiment_context: dict[str, Any] | None = None,
+    environ: dict[str, str] | None = None,
 ) -> str:
     spec = compiled.application.spec
+    application_identity = application_code_identity(
+        spec,
+        compiled.application.base_dir,
+        environ if environ is not None else os.environ,
+    )
+    application_environment_identity = _application_environment_identity(
+        spec, compiled.application.base_dir, environ
+    )
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     if not run_id or len(run_id) > 120:
         raise RunError("run_id must be a non-empty value of at most 120 characters")
@@ -154,6 +371,9 @@ def create_run(
             existing_run.manifest.dataset_hash != compiled.dataset.content_hash
             or existing_run.manifest.application_hash != expected_app_hash
             or existing_run.manifest.plan_hash != compiled.plan_hash
+            or parameters.get("application_code_identity") != application_identity
+            or parameters.get("application_environment_identity")
+            != application_environment_identity
             or (run_seed is not None and existing_run.manifest.seed != run_seed)
             or parameters.get("experiment_context") != experiment_context
         ):
@@ -246,6 +466,11 @@ def create_run(
             "application_base_dir": str(compiled.application.base_dir),
             "policy": compiled.policy.model_dump(mode="json"),
             "policy_hash": compiled.policy_hash,
+            "application_code_identity": application_identity,
+            "application_environment_identity": application_environment_identity,
+            "application_identity_basis": _application_identity_basis(
+                spec, application_identity, application_environment_identity
+            ),
             "scoring_id": f"engine-{run_id}",
             "binding_hashes": [m.binding_hash for m in compiled.metrics],
             # State between cases (§7): how and when the application is reset.
@@ -261,7 +486,7 @@ def create_run(
             ),
         },
         seed=(run_seed if run_seed is not None else random.SystemRandom().randrange(2**31)),
-        environment={"python": platform.python_version(), "platform": sys.platform},
+        environment=_runtime_environment_identity(),
     )
     storage.commit_run(manifest, status="created")
     storage.commit_approval(
@@ -377,6 +602,105 @@ def _frozen_application(
     if content_hash(spec.model_dump(mode="json")) != manifest.application_hash:
         raise RunError("the frozen application spec does not match the run manifest")
     return spec
+
+
+def _verify_application_resume_identity(
+    manifest: RunManifest,
+    spec: ApplicationSpec,
+    *,
+    status: str,
+    environ: dict[str, str] | None,
+) -> None:
+    """Fail before recovery or dispatch if this run no longer describes one app build."""
+    baseline = manifest.parameters.get("application_code_identity")
+    if baseline is None:
+        if status == "created":
+            # Old, never-started runs can safely begin with the current source: no observation
+            # has yet been attributed to them.
+            return
+        raise RunError(
+            "this run has no frozen application source/environment identity, so it cannot be "
+            "resumed safely; create a new run"
+        )
+
+    base_dir = Path(manifest.parameters["application_base_dir"])
+    current = application_code_identity(
+        spec,
+        base_dir,
+        environ if environ is not None else os.environ,
+    )
+    current_environment_identity = _application_environment_identity(
+        spec, base_dir, environ
+    )
+    if current != baseline:
+        raise RunError(
+            "the application's source, inherited environment, secrets, or aibench version "
+            "changed since this run was created; restore the original identity or create a new "
+            "run"
+        )
+    frozen_environment_identity = manifest.parameters.get("application_environment_identity")
+    if current_environment_identity != frozen_environment_identity:
+        raise RunError(
+            "the application's Python interpreter or installed dependencies changed since this "
+            "run was created; restore the original environment or create a new run"
+        )
+
+    frozen_environment = dict(manifest.environment or {})
+    runtime = _runtime_environment_identity()
+    changed_runtime = sorted(
+        name
+        for name, frozen_value in frozen_environment.items()
+        if name in runtime and runtime[name] != frozen_value
+    )
+    if changed_runtime:
+        raise RunError(
+            "the benchmark host runtime changed since this run was created "
+            f"({', '.join(changed_runtime)}); restore the original runtime or create a new run"
+        )
+
+    if status != "created":
+        python_environment_unverifiable = (
+            current_environment_identity is not None
+            and current_environment_identity.get("kind") == "python"
+            and not spec.environment_digest
+            and (
+                not current_environment_identity.get("binary")
+                or not current_environment_identity.get("runtime")
+                or not current_environment_identity.get("dependencies")
+            )
+        )
+        cli_environment_unverifiable = (
+            isinstance(spec.transport, CliTransport)
+            and not spec.revision
+            and not spec.environment_digest
+            and (
+                not current_environment_identity
+                or not current_environment_identity.get("executable")
+                or not current_environment_identity.get("binary")
+            )
+        )
+        cli_dependencies_unverifiable = (
+            current_environment_identity is not None
+            and current_environment_identity.get("kind") == "cli_executable"
+            and not spec.environment_digest
+        )
+        if (
+            python_environment_unverifiable
+            or cli_environment_unverifiable
+            or cli_dependencies_unverifiable
+        ):
+            raise RunError(
+                "cannot safely resume this application because its executable, runtime, or "
+                "installed dependencies could not be fully fingerprinted; declare an "
+                "`environment_digest` (updated whenever the runtime or dependencies change) or "
+                "create a new run"
+            )
+        problem = application_resume_identity_problem(spec, base_dir, current)
+        if problem:
+            raise RunError(
+                "cannot safely resume this run because "
+                f"{problem}; create a new run after recording an application revision"
+            )
 
 
 def _frozen_registry(
@@ -675,6 +999,15 @@ async def _execute_leased(
         w.kind == "execution" and w.state is WorkItemState.PENDING
         for w in storage.list_work_items(run_id)
     )
+    # A run that only settles stored observations/evaluations does not create a mixed app
+    # revision. Check the live app identity exactly when further application dispatch is due.
+    if pending_exec and current.status != "cancelling":
+        _verify_application_resume_identity(
+            manifest,
+            spec,
+            status=current.status,
+            environ=environ,
+        )
     runner = None
     if pending_exec:
         runner = create_runner(
@@ -719,6 +1052,7 @@ async def _execute_leased(
         controller=controller or RunController(),
         rng=random.Random(manifest.seed),
         heartbeat=lambda: storage.heartbeat_run_lease(run_id, owner, time.time()),
+        _session_started=ledger.started,
     )
     return await engine.execute()
 
