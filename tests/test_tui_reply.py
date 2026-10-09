@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import pytest
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from rich.console import Console
@@ -163,7 +164,10 @@ def test_streamed_chat_reply_is_labelled_rendered_and_wrapped(tmp_path: Path) ->
     assert all(len(line) <= 75 for line in shown.splitlines())
 
 
-def test_user_band_is_tinted_full_width_with_a_marker() -> None:
+def test_user_band_is_tinted_full_width_with_a_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.delenv("NO_COLOR", raising=False)
     theme = get_theme(None)
     console = Console(file=io.StringIO(), width=60, force_terminal=True, color_system="truecolor")
     console.print(user_band("hi\nsecond [red]line[/red]", theme, unicode=True))
@@ -174,6 +178,19 @@ def test_user_band_is_tinted_full_width_with_a_marker() -> None:
     assert f"48;2;{red};{green};{blue}" in shown  # the band's background
     assert all(len(line) == 60 for line in plain.splitlines())  # full width
     assert len(plain.splitlines()) == 4  # a padding row above and below
+
+
+def test_user_band_respects_no_color_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    output = io.StringIO()
+    console = Console(file=output, width=60, force_terminal=True, color_system="truecolor")
+    console.print(user_band("hi", get_theme(None), unicode=True))
+
+    shown = output.getvalue()
+    assert console.no_color is True
+    assert "hi" in shown
+    sgr = re.findall(r"\x1b\[([0-9;]*)m", shown)
+    assert not any("38" in params.split(";") or "48" in params.split(";") for params in sgr)
 
 
 class _SlowProvider:

@@ -1,0 +1,24 @@
+﻿F18 verification
+================
+
+Observed environment and reproduction
+-------------------------------------
+- The test process inherited `TERM=dumb` and `NO_COLOR=1`.
+- Before the harness change, the capable ConPTY test failed to find the styled composer and
+  the RGB test failed to find its background color (`2 failed`).
+
+After the fix
+-------------
+- `tests/test_cli_chat_pty.py tests/test_tui_reply.py`: 15 passed.
+- Focused capable-terminal, dumb-terminal, RGB, and `NO_COLOR` checks: 5 passed.
+- The ConPTY harness sets `TERM=xterm-256color`, `COLORTERM=truecolor`, and removes `NO_COLOR`
+  for the capable-terminal assertions.
+- A separate `TERM=dumb` ConPTY check waits for the `/help` response before confirming the
+  composer hint is absent from the plain prompt.
+- A separate `NO_COLOR=1` rendering check confirms foreground and background color codes are
+  omitted while text remains visible.
+- `.venv/Scripts/mypy.exe src/aibench`: no issues in 142 source files.
+- `.venv/Scripts/ruff.exe check src tests plugins`: passed.
+- `git diff --check`: passed.
+
+Only tests changed; production terminal behavior is unchanged.
