@@ -152,20 +152,46 @@ def _value(raw: Any) -> Any:
         except (TypeError, ValueError):
             return raw["intValue"]
     if "arrayValue" in raw:
-        return [_value(v) for v in (raw["arrayValue"] or {}).get("values", [])]
+        array = raw["arrayValue"]
+        if not isinstance(array, dict):
+            raise TraceFormatError("arrayValue must be an object")
+        return [_value(v) for v in _array(array.get("values"), "arrayValue.values")]
     if "kvlistValue" in raw:
-        return {
-            kv.get("key"): _value(kv.get("value")) for kv in raw["kvlistValue"].get("values", [])
-        }
+        kvlist = raw["kvlistValue"]
+        if not isinstance(kvlist, dict):
+            raise TraceFormatError("kvlistValue must be an object")
+        values = _array(kvlist.get("values"), "kvlistValue.values")
+        if any(not isinstance(item, dict) for item in values):
+            raise TraceFormatError("kvlistValue.values entries must be objects")
+        if any(not isinstance(item.get("key"), str) for item in values):
+            raise TraceFormatError("kvlistValue.values entries need a string key")
+        return {kv.get("key"): _value(kv.get("value")) for kv in values}
     return None
 
 
-def _attributes(items: Any) -> dict[str, Any]:
-    return {
-        str(kv.get("key")): _value(kv.get("value"))
-        for kv in (items or [])
-        if isinstance(kv, dict) and "key" in kv
-    }
+def _array(raw: Any, field: str, *, allow_none: bool = True) -> list[Any]:
+    if raw is None:
+        if allow_none:
+            return []
+        raise TraceFormatError(f"{field} must be a list")
+    if not isinstance(raw, list):
+        raise TraceFormatError(f"{field} must be a list")
+    return raw
+
+
+def _object(raw: Any, field: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise TraceFormatError(f"{field} entries must be objects")
+    return raw
+
+
+def _attributes(items: Any, field: str = "attributes") -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for item in _array(items, field):
+        kv = _object(item, f"{field}[]")
+        if "key" in kv:
+            result[str(kv["key"])] = _value(kv.get("value"))
+    return result
 
 
 def _int(raw: Any) -> int | None:
@@ -177,7 +203,10 @@ def _int(raw: Any) -> int | None:
 
 def parse_otlp(data: bytes) -> list[Trace]:
     """Every trace in an OTLP/JSON export, spans grouped by trace ID."""
-    text = data.decode("utf-8-sig").strip()
+    try:
+        text = data.decode("utf-8-sig").strip()
+    except UnicodeDecodeError as exc:
+        raise TraceFormatError("trace export is not valid UTF-8") from exc
     documents: list[Any] = []
     try:
         documents = [json.loads(text)]
@@ -192,11 +221,37 @@ def parse_otlp(data: bytes) -> list[Trace]:
         if not isinstance(document, dict) or "resourceSpans" not in document:
             raise TraceFormatError("expected OTLP/JSON with a 'resourceSpans' list")
         found_any = True
-        for resource_spans in document.get("resourceSpans") or []:
-            resource = _attributes((resource_spans.get("resource") or {}).get("attributes"))
-            for scope_spans in resource_spans.get("scopeSpans") or []:
-                for raw in scope_spans.get("spans") or []:
-                    span = _span(raw, resource)
+        for resource_index, raw_resource_spans in enumerate(
+            _array(document.get("resourceSpans"), "resourceSpans", allow_none=False)
+        ):
+            resource_spans = _object(raw_resource_spans, f"resourceSpans[{resource_index}]")
+            raw_resource = resource_spans.get("resource") or {}
+            resource_obj = _object(raw_resource, f"resourceSpans[{resource_index}].resource")
+            resource = _attributes(
+                resource_obj.get("attributes"),
+                f"resourceSpans[{resource_index}].resource.attributes",
+            )
+            for scope_index, raw_scope_spans in enumerate(
+                _array(
+                    resource_spans.get("scopeSpans"),
+                    f"resourceSpans[{resource_index}].scopeSpans",
+                )
+            ):
+                scope_spans = _object(
+                    raw_scope_spans,
+                    f"resourceSpans[{resource_index}].scopeSpans[{scope_index}]",
+                )
+                for span_index, raw_span in enumerate(
+                    _array(
+                        scope_spans.get("spans"),
+                        f"resourceSpans[{resource_index}].scopeSpans[{scope_index}].spans",
+                    )
+                ):
+                    span_obj = _object(
+                        raw_span,
+                        f"resourceSpans[{resource_index}].scopeSpans[{scope_index}].spans[{span_index}]",
+                    )
+                    span = _span(span_obj, resource)
                     traces.setdefault(span.trace_id, Trace(span.trace_id)).add(span)
     if not found_any:
         raise TraceFormatError("expected OTLP/JSON with a 'resourceSpans' list")
@@ -208,13 +263,15 @@ def _span(raw: dict[str, Any], resource: dict[str, Any]) -> Span:
         raise TraceFormatError("a span needs traceId and spanId")
     flags = _int(raw.get("flags"))
     status = raw.get("status") or {}
+    if not isinstance(status, dict):
+        raise TraceFormatError("span status must be an object")
     code = status.get("code")
     return Span(
         trace_id=str(raw["traceId"]),
         span_id=str(raw["spanId"]),
         parent_span_id=str(raw["parentSpanId"]) if raw.get("parentSpanId") else None,
         name=str(raw.get("name", "")),
-        attributes={**resource, **_attributes(raw.get("attributes"))},
+        attributes={**resource, **_attributes(raw.get("attributes"), "span attributes")},
         start_ns=_int(raw.get("startTimeUnixNano")),
         end_ns=_int(raw.get("endTimeUnixNano")),
         sampled=None if flags is None else bool(flags & _TRACE_FLAG_SAMPLED),

@@ -37,6 +37,7 @@ app = typer.Typer(
     name="aibench",
     help="BenchCraft: evaluate AI applications in conversation. Run `benchcraft` in a project.",
     no_args_is_help=False,
+    pretty_exceptions_show_locals=False,
 )
 app.add_typer(dataset_cli.app, name="dataset")
 app.add_typer(experiments_cli.app, name="experiments")

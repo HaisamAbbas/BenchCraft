@@ -25,6 +25,7 @@ from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
 from aibench.cli.score import _PLUGIN_ENV_OPTION, _PLUGIN_PATH_OPTION, _PLUGIN_SECRET_OPTION
 from aibench.config.resolve import load_mapping_file
 from aibench.core.errors import AibenchError
@@ -56,9 +57,21 @@ _POLICY = typer.Option(
 _JSON = typer.Option(False, "--json", help="Machine-readable output on stdout.")
 
 
-def _fail(message: str, code: int) -> typer.Exit:
-    err_console.print(f"[red]{escape(message)}[/red]")
-    return typer.Exit(code=code)
+def _fail(
+    message: str,
+    code: int,
+    *,
+    json_output: bool = False,
+    details: list[str] | None = None,
+) -> typer.Exit:
+    return error_exit(
+        message,
+        exit_code=code,
+        json_output=json_output,
+        console=console,
+        err_console=err_console,
+        details=details,
+    )
 
 
 def _exit_for(findings: list[PlanFinding]) -> int:
@@ -82,30 +95,44 @@ def _print_findings(findings: list[PlanFinding]) -> None:
 # --------------------------------------------------------------------------- draft
 
 
-def _selection(sample: int | None, seed: int | None, limit: int | None) -> CaseSelection | None:
+def _selection(
+    sample: int | None, seed: int | None, limit: int | None, *, json_output: bool = False
+) -> CaseSelection | None:
     if sample is None and limit is None:
         if seed is not None:
-            raise _fail("--seed requires --sample", EXIT_INVALID)
+            raise _fail("--seed requires --sample", EXIT_INVALID, json_output=json_output)
         return None
     try:
         return CaseSelection(sample_size=sample, seed=seed, limit=limit)
     except PydanticValidationError as exc:
-        raise _fail(f"invalid selection: {exc.errors()[0]['msg']}", EXIT_INVALID) from exc
+        raise _fail(
+            f"invalid selection: {exc.errors()[0]['msg']}", EXIT_INVALID, json_output=json_output
+        ) from exc
 
 
 def _plugin_environments(
-    python: Path | None, secrets: list[str], paths: list[Path]
+    python: Path | None,
+    secrets: list[str],
+    paths: list[Path],
+    *,
+    json_output: bool = False,
 ) -> tuple[PluginEnvironmentRef, ...]:
     if python is None:
         if secrets or paths:
-            raise _fail("--plugin-secret and --plugin-path require --plugin-env", EXIT_INVALID)
+            raise _fail(
+                "--plugin-secret and --plugin-path require --plugin-env",
+                EXIT_INVALID,
+                json_output=json_output,
+            )
         return ()
     secret_env: dict[str, str] = {}
     for item in secrets:
         name, sep, ref = item.partition("=")
         if not sep or not name or ":" not in ref:
             raise _fail(
-                f"--plugin-secret must look like NAME=source:name, got {item!r}", EXIT_INVALID
+                f"--plugin-secret must look like NAME=source:name, got {item!r}",
+                EXIT_INVALID,
+                json_output=json_output,
             )
         secret_env[name] = ref
     try:
@@ -117,33 +144,49 @@ def _plugin_environments(
             ),
         )
     except PydanticValidationError as exc:
-        raise _fail(f"invalid plugin environment: {exc.errors()[0]['msg']}", EXIT_INVALID) from exc
+        raise _fail(
+            f"invalid plugin environment: {exc.errors()[0]['msg']}",
+            EXIT_INVALID,
+            json_output=json_output,
+        ) from exc
 
 
-def _keyed_json(items: list[str], option: str) -> dict[str, Any]:
+def _keyed_json(items: list[str], option: str, *, json_output: bool = False) -> dict[str, Any]:
     parsed: dict[str, Any] = {}
     for item in items:
         key, sep, raw = item.partition("=")
         if not sep or not key:
-            raise _fail(f"{option} must look like EVALUATOR_ID=JSON, got {item!r}", EXIT_INVALID)
+            raise _fail(
+                f"{option} must look like EVALUATOR_ID=JSON, got {item!r}",
+                EXIT_INVALID,
+                json_output=json_output,
+            )
         try:
             parsed[key] = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise _fail(f"{option} {key}: invalid JSON ({exc.msg})", EXIT_INVALID) from exc
+            raise _fail(
+                f"{option} {key}: invalid JSON ({exc.msg})",
+                EXIT_INVALID,
+                json_output=json_output,
+            ) from exc
     return parsed
 
 
-def _rules(items: list[str]) -> dict[str, DecisionRule]:
+def _rules(items: list[str], *, json_output: bool = False) -> dict[str, DecisionRule]:
     rules = {}
-    for key, value in _keyed_json(items, "--rule").items():
+    for key, value in _keyed_json(items, "--rule", json_output=json_output).items():
         try:
             rules[key] = DecisionRule.model_validate(value)
         except PydanticValidationError as exc:
-            raise _fail(f"--rule {key}: {exc.errors()[0]['msg']}", EXIT_INVALID) from exc
+            raise _fail(
+                f"--rule {key}: {exc.errors()[0]['msg']}", EXIT_INVALID, json_output=json_output
+            ) from exc
     return rules
 
 
-def _provider(config_path: Path, policy_path: Path | None) -> tuple[Any, list[str]]:
+def _provider(
+    config_path: Path, policy_path: Path | None, *, json_output: bool = False
+) -> tuple[Any, list[str]]:
     """The provider, or (None, denials) when the policy does not permit contacting it."""
     from aibench.planning.openai_provider import (
         OpenAICompatibleConfig,
@@ -154,14 +197,19 @@ def _provider(config_path: Path, policy_path: Path | None) -> tuple[Any, list[st
     try:
         config = OpenAICompatibleConfig.model_validate(load_mapping_file(config_path))
     except (PydanticValidationError, AibenchError, OSError) as exc:
-        raise _fail(f"invalid provider config {config_path}: {exc}", EXIT_INVALID) from exc
-    denials = provider_denials(config, load_policy(policy_path))
+        raise _fail(
+            f"invalid provider config {config_path}: {exc}", EXIT_INVALID, json_output=json_output
+        ) from exc
+    try:
+        denials = provider_denials(config, load_policy(policy_path))
+    except AibenchError as exc:
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     if denials:
         return None, denials
     try:
         return OpenAICompatibleProvider(config), []
     except AibenchError as exc:
-        raise _fail(str(exc), EXIT_INVALID) from exc
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
 
 
 def _summary(document: PlanDraft) -> None:
@@ -237,11 +285,14 @@ def plan(
         raise _fail(
             "aibench plan needs --app and --dataset (or use `aibench plan validate FILE`)",
             EXIT_INVALID,
+            json_output=json_output,
         )
     if planner not in ("template", "model"):
-        raise _fail("--planner must be template or model", EXIT_INVALID)
+        raise _fail("--planner must be template or model", EXIT_INVALID, json_output=json_output)
     if planner == "model" and provider_config is None:
-        raise _fail("--planner model needs --provider-config", EXIT_INVALID)
+        raise _fail(
+            "--planner model needs --provider-config", EXIT_INVALID, json_output=json_output
+        )
     try:
         gathered = gather_inputs(
             application=app,
@@ -250,24 +301,26 @@ def plan(
             out=out,
             policy=load_policy(policy),
             trusted_local=trust_local_app,
-            selection=_selection(sample, seed, limit),
+            selection=_selection(sample, seed, limit, json_output=json_output),
             budgets=BudgetLimits(
                 max_application_calls=max_app_calls, max_evaluator_calls=max_evaluator_calls
             ),
-            plugin_environments=_plugin_environments(plugin_env, plugin_secret, plugin_path),
-            params=_keyed_json(params, "--params"),
-            rules=_rules(rule),
+            plugin_environments=_plugin_environments(
+                plugin_env, plugin_secret, plugin_path, json_output=json_output
+            ),
+            params=_keyed_json(params, "--params", json_output=json_output),
+            rules=_rules(rule, json_output=json_output),
             source_root=Path.cwd(),
         )
     except AibenchError as exc:
-        raise _fail(str(exc), EXIT_INVALID) from exc
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     for note in gathered.notes:
         err_console.print(f"[yellow]note:[/yellow] {escape(note)}")
     inputs = gathered.inputs
     provider_denied: list[str] = []
     if planner == "model":
         assert provider_config is not None
-        provider, provider_denied = _provider(provider_config, policy)
+        provider, provider_denied = _provider(provider_config, policy, json_output=json_output)
         if provider is None:
             outcome = plan_with_template(inputs)
             outcome.provenance = outcome.provenance.model_copy(
@@ -287,7 +340,7 @@ def plan(
     try:
         document = write_draft(outcome, inputs, out, revise=revise)
     except AibenchError as exc:
-        raise _fail(str(exc), EXIT_INVALID) from exc
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     findings = outcome.validation.findings
     for denial in provider_denied:
         err_console.print(f"[red]denied:[/red] {escape(denial)}")
@@ -326,9 +379,9 @@ def show_opportunities(
     json_output: bool = _JSON,
 ) -> None:
     """Show evidence- and policy-aware metric opportunities; write no plan and run nothing."""
-    supplied_params = _keyed_json(params, "--params")
+    supplied_params = _keyed_json(params, "--params", json_output=json_output)
     if any(not isinstance(value, dict) for value in supplied_params.values()):
-        raise _fail("--params values must be JSON objects", EXIT_INVALID)
+        raise _fail("--params values must be JSON objects", EXIT_INVALID, json_output=json_output)
     try:
         gathered = gather_inputs(
             application=app,
@@ -337,13 +390,15 @@ def show_opportunities(
             out=None,
             policy=load_policy(policy),
             trusted_local=trust_local_app,
-            plugin_environments=_plugin_environments(plugin_env, plugin_secret, plugin_path),
+            plugin_environments=_plugin_environments(
+                plugin_env, plugin_secret, plugin_path, json_output=json_output
+            ),
             params=supplied_params,
-            rules=_rules(rule),
+            rules=_rules(rule, json_output=json_output),
             source_root=Path.cwd(),
         )
     except AibenchError as exc:
-        raise _fail(str(exc), EXIT_INVALID) from exc
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     for note in gathered.notes:
         err_console.print(f"[yellow]note:[/yellow] {escape(note)}")
     report = discover_opportunities(gathered.inputs)
@@ -408,9 +463,15 @@ def validate_plan(
             trusted_local=trust_local_app,
         )
     except PlanInvalid as exc:
-        for problem in exc.problems:
-            err_console.print(f"[red]invalid:[/red] {escape(problem)}")
-        raise _fail("nothing was dispatched: the plan is invalid", EXIT_INVALID) from exc
+        if not json_output:
+            for problem in exc.problems:
+                err_console.print(f"[red]invalid:[/red] {escape(problem)}")
+        raise _fail(
+            "nothing was dispatched: the plan is invalid",
+            EXIT_INVALID,
+            json_output=json_output,
+            details=list(exc.problems),
+        ) from exc
     code = _exit_for(analysis.findings)
     estimate = estimate_spend(loaded, analysis) if analysis.dataset is not None else None
     summary: dict[str, Any] = {
@@ -473,20 +534,28 @@ def benchmark_planner(
     from aibench.services.reports import write_text_atomic
 
     if planner not in ("template", "model"):
-        raise _fail("--planner must be template or model", EXIT_INVALID)
+        raise _fail("--planner must be template or model", EXIT_INVALID, json_output=json_output)
     try:
         fixture_set = load_fixture_set(fixtures)
     except FixtureSetError as exc:
-        raise _fail(str(exc), EXIT_INVALID) from exc
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     provider = None
     if planner == "model":
         if provider_config is None:
-            raise _fail("--planner model needs --provider-config", EXIT_INVALID)
-        provider, denials = _provider(provider_config, policy)
+            raise _fail(
+                "--planner model needs --provider-config", EXIT_INVALID, json_output=json_output
+            )
+        provider, denials = _provider(provider_config, policy, json_output=json_output)
         if provider is None:
-            for denial in denials:
-                err_console.print(f"[red]denied:[/red] {escape(denial)}")
-            raise _fail("the model planner was not contacted; nothing was measured", EXIT_DENIED)
+            if not json_output:
+                for denial in denials:
+                    err_console.print(f"[red]denied:[/red] {escape(denial)}")
+            raise _fail(
+                "the model planner was not contacted; nothing was measured",
+                EXIT_DENIED,
+                json_output=json_output,
+                details=denials,
+            )
 
     def plan_one(inputs: Any) -> Any:
         if provider is None:

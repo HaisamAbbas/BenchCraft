@@ -129,10 +129,13 @@ def test_plan_benchmark_command(tmp_path: Path) -> None:
             "model",
             "--provider-config",
             str(provider),
+            "--json",
         ],
     )
     assert denied.exit_code == 4  # the policy does not permit the planner endpoint
-    assert "not contacted" in " ".join(denied.output.split())
+    denial_document = json.loads(denied.stdout)
+    assert "not contacted" in denial_document["message"]
+    assert denial_document["details"]
 
 
 def test_invalid_fixture_sets_are_refused(tmp_path: Path) -> None:
@@ -143,6 +146,37 @@ def test_invalid_fixture_sets_are_refused(tmp_path: Path) -> None:
         assert "expected schema" in str(exc)
     else:
         raise AssertionError("an invalid fixture set was accepted")
+
+
+def test_plan_benchmark_reports_invalid_policy_as_json(tmp_path: Path) -> None:
+    provider = tmp_path / "provider.json"
+    provider.write_text(
+        json.dumps({"base_url": "https://api.example.com/v1", "model": "m"}),
+        encoding="utf-8",
+    )
+    policy = tmp_path / "policy.json"
+    policy.write_text("{", encoding="utf-8")
+    result = cli.invoke(
+        app,
+        [
+            "plan",
+            "benchmark",
+            "--fixtures",
+            str(SET),
+            "--planner",
+            "model",
+            "--provider-config",
+            str(provider),
+            "--policy",
+            str(policy),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    document = json.loads(result.stdout)
+    assert document["status"] == "error" and document["exit_code"] == 2
+    assert "invalid policy" in document["message"]
+    assert "Traceback" not in result.output
 
 
 def test_fixture_id_cannot_escape_the_temporary_benchmark_directory(tmp_path: Path) -> None:

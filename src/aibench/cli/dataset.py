@@ -9,6 +9,7 @@ from rich.console import Console
 
 from aibench.cli import candidates as candidates_cli
 from aibench.cli import episodes as episodes_cli
+from aibench.cli.errors import error_exit
 from aibench.core.errors import ValidationError
 from aibench.datasets.ingest import ingest_dataset
 
@@ -33,8 +34,13 @@ def validate(
         # stays bounded-memory regardless of dataset size (see `ingest_dataset` docstring).
         report = ingest_dataset(path, retain_cases=False)
     except ValidationError as exc:
-        err_console.print(f"[red]invalid dataset:[/red] {exc}")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            f"invalid dataset: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
 
     case_count = report.manifest.case_count if report.manifest else 0
 

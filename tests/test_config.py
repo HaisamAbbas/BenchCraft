@@ -9,6 +9,7 @@ import pytest
 
 from aibench.config.resolve import (
     assert_no_policy_keys_from_dataset,
+    load_mapping_file,
     resolve_config,
     resolve_path,
 )
@@ -47,6 +48,18 @@ def test_unpermitted_env_var_is_ignored(tmp_path) -> None:
 def test_missing_config_file_raises_config_error(tmp_path) -> None:
     with pytest.raises(ConfigError):
         resolve_config(config_path=tmp_path / "missing.json", cli_overrides={}, env={})
+
+
+def test_malformed_yaml_error_does_not_echo_file_contents(tmp_path) -> None:
+    pytest.importorskip("yaml")
+    config = tmp_path / "config.yaml"
+    config.write_text("secret: [sensitive-value", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as error:
+        load_mapping_file(config)
+
+    assert "not valid YAML at line 1" in str(error.value)
+    assert "sensitive-value" not in str(error.value)
 
 
 def test_secrets_are_references_not_values(tmp_path) -> None:

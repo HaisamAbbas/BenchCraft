@@ -129,6 +129,122 @@ def test_a_file_that_is_not_a_trace_export_is_refused(traced: tuple[Path, Path])
     assert "resourceSpans" in result.output
 
 
+def test_malformed_nested_trace_shape_is_a_json_input_error(traced: tuple[Path, Path]) -> None:
+    root, _ = traced
+    ws = ["--workspace", str(root)]
+    run_id = _cli("run", "--plan", str(root / "plan.json"), "--json", *ws)["run_id"]
+    malformed = root / "malformed.json"
+    malformed.write_text(json.dumps({"resourceSpans": [None]}), encoding="utf-8")
+    result = cli.invoke(
+        app,
+        ["traces", "import", run_id, str(malformed), "--json", *ws],
+    )
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout) == {
+        "status": "error",
+        "message": "resourceSpans[0] entries must be objects",
+        "exit_code": 2,
+    }
+    assert "Traceback" not in result.output
+
+    malformed.write_text(
+        json.dumps(
+            {
+                "resourceSpans": [
+                    {
+                        "scopeSpans": [
+                            {
+                                "spans": [
+                                    {
+                                        "traceId": "a" * 32,
+                                        "spanId": "b" * 16,
+                                        "attributes": [
+                                            {
+                                                "key": "nested",
+                                                "value": {
+                                                    "kvlistValue": {
+                                                        "values": [
+                                                            {
+                                                                "key": [],
+                                                                "value": {"stringValue": "x"},
+                                                            }
+                                                        ]
+                                                    }
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = cli.invoke(app, ["traces", "import", run_id, str(malformed), "--json", *ws])
+    assert result.exit_code == 2, result.output
+    document = json.loads(result.stdout)
+    assert document["status"] == "error" and document["exit_code"] == 2
+    assert "string key" in document["message"]
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"resourceSpans": [None]},
+        {"resourceSpans": [{"scopeSpans": [None]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": [None]}]}]},
+        {
+            "resourceSpans": [
+                {
+                    "scopeSpans": [
+                        {
+                            "spans": [
+                                {
+                                    "traceId": "a" * 32,
+                                    "spanId": "b" * 16,
+                                    "attributes": [
+                                        {
+                                            "key": "nested",
+                                            "value": {
+                                                "kvlistValue": {
+                                                    "values": [
+                                                        {
+                                                            "key": [],
+                                                            "value": {"stringValue": "x"},
+                                                        }
+                                                    ]
+                                                }
+                                            },
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {"resourceSpans": "invalid"},
+        {"resourceSpans": None},
+    ],
+)
+def test_nested_otlp_shape_errors_use_trace_format_error(document: dict[str, Any]) -> None:
+    with pytest.raises(TraceFormatError):
+        parse_otlp(json.dumps(document).encode())
+
+
+@pytest.mark.parametrize("field", ["arrayValue", "kvlistValue"])
+def test_otlp_anyvalue_rejects_falsey_non_object_containers(field: str) -> None:
+    span = _span("span")
+    span["attributes"] = [{"key": "nested", "value": {field: []}}]
+    with pytest.raises(TraceFormatError, match=f"{field} must be an object"):
+        parse_otlp(_document([span]))
+
+
 def _document(spans: list[dict[str, Any]]) -> bytes:
     return json.dumps({"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}).encode()
 

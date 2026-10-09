@@ -218,6 +218,34 @@ def test_headless_slash_commands_receive_provider_and_plugin_judge(
     assert captured["secret_env"] == {}
 
 
+@pytest.mark.parametrize("command", ['/cases generate "unfinished', '/compare "unfinished'])
+def test_headless_malformed_slash_command_emits_json_error(tmp_path: Path, command: str) -> None:
+    project = tmp_path / "project"
+    application, dataset = _project(project)
+    result = runner.invoke(
+        app,
+        [
+            "chat",
+            "--project",
+            str(project),
+            "--app",
+            str(application),
+            "--dataset",
+            str(dataset),
+            "--new",
+            "--send",
+            command,
+            "--json",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["exit_code"] == 2
+    assert "invalid command quoting" in payload["message"]
+    assert "Traceback" not in result.output
+
+
 def test_chat_send_json_sanitizes_command_data(tmp_path: Path, monkeypatch) -> None:
     from aibench.tui.commands import CommandResult, Commands
 

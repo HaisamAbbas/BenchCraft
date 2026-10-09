@@ -34,7 +34,10 @@ class ResolvedConfig:
 def load_mapping_file(path: Path) -> dict[str, Any]:
     """Parse config bytes without executing code. JSON is always supported; YAML is
     supported only via safe_load if PyYAML is installed, never via arbitrary eval/exec."""
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"{path} is not valid UTF-8 text") from exc
     if path.suffix.lower() in (".yaml", ".yml"):
         try:
             import yaml  # type: ignore[import-untyped]
@@ -42,7 +45,14 @@ def load_mapping_file(path: Path) -> dict[str, Any]:
             raise ConfigError(
                 f"{path} is YAML but PyYAML is not installed; use JSON or install PyYAML"
             ) from exc
-        loaded = yaml.safe_load(text) or {}
+        try:
+            loaded = yaml.safe_load(text) or {}
+        except yaml.YAMLError as exc:
+            mark = getattr(exc, "problem_mark", None)
+            location = (
+                f" at line {mark.line + 1}, column {mark.column + 1}" if mark is not None else ""
+            )
+            raise ConfigError(f"{path} is not valid YAML{location}") from exc
     else:
         try:
             loaded = json.loads(text) if text.strip() else {}

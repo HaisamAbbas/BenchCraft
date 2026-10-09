@@ -40,6 +40,28 @@ def test_missing_file_exits_two() -> None:
     assert result.exit_code == 2
 
 
+def test_missing_file_json_uses_shared_error_document(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["dataset", "validate", str(tmp_path / "missing.jsonl"), "--json"])
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout) == {
+        "status": "error",
+        "message": f"invalid dataset: dataset file not found: {tmp_path / 'missing.jsonl'}",
+        "exit_code": 2,
+    }
+
+
+def test_invalid_utf8_dataset_is_a_json_input_error(tmp_path: Path) -> None:
+    invalid = tmp_path / "invalid.jsonl"
+    invalid.write_bytes(b"\xff\xfe\n")
+    result = runner.invoke(app, ["dataset", "validate", str(invalid), "--json"])
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout) == {
+        "status": "error",
+        "message": f"invalid dataset: dataset file is not valid UTF-8: {invalid}",
+        "exit_code": 2,
+    }
+
+
 def test_malformed_nested_input_produces_line_errors_not_a_crash() -> None:
     """Regression test for the code-review finding that malformed nested `fixtures`,
     `context`, `reference`, `provenance`, and non-namespaced `extensions` keys could raise

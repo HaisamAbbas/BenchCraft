@@ -100,6 +100,18 @@ def test_doctor_flags_invalid_project_files(project: Path) -> None:
     assert dataset["status"] == "invalid"
 
 
+def test_doctor_reports_invalid_utf8_config_as_json(tmp_path: Path) -> None:
+    (tmp_path / "aibench.json").write_bytes(b"\xff\xfe")
+    result = cli.invoke(app, ["doctor", "--project", str(tmp_path), "--json"])
+    assert result.exit_code == 2, result.output
+    payload = _json(result.output)
+    [config] = [check for check in payload["checks"] if check["name"] == "config"]
+    assert config["status"] == "invalid"
+    assert "valid UTF-8" in config["detail"]
+    assert "Traceback" not in result.output
+    assert app.pretty_exceptions_show_locals is False
+
+
 def test_nested_project_root_works_in_chat_and_doctor_without_widening_policy(
     tmp_path: Path,
 ) -> None:

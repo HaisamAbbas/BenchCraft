@@ -26,6 +26,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
 from aibench.core.errors import AibenchError
 from aibench.engine.compile import (
     PlanInvalid,
@@ -65,35 +66,65 @@ _POLICY = typer.Option(
 _JSON = typer.Option(False, "--json", help="Machine-readable output on stdout.")
 
 
-def _fail(message: str, code: int) -> typer.Exit:
-    err_console.print(f"[red]{escape(message)}[/red]")
-    return typer.Exit(code=code)
+def _fail(
+    message: str,
+    code: int,
+    *,
+    json_output: bool = False,
+    details: list[str] | None = None,
+) -> typer.Exit:
+    return error_exit(
+        message,
+        exit_code=code,
+        json_output=json_output,
+        console=console,
+        err_console=err_console,
+        details=details,
+    )
 
 
-def _open(workspace: Path | None, *, create: bool = False) -> tuple[Storage, ArtifactStore]:
+def _open(
+    workspace: Path | None, *, create: bool = False, json_output: bool = False
+) -> tuple[Storage, ArtifactStore]:
     """Open the workspace; only `run` creates one — reading an absent one is an error."""
     ws = Workspace.at(workspace or Path.cwd())
     if not create and not ws.db_path.is_file():
-        raise _fail(f"no aibench workspace at {ws.root}", EXIT_INVALID)
+        raise _fail(f"no aibench workspace at {ws.root}", EXIT_INVALID, json_output=json_output)
     ws.ensure_directories()
     return Storage(Database.open_workspace(ws)), ArtifactStore(ws.artifacts_dir)
 
 
-def _report_problems(exc: AibenchError) -> typer.Exit:
+def _report_problems(exc: AibenchError, *, json_output: bool = False) -> typer.Exit:
     if isinstance(exc, PolicyDenied):
-        for denial in exc.denials:
-            err_console.print(f"[red]denied:[/red] {escape(denial)}")
-        return _fail("nothing was dispatched: the policy denies this plan", EXIT_DENIED)
+        if not json_output:
+            for denial in exc.denials:
+                err_console.print(f"[red]denied:[/red] {escape(denial)}")
+        return _fail(
+            "nothing was dispatched: the policy denies this plan",
+            EXIT_DENIED,
+            json_output=json_output,
+            details=list(exc.denials),
+        )
     if isinstance(exc, PlanInvalid):
-        for problem in exc.problems:
-            err_console.print(f"[red]invalid:[/red] {escape(problem)}")
-        return _fail("nothing was dispatched: the plan is invalid", EXIT_INVALID)
-    return _fail(str(exc), EXIT_INVALID)
+        if not json_output:
+            for problem in exc.problems:
+                err_console.print(f"[red]invalid:[/red] {escape(problem)}")
+        return _fail(
+            "nothing was dispatched: the plan is invalid",
+            EXIT_INVALID,
+            json_output=json_output,
+            details=list(exc.problems),
+        )
+    return _fail(str(exc), EXIT_INVALID, json_output=json_output)
 
 
-def _interrupted_before_dispatch(run_id: str | None) -> typer.Exit:
+def _interrupted_before_dispatch(run_id: str | None, *, json_output: bool = False) -> typer.Exit:
     hint = f"; resume with: aibench resume {run_id}" if run_id else ""
-    return _fail(f"interrupted before dispatch; nothing was dispatched{hint}", EXIT_INTERRUPTED)
+    return _fail(
+        f"interrupted before dispatch; nothing was dispatched{hint}",
+        EXIT_INTERRUPTED,
+        json_output=json_output,
+    )
 
 
 async def _execute(run_id: str, storage: Storage, artifacts: ArtifactStore) -> RunOutcome:
@@ -160,18 +191,20 @@ def _print_outcome(run_id: str, outcome: RunOutcome) -> None:
         console.print(f"  resume with: aibench resume {run_id}")
 
 
-def _resolve_plan(target: Path | None, policy: Path | None) -> tuple[Path, Path | None]:
+def _resolve_plan(
+    target: Path | None, policy: Path | None, *, json_output: bool = False
+) -> tuple[Path, Path | None]:
     """The plan and policy for `aibench run [TARGET]` without `--plan`."""
     from aibench.cli.chat import project_settings
 
     if target is not None and not target.exists():
-        raise _fail(f"{target} does not exist", EXIT_INVALID)
+        raise _fail(f"{target} does not exist", EXIT_INVALID, json_output=json_output)
     dataset = target if target is not None and target.is_file() else None
     root = target if target is not None and target.is_dir() else Path.cwd()
     try:
         settings = project_settings(root.resolve(), None, None, policy)
     except AibenchError as exc:
-        raise _fail(str(exc), EXIT_INVALID) from exc
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     plan = settings["plan"]
     if plan is None:
         where = settings["config"] or root.resolve()
@@ -180,17 +213,19 @@ def _resolve_plan(target: Path | None, policy: Path | None) -> tuple[Path, Path 
             f"({where}); `aibench init` creates one. A dataset alone cannot identify an "
             "application.",
             EXIT_INVALID,
+            json_output=json_output,
         )
     if dataset is not None:
         try:
             bound = (plan.parent / load_plan(plan).dataset).resolve()
         except PlanInvalid as exc:
-            raise _report_problems(exc) from exc
+            raise _report_problems(exc, json_output=json_output) from exc
         if bound != dataset.resolve():
             raise _fail(
                 f"the configured plan {plan} is bound to {bound}, not {dataset.resolve()}; "
                 "run a plan whose dataset is this file (aibench plan --dataset ... --out ...)",
                 EXIT_INVALID,
+                json_output=json_output,
             )
     return plan, settings["policy"]
 
@@ -211,20 +246,22 @@ def run_plan(
 ) -> None:
     """Execute a plan: validate, freeze, run, evaluate."""
     if plan is None:
-        plan, policy = _resolve_plan(target, policy)
+        plan, policy = _resolve_plan(target, policy, json_output=json_output)
         if workspace is None and target is not None and target.is_dir():
             workspace = target  # the project's own .aibench/, where its chat and report look
     elif target is not None:
         raise _fail(
-            "pass either --plan FILE or a project directory/dataset, not both", EXIT_INVALID
+            "pass either --plan FILE or a project directory/dataset, not both",
+            EXIT_INVALID,
+            json_output=json_output,
         )
     try:
         compiled = compile_plan(plan, policy=load_policy(policy), trusted_local=trust_local_app)
     except AibenchError as exc:
-        raise _report_problems(exc) from exc
+        raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
-        raise _interrupted_before_dispatch(None) from exc
-    storage, artifacts = _open(workspace, create=True)
+        raise _interrupted_before_dispatch(None, json_output=json_output) from exc
+    storage, artifacts = _open(workspace, create=True, json_output=json_output)
     run_id: str | None = None
     try:
         granted = "cli:--trust-local-app" if trust_local_app else "policy"
@@ -236,9 +273,9 @@ def run_plan(
         outcome = asyncio.run(_execute(run_id, storage, artifacts))
         code = _finish(run_id, outcome, storage, artifacts, json_output)
     except AibenchError as exc:
-        raise _report_problems(exc) from exc
+        raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
-        raise _interrupted_before_dispatch(run_id) from exc
+        raise _interrupted_before_dispatch(run_id, json_output=json_output) from exc
     finally:
         storage.db.close()
     raise typer.Exit(code=code)
@@ -250,14 +287,14 @@ def resume(
     json_output: bool = _JSON,
 ) -> None:
     """Continue eligible unfinished work under the run's frozen plan and identities."""
-    storage, artifacts = _open(workspace)
+    storage, artifacts = _open(workspace, json_output=json_output)
     try:
         outcome = asyncio.run(_execute(run_id, storage, artifacts))
         code = _finish(run_id, outcome, storage, artifacts, json_output)
     except AibenchError as exc:  # includes RunError, PolicyDenied and LeaseHeld
-        raise _report_problems(exc) from exc
+        raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
-        raise _interrupted_before_dispatch(run_id) from exc
+        raise _interrupted_before_dispatch(run_id, json_output=json_output) from exc
     finally:
         storage.db.close()
     raise typer.Exit(code=code)
@@ -277,7 +314,7 @@ def evaluate(
     ),
 ) -> None:
     """Rescore stored executions without rerunning the application."""
-    storage, artifacts = _open(workspace)
+    storage, artifacts = _open(workspace, json_output=json_output)
     try:
         report = asyncio.run(
             evaluate_run(
@@ -290,7 +327,7 @@ def evaluate(
             )
         )
     except AibenchError as exc:
-        raise _report_problems(exc) from exc
+        raise _report_problems(exc, json_output=json_output) from exc
     finally:
         storage.db.close()
     data = {
@@ -337,11 +374,11 @@ def status(
     json_output: bool = _JSON,
 ) -> None:
     """Committed run state: work item counts, items needing attention, budget."""
-    storage, _ = _open(workspace)
+    storage, _ = _open(workspace, json_output=json_output)
     try:
         data = run_status(storage, run_id)
     except RunError as exc:
-        raise _fail(str(exc), EXIT_INVALID) from exc
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     finally:
         storage.db.close()
     if json_output:

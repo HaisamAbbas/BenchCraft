@@ -32,9 +32,27 @@ def test_plan_validate_reports_shape_and_dispatches_nothing(tmp_path: Path) -> N
     denied = cli.invoke(app, ["plan", "validate", str(plan)])
     assert denied.exit_code == 4
     assert "requires trusted-local mode" in " ".join(denied.output.split())
-    invalid = h.plan(dataset="missing.jsonl", application=h.cli_app())
-    assert cli.invoke(app, ["plan", "validate", str(invalid), "--trust-local-app"]).exit_code == 2
+    invalid = tmp_path / "invalid-plan.json"
+    invalid.write_text("{", encoding="utf-8")
+    rejected = cli.invoke(
+        app, ["plan", "validate", str(invalid), "--trust-local-app", "--json"]
+    )
+    assert rejected.exit_code == 2, rejected.output
+    assert _json(rejected.stdout)["details"]
     assert h.count() == 0
+
+
+def test_missing_plan_json_uses_shared_error_document(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.plan.json"
+    result = cli.invoke(
+        app,
+        ["run", "--plan", str(missing), "--workspace", str(tmp_path), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+    document = _json(result.stdout)
+    assert document["status"] == "error"
+    assert document["message"] == "nothing was dispatched: the plan is invalid"
+    assert document["exit_code"] == 2 and document["details"]
 
 
 def test_example_plan_runs_under_the_dev_policy_and_is_denied_by_default(tmp_path: Path) -> None:

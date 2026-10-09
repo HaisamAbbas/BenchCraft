@@ -165,7 +165,7 @@
         "Final independent review: no findings"
       ],
       "review": "evidence/F09-review.md",
-      "commit": null,
+      "commit": "3dad5e61a4e87096839423ee566a336853b124b5",
       "pushed": true
     },
     {
@@ -174,11 +174,17 @@
       "title": "Malformed input escapes CLI error handling and breaks JSON output",
       "detail": "Multiple CLI reproductions",
       "kind": "finding",
-      "status": "pending",
-      "verification": [],
-      "review": null,
+      "status": "delivered",
+      "verification": [
+        "Broad affected CLI, trace, chat, project, planner, and config batch: 89 passed, 1 skipped",
+        "Final post-review focused malformed-input and JSON error batch: 13 passed",
+        "Ruff passed; mypy found no issues in 141 source files; git diff --check passed",
+        "Malformed OTLP AnyValues, UTF-8 inputs, YAML diagnostics, slash quoting, plan errors, and planner policy errors return handled CLI errors",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F10-review.md",
       "commit": null,
-      "pushed": false
+      "pushed": true
     },
     {
       "id": "F11",

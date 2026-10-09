@@ -30,6 +30,7 @@ import typer
 from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console
 
+from aibench.cli.errors import error_document
 from aibench.config.resolve import load_mapping_file, resolve_config
 from aibench.core.errors import AibenchError, ConfigError
 from aibench.core.models import deep_unfreeze
@@ -625,14 +626,15 @@ async def _send(
     live_before = set(controller.live_runs())
     experiment_tasks_before = controller.experiment_task_keys()
     command_code: int | None = None
+    command_error: str | None = None
     try:
         if text.strip().startswith("/"):
-            result = await create_commands(
-                controller, new_session, provider=provider
-            ).run(text)
+            result = await create_commands(controller, new_session, provider=provider).run(text)
             payload: dict[str, Any] = {"session_id": controller.session_id, **result.as_dict()}
             ok = result.ok
             command_code = result.exit_code
+            if result.kind == "error":
+                command_error = str(result.data.get("error", "command failed"))
             actions = [result.data] if result.kind == "action" else []
             if result.kind == "confirm":  # /run showed the plan first: nothing was started
                 actions = [{"state": "confirmation_required"}]
@@ -703,6 +705,8 @@ async def _send(
     else:
         code = EXIT_OK
     payload["exit_code"] = code
+    if json_output and command_error is not None:
+        payload.update(error_document(command_error, code))
     if dataset_notices:
         payload["dataset_selection"] = dataset_notices
     if json_output:

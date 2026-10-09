@@ -89,6 +89,16 @@ NewSession = Callable[[], SessionController]
 JudgeSource = tuple[dict[str, Any], dict[str, str]]
 
 
+def _split_words(text: str) -> list[str]:
+    """Parse user command words without leaking shlex's raw ValueError to the CLI."""
+    try:
+        return shlex.split(text, posix=False)
+    except ValueError as exc:
+        from aibench.core.errors import ValidationError
+
+        raise ValidationError(f"invalid command quoting: {exc}") from exc
+
+
 def create_commands(
     controller: SessionController,
     new_session: NewSession | None = None,
@@ -140,7 +150,7 @@ class Commands:
         try:
             result: CommandResult = await handler(argument.strip())
         except AibenchError as exc:
-            result = CommandResult(name, "error", {"error": str(exc)}, ok=False)
+            result = CommandResult(name, "error", {"error": str(exc)}, ok=False, exit_code=2)
         self._record(text.strip(), result, message_id)
         return result
 
@@ -234,7 +244,7 @@ class Commands:
         from aibench.services.plugins import install, plan_install, plugin_status, session_plugins
 
         root = self.controller.project_root
-        words = shlex.split(argument, posix=False)
+        words = _split_words(argument)
         if not words:
             rows = plugin_status(root, self.controller.policy())
             return CommandResult("/plugins", "plugins", {"plugins": rows})
@@ -299,7 +309,7 @@ class Commands:
             "/cases check FILE.jsonl [N... | all]  |  /cases verify FILE.jsonl N...  |  "
             '/cases add FILE.jsonl "QUESTION" "ANSWER"'
         )
-        words = shlex.split(argument, posix=False)
+        words = _split_words(argument)
         sub = words[0].lower() if words else "show"
         rest = words[1:]
         storage = self.controller.storage
@@ -420,7 +430,7 @@ class Commands:
         """`/traces [RUN_ID]`: what the run's imported traces add. `/traces import FILE
         [RUN_ID]`: attach an OpenTelemetry (OTLP/JSON) export to the run, so metrics that
         read traces (DeepEval's agent metrics) can score it with `/rescore`."""
-        words = shlex.split(argument, posix=False)
+        words = _split_words(argument)
         if not words or words[0] != "import":
             if len(words) > 1:
                 return CommandResult(
@@ -507,7 +517,7 @@ class Commands:
         """`/compare BASELINE CURRENT`: the stored, paired comparison (no model). Adding
         `--judge "CRITERIA"` has a judge also say, case by case, which run's answer is better
         by those criteria (DeepEval's ArenaGEval, each case judged in both orders)."""
-        words = [_unquote(w) for w in shlex.split(argument, posix=False)]
+        words = [_unquote(w) for w in _split_words(argument)]
         criteria = None
         if "--judge" in words:
             at = words.index("--judge")
