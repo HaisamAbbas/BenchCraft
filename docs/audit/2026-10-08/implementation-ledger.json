@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G14",
+  "current_item": "G15",
   "items": [
     {
       "id": "F01",
@@ -576,11 +576,16 @@
       "title": "Warmup and measurement phases",
       "detail": "**Missing; performance extension.** No bounded warmup count or exclusion phase before latency sampling. Warmup effects and spend need to be accounted explicitly.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "226 targeted tests passed across engine, recovery, CLI, reports, comparison, export, planning, and caches",
+        "Ruff src/tests passed; mypy passed for 152 source files; git diff --check passed",
+        "Warmup phase order, retries, cache bypass, budget accounting, unknown-effect recovery, comparison cost, and legacy plan hashes covered",
+        "Final independent review found no remaining actionable findings"
+      ],
+      "review": "evidence/G14-review.md",
+      "commit": "fc84d184",
+      "pushed": true
     },
     {
       "id": "G15",
