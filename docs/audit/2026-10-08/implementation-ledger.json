@@ -642,7 +642,7 @@
       "id": "G18",
       "priority": "P2",
       "title": "Dataset utilities and versioned suites",
-      "detail": "**Partial.** Validation, candidate review/promotion, episodes, content hashes, schema-aware import, and bounded JSONL dataset diff exist. Optional Parquet import requires explicit trust because PyArrow decompresses pages before row-size checks. Deduplication/splitting tools and a named suite catalog remain missing.",
+      "detail": "**Partial.** Validation, candidate review/promotion, episodes, content hashes, schema-aware import, bounded JSONL diff, and identity-based deduplication with explicit conflict policies exist. Optional Parquet import requires explicit trust because PyArrow decompresses pages before row-size checks. Deterministic grouped splitting and a named suite catalog remain missing.",
       "kind": "feature",
       "status": "pending",
       "verification": [
@@ -652,9 +652,12 @@
         "Diff delivery: 106 focused dataset, ingest, discovery, finite-number, and episode tests passed; 1 skipped",
         "Ruff and formatting passed; mypy passed for 157 source files; git diff --check passed",
         "Diff compares normalized explicit IDs, bounds records and detail output, and returns stable JSON errors and fail-on-change exit status",
-        "Final independent review found no remaining actionable findings for both importer and diff"
+        "Deduplication delivery: 114 focused dataset, ingest, discovery, finite-number, and episode tests passed; 1 skipped",
+        "Ruff, formatting, and git diff --check passed; Mypy passed for 158 source files",
+        "Identical normalized duplicates are removed; conflicting IDs fail by default or require an explicit first/last policy; warnings remain visible",
+        "Final independent reviews found no remaining actionable findings for importer, diff, and deduplication"
       ],
-      "review": "evidence/G18-import-review.md",
+      "review": "evidence/G18-dedup-review.md",
       "commit": null,
       "pushed": false,
       "subrequirements": [
@@ -671,7 +674,13 @@
           "pushed": true
         },
         {
-          "name": "deduplication and split tools",
+          "name": "deduplication",
+          "status": "delivered",
+          "commit": "0ce569f6e8d2692b537965e0528b641123aa8f5d",
+          "pushed": true
+        },
+        {
+          "name": "deterministic grouped splitting",
           "status": "pending"
         },
         {
