@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G19.3: portable run and session bundles",
+  "current_item": "G19.4: portable session bundles",
   "items": [
     {
       "id": "F01",
@@ -705,7 +705,7 @@
       "id": "G19",
       "priority": "P2",
       "title": "Workspace maintenance and portability",
-      "detail": "**Partial.** `aibench workspace gc` previews orphaned artifacts by default and requires explicit `--apply` plus a minimum grace period before deletion. Verified online workspace backup and non-overwriting atomic restore now validate the archive, SQLite database, catalog and artifacts, and relocate artifact paths. Portable run/session bundles, workspace integrity/repair, retention/storage usage, and absolute-path migration remain outstanding.",
+      "detail": "**Partial.** `aibench workspace gc` previews orphaned artifacts by default and requires explicit `--apply` plus a minimum grace period before deletion. Verified online workspace backup and non-overwriting atomic restore now validate the archive, SQLite database, catalog and artifacts, and relocate artifact paths. Portable terminal-run bundles can now be exported and imported into another workspace with integrity checks and conflict-aware idempotence. Portable session bundles, workspace integrity/repair, retention/storage usage, and absolute-path migration remain outstanding.",
       "kind": "feature",
       "status": "partial",
       "verification": [
@@ -716,10 +716,12 @@
         "Mypy: 162 source files passed; Ruff src/tests and git diff --check passed",
         "Independent final review of backup/restore reported no actionable findings; see evidence/G19-backup-review.md",
         "Adjacent storage batch: 45 passed, 2 skipped, 1 failed, 1 deselected; the resume identity-drift failure passed when rerun alone after commit (1 passed), and the excluded process-lock test passed alone",
-        "Full repository pytest run stopped at 4% after several minutes and was not completed"
+        "Full repository pytest run stopped at 4% after several minutes and was not completed",
+        "Terminal-run bundle and CLI regression batch: 90 passed, 10 skipped",
+        "Ruff lint/format and Mypy passed for changed Python modules; final independent review reported no findings; see evidence/G19-run-bundles-review.md"
       ],
-      "review": "evidence/G19-backup-review.md",
-      "commit": "c55fa221",
+      "review": "evidence/G19-run-bundles-review.md",
+      "commit": "902a235d3f03b07ad86193ec5e9bd1a194e8d46f",
       "pushed": true,
       "subrequirements": [
         {
@@ -736,7 +738,14 @@
           "review": "evidence/G19-backup-review.md"
         },
         {
-          "name": "portable run and session bundles",
+          "name": "portable terminal-run bundles",
+          "status": "delivered",
+          "commit": "902a235d3f03b07ad86193ec5e9bd1a194e8d46f",
+          "pushed": true,
+          "review": "evidence/G19-run-bundles-review.md"
+        },
+        {
+          "name": "portable session bundles",
           "status": "pending"
         },
         {
