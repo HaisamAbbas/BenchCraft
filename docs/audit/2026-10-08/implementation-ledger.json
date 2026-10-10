@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G16",
+  "current_item": "G17",
   "items": [
     {
       "id": "F01",
@@ -608,13 +608,18 @@
       "id": "G16",
       "priority": "P2",
       "title": "Streaming model performance",
-      "detail": "**Missing; performance extension.** Application benchmarking records JSON responses, not streaming token events. TTFT, inter-token latency, output tokens/sec, and streaming completion integrity are unavailable. Assistant reply streaming is already implemented and is a separate capability.",
+      "detail": "**Implemented.** Opt-in OpenAI-compatible SSE benchmarking records TTFT, receive-time inter-content-delta intervals, usage-based output tokens/sec, and completion integrity; measured and warmup reports/comparisons expose the summaries. See implementation/G16.md.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "Independent review: 31 streaming and transport tests passed, 4 skipped; no remaining actionable findings",
+        "Focused parser, runner, report, comparison, and TUI regressions: 18 passed",
+        "Ruff src/tests and the local streaming fixture passed; mypy passed for 154 source files; git diff --check passed",
+        "Full suite collection found 1,646 tests; the broad run was stopped at 4% after several minutes and is not reported as passing"
+      ],
+      "review": "evidence/G16-review.md",
+      "commit": "6b163b9f",
+      "pushed": true
     },
     {
       "id": "G17",
