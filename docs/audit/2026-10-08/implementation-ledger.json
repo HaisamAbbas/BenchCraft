@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G19.5: workspace integrity checks and repair",
+  "current_item": "G19.6: retention policy and storage usage",
   "items": [
     {
       "id": "F01",
@@ -705,7 +705,7 @@
       "id": "G19",
       "priority": "P2",
       "title": "Workspace maintenance and portability",
-      "detail": "**Partial.** `aibench workspace gc` previews orphaned artifacts by default and requires explicit `--apply` plus a minimum grace period before deletion. Verified online workspace backup and non-overwriting atomic restore validate the archive, SQLite database, catalog and artifacts, and relocate artifact paths. Portable terminal-run bundles and portable session bundles can be exported and imported across workspaces with integrity checks and conflict-aware idempotence. Workspace integrity/repair, retention/storage usage, and absolute-path migration remain outstanding.",
+      "detail": "**Partial.** `aibench workspace gc` previews orphaned artifacts by default and requires explicit `--apply` plus a minimum grace period before deletion. Verified online workspace backup and non-overwriting atomic restore validate the archive, SQLite database, catalog and artifacts, and relocate artifact paths. Portable terminal-run and session bundles can be exported and imported across workspaces with integrity checks and conflict-aware idempotence. `workspace check` validates database/schema, artifact, frozen-plan and dataset-suite integrity; `workspace repair BACKUP` previews a verified backup and, with `--apply`, retains the old workspace while publishing and checking the restore. Retention/storage usage and absolute-path migration remain outstanding.",
       "kind": "feature",
       "status": "partial",
       "verification": [
@@ -721,10 +721,13 @@
         "Ruff lint/format and Mypy passed for changed Python modules; final independent review reported no findings; see evidence/G19-run-bundles-review.md",
         "Portable session bundles: 19 focused tests passed and 3 POSIX-only race tests skipped on Windows; broad session/run/storage/chat batch: 111 passed, 3 skipped, and 1 unrelated recovery test deselected",
         "Ruff lint/format, Mypy, and git diff --check passed; independent review reported no findings; POSIX ancestor-chain runtime tests remain unexecuted locally; see evidence/G19-session-bundles-review.md",
-        "Post-delivery ZIP entry-count preflight regression: 1 focused test passed; independent hotfix review found no findings; correction commit aa47f821 pushed"
+        "Post-delivery ZIP entry-count preflight regression: 1 focused test passed; independent hotfix review found no findings; correction commit aa47f821 pushed",
+        "Workspace integrity/repair and artifact storage on Windows: 86 passed, 13 POSIX-only skips; artifact-storage file rerun: 31 passed, 3 skipped",
+        "Ruff lint/format, Mypy for changed storage and CLI modules, and git diff --check passed",
+        "Independent G19.5 review found and led to a fix for a concurrent-publication rollback race, then reported no further findings; see evidence/G19-integrity-check-review.md"
       ],
-      "review": "evidence/G19-session-bundles-review.md",
-      "commit": "a6bb8ac8229e51be864eac0cd2f7be306950ac6b",
+      "review": "evidence/G19-integrity-check-review.md",
+      "commit": "2bed73a4",
       "pushed": true,
       "subrequirements": [
         {
@@ -756,7 +759,10 @@
         },
         {
           "name": "workspace integrity checks and repair",
-          "status": "pending"
+          "status": "delivered",
+          "commit": "2bed73a4",
+          "pushed": true,
+          "review": "evidence/G19-integrity-check-review.md"
         },
         {
           "name": "retention policy and storage usage",
