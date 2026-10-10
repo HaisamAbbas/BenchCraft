@@ -21,7 +21,11 @@ from aibench.datasets.diff import (
 )
 from aibench.datasets.importers import DatasetFormat, DatasetImportError, import_dataset
 from aibench.datasets.ingest import ingest_dataset
-from aibench.datasets.transform import DatasetTransformError, deduplicate_dataset
+from aibench.datasets.transform import (
+    DatasetTransformError,
+    deduplicate_dataset,
+    split_dataset,
+)
 
 app = typer.Typer(help="Import, validate, and inspect benchmark datasets.")
 console = Console()
@@ -148,6 +152,62 @@ def deduplicate(
         if result["temporary_cleanup_warning"]:
             console.print(
                 "  warning: output was published but its temporary link could not be removed",
+                markup=False,
+            )
+
+
+@app.command("split")
+def split(
+    source: Path = typer.Argument(..., help="Input JSONL dataset."),  # noqa: B008
+    output_dir: Path = typer.Argument(..., help="New output directory for train/validation/test."),  # noqa: B008
+    train: str = typer.Option("0.8", "--train", help="Requested train fraction."),
+    validation: str = typer.Option("0.1", "--validation", help="Requested validation fraction."),
+    test: str = typer.Option("0.1", "--test", help="Requested test fraction."),
+    seed: str = typer.Option("0", "--seed", help="Integer seed for deterministic grouping."),
+    json_output: bool = typer.Option(False, "--json", help="Print a machine-readable summary."),
+) -> None:
+    """Create deterministic train, validation, and test JSONL datasets."""
+    try:
+        result = split_dataset(
+            source,
+            output_dir,
+            train=train,
+            validation=validation,
+            test=test,
+            seed=seed,
+        )
+    except (DatasetTransformError, ValidationError, OSError) as exc:
+        raise error_exit(
+            f"dataset split failed: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(
+            f"split {result['input_case_count']} case(s) across "
+            f"{result['group_count']} group(s) with seed {result['seed']}",
+            markup=False,
+        )
+        console.print(f"  output: {result['output']}", markup=False)
+        for name, detail in result["splits"].items():
+            console.print(
+                f"  {name}: {detail['case_count']} cases, {detail['group_count']} groups, "
+                f"{detail['content_hash']}",
+                markup=False,
+            )
+        for warning in result["warnings"]:
+            console.print(f"  warning: {warning}", markup=False)
+        if result["warnings_truncated"]:
+            console.print("  warning list truncated", markup=False)
+        if result["temporary_directory_cleanup_warning"]:
+            console.print(
+                f"  warning: staging directory could not be removed: "
+                f"{result['temporary_directory']}",
                 markup=False,
             )
 

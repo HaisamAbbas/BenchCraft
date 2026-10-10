@@ -11,6 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from aibench.cli.main import app
+from aibench.datasets.transform import _publish_directory_no_replace
 
 runner = CliRunner()
 FIXTURES = Path(__file__).resolve().parents[1] / "examples" / "datasets"
@@ -405,6 +406,297 @@ def test_dataset_deduplicate_reports_temp_cleanup_failure_after_publish(
     monkeypatch.setattr(Path, "unlink", original_unlink)
     for temporary in tmp_path.glob(".deduplicated.jsonl.*.tmp"):
         temporary.unlink(missing_ok=True)
+
+
+def test_dataset_split_is_deterministic_and_keeps_group_ids_together(tmp_path: Path) -> None:
+    source = tmp_path / "cases.jsonl"
+    first_dir = tmp_path / "first-split"
+    second_dir = tmp_path / "second-split"
+    _write_cases(
+        source,
+        [
+            {
+                "case_id": f"{group}-{case}",
+                "group_id": str(group),
+                "input": f"prompt {group}-{case}",
+            }
+            for group in range(8)
+            for case in range(2)
+        ],
+    )
+    arguments = [
+        "dataset",
+        "split",
+        str(source),
+        "{output}",
+        "--train",
+        "0.5",
+        "--validation",
+        "0.25",
+        "--test",
+        "0.25",
+        "--seed",
+        "73",
+        "--json",
+    ]
+
+    first = runner.invoke(app, [arg.format(output=first_dir) for arg in arguments])
+    second = runner.invoke(app, [arg.format(output=second_dir) for arg in arguments])
+
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    first_payload = json.loads(first.stdout)
+    second_payload = json.loads(second.stdout)
+    assert first_payload["input_case_count"] == 16
+    assert first_payload["group_count"] == 8
+    assert {name: detail["case_count"] for name, detail in first_payload["splits"].items()} == {
+        "train": 8,
+        "validation": 4,
+        "test": 4,
+    }
+    assert (first_dir / "manifest.json").is_file()
+    assert json.loads((first_dir / "manifest.json").read_text(encoding="utf-8"))["seed"] == 73
+    membership: dict[str, set[str]] = {}
+    for name in ("train", "validation", "test"):
+        first_file = first_dir / f"{name}.jsonl"
+        second_file = second_dir / f"{name}.jsonl"
+        assert first_file.read_bytes() == second_file.read_bytes()
+        for line in first_file.read_text(encoding="utf-8").splitlines():
+            case = json.loads(line)
+            membership.setdefault(case["group_id"], set()).add(name)
+    assert all(len(splits) == 1 for splits in membership.values())
+    assert second_payload["seed"] == first_payload["seed"]
+
+
+def test_dataset_split_creates_empty_zero_ratio_output_and_falls_back_to_case_ids(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "cases.jsonl"
+    output_dir = tmp_path / "splits"
+    _write_cases(
+        source,
+        [
+            {"case_id": "a", "input": "one"},
+            {"case_id": "b", "input": "two"},
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "dataset",
+            "split",
+            str(source),
+            str(output_dir),
+            "--train",
+            "0.5",
+            "--validation",
+            "0.5",
+            "--test",
+            "0",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["group_count"] == 2
+    assert (output_dir / "test.jsonl").read_bytes() == b""
+    assert payload["splits"]["test"]["case_count"] == 0
+
+
+def test_dataset_split_populates_every_nonzero_split_when_enough_groups_exist(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "cases.jsonl"
+    output_dir = tmp_path / "splits"
+    _write_cases(
+        source,
+        [{"case_id": f"case-{index}", "input": f"prompt {index}"} for index in range(3)],
+    )
+
+    result = runner.invoke(app, ["dataset", "split", str(source), str(output_dir), "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert all(
+        payload["splits"][name]["case_count"] > 0 for name in ("train", "validation", "test")
+    )
+
+
+def test_dataset_split_rejects_fewer_groups_than_nonzero_splits(tmp_path: Path) -> None:
+    source = tmp_path / "cases.jsonl"
+    output_dir = tmp_path / "splits"
+    _write_cases(source, [{"case_id": "a", "group_id": "one", "input": "prompt"}])
+
+    result = runner.invoke(app, ["dataset", "split", str(source), str(output_dir), "--json"])
+
+    assert result.exit_code == 2, result.output
+    assert (
+        "cannot populate 3 non-zero splits from 1 independent group"
+        in json.loads(result.stdout)["message"]
+    )
+    assert not output_dir.exists()
+
+
+def test_dataset_split_symlink_loop_uses_json_error_envelope(tmp_path: Path) -> None:
+    source = tmp_path / "loop.jsonl"
+    try:
+        source.symlink_to(source)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    result = runner.invoke(
+        app, ["dataset", "split", str(source), str(tmp_path / "splits"), "--json"]
+    )
+
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["exit_code"] == result.exit_code
+
+
+def test_dataset_split_rejects_bad_ratios_and_duplicate_ids_as_json(tmp_path: Path) -> None:
+    source = tmp_path / "cases.jsonl"
+    output_dir = tmp_path / "splits"
+    _write_cases(
+        source,
+        [
+            {"case_id": "same", "input": "one"},
+            {"case_id": "same", "input": "two"},
+        ],
+    )
+
+    bad_ratio = runner.invoke(
+        app,
+        [
+            "dataset",
+            "split",
+            str(source),
+            str(output_dir),
+            "--train",
+            "0.5",
+            "--validation",
+            "0.5",
+            "--test",
+            "0.5",
+            "--json",
+        ],
+    )
+    duplicate = runner.invoke(app, ["dataset", "split", str(source), str(output_dir), "--json"])
+
+    assert bad_ratio.exit_code == 2, bad_ratio.output
+    assert "must sum to 1" in json.loads(bad_ratio.stdout)["message"]
+    assert duplicate.exit_code == 2, duplicate.output
+    assert "split requires unique IDs" in json.loads(duplicate.stdout)["message"]
+    assert not output_dir.exists()
+
+
+def test_dataset_split_preserves_existing_directory_and_hides_failed_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "cases.jsonl"
+    output_dir = tmp_path / "splits"
+    _write_cases(
+        source,
+        [{"case_id": f"case-{index}", "input": f"prompt {index}"} for index in range(3)],
+    )
+    output_dir.mkdir()
+    sentinel = output_dir / "preserve.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+
+    existing = runner.invoke(app, ["dataset", "split", str(source), str(output_dir), "--json"])
+    assert existing.exit_code == 2, existing.output
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+    sentinel.unlink()
+    output_dir.rmdir()
+    real_publish = _publish_directory_no_replace
+
+    def fail_directory_publish(source_path: Path, target_path: Path) -> None:
+        if target_path == output_dir:
+            raise PermissionError("simulated publication failure")
+        real_publish(source_path, target_path)
+
+    monkeypatch.setattr(
+        "aibench.datasets.transform._publish_directory_no_replace", fail_directory_publish
+    )
+    failed = runner.invoke(app, ["dataset", "split", str(source), str(output_dir), "--json"])
+
+    assert failed.exit_code == 2, failed.output
+    assert "could not atomically publish" in json.loads(failed.stdout)["message"]
+    assert not output_dir.exists()
+
+
+def test_dataset_split_reports_staging_path_when_cleanup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "cases.jsonl"
+    output_dir = tmp_path / "splits"
+    _write_cases(
+        source,
+        [{"case_id": f"case-{index}", "input": f"prompt {index}"} for index in range(3)],
+    )
+    temporary_directories: list[object] = []
+    staging_paths: list[Path] = []
+    temporary_directory_type = __import__("tempfile").TemporaryDirectory
+    real_cleanup = temporary_directory_type.cleanup
+    real_publish = _publish_directory_no_replace
+
+    def fail_cleanup(instance: object) -> None:
+        temporary_directories.append(instance)
+        staging_paths.append(Path(instance.name))  # type: ignore[attr-defined]
+        raise PermissionError("simulated cleanup failure")
+
+    monkeypatch.setattr(
+        "aibench.datasets.transform.tempfile.TemporaryDirectory.cleanup", fail_cleanup
+    )
+
+    def fail_publish(source_path: Path, target_path: Path) -> None:
+        if target_path == output_dir:
+            raise PermissionError("simulated publication failure")
+        real_publish(source_path, target_path)
+
+    monkeypatch.setattr("aibench.datasets.transform._publish_directory_no_replace", fail_publish)
+    failed = runner.invoke(app, ["dataset", "split", str(source), str(output_dir), "--json"])
+    payload = json.loads(failed.stdout)
+
+    assert failed.exit_code == 2, failed.output
+    assert "simulated publication failure" in payload["message"]
+    assert "could not remove temporary split directory" in payload["message"]
+    assert str(staging_paths[0]) in payload["message"]
+    assert staging_paths[0].is_dir()
+    assert not output_dir.exists()
+
+    monkeypatch.undo()
+    for temporary_directory in temporary_directories:
+        real_cleanup(temporary_directory)
+
+
+def test_dataset_split_preserves_directory_created_during_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "cases.jsonl"
+    output_dir = tmp_path / "splits"
+    _write_cases(
+        source,
+        [{"case_id": f"case-{index}", "input": f"prompt {index}"} for index in range(3)],
+    )
+    real_publish = _publish_directory_no_replace
+
+    def create_racing_destination(stage_dir: Path, target_dir: Path) -> None:
+        target_dir.mkdir()
+        real_publish(stage_dir, target_dir)
+
+    monkeypatch.setattr(
+        "aibench.datasets.transform._publish_directory_no_replace", create_racing_destination
+    )
+    result = runner.invoke(app, ["dataset", "split", str(source), str(output_dir), "--json"])
+
+    assert result.exit_code == 2, result.output
+    assert "output directory already exists" in json.loads(result.stdout)["message"]
+    assert output_dir.is_dir()
+    assert list(output_dir.iterdir()) == []
 
 
 def test_missing_file_exits_two() -> None:
