@@ -32,6 +32,7 @@ import hashlib
 import json
 import shutil
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -509,7 +510,11 @@ class SessionController:
         task_key = f"{experiment_id}:holdout"
         current = self._live_experiments.get(task_key)
         if current is not None and not current.done():
-            return {"experiment_id": experiment_id, "status": "holdout_running", "already_running": True}
+            return {
+                "experiment_id": experiment_id,
+                "status": "holdout_running",
+                "already_running": True,
+            }
         from aibench.experiments.service import evaluate_protected_holdout
 
         task = asyncio.create_task(
@@ -548,7 +553,9 @@ class SessionController:
         enriches the same stored run; it does not restart the application.
         """
         runs = self.session_runs()
-        selected = run_id or (self.session.active_run_id if self.session.active_run_id in runs else None)
+        selected = run_id or (
+            self.session.active_run_id if self.session.active_run_id in runs else None
+        )
         if selected is None and runs:
             selected = runs[-1]
         if selected is None:
@@ -716,8 +723,7 @@ class SessionController:
                 Path(session.project_root),
                 default_seed=_stable_seed(session.session_id),
                 metric_bindings=tuple(
-                    item["metric"]
-                    for item in deep_unfreeze(current.draft).get("rationale", [])
+                    item["metric"] for item in deep_unfreeze(current.draft).get("rationale", [])
                 ),
             )
         except PatchRejected as exc:
@@ -820,9 +826,7 @@ class SessionController:
             return PatchResult("rejected", session.revision, problems=problems)
         # The plan file names the dataset by path, so its hash is the same after the file's
         # cases changed; the draft's case counts and estimate are not. Compare the dataset too.
-        unchanged_dataset = draft.document.dataset_hash == (current.draft or {}).get(
-            "dataset_hash"
-        )
+        unchanged_dataset = draft.document.dataset_hash == (current.draft or {}).get("dataset_hash")
         if only_if_different and draft.plan_hash == current.plan_hash and unchanged_dataset:
             return None
         decision = DecisionRecord(
@@ -1439,25 +1443,43 @@ class SessionController:
             "evaluated_now": len(report.results) - report.carried,
         }
 
-    def report(self, run_id: str | None = None, *, for_assistant: bool = False) -> dict[str, Any]:
+    def report(
+        self,
+        run_id: str | None = None,
+        *,
+        for_assistant: bool = False,
+        group_by: Sequence[str] = (),
+    ) -> dict[str, Any]:
         """The run's report document, from stored facts only (services.reports): nothing
         is rerun. The assistant gets case excerpts only when the policy shares content."""
         share = not for_assistant or self.policy().share_case_content_with_assistant
         return build_report(
-            self.storage, self.artifacts, self._run_id(run_id), include_content=share
+            self.storage,
+            self.artifacts,
+            self._run_id(run_id),
+            include_content=share,
+            group_by=group_by,
         )
 
     def report_facts(
-        self, run_id: str | None = None, *, for_assistant: bool = False
+        self,
+        run_id: str | None = None,
+        *,
+        for_assistant: bool = False,
+        group_by: Sequence[str] = (),
     ) -> dict[str, Any]:
         """The report's aggregates (`/report`, the assistant's `get_report`)."""
-        return report_facts(self.report(run_id, for_assistant=for_assistant))
+        return report_facts(self.report(run_id, for_assistant=for_assistant, group_by=group_by))
 
     def export_report(
-        self, run_id: str | None = None, formats: tuple[str, ...] = ("html", "json")
+        self,
+        run_id: str | None = None,
+        formats: tuple[str, ...] = ("html", "json"),
+        *,
+        group_by: Sequence[str] = (),
     ) -> dict[str, Any]:
         """Write the report files under `.aibench/reports/RUN_ID/` (sanitized content)."""
-        document = self.report(run_id)
+        document = self.report(run_id, group_by=group_by)
         run = document["run"]
         paths = export_report(
             document, list(formats), report_dir(self.workspace_root, run["run_id"])

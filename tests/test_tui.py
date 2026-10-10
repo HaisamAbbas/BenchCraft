@@ -20,6 +20,7 @@ from aibench.planning.planner import ModelReply
 from aibench.sessions.controller import SessionController
 from aibench.tui.app import ChatApp, SlashCompleter, key_bindings
 from aibench.tui.commands import COMMANDS, Commands
+from aibench.tui.render import report as render_report
 from aibench.tui.render import status_line
 from tests.chat_server_support import chat_server, text_stream, tool_stream
 from tests.session_support import (
@@ -107,11 +108,12 @@ def test_slash_commands_use_real_session_services_and_cover_the_contract(tmp_pat
 
         failures = await commands.run("/failures")
         budget = await commands.run("/budget")
-        report = await commands.run("/report")
+        report = await commands.run("/report --group-by group_id")
         sessions = await commands.run("/sessions")
         assert failures.kind == "failures" and failures.data["run_id"] == run_id
         assert budget.kind == "budget" and budget.data["run_id"] == run_id
         assert report.kind == "report" and report.data["run_id"] == run_id
+        assert report.data["segments"][0]["field"] == "group_id"
         assert sessions.kind == "sessions" and sessions.data["sessions"]
 
         # Explicit cancellation returns before the slow application call is done.
@@ -771,3 +773,66 @@ def test_human_comparison_shows_richer_application_performance() -> None:
     assert "streaming: TTFT p50/p95 20/30 ms" in shown
     assert "inter-token mean 8 ms" in shown
     assert "output 40 tokens/s median" in shown
+
+
+def test_human_report_shows_segment_counts_and_metric_outcomes() -> None:
+    output = io.StringIO()
+    render_report(
+        Console(file=output, force_terminal=False, width=160),
+        {
+            "run_id": "run-1",
+            "status": "completed",
+            "provisional": False,
+            "partial": False,
+            "basis": "stored facts only",
+            "gates": [],
+            "metrics": [],
+            "application": {
+                "completed": 1,
+                "planned": 1,
+                "recorded": 1,
+                "failed": 0,
+                "error_like_answers": {"count": 0, "case_ids": []},
+            },
+            "latency_ms": {"successful_requests": 1, "p50_ms": 12, "p95_ms": 12},
+            "cost": {},
+            "non_passing_cases": {"total": 0, "first": []},
+            "segments": [
+                {
+                    "field": "metadata.language",
+                    "category_count": 1,
+                    "selected_cases": 1,
+                    "groups": [
+                        {
+                            "label": "en",
+                            "case_count": 1,
+                            "application": {
+                                "planned_requests": 1,
+                                "completed_requests": 1,
+                                "failed_requests": 0,
+                            },
+                            "scoring_passes": [
+                                {
+                                    "kind": "engine",
+                                    "metrics": [
+                                        {
+                                            "metric": "native.exact_match@1.0.0",
+                                            "summary": {
+                                                "selected": 1,
+                                                "decisions": {"pass": 1},
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    shown = output.getvalue()
+    assert "segment metadata.language: 1 value(s) across 1 selected case(s)" in shown
+    assert "en: 1 case(s), application completed 1/1" in shown
+    assert "native.exact_match@1.0.0 pass 1/1" in shown

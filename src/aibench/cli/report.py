@@ -26,7 +26,9 @@ from aibench.reporting.ci import render_ci_report
 from aibench.reporting.render import render
 from aibench.services.case_export import build_case_export
 from aibench.services.reports import (
+    CI_FORMATS,
     REPORT_FORMATS,
+    ReportError,
     build_report,
     report_dir,
     write_text_atomic,
@@ -49,6 +51,11 @@ def report(
     ),
     no_content: bool = typer.Option(
         False, "--no-content", help="Withhold output, reason excerpts and per-case values."
+    ),
+    group_by: list[str] = typer.Option(  # noqa: B008
+        [],
+        "--group-by",
+        help="Summarize by group_id or metadata.<field.path>; repeat; supports html/markdown/json.",
     ),
     workspace: Path | None = typer.Option(  # noqa: B008
         None, "--workspace", help="Project root containing .aibench/ (default: cwd)."
@@ -78,7 +85,17 @@ def report(
     storage = Storage(Database.open_workspace(ws))
     artifacts = ArtifactStore(ws.artifacts_dir)
     try:
-        document = build_report(storage, artifacts, run_id, include_content=not no_content)
+        if group_by and fmt in CI_FORMATS:
+            raise ReportError(
+                "--group-by is supported with html, markdown and json reports, not junit or sarif"
+            )
+        document = build_report(
+            storage,
+            artifacts,
+            run_id,
+            include_content=not no_content,
+            group_by=group_by,
+        )
         case_document = None
         if fmt in ("junit", "sarif"):
             case_document = build_case_export(
@@ -91,7 +108,11 @@ def report(
             )
     except AibenchError as exc:
         raise error_exit(
-            str(exc), exit_code=EXIT_INVALID, json_output=json_output, console=console, err_console=err_console
+            str(exc),
+            exit_code=EXIT_INVALID,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
         ) from exc
     finally:
         storage.db.close()

@@ -8,6 +8,7 @@ except where a test proves that the application and evaluators are *not* needed.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import sys
@@ -18,7 +19,14 @@ import pytest
 from typer.testing import CliRunner
 
 from aibench.cli.main import app
-from aibench.core.models import Decision, EvaluationResult, ExecutionStatus, MetricValue
+from aibench.core.models import (
+    BenchmarkCase,
+    Decision,
+    EvaluationResult,
+    ExecutionStatus,
+    MetricValue,
+    WorkItem,
+)
 from aibench.engine.compile import compile_plan
 from aibench.engine.engine import RunController
 from aibench.reporting.render import (
@@ -29,9 +37,10 @@ from aibench.reporting.render import (
     render,
 )
 from aibench.security.policy import ExecutionPolicy
-from aibench.services.reports import build_report, percentile, report_facts
+from aibench.services.reports import ReportError, build_report, percentile, report_facts
 from aibench.services.runs import create_run, execute_run, run_budget
 from aibench.services.scoring import select_final_executions
+from aibench.services.segment_analysis import build_segment_analysis
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
@@ -282,6 +291,254 @@ def test_performance_render_explains_stream_latency_and_integrity() -> None:
     assert "inter-token gap mean 4 ms" in text
     assert "output 40 tokens/s median" in text
     assert "1 complete, 1 incomplete, 0 unknown" in text
+
+
+def test_report_groups_metrics_and_application_outcomes_by_metadata_and_group_id(
+    tmp_path: Path,
+) -> None:
+    project = Project(
+        tmp_path,
+        [
+            {
+                "case_id": "en-pass",
+                "input": "yes",
+                "expected_output": "yes",
+                "group_id": "north",
+                "metadata": {"language": "en", "model": {"family": "small"}},
+            },
+            {
+                "case_id": "en-fail",
+                "input": "no",
+                "expected_output": "yes",
+                "group_id": "north",
+                "metadata": {"language": "en", "model": {"family": "small"}},
+            },
+            {
+                "case_id": "fr-pass",
+                "input": "oui",
+                "expected_output": "oui",
+                "group_id": "south",
+                "metadata": {"language": "fr", "model": {"family": "large"}},
+            },
+            {
+                "case_id": "missing-language",
+                "input": "non",
+                "expected_output": "oui",
+                "group_id": "south",
+                "metadata": {"model": {"family": "large"}},
+            },
+        ],
+        repetitions=2,
+    )
+    run_id = project.run()
+
+    report = project.report(
+        run_id,
+        group_by=("metadata.language", "metadata.model.family", "group_id"),
+    )
+
+    fields = {item["field"]: item for item in report["segments"]["fields"]}
+    languages = fields["metadata.language"]
+    by_value = {item["value"]: item for item in languages["groups"]}
+    assert languages["selected_cases"] == 4
+    assert by_value["en"]["case_count"] == 2
+    assert by_value["en"]["application"]["planned_requests"] == 4
+    [english_metric] = by_value["en"]["scoring_passes"][0]["metrics"]
+    assert english_metric["summary"]["selected"] == 4
+    assert english_metric["summary"]["decisions"]["pass"] == 2
+    assert english_metric["summary"]["decisions"]["fail"] == 2
+    assert any(item["value_type"] == "missing" for item in languages["groups"])
+    assert "large" in {item["value"] for item in fields["metadata.model.family"]["groups"]}
+    assert {item["value"] for item in fields["group_id"]["groups"]} == {"north", "south"}
+
+    markdown = render(report, "markdown")
+    html = render(report, "html")
+    assert "## Segment analysis" in markdown
+    assert "Grouped by metadata.language" in markdown
+    assert "Grouped by metadata.model.family" in html
+    assert "en" in html and "fr" in html
+
+
+def test_report_segment_values_follow_no_content_policy_and_cli_group_by_option(
+    tmp_path: Path,
+) -> None:
+    project = Project(
+        tmp_path,
+        [
+            {
+                "case_id": "case-a",
+                "input": "yes",
+                "expected_output": "yes",
+                "metadata": {"customer": "Acme Private"},
+            },
+            {
+                "case_id": "case-b",
+                "input": "no",
+                "expected_output": "yes",
+                "metadata": {"customer": "Other Private"},
+            },
+        ],
+    )
+    run_id = project.run()
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "report",
+            run_id,
+            "--workspace",
+            str(tmp_path),
+            "--format",
+            "json",
+            "--out",
+            "-",
+            "--group-by",
+            "metadata.customer",
+            "--group-by",
+            "group_id",
+            "--no-content",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.stdout)
+    serialized = json.dumps(report)
+    assert "Acme Private" not in serialized and "Other Private" not in serialized
+    fields = {field["field"]: field for field in report["segments"]["fields"]}
+    assert set(fields) == {"metadata.customer", "group_id"}
+    groups = fields["metadata.customer"]["groups"]
+    assert len(groups) == 2
+    assert all(group["value"] is None and group["value_redacted"] for group in groups)
+    known_identity = json.dumps(
+        {"state": "value", "value": "Acme Private"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    guessable_digest = hashlib.sha256(f"metadata.customer\0{known_identity}".encode()).hexdigest()[
+        :16
+    ]
+    assert guessable_digest not in serialized
+    next_report = project.report(
+        run_id, group_by=("metadata.customer", "group_id"), include_content=False
+    )
+    next_labels = [group["label"] for group in next_report["segments"]["fields"][0]["groups"]]
+    assert next_labels != [group["label"] for group in groups]
+    facts = report_facts(report)
+    assert len(facts["segments"][0]["groups"]) == 2
+
+
+def test_sanitized_segment_label_collisions_are_disambiguated(tmp_path: Path) -> None:
+    project = Project(
+        tmp_path,
+        [
+            {
+                "case_id": "plain",
+                "input": "one",
+                "expected_output": "one",
+                "metadata": {"region": "north"},
+            },
+            {
+                "case_id": "hidden-control",
+                "input": "two",
+                "expected_output": "two",
+                "metadata": {"region": "\u200bnorth"},
+            },
+            {
+                "case_id": "literal-marker",
+                "input": "three",
+                "expected_output": "three",
+                "metadata": {"region": "north [segment:001]"},
+            },
+        ],
+    )
+    run_id = project.run()
+    report = project.report(run_id, group_by=("metadata.region",))
+
+    groups = report["segments"]["fields"][0]["groups"]
+    labels = [group["label"] for group in groups]
+    assert len(labels) == 3
+    assert len(set(labels)) == 3
+    assert all(label.startswith("north") for label in labels)
+    assert [label.rsplit(" ", 1)[-1] for label in labels] == [
+        "[segment:001]",
+        "[segment:002]",
+        "[segment:003]",
+    ]
+    repeated = project.report(run_id, group_by=("metadata.region",))
+    assert [group["label"] for group in repeated["segments"]["fields"][0]["groups"]] == [
+        group["label"] for group in groups
+    ]
+    markdown = render(report, "markdown")
+    assert all(f"segment:{index:03d}" in markdown for index in range(1, 4))
+
+
+def test_segment_category_limit_coalesces_excess_values() -> None:
+    cases = [
+        BenchmarkCase(
+            case_id=f"case-{index:03d}",
+            input="input",
+            metadata={"bucket": f"bucket-{index:03d}"},
+        )
+        for index in range(101)
+    ]
+    work_items = [
+        WorkItem(
+            work_item_id=f"item-{index:03d}",
+            run_id="run-1",
+            task_key=f"exec:{case.case_id}:r0",
+            kind="execution",
+        )
+        for index, case in enumerate(cases)
+    ]
+
+    [field] = build_segment_analysis(
+        ("metadata.bucket",),
+        cases=cases,
+        work_items=work_items,
+        executions=(),
+        scoring_passes=(),
+        include_content=True,
+    )["fields"]
+
+    assert field["category_count"] == 101
+    assert field["omitted_categories"] == 2
+    assert field["omitted_cases"] == 2
+    assert len(field["groups"]) == 100
+    other = next(group for group in field["groups"] if group["value_type"] == "omitted")
+    assert other["case_count"] == 2
+    assert other["label"].startswith("other (2 omitted values)")
+
+
+def test_report_rejects_invalid_group_by_fields(tmp_path: Path) -> None:
+    project = Project(tmp_path, _rows(("case-a", "yes", "yes")))
+    run_id = project.run()
+
+    with pytest.raises(ReportError, match="--group-by"):
+        project.report(run_id, group_by=("input",))
+
+
+@pytest.mark.parametrize("fmt", ("junit", "sarif"))
+def test_cli_rejects_group_by_for_ci_exports(tmp_path: Path, fmt: str) -> None:
+    project = Project(tmp_path, _rows(("case-a", "yes", "yes")))
+    run_id = project.run()
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "report",
+            run_id,
+            "--workspace",
+            str(tmp_path),
+            "--format",
+            fmt,
+            "--group-by",
+            "group_id",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "not junit or sarif" in " ".join(result.output.split())
 
 
 def test_missing_accounting_is_never_totalled() -> None:

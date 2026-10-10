@@ -44,9 +44,12 @@ COMMANDS: dict[str, str] = {
     "/budget": "ceilings, committed spend and unknown accounting",
     "/app": "the application's runner: what it observes, missing evidence, resets, test worlds",
     "/world": "/world NAME|none - select one of the application's test worlds (a new draft)",
-    "/report": "/report [html|markdown|json] - the current run's report, from stored facts",
+    "/report": (
+        "/report [html|markdown|json] [--group-by FIELD ...] - the current run's report, "
+        "from stored facts"
+    ),
     "/compare": (
-        "/compare BASELINE CURRENT [--judge \"CRITERIA\"] - paired stored-run comparison; "
+        '/compare BASELINE CURRENT [--judge "CRITERIA"] - paired stored-run comparison; '
         "--judge also has a judge say which run's answers are better"
     ),
     "/integrations": "external integrations: modes, data destinations, availability",
@@ -500,17 +503,43 @@ class Commands:
     async def _report(self, argument: str) -> CommandResult:
         """Render the current run's report from stored facts: a terminal summary, and the
         report files (HTML and JSON by default; `/report markdown` etc. to choose)."""
-        formats = tuple(argument.split()) or ("html", "json")
-        unknown = [f for f in formats if f not in FORMATS]
-        if unknown:
+        words = [_unquote(word) for word in _split_words(argument)]
+        formats: list[str] = []
+        group_by: list[str] = []
+        index = 0
+        while index < len(words):
+            word = words[index]
+            if word == "--group-by":
+                index += 1
+                if index == len(words):
+                    return CommandResult(
+                        "/report",
+                        "error",
+                        {"error": "usage: /report [html|markdown|json] [--group-by FIELD ...]"},
+                        ok=False,
+                    )
+                group_by.append(words[index])
+            elif word in FORMATS:
+                formats.append(word)
+            else:
+                return CommandResult(
+                    "/report",
+                    "error",
+                    {"error": f"unknown report option {word!r}; use html, markdown or json"},
+                    ok=False,
+                )
+            index += 1
+        if not formats:
+            formats = ["html", "json"]
+        if len(set(formats)) != len(formats):
             return CommandResult(
                 "/report",
                 "error",
-                {"error": f"unknown format {' '.join(unknown)}; use html, markdown or json"},
+                {"error": "report formats may be specified only once"},
                 ok=False,
             )
-        exported = self.controller.export_report(formats=formats)
-        facts = self.controller.report_facts(exported["run_id"])
+        exported = self.controller.export_report(formats=tuple(formats), group_by=tuple(group_by))
+        facts = self.controller.report_facts(exported["run_id"], group_by=tuple(group_by))
         return CommandResult("/report", "report", {**facts, "exported": exported["paths"]})
 
     async def _compare(self, argument: str) -> CommandResult:
@@ -539,7 +568,10 @@ class Commands:
             )
         report = self.controller.compare_runs(words[0], words[1])
         if criteria is not None:
-            report = {**report, "arena": await self.controller.judge_runs(words[0], words[1], criteria)}
+            report = {
+                **report,
+                "arena": await self.controller.judge_runs(words[0], words[1], criteria),
+            }
         code = comparison_exit_code(report)
         return CommandResult(
             "/compare",

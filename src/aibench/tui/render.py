@@ -128,9 +128,7 @@ def draft(console: Console, summary: dict[str, Any]) -> None:
         if gate.get("min_pass_rate") is not None:
             thresholds.append(f"pass rate >= {gate['min_pass_rate'] * 100:g}%")
         if gate.get("min_completed_coverage") is not None:
-            thresholds.append(
-                f"completed coverage >= {gate['min_completed_coverage'] * 100:g}%"
-            )
+            thresholds.append(f"completed coverage >= {gate['min_completed_coverage'] * 100:g}%")
         metric = gate.get("metric", f"binding {gate['binding']}")
         out(
             console,
@@ -623,6 +621,33 @@ def report(console: Console, data: dict[str, Any]) -> None:
             else "not measured (no successful request)"
         ),
     )
+    for segment in data.get("segments", [])[:8]:
+        out(
+            console,
+            f"  segment {safe(segment['field'])}: {segment['category_count']} value(s) across "
+            f"{segment['selected_cases']} selected case(s)",
+        )
+        for group in segment.get("groups", [])[:5]:
+            app_summary = group.get("application") or {}
+            description = (
+                f"{safe(group['label'])}: {group['case_count']} case(s), application "
+                f"completed {_of(app_summary.get('completed_requests', 0), app_summary.get('planned_requests'))}, "
+                f"failed {app_summary.get('failed_requests', 0)}"
+            )
+            metric_summaries = []
+            for scoring in group.get("scoring_passes", []):
+                for metric in scoring.get("metrics", []):
+                    summary = metric["summary"]
+                    metric_summaries.append(
+                        f"{metric['metric']} pass "
+                        f"{_of(summary['decisions'].get('pass', 0), summary['selected'])}"
+                    )
+            if metric_summaries:
+                description += "; " + ", ".join(metric_summaries)
+            out(console, f"    {description}")
+        remaining = segment["category_count"] - min(5, len(segment.get("groups", [])))
+        if remaining > 0:
+            out(console, f"    ... and {remaining} more value(s) in the report")
     suspect = app.get("error_like_answers") or {"count": 0}
     if suspect["count"]:
         out(

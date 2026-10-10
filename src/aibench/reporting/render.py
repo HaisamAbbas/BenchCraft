@@ -183,6 +183,21 @@ def _value_summary(summary: dict[str, Any]) -> str:
     return "reported per case (not aggregated)"
 
 
+def _segment_metrics_text(scoring_passes: list[dict[str, Any]]) -> str:
+    summaries = []
+    for scoring in scoring_passes:
+        for metric in scoring["metrics"]:
+            summary = metric["summary"]
+            decisions = summary["decisions"]
+            summaries.append(
+                f"{scoring['kind']} {metric['metric']}: pass "
+                f"{fraction(decisions.get('pass', 0), summary['selected'])}; "
+                f"completed {fraction(summary['completed'], summary['selected'])}; "
+                f"{_value_summary(summary)}"
+            )
+    return "; ".join(summaries) if summaries else "no metric results"
+
+
 def _rule(rule: dict[str, Any] | None) -> str:
     if not rule:
         return "none (decisions indeterminate)"
@@ -395,6 +410,37 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         application.append(
             ("Warmup streaming performance", _streaming_text(latency["warmup_streaming"]))
         )
+    segments = []
+    for field_summary in (report.get("segments") or {}).get("fields", []):
+        rows = []
+        for group in field_summary["groups"]:
+            app_data = group["application"]
+            app_text = (
+                f"completed {fraction(app_data['completed_requests'], app_data['planned_requests'])}; "
+                f"failed {app_data['failed_requests']}; latency p50/p95 "
+                f"{_number(app_data['latency_ms']['p50_ms'])}/"
+                f"{_number(app_data['latency_ms']['p95_ms'])} ms"
+            )
+            rows.append(
+                [
+                    group["label"],
+                    str(group["case_count"]),
+                    app_text,
+                    _segment_metrics_text(group["scoring_passes"]),
+                ]
+            )
+        segments.append(
+            {
+                "field": field_summary["field"],
+                "max_groups": field_summary["max_groups"],
+                "rows": rows,
+                "selected_cases": field_summary["selected_cases"],
+                "category_count": field_summary["category_count"],
+                "omitted_categories": field_summary["omitted_categories"],
+                "omitted_cases": field_summary["omitted_cases"],
+                "basis": field_summary["basis"],
+            }
+        )
     cost = report["cost"]
     costs = [
         ("Application", _usd(cost["application"])),
@@ -448,6 +494,7 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         "gates": gates,
         "passes": passes,
         "application": application,
+        "segments": segments,
         "costs": costs,
         "cost_note": cost["note"],
         "evidence": evidence,
@@ -533,6 +580,21 @@ def _markdown(report: dict[str, Any]) -> str:
     lines += ["", "## Application", ""] + _md_table(
         ["Item", "Value"], [list(a) for a in r["application"]]
     )
+    if r["segments"]:
+        lines += ["", "## Segment analysis", ""]
+        for segment in r["segments"]:
+            lines += [f"### Grouped by {md(segment['field'])}", ""]
+            if segment["omitted_categories"]:
+                lines.append(
+                    f"Showing up to {segment['max_groups']} groups; omitted "
+                    f"{segment['omitted_categories']} categories covering "
+                    f"{segment['omitted_cases']} case(s)."
+                )
+                lines.append("")
+            lines += _md_table(
+                ["Segment", "Selected cases", "Application", "Metrics"], segment["rows"]
+            )
+            lines += ["", md(segment["basis"]), ""]
     lines += ["", "## Cost", ""] + _md_table(["Role", "Observed"], [list(c) for c in r["costs"]])
     lines += ["", md(r["cost_note"]), "", "## Case evidence", "", md(r["evidence_note"]), ""]
     if not r["evidence"]:
@@ -630,6 +692,22 @@ def _html(report: dict[str, Any]) -> str:
         parts.append("</ul>")
     parts.append("<h2>Application</h2>")
     parts.append(_html_table(["Item", "Value"], [list(a) for a in r["application"]]))
+    if r["segments"]:
+        parts.append("<h2>Segment analysis</h2>")
+        for segment in r["segments"]:
+            parts.append(f"<h3>Grouped by {h(segment['field'])}</h3>")
+            if segment["omitted_categories"]:
+                parts.append(
+                    f'<p class="muted">Showing up to {segment["max_groups"]} groups; omitted '
+                    f"{segment['omitted_categories']} categories covering "
+                    f"{segment['omitted_cases']} case(s).</p>"
+                )
+            parts.append(
+                _html_table(
+                    ["Segment", "Selected cases", "Application", "Metrics"], segment["rows"]
+                )
+            )
+            parts.append(f'<p class="muted">{h(segment["basis"])}</p>')
     parts.append("<h2>Cost</h2>")
     parts.append(_html_table(["Role", "Observed"], [list(c) for c in r["costs"]]))
     parts.append(f'<p class="muted">{h(r["cost_note"])}</p>')

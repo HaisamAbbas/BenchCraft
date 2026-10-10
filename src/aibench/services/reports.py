@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import os
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -64,6 +65,7 @@ from aibench.services.performance import (
 from aibench.services.phase_accounting import recovered_uncommitted_execution_items
 from aibench.services.runs import _FINISHED, RunError, _frozen_application, _frozen_plan
 from aibench.services.scoring import rescore_selected_count, select_final_executions
+from aibench.services.segment_analysis import build_segment_analysis, validate_group_by
 from aibench.services.suspect_answers import looks_like_error
 from aibench.services.traces import traces_summary
 from aibench.storage.artifacts import ArtifactStore
@@ -620,9 +622,18 @@ def _raw_artifacts(storage: Storage, results: list[EvaluationResult]) -> dict[st
 
 
 def build_report(
-    storage: Storage, artifacts: ArtifactStore, run_id: str, *, include_content: bool = True
+    storage: Storage,
+    artifacts: ArtifactStore,
+    run_id: str,
+    *,
+    include_content: bool = True,
+    group_by: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The report document for `run_id`, from stored facts only."""
+    try:
+        group_fields = validate_group_by(group_by)
+    except ValueError as exc:
+        raise ReportError(str(exc)) from exc
     record = storage.get_run(run_id)
     if record is None:
         raise RunError(f"no run committed with run_id={run_id!r}")
@@ -654,13 +665,9 @@ def build_report(
 
     planned_exec = sum(1 for w in items if w.kind == "execution") if items else None
     planned_measurements = (
-        sum(1 for w in items if w.kind == "execution" and not w.warmup)
-        if items
-        else planned_exec
+        sum(1 for w in items if w.kind == "execution" and not w.warmup) if items else planned_exec
     )
-    planned_warmups = (
-        sum(1 for w in items if w.kind == "execution" and w.warmup) if items else 0
-    )
+    planned_warmups = sum(1 for w in items if w.kind == "execution" and w.warmup) if items else 0
     application, finals = _application_section(
         storage,
         run_id,
@@ -706,6 +713,7 @@ def build_report(
     )
 
     passes = []
+    segment_passes: list[dict[str, Any]] = []
     labels: dict[str, str] = {}
     metrics_by_binding: dict[int, dict[str, Any] | None] = {}
     derived = False
@@ -725,6 +733,7 @@ def build_report(
                 if not bound:
                     continue
                 profile = _derived_profile(bound)
+                profiles[binding_hash] = profile
                 derived = True
             if is_engine and items:
                 section = _metric_section(
@@ -783,6 +792,14 @@ def build_report(
                 "outcome": pass_accounting.get(scoring_id, {}).get("outcome"),
                 "exit_code": pass_accounting.get(scoring_id, {}).get("exit_code"),
                 "gates": pass_accounting.get(scoring_id, {}).get("gates"),
+            }
+        )
+        segment_passes.append(
+            {
+                "scoring_id": scoring_id,
+                "kind": "engine" if is_engine else "rescore",
+                "profiles": profiles,
+                "results": by_binding,
             }
         )
     if derived:
@@ -867,6 +884,15 @@ def build_report(
         },
         "notes": notes,
     }
+    if group_fields:
+        report["segments"] = build_segment_analysis(
+            group_fields,
+            cases=storage.list_cases(manifest.dataset_hash),
+            work_items=items,
+            executions=finals,
+            scoring_passes=segment_passes,
+            include_content=include_content,
+        )
     report["outcome"] = outcome_summary(report)
     return report
 
@@ -959,7 +985,7 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
             )
     app = report["application"]
     items = report["evidence"]["items"]
-    return {
+    facts = {
         "run_id": run["run_id"],
         "status": run["status"],
         "provisional": run["provisional"],
@@ -1035,3 +1061,43 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
         "outcome": report["outcome"],
         "notes": report["notes"],
     }
+    if report.get("segments"):
+        facts["segments"] = [
+            {
+                "field": field["field"],
+                "selected_cases": field["selected_cases"],
+                "category_count": field["category_count"],
+                "omitted_categories": field["omitted_categories"],
+                "groups": [
+                    {
+                        "label": group["label"],
+                        "case_count": group["case_count"],
+                        "application": {
+                            "planned_requests": group["application"]["planned_requests"],
+                            "completed_requests": group["application"]["completed_requests"],
+                            "failed_requests": group["application"]["failed_requests"],
+                            "latency_p50_ms": group["application"]["latency_ms"]["p50_ms"],
+                        },
+                        "scoring_passes": [
+                            {
+                                "kind": scoring["kind"],
+                                "metrics": [
+                                    {
+                                        "metric": metric["metric"],
+                                        "selected": metric["summary"]["selected"],
+                                        "completed": metric["summary"]["completed"],
+                                        "decisions": metric["summary"]["decisions"],
+                                        "value_summary": metric["summary"]["value_summary"],
+                                    }
+                                    for metric in scoring["metrics"]
+                                ],
+                            }
+                            for scoring in group["scoring_passes"]
+                        ],
+                    }
+                    for group in field["groups"][:10]
+                ],
+            }
+            for field in report["segments"]["fields"]
+        ]
+    return facts
