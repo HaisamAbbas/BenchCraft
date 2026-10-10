@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 
 import typer
 from rich.markup import escape
 
 from aibench.cli.errors import error_exit
+from aibench.cli.event_stream import (
+    EventLogLock,
+    event_document,
+    last_logged_sequence,
+    latest_stored_sequence,
+)
 from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.services.run_catalog import (
@@ -17,6 +25,7 @@ from aibench.services.run_catalog import (
     normalize_tag,
     promote_approved_baseline,
 )
+from aibench.services.runs import RESUMABLE_STATES, lease_state
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import BaselinePromotion, RunBaseline, RunRecord, Storage
@@ -26,6 +35,7 @@ baseline_app = typer.Typer(help="Inspect and promote approved named baselines.")
 app.add_typer(baseline_app, name="baseline")
 console = Console()
 err_console = Console(stderr=True)
+MAX_SQLITE_INTEGER = (1 << 63) - 1
 
 
 def _open_storage(workspace: Path | None) -> Storage:
@@ -261,6 +271,143 @@ def show_run(
     console.print(f"  baselines: {escape(', '.join(metadata['baselines']) or '(none)')}")
     if metadata["note"]:
         console.print(f"  note: {escape(metadata['note'])}")
+
+
+@app.command("events")
+def run_events(
+    run_id: str = typer.Argument(..., help="Run whose durable event stream to read."),
+    workspace: Path | None = typer.Option(  # noqa: B008
+        None, "--workspace", help="Project root containing .aibench/ (default: cwd)."
+    ),
+    after: int = typer.Option(
+        0,
+        "--after",
+        min=0,
+        max=MAX_SQLITE_INTEGER,
+        help="Only emit events after this sequence.",
+    ),
+    follow: bool = typer.Option(
+        False, "--follow", help="Continue polling while a worker owns the run."
+    ),
+    jsonl: bool = typer.Option(False, "--jsonl", help="Emit one versioned JSON record per line."),
+    log_file: Path | None = typer.Option(  # noqa: B008
+        None, "--log-file", help="Append this run's JSONL events to a file."
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", help="Suppress human event lines; JSONL output remains enabled."
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Include each event payload in human-readable output."
+    ),
+) -> None:
+    """Read or follow the durable event history for a run."""
+    if quiet and verbose:
+        raise error_exit(
+            "--quiet cannot be combined with --verbose",
+            exit_code=2,
+            json_output=False,
+            console=console,
+            err_console=err_console,
+        )
+    ws = Workspace.at(workspace or Path.cwd())
+    storage = _open_storage(workspace)
+    if storage.get_run(run_id) is None:
+        storage.db.close()
+        raise error_exit(
+            f"no run committed with run_id={run_id!r}",
+            exit_code=2,
+            json_output=False,
+            console=console,
+            err_console=err_console,
+        )
+    sink = None
+    sink_lock: EventLogLock | None = None
+    if log_file is not None:
+        target = log_file.expanduser().resolve()
+        if target == ws.db_path.resolve():
+            storage.db.close()
+            raise error_exit(
+                "--log-file cannot target the workspace database",
+                exit_code=2,
+                json_output=False,
+                console=console,
+                err_console=err_console,
+            )
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            sink_lock = EventLogLock(target)
+            sink_lock.acquire()
+            sink_cursor = last_logged_sequence(target, run_id)
+            if sink_cursor > latest_stored_sequence(ws, run_id):
+                raise ValueError("event log sequence is newer than the workspace run history")
+            sink = target.open("a", encoding="utf-8", newline="\n")
+        except (OSError, ValueError) as exc:
+            if sink_lock is not None:
+                sink_lock.release()
+            storage.db.close()
+            raise error_exit(
+                f"could not open event log {target}: {exc}",
+                exit_code=2,
+                json_output=False,
+                console=console,
+                err_console=err_console,
+            ) from exc
+    try:
+        cursor = after
+        idle_resumable_polls = 0
+        while True:
+            events = storage.list_run_events(run_id, after=cursor)
+            for event in events:
+                cursor = int(event["sequence"])
+                document = event_document(run_id, event)
+                line = json.dumps(document, ensure_ascii=False, sort_keys=True)
+                if sink is not None and cursor > sink_cursor:
+                    sink.write(line + "\n")
+                    sink.flush()
+                    sink_cursor = cursor
+                if jsonl:
+                    typer.echo(line)
+                elif not quiet:
+                    description = f"{cursor:06d} {event['event_type']}"
+                    if verbose:
+                        description += " " + json.dumps(
+                            event["payload"], ensure_ascii=False, sort_keys=True
+                        )
+                    console.print(description)
+            if not follow:
+                break
+            record = storage.get_run(run_id)
+            if record is None:
+                break
+            if lease_state(storage, run_id) == "live":
+                idle_resumable_polls = 0
+            elif record.status not in RESUMABLE_STATES:
+                break
+            else:
+                # A detached worker claims its lease just after the launcher returns.
+                idle_resumable_polls += 1
+                if idle_resumable_polls >= 20:
+                    break
+            time.sleep(0.1)
+    except KeyboardInterrupt as exc:
+        raise typer.Exit(code=130) from exc
+    except OSError as exc:
+        raise error_exit(
+            f"could not write event log: {exc}",
+            exit_code=2,
+            json_output=False,
+            console=console,
+            err_console=err_console,
+        ) from exc
+    finally:
+        storage.db.close()
+        if sink is not None:
+            try:
+                sink.close()
+            except OSError:
+                pass
+        if sink_lock is not None:
+            sink_lock.release()
 
 
 @app.command("tag")

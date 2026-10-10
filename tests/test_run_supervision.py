@@ -52,6 +52,7 @@ def test_detached_run_can_be_paused_resumed_and_cancelled(tmp_path: Path) -> Non
         application=harness.cli_app(),
     )
     project = harness.workspace.root.parent
+    event_log = tmp_path / "detached-run-events.jsonl"
     launched = runner.invoke(
         app,
         [
@@ -66,6 +67,8 @@ def test_detached_run_can_be_paused_resumed_and_cancelled(tmp_path: Path) -> Non
             "--evaluation-concurrency",
             "1",
             "--detach",
+            "--log-file",
+            str(event_log),
             "--json",
         ],
     )
@@ -95,6 +98,22 @@ def test_detached_run_can_be_paused_resumed_and_cancelled(tmp_path: Path) -> Non
         assert cancelled["supervision"]["control"]["sequence"] == 3
         assert cancelled["supervision"]["worker_lease"] is None
         assert harness.count() < 8
+        deadline = time.monotonic() + 10
+        logged_events: list[dict[str, object]] = []
+        while time.monotonic() < deadline:
+            if event_log.exists():
+                logged_events = [
+                    json.loads(line) for line in event_log.read_text(encoding="utf-8").splitlines()
+                ]
+                if any(event["event_type"] == "run_session_ended" for event in logged_events):
+                    break
+            time.sleep(0.05)
+        assert logged_events
+        assert [event["sequence"] for event in logged_events] == sorted(
+            event["sequence"] for event in logged_events
+        )
+        assert all(event["run_id"] == run_id for event in logged_events)
+        assert any(event["event_type"] == "run_session_ended" for event in logged_events)
         rejected_resume = runner.invoke(
             app, ["runs", "control", run_id, "resume", "--workspace", str(project), "--json"]
         )

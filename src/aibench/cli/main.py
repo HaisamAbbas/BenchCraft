@@ -96,6 +96,12 @@ _GLOBAL_NON_INTERACTIVE = typer.Option(
 _GLOBAL_POLICY = typer.Option(
     None, "--policy", help="Default execution policy (a command-local --policy overrides it)."
 )
+_GLOBAL_QUIET = typer.Option(
+    False, "--quiet", help="Suppress human-readable run progress; errors and JSON remain visible."
+)
+_GLOBAL_VERBOSE = typer.Option(
+    False, "--verbose", help="Write durable run events to stderr while a run executes."
+)
 
 
 @app.command("setup")
@@ -129,6 +135,8 @@ def main(
     json_output: bool = _GLOBAL_JSON,
     non_interactive: bool = _GLOBAL_NON_INTERACTIVE,
     policy: Path | None = _GLOBAL_POLICY,
+    quiet: bool = _GLOBAL_QUIET,
+    verbose: bool = _GLOBAL_VERBOSE,
     continue_latest: bool = typer.Option(
         False, "--continue", "-c", help="Continue the latest session with work in it."
     ),
@@ -142,6 +150,8 @@ def main(
         json_output=json_output,
         non_interactive=non_interactive,
         policy=policy,
+        quiet=quiet,
+        verbose=verbose,
     )
     ctx.obj = options
     ctx.default_map = merge_default_maps(

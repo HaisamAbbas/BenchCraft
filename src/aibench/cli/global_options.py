@@ -19,6 +19,8 @@ class GlobalOptions:
     json_output: bool = False
     non_interactive: bool = False
     policy: Path | None = None
+    quiet: bool = False
+    verbose: bool = False
 
 
 def current_global_options() -> GlobalOptions:
@@ -48,8 +50,11 @@ def command_defaults(command: Any, options: GlobalOptions) -> dict[str, Any]:
     defaults: dict[str, Any] = {}
     for parameter in getattr(command, "params", ()):
         name = getattr(parameter, "name", None)
-        if (name == "json_output" and options.json_output) or (
-            name == "non_interactive" and options.non_interactive
+        if (
+            (name == "json_output" and options.json_output)
+            or (name == "non_interactive" and options.non_interactive)
+            or (name == "quiet" and options.quiet)
+            or (name == "verbose" and options.verbose)
         ):
             defaults[name] = True
         elif name in {"policy", "policy_path"} and options.policy is not None:

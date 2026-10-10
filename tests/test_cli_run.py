@@ -226,6 +226,71 @@ def test_example_plan_runs_under_the_dev_policy_and_is_denied_by_default(tmp_pat
     assert again.exit_code == 2 and "only interrupted or unfinished runs resume" in again.output
 
 
+def test_run_quiet_preserves_json_and_writes_durable_event_log(tmp_path: Path) -> None:
+    harness = Harness(tmp_path)
+    plan = harness.plan(
+        dataset=harness.dataset({"case-a": "hi"}),
+        application=harness.cli_app(),
+    )
+    event_log = tmp_path / "run-events.jsonl"
+    result = cli.invoke(
+        app,
+        [
+            "--quiet",
+            "run",
+            "--plan",
+            str(plan),
+            "--workspace",
+            str(harness.workspace.root.parent),
+            "--trust-local-app",
+            "--log-file",
+            str(event_log),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    document = _json(result.stdout)
+    assert document["state"] == "completed"
+    records = [json.loads(line) for line in event_log.read_text(encoding="utf-8").splitlines()]
+    assert records
+    assert all(record["schema"] == "aibench.run-event/1" for record in records)
+    assert all(record["run_id"] == document["run_id"] for record in records)
+    assert [record["sequence"] for record in records] == sorted(
+        record["sequence"] for record in records
+    )
+    assert "run completed" not in result.stdout
+
+
+def test_run_rejects_non_event_log_before_creating_run(tmp_path: Path) -> None:
+    harness = Harness(tmp_path)
+    plan = harness.plan(
+        dataset=harness.dataset({"case-a": "hi"}),
+        application=harness.cli_app(),
+    )
+    event_log = tmp_path / "existing.log"
+    event_log.write_text("preserve this file\n", encoding="utf-8")
+
+    result = cli.invoke(
+        app,
+        [
+            "run",
+            "--plan",
+            str(plan),
+            "--workspace",
+            str(harness.workspace.root.parent),
+            "--trust-local-app",
+            "--log-file",
+            str(event_log),
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert event_log.read_text(encoding="utf-8") == "preserve this file\n"
+    assert harness.count() == 0
+    assert not harness.workspace.db_path.exists()
+
+
 def test_run_exit_code_3_for_failures_and_status_lists_them(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     plan = h.plan(

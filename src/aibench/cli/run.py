@@ -31,6 +31,12 @@ import typer
 from rich.markup import escape
 
 from aibench.cli.errors import error_exit
+from aibench.cli.event_stream import (
+    EventLogLock,
+    RunEventStream,
+    last_logged_sequence,
+    latest_stored_sequence,
+)
 from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.core.hashes import content_hash
@@ -114,6 +120,56 @@ def _open(
     return Storage(Database.open_workspace(ws)), ArtifactStore(ws.artifacts_dir)
 
 
+def _start_event_stream(
+    workspace: Path | None,
+    run_id: str,
+    *,
+    log_file: Path | None,
+    verbose: bool,
+    log_lock: EventLogLock | None = None,
+    wait_for_log_lock: bool = False,
+) -> RunEventStream:
+    try:
+        stream = RunEventStream(
+            workspace or Path.cwd(),
+            run_id,
+            log_file=log_file,
+            verbose=verbose,
+            log_lock=log_lock,
+            wait_for_log_lock=wait_for_log_lock,
+        )
+        stream.start()
+        return stream
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _fail(f"could not start run event logging: {exc}", EXIT_INVALID) from exc
+
+
+def _preflight_event_log(
+    workspace: Path | None, log_file: Path | None, *, run_id: str | None = None
+) -> EventLogLock | None:
+    """Validate and test the selected destination before a run/control change is committed."""
+    if log_file is None:
+        return None
+    target = log_file.expanduser().resolve()
+    ws = Workspace.at(workspace or Path.cwd())
+    if target == ws.db_path.resolve():
+        raise _fail("--log-file cannot target the workspace database", EXIT_INVALID)
+    log_lock = EventLogLock(target)
+    try:
+        log_lock.acquire()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Empty run_id validates format before a new run ID has been created.
+        cursor = last_logged_sequence(target, run_id or "")
+        if run_id is not None and cursor > latest_stored_sequence(ws, run_id):
+            raise ValueError("event log sequence is newer than the workspace run history")
+        with target.open("a", encoding="utf-8"):
+            pass
+    except (OSError, ValueError) as exc:
+        log_lock.release()
+        raise _fail(f"could not open event log {target}: {exc}", EXIT_INVALID) from exc
+    return log_lock
+
+
 def _report_problems(exc: AibenchError, *, json_output: bool = False) -> typer.Exit:
     if isinstance(exc, PolicyDenied):
         if not json_output:
@@ -167,6 +223,7 @@ def _finish(
     json_output: bool,
     *,
     retry_scope: dict[str, object] | None = None,
+    quiet: bool = False,
 ) -> int:
     """Print the outcome with its gate verdicts (from the stored report) and return the
     §13 exit code."""
@@ -187,6 +244,8 @@ def _finish(
                 **({"retry_scope": retry_scope} if retry_scope is not None else {}),
             }
         )
+        return code
+    if quiet:
         return code
     _print_outcome(run_id, outcome)
     if run_seed is not None:
@@ -274,7 +333,15 @@ def _run_preview(compiled: CompiledRun, *, run_seed: int | None) -> dict[str, ob
     }
 
 
-def _launch_detached(run_id: str, project_root: Path, storage: Storage) -> dict[str, object]:
+def _launch_detached(
+    run_id: str,
+    project_root: Path,
+    storage: Storage,
+    *,
+    log_file: Path | None = None,
+    verbose: bool = False,
+    quiet: bool = False,
+) -> dict[str, object]:
     """Start a separately supervised CLI worker and retain its output in the workspace."""
     record = storage.get_run(run_id)
     if record is None:
@@ -287,6 +354,20 @@ def _launch_detached(run_id: str, project_root: Path, storage: Storage) -> dict[
     workspace = Workspace.at(project_root)
     log_path = workspace.root / "logs" / f"run-{digest}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    event_log: Path | None = None
+    if log_file is not None:
+        event_log = log_file.expanduser().resolve()
+        if event_log == workspace.db_path.resolve() or event_log == log_path.resolve():
+            raise RunError("--log-file must be separate from the workspace database and worker log")
+        try:
+            event_log.parent.mkdir(parents=True, exist_ok=True)
+            logged_sequence = last_logged_sequence(event_log, run_id)
+            if logged_sequence > latest_stored_sequence(workspace, run_id):
+                raise ValueError("event log sequence is newer than the workspace run history")
+            with event_log.open("a", encoding="utf-8"):
+                pass
+        except (OSError, ValueError) as exc:
+            raise RunError(f"could not open event log {event_log}: {exc}") from exc
     relative_log = log_path.relative_to(workspace.root.parent).as_posix()
     storage.append_run_event(
         run_id,
@@ -299,12 +380,22 @@ def _launch_detached(run_id: str, project_root: Path, storage: Storage) -> dict[
         "aibench.cli.main",
         "--non-interactive",
         "--json",
-        "resume",
-        run_id,
-        "--workspace",
-        str(project_root.resolve()),
-        "--worker",
     ]
+    if verbose:
+        command.append("--verbose")
+    if quiet:
+        command.append("--quiet")
+    command.extend(
+        [
+            "resume",
+            run_id,
+            "--workspace",
+            str(project_root.resolve()),
+            "--worker",
+        ]
+    )
+    if log_file is not None:
+        command.extend(["--log-file", str(event_log)])
     creationflags = 0
     start_new_session = os.name != "nt"
     if os.name == "nt":
@@ -314,12 +405,12 @@ def _launch_detached(run_id: str, project_root: Path, storage: Storage) -> dict[
             | subprocess.CREATE_NO_WINDOW
         )
     try:
-        with log_path.open("ab") as log_file:
+        with log_path.open("ab") as worker_log:
             worker = subprocess.Popen(
                 command,
                 cwd=project_root,
                 stdin=subprocess.DEVNULL,
-                stdout=log_file,
+                stdout=worker_log,
                 stderr=subprocess.STDOUT,
                 close_fds=True,
                 creationflags=creationflags,
@@ -337,6 +428,8 @@ def _launch_detached(run_id: str, project_root: Path, storage: Storage) -> dict[
         "host": socket.gethostname(),
         "log_path": relative_log,
     }
+    if event_log is not None:
+        payload["event_log_path"] = str(event_log)
     storage.append_run_event(run_id, "detached_worker_started", payload)
     return {"run_id": run_id, "worker": {"state": "started", **payload}}
 
@@ -525,10 +618,33 @@ def run_plan(
     detach: bool = typer.Option(
         False, "--detach", help="Run in a separate supervised process and write output to its log."
     ),
+    log_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--log-file",
+        help="Append this run's durable events as JSONL to a file.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        help="Suppress human-readable run progress; errors and JSON remain visible.",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Write each durable run event to stderr while it occurs."
+    ),
     workspace: Path | None = _WORKSPACE,
     json_output: bool = _JSON,
 ) -> None:
     """Execute a plan: validate, freeze, run, evaluate."""
+    if quiet and verbose:
+        raise _fail(
+            "--quiet cannot be combined with --verbose", EXIT_INVALID, json_output=json_output
+        )
+    if dry_run and log_file is not None:
+        raise _fail(
+            "--log-file requires a run; it cannot be used with --dry-run",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
     if plan is None:
         plan, policy = _resolve_plan(target, policy, json_output=json_output)
         if workspace is None and target is not None and target.is_dir():
@@ -578,7 +694,13 @@ def run_plan(
     if dry_run:
         _print_run_preview(_run_preview(compiled, run_seed=run_seed), json_output=json_output)
         return
-    storage, artifacts = _open(workspace, create=True, json_output=json_output)
+    event_log_lock = _preflight_event_log(workspace, log_file)
+    try:
+        storage, artifacts = _open(workspace, create=True, json_output=json_output)
+    except BaseException:
+        if event_log_lock is not None:
+            event_log_lock.release()
+        raise
     run_id: str | None = None
     try:
         granted = "cli:--trust-local-app" if trust_local_app else "policy"
@@ -589,33 +711,54 @@ def run_plan(
             granted_by=granted,
             run_seed=run_seed,
         )
-        if not json_output:
+        if not json_output and not quiet:
             console.print(
                 f"run [bold]{run_id}[/bold] created from plan {escape(compiled.plan.plan_id)}"
             )
         if detach:
             project_root = (workspace or Path.cwd()).resolve()
-            launch = _launch_detached(run_id, project_root, storage)
+            launch = _launch_detached(
+                run_id,
+                project_root,
+                storage,
+                log_file=log_file,
+                verbose=verbose,
+                quiet=quiet,
+            )
             code = 0
             if json_output:
                 console.print_json(data={**launch, "exit_code": code})
-            else:
+            elif not quiet:
                 worker = launch["worker"]
                 assert isinstance(worker, dict)
                 console.print(
                     f"detached worker started for run [bold]{run_id}[/bold] "
                     f"(pid {worker['pid']}); log: {worker['log_path']}"
                 )
+                if log_file is not None:
+                    console.print(f"  event log: {log_file.expanduser().resolve()}")
                 console.print(f"control it with: aibench runs control {run_id} pause|resume|cancel")
         else:
-            outcome = asyncio.run(_execute(run_id, storage, artifacts))
-            code = _finish(run_id, outcome, storage, artifacts, json_output)
+            stream = _start_event_stream(
+                workspace,
+                run_id,
+                log_file=log_file,
+                verbose=verbose,
+                log_lock=event_log_lock,
+            )
+            try:
+                outcome = asyncio.run(_execute(run_id, storage, artifacts))
+            finally:
+                stream.close()
+            code = _finish(run_id, outcome, storage, artifacts, json_output, quiet=quiet)
     except AibenchError as exc:
         raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(run_id, json_output=json_output) from exc
     finally:
         storage.db.close()
+        if event_log_lock is not None:
+            event_log_lock.release()
     raise typer.Exit(code=code)
 
 
@@ -629,15 +772,46 @@ def resume(
     worker_process: bool = typer.Option(
         False, "--worker", hidden=True, help="Internal detached worker entry point."
     ),
+    log_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--log-file",
+        help="Append this run's durable events as JSONL to a file.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        help="Suppress human-readable run progress; errors and JSON remain visible.",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Write each durable run event to stderr while it occurs."
+    ),
     workspace: Path | None = _WORKSPACE,
     json_output: bool = _JSON,
 ) -> None:
     """Continue eligible unfinished work under the run's frozen plan and identities."""
+    if quiet and verbose:
+        raise _fail(
+            "--quiet cannot be combined with --verbose", EXIT_INVALID, json_output=json_output
+        )
     storage, artifacts = _open(workspace, json_output=json_output)
+    event_log_lock: EventLogLock | None = None
     try:
         if worker_process:
-            outcome = asyncio.run(_execute(run_id, storage, artifacts))
-            code = _finish(run_id, outcome, storage, artifacts, json_output)
+            record = storage.get_run(run_id)
+            if record is None:
+                raise RunError(f"no run committed with run_id={run_id!r}")
+            stream = _start_event_stream(
+                workspace,
+                run_id,
+                log_file=log_file,
+                verbose=verbose,
+                wait_for_log_lock=True,
+            )
+            try:
+                outcome = asyncio.run(_execute(run_id, storage, artifacts))
+            finally:
+                stream.close()
+            code = _finish(run_id, outcome, storage, artifacts, json_output, quiet=quiet)
         else:
             record = storage.get_run(run_id)
             if record is None:
@@ -652,6 +826,13 @@ def resume(
             pending_cancel = record.status == "cancelling" or (
                 control is not None and control.desired_state == "cancelled"
             )
+            worker_is_live = lease_state(storage, run_id) == "live"
+            if worker_is_live and (log_file is not None or verbose):
+                raise RunError(
+                    "logging options cannot be changed on a live worker; use "
+                    f"aibench runs events {run_id} --follow instead"
+                )
+            event_log_lock = _preflight_event_log(workspace, log_file, run_id=run_id)
             if pending_cancel:
                 if control is None or control.desired_state != "cancelled":
                     control = request_run_control(
@@ -661,7 +842,7 @@ def resume(
                 control = request_run_control(
                     storage, run_id, "resume", requested_by="aibench resume"
                 )
-            if lease_state(storage, run_id) == "live":
+            if worker_is_live:
                 accepted: dict[str, object] = {
                     "run_id": run_id,
                     "action": "cancel" if pending_cancel else "resume",
@@ -673,11 +854,18 @@ def resume(
                 code = 0
                 if json_output:
                     console.print_json(data=accepted)
-                else:
+                elif not quiet:
                     action_text = "pending cancel" if pending_cancel else "resume request"
                     console.print(f"{action_text} accepted for live run [bold]{run_id}[/bold]")
             elif detach:
-                launch = _launch_detached(run_id, (workspace or Path.cwd()).resolve(), storage)
+                launch = _launch_detached(
+                    run_id,
+                    (workspace or Path.cwd()).resolve(),
+                    storage,
+                    log_file=log_file,
+                    verbose=verbose,
+                    quiet=quiet,
+                )
                 code = 0
                 if json_output:
                     console.print_json(
@@ -687,22 +875,36 @@ def resume(
                             "pending_cancel": pending_cancel,
                         }
                     )
-                else:
+                elif not quiet:
                     worker = launch["worker"]
                     assert isinstance(worker, dict)
                     console.print(
                         f"detached worker started for run [bold]{run_id}[/bold] "
                         f"(pid {worker['pid']}); log: {worker['log_path']}"
                     )
+                    if log_file is not None:
+                        console.print(f"  event log: {log_file.expanduser().resolve()}")
             else:
-                outcome = asyncio.run(_execute(run_id, storage, artifacts))
-                code = _finish(run_id, outcome, storage, artifacts, json_output)
+                stream = _start_event_stream(
+                    workspace,
+                    run_id,
+                    log_file=log_file,
+                    verbose=verbose,
+                    log_lock=event_log_lock,
+                )
+                try:
+                    outcome = asyncio.run(_execute(run_id, storage, artifacts))
+                finally:
+                    stream.close()
+                code = _finish(run_id, outcome, storage, artifacts, json_output, quiet=quiet)
     except AibenchError as exc:  # includes RunError, PolicyDenied and LeaseHeld
         raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(run_id, json_output=json_output) from exc
     finally:
         storage.db.close()
+        if event_log_lock is not None:
+            event_log_lock.release()
     raise typer.Exit(code=code)
 
 
@@ -774,10 +976,33 @@ def retry(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Validate and preview the child scope without creating a run."
     ),
+    log_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--log-file",
+        help="Append this run's durable events as JSONL to a file.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        help="Suppress human-readable run progress; errors and JSON remain visible.",
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Write each durable run event to stderr while it occurs."
+    ),
     workspace: Path | None = _WORKSPACE,
     json_output: bool = _JSON,
 ) -> None:
     """Create a bounded child run for safe application failures or explicit cases."""
+    if quiet and verbose:
+        raise _fail(
+            "--quiet cannot be combined with --verbose", EXIT_INVALID, json_output=json_output
+        )
+    if dry_run and log_file is not None:
+        raise _fail(
+            "--log-file requires a run; it cannot be used with --dry-run",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
     if max_cases > 1000:
         raise _fail("--max-cases must be between 1 and 1000", EXIT_INVALID, json_output=json_output)
     if case_ids is not None:
@@ -792,6 +1017,7 @@ def retry(
 
     storage, artifacts = _open(workspace, json_output=json_output)
     child_run_id: str | None = None
+    event_log_lock: EventLogLock | None = None
     try:
         parent = storage.get_run(parent_run_id)
         if parent is None:
@@ -863,7 +1089,7 @@ def retry(
         if dry_run:
             if json_output:
                 console.print_json(data=preview)
-            else:
+            elif not quiet:
                 console.print(
                     f"retry preview from {escape(parent_run_id)}: "
                     f"{len(compiled.cases)} case(s), {repetitions} repetition(s), "
@@ -885,6 +1111,7 @@ def retry(
                     )
             return
 
+        event_log_lock = _preflight_event_log(workspace, log_file)
         child_run_id = create_run(
             compiled,
             storage=storage,
@@ -893,7 +1120,7 @@ def retry(
             run_seed=run_seed,
             parent_run_id=parent_run_id,
         )
-        if not json_output:
+        if not json_output and not quiet:
             console.print(
                 f"child run [bold]{child_run_id}[/bold] created from parent "
                 f"[bold]{escape(parent_run_id)}[/bold] with {len(compiled.cases)} case(s)"
@@ -910,13 +1137,24 @@ def retry(
                     "external effects; retry can repeat them: "
                     f"{', '.join(escape(case_id) for case_id in explicitly_retried_unsafe)}[/yellow]"
                 )
-        outcome = asyncio.run(_execute(child_run_id, storage, artifacts))
+        stream = _start_event_stream(
+            workspace,
+            child_run_id,
+            log_file=log_file,
+            verbose=verbose,
+            log_lock=event_log_lock,
+        )
+        try:
+            outcome = asyncio.run(_execute(child_run_id, storage, artifacts))
+        finally:
+            stream.close()
         code = _finish(
             child_run_id,
             outcome,
             storage,
             artifacts,
             json_output,
+            quiet=quiet,
             retry_scope={
                 "selected_case_ids": [case.case_id for case in compiled.cases],
                 "repetitions": compiled.plan.repetitions,
@@ -931,6 +1169,8 @@ def retry(
         raise _interrupted_before_dispatch(child_run_id, json_output=json_output) from exc
     finally:
         storage.db.close()
+        if event_log_lock is not None:
+            event_log_lock.release()
     raise typer.Exit(code=code)
 
 

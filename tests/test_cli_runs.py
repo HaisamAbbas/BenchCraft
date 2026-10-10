@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+from aibench.cli import runs as runs_cli
+from aibench.cli.event_stream import EventLogLock, RunEventStream
 from aibench.cli.main import app
+from aibench.cli.run import _preflight_event_log
 from aibench.core.models import RunManifest
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
@@ -80,6 +86,184 @@ def test_runs_list_json_output(tmp_path) -> None:
     assert len(payload["data"]) == 1
     assert payload["data"][0]["run_id"] == "r1"
     assert payload["data"][0]["status"] == "created"
+
+
+def test_runs_events_jsonl_schema_and_after_cursor(tmp_path) -> None:
+    _seed_run(tmp_path)
+    db = Database.open_workspace(Workspace.at(tmp_path))
+    storage = Storage(db)
+    storage.append_run_event("r1", "run_started", {"attempt": 1})
+    storage.append_run_event("r1", "item_state", {"state": "running"})
+    db.close()
+
+    result = runner.invoke(
+        app, ["runs", "events", "r1", "--workspace", str(tmp_path), "--jsonl"]
+    )
+    assert result.exit_code == 0, result.output
+    records = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [item["sequence"] for item in records] == [1, 2]
+    assert records[0]["schema"] == "aibench.run-event/1"
+    assert records[0]["run_id"] == "r1"
+    assert records[0]["event_type"] == "run_started"
+    assert records[0]["payload"] == {"attempt": 1}
+    assert isinstance(records[0]["created_at"], str)
+
+    resumed = runner.invoke(
+        app,
+        ["runs", "events", "r1", "--workspace", str(tmp_path), "--after", "1", "--jsonl"],
+    )
+    assert resumed.exit_code == 0, resumed.output
+    assert [json.loads(line)["sequence"] for line in resumed.stdout.splitlines()] == [2]
+
+
+def test_runs_events_rejects_cursor_above_sqlite_integer_range(tmp_path) -> None:
+    _seed_run(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "runs",
+            "events",
+            "r1",
+            "--workspace",
+            str(tmp_path),
+            "--after",
+            "9223372036854775808",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "Traceback" not in result.output
+
+
+def test_runs_events_rejects_a_log_file_with_an_active_writer(tmp_path) -> None:
+    _seed_run(tmp_path)
+    db = Database.open_workspace(Workspace.at(tmp_path))
+    Storage(db).append_run_event("r1", "run_started", {})
+    db.close()
+    log_file = tmp_path / "events.jsonl"
+    writer = RunEventStream(tmp_path, "r1", log_file=log_file)
+    writer.start()
+    try:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not log_file.exists():
+            time.sleep(0.01)
+        result = runner.invoke(
+            app,
+            [
+                "runs",
+                "events",
+                "r1",
+                "--workspace",
+                str(tmp_path),
+                "--follow",
+                "--log-file",
+                str(log_file),
+            ],
+        )
+        assert result.exit_code == 2
+        assert "already in use by another writer" in result.output
+    finally:
+        writer.close()
+
+    records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+    assert [record["sequence"] for record in records] == [1]
+
+
+def test_run_log_preflight_holds_lock_until_stream_owns_it(tmp_path) -> None:
+    _seed_run(tmp_path)
+    log_file = tmp_path / "events.jsonl"
+    log_lock = _preflight_event_log(tmp_path, log_file)
+    assert log_lock is not None and log_lock.is_held
+
+    contender = EventLogLock(log_file.resolve())
+    with pytest.raises(ValueError, match="already in use"):
+        contender.acquire()
+
+    stream = RunEventStream(tmp_path, "r1", log_file=log_file, log_lock=log_lock)
+    assert log_lock.is_held
+    stream.close()
+    assert not log_lock.is_held
+
+
+def test_runs_events_log_file_contains_jsonl_even_in_quiet_mode(tmp_path) -> None:
+    _seed_run(tmp_path)
+    db = Database.open_workspace(Workspace.at(tmp_path))
+    storage = Storage(db)
+    storage.append_run_event("r1", "run_started", {"attempt": 1})
+    db.close()
+    log_file = tmp_path / "events.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "runs",
+            "events",
+            "r1",
+            "--workspace",
+            str(tmp_path),
+            "--log-file",
+            str(log_file),
+            "--quiet",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.stdout == ""
+    records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["event_type"] == "run_started"
+    assert records[0]["payload"] == {"attempt": 1}
+
+    db = Database.open_workspace(Workspace.at(tmp_path))
+    storage = Storage(db)
+    storage.append_run_event("r1", "item_state", {"state": "complete"})
+    db.close()
+    again = runner.invoke(
+        app,
+        [
+            "runs",
+            "events",
+            "r1",
+            "--workspace",
+            str(tmp_path),
+            "--log-file",
+            str(log_file),
+            "--quiet",
+        ],
+    )
+    assert again.exit_code == 0, again.output
+    records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+    assert [record["sequence"] for record in records] == [1, 2]
+
+
+def test_runs_events_follow_emits_events_appended_during_follow(tmp_path, monkeypatch) -> None:
+    _seed_run(tmp_path, status="running")
+    db = Database.open_workspace(Workspace.at(tmp_path))
+    storage = Storage(db)
+    storage.append_run_event("r1", "run_started", {})
+    db.close()
+    live = [True]
+    monkeypatch.setattr(runs_cli, "lease_state", lambda *_args: "live" if live[0] else None)
+
+    def append_completion() -> None:
+        time.sleep(0.2)
+        follow_db = Database.open_workspace(Workspace.at(tmp_path))
+        follow_storage = Storage(follow_db)
+        follow_storage.append_run_event("r1", "run_session_ended", {"state": "completed"})
+        follow_storage.update_run_status("r1", "completed")
+        follow_db.close()
+        live[0] = False
+
+    writer = threading.Thread(target=append_completion)
+    writer.start()
+    result = runner.invoke(
+        app, ["runs", "events", "r1", "--workspace", str(tmp_path), "--follow", "--jsonl"]
+    )
+    writer.join(timeout=5)
+    assert not writer.is_alive()
+    assert result.exit_code == 0, result.output
+    records = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [record["event_type"] for record in records] == [
+        "run_started",
+        "run_session_ended",
+    ]
 
 
 def test_runs_list_filters_by_status(tmp_path) -> None:
