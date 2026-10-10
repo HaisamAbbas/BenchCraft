@@ -54,6 +54,17 @@ class WorkItemSettlement:
 
 
 @dataclass(frozen=True)
+class DatasetSuiteRecord:
+    suite_name: str
+    suite_version: str
+    dataset_content_hash: str
+    dataset_path: str
+    case_count: int
+    description: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class CandidateTransition:
     candidate: DatasetCandidate
     from_status: CandidateStatus
@@ -249,9 +260,77 @@ class Storage:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
-    def commit_cases(
-        self, dataset_content_hash: str, cases: Iterable[BenchmarkCase]
-    ) -> int:
+    def register_dataset_suite(
+        self,
+        *,
+        suite_name: str,
+        suite_version: str,
+        dataset_content_hash: str,
+        dataset_path: str,
+        case_count: int,
+        description: str,
+    ) -> bool:
+        """Register one immutable dataset suite version, idempotently."""
+        identity = {
+            "suite_name": suite_name,
+            "suite_version": suite_version,
+            "dataset_content_hash": dataset_content_hash,
+            "dataset_path": dataset_path,
+            "case_count": case_count,
+            "description": description,
+        }
+        record_hash = _hash_of(json.dumps(identity, sort_keys=True, separators=(",", ":")))
+        return _commit_idempotent_composite(
+            self.conn,
+            table="dataset_suites",
+            pk_cols=("suite_name", "suite_version"),
+            pk_values=(suite_name, suite_version),
+            compare_col="record_hash",
+            compare_value=record_hash,
+            insert_sql="""
+                INSERT INTO dataset_suites
+                    (suite_name, suite_version, dataset_content_hash, dataset_path,
+                     case_count, description, record_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            params=(
+                suite_name,
+                suite_version,
+                dataset_content_hash,
+                dataset_path,
+                case_count,
+                description,
+                record_hash,
+                _now(),
+            ),
+        )
+
+    def get_dataset_suite(self, suite_name: str, suite_version: str) -> DatasetSuiteRecord | None:
+        row = self.conn.execute(
+            "SELECT suite_name, suite_version, dataset_content_hash, dataset_path, case_count, "
+            "description, created_at FROM dataset_suites WHERE suite_name = ? "
+            "AND suite_version = ?",
+            (suite_name, suite_version),
+        ).fetchone()
+        return DatasetSuiteRecord(**dict(row)) if row is not None else None
+
+    def list_dataset_suites(self, suite_name: str | None = None) -> list[DatasetSuiteRecord]:
+        if suite_name is None:
+            rows = self.conn.execute(
+                "SELECT suite_name, suite_version, dataset_content_hash, dataset_path, "
+                "case_count, description, created_at FROM dataset_suites "
+                "ORDER BY suite_name, suite_version"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT suite_name, suite_version, dataset_content_hash, dataset_path, "
+                "case_count, description, created_at FROM dataset_suites WHERE suite_name = ? "
+                "ORDER BY suite_version",
+                (suite_name,),
+            ).fetchall()
+        return [DatasetSuiteRecord(**dict(row)) for row in rows]
+
+    def commit_cases(self, dataset_content_hash: str, cases: Iterable[BenchmarkCase]) -> int:
         """Idempotent per (dataset_content_hash, case_id, source_line): re-committing the
         identical case is a no-op; a mismatched case at the same key raises `ConflictError`
         for that case (any earlier cases in this call are already committed and retained —
@@ -371,8 +450,13 @@ class Storage:
                 self.conn.execute(
                     "INSERT INTO candidate_events (event_id, candidate_id, kind, data, created_at) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (event.event_id, event.candidate_id, event.kind, event.model_dump_json(),
-                     event.created_at.isoformat()),
+                    (
+                        event.event_id,
+                        event.candidate_id,
+                        event.kind,
+                        event.model_dump_json(),
+                        event.created_at.isoformat(),
+                    ),
                 )
             self.conn.execute("COMMIT")
             return existing is None
@@ -450,15 +534,25 @@ class Storage:
                 self.conn.execute(
                     "UPDATE candidate_cases SET status = ?, content_hash = ?, data = ?, updated_at = ? "
                     "WHERE candidate_id = ? AND status = ?",
-                    (candidate.status.value, digest, data, _now(), candidate.candidate_id,
-                     transition.from_status.value),
+                    (
+                        candidate.status.value,
+                        digest,
+                        data,
+                        _now(),
+                        candidate.candidate_id,
+                        transition.from_status.value,
+                    ),
                 )
                 self.conn.execute(
                     "INSERT INTO candidate_events (event_id, candidate_id, kind, data, created_at) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (transition.event.event_id, transition.event.candidate_id,
-                     transition.event.kind, transition.event.model_dump_json(),
-                     transition.event.created_at.isoformat()),
+                    (
+                        transition.event.event_id,
+                        transition.event.candidate_id,
+                        transition.event.kind,
+                        transition.event.model_dump_json(),
+                        transition.event.created_at.isoformat(),
+                    ),
                 )
             self.conn.execute("COMMIT")
         except BaseException:
@@ -799,9 +893,7 @@ class Storage:
         )
 
     def get_plan(self, plan_id: str) -> EvaluationPlan | None:
-        row = self.conn.execute(
-            "SELECT data FROM plans WHERE plan_id = ?", (plan_id,)
-        ).fetchone()
+        row = self.conn.execute("SELECT data FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
         return EvaluationPlan.model_validate_json(row["data"]) if row else None
 
     # ---------------------------------------------------------------- runs
@@ -853,8 +945,7 @@ class Storage:
 
     def get_run(self, run_id: str) -> RunRecord | None:
         row = self.conn.execute(
-            "SELECT data, status, created_at, committed_at, updated_at FROM runs "
-            "WHERE run_id = ?",
+            "SELECT data, status, created_at, committed_at, updated_at FROM runs WHERE run_id = ?",
             (run_id,),
         ).fetchone()
         if row is None:
@@ -924,8 +1015,7 @@ class Storage:
             values.append(tag)
         if baseline is not None:
             conditions.append(
-                "EXISTS (SELECT 1 FROM run_baselines b "
-                "WHERE b.run_id = r.run_id AND b.alias = ?)"
+                "EXISTS (SELECT 1 FROM run_baselines b WHERE b.run_id = r.run_id AND b.alias = ?)"
             )
             values.append(baseline)
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -958,8 +1048,7 @@ class Storage:
             chunk = ids[start : start + 500]
             placeholders = ",".join("?" for _ in chunk)
             for row in self.conn.execute(
-                f"SELECT run_id, tag FROM run_tags WHERE run_id IN ({placeholders}) "
-                "ORDER BY tag",
+                f"SELECT run_id, tag FROM run_tags WHERE run_id IN ({placeholders}) ORDER BY tag",
                 chunk,
             ):
                 metadata[row["run_id"]]["tags"].append(row["tag"])
@@ -1378,9 +1467,7 @@ class Storage:
             raise ConflictError(f"no remote job {job_id!r}")
 
     def get_remote_job(self, job_id: str) -> dict[str, Any] | None:
-        row = self.conn.execute(
-            "SELECT * FROM remote_jobs WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM remote_jobs WHERE job_id = ?", (job_id,)).fetchone()
         return self._remote_job(row) if row else None
 
     def list_remote_jobs(self, run_id: str | None = None) -> list[dict[str, Any]]:
@@ -1533,7 +1620,9 @@ class Storage:
         ).fetchone()
         return ExecutionResult.model_validate_json(row["data"]) if row else None
 
-    def list_execution_attempts(self, run_id: str, case_id: str | None = None) -> list[ExecutionResult]:
+    def list_execution_attempts(
+        self, run_id: str, case_id: str | None = None
+    ) -> list[ExecutionResult]:
         if case_id is not None:
             rows = self.conn.execute(
                 "SELECT data FROM execution_attempts WHERE run_id = ? AND case_id = ?",

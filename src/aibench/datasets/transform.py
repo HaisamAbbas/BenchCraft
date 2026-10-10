@@ -10,7 +10,7 @@ import os
 import sqlite3
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any, Literal, NoReturn
@@ -106,11 +106,15 @@ def _canonical_case(case: BenchmarkCase, *, path: Path, line_number: int) -> str
 
 def _iter_canonical_cases(
     path: Path,
+    *,
+    on_source_line: Callable[[int, str], None] | None = None,
 ) -> Iterator[tuple[int, BenchmarkCase, str, tuple[str, ...]]]:
     if not path.is_file():
         raise DatasetTransformError(f"dataset file not found: {path}")
 
     for occurrence, (line_number, line) in enumerate(iter_jsonl_lines(path), start=1):
+        if on_source_line is not None:
+            on_source_line(line_number, line)
         try:
             raw = json.loads(line, parse_constant=_reject_constant)
         except (json.JSONDecodeError, ValueError) as exc:

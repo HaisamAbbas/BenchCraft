@@ -9,6 +9,7 @@ from typing import cast
 import typer
 
 from aibench.cli import candidates as candidates_cli
+from aibench.cli import dataset_suites as dataset_suites_cli
 from aibench.cli import episodes as episodes_cli
 from aibench.cli.errors import error_exit
 from aibench.cli.output import Console
@@ -32,6 +33,7 @@ console = Console()
 err_console = Console(stderr=True)
 app.add_typer(candidates_cli.app, name="candidates")
 app.add_typer(episodes_cli.app, name="episodes")
+app.add_typer(dataset_suites_cli.app, name="suites")
 
 
 @app.command("diff")

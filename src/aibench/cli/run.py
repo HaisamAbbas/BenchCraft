@@ -47,6 +47,7 @@ from aibench.core.models import (
     WorkItem,
     WorkItemState,
 )
+from aibench.datasets.suites import DatasetSuiteRecord, resolve_dataset_suite
 from aibench.engine.compile import (
     CompiledRun,
     PlanInvalid,
@@ -308,9 +309,7 @@ def _run_preview(compiled: CompiledRun, *, run_seed: int | None) -> dict[str, ob
             },
             "application": {
                 "application_id": compiled.application.spec.application_id,
-                "application_hash": content_hash(
-                    compiled.application.spec.model_dump(mode="json")
-                ),
+                "application_hash": content_hash(compiled.application.spec.model_dump(mode="json")),
                 "runner": compiled.application.spec.runner.value,
             },
             "policy_hash": compiled.policy_hash,
@@ -487,11 +486,15 @@ def _retry_failure_case_ids(
             # every failed case rather than risk repeating an unknown dispatch.
             effect_risk.update(failed)
         else:
-            if item.state is not WorkItemState.FAILED or (
-                case_id,
-                repetition,
-                item.attempt,
-            ) not in recorded_attempts:
+            if (
+                item.state is not WorkItemState.FAILED
+                or (
+                    case_id,
+                    repetition,
+                    item.attempt,
+                )
+                not in recorded_attempts
+            ):
                 effect_risk.add(case_id)
     unsafe_failed = failed & effect_risk
     return failed, failed - unsafe_failed, effect_risk
@@ -543,6 +546,11 @@ def run_plan(
     plan: Path | None = typer.Option(  # noqa: B008
         None, "--plan", help="Executable plan file (JSON/YAML); default: the project config's."
     ),
+    dataset_suite: str | None = typer.Option(
+        None,
+        "--dataset-suite",
+        help="Override the plan dataset with a registered immutable NAME@VERSION.",
+    ),
     policy: Path | None = _POLICY,
     trust_local_app: bool = typer.Option(
         False, "--trust-local-app", help="Grant trusted-local mode for a CLI application."
@@ -574,23 +582,38 @@ def run_plan(
         help="Override the plan's warmup application-call count per case (excluded from metrics).",
     ),
     application_concurrency: int | None = typer.Option(
-        None, "--application-concurrency", min=1, max=64,
+        None,
+        "--application-concurrency",
+        min=1,
+        max=64,
         help="Override concurrent application calls.",
     ),
     evaluation_concurrency: int | None = typer.Option(
-        None, "--evaluation-concurrency", min=1, max=64,
+        None,
+        "--evaluation-concurrency",
+        min=1,
+        max=64,
         help="Override concurrent evaluator calls.",
     ),
     max_attempts: int | None = typer.Option(
-        None, "--max-attempts", min=1, max=10,
+        None,
+        "--max-attempts",
+        min=1,
+        max=10,
         help="Override total attempts per work item, including the first.",
     ),
     evaluation_timeout_seconds: float | None = typer.Option(
-        None, "--evaluation-timeout-seconds", min=0.000001, max=3600,
+        None,
+        "--evaluation-timeout-seconds",
+        min=0.000001,
+        max=3600,
         help="Override the per-case non-model evaluator timeout.",
     ),
     model_evaluation_timeout_seconds: float | None = typer.Option(
-        None, "--model-evaluation-timeout-seconds", min=0.000001, max=3600,
+        None,
+        "--model-evaluation-timeout-seconds",
+        min=0.000001,
+        max=3600,
         help="Override the per-case model-backed evaluator timeout.",
     ),
     max_application_calls: int | None = typer.Option(
@@ -609,19 +632,25 @@ def run_plan(
         None, "--max-cost-usd", min=0, help="Override the soft estimated-cost budget."
     ),
     estimated_cost_per_application_call_usd: float | None = typer.Option(
-        None, "--estimated-cost-per-app-call-usd", min=0,
+        None,
+        "--estimated-cost-per-app-call-usd",
+        min=0,
         help="Estimated spend per application call, required to enforce --max-cost-usd.",
     ),
     estimated_cost_per_evaluation_usd: float | None = typer.Option(
-        None, "--estimated-cost-per-evaluation-usd", min=0,
+        None,
+        "--estimated-cost-per-evaluation-usd",
+        min=0,
         help="Estimated spend per evaluator call for model-backed metrics.",
     ),
     cache_executions: bool | None = typer.Option(
-        None, "--cache-executions/--no-cache-executions",
+        None,
+        "--cache-executions/--no-cache-executions",
         help="Override execution-cache behavior from the plan.",
     ),
     cache_evaluations: bool | None = typer.Option(
-        None, "--cache-evaluations/--no-cache-evaluations",
+        None,
+        "--cache-evaluations/--no-cache-evaluations",
         help="Override evaluation-cache behavior from the plan.",
     ),
     dry_run: bool = typer.Option(
@@ -647,6 +676,13 @@ def run_plan(
     json_output: bool = _JSON,
 ) -> None:
     """Execute a plan: validate, freeze, run, evaluate."""
+    if dataset_suite is not None and target is not None and target.is_file():
+        raise _fail(
+            "--dataset-suite cannot be combined with a positional dataset path; pass the "
+            "project directory or --plan instead",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
     if quiet and verbose:
         raise _fail(
             "--quiet cannot be combined with --verbose", EXIT_INVALID, json_output=json_output
@@ -671,12 +707,27 @@ def run_plan(
         raise _fail(
             "--detach cannot be combined with --dry-run", EXIT_INVALID, json_output=json_output
         )
+    dataset_override: str | None = None
+    suite_record: DatasetSuiteRecord | None = None
+    if dataset_suite is not None:
+        try:
+            suite_path, suite_record = resolve_dataset_suite(workspace or Path.cwd(), dataset_suite)
+            try:
+                dataset_override = os.path.relpath(suite_path, start=plan.resolve().parent)
+            except ValueError:
+                # On Windows, plan and workspace may be on different drives, where a
+                # relative path cannot be represented. Absolute dataset paths are valid.
+                dataset_override = str(suite_path)
+        except (AibenchError, OSError) as exc:
+            raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
+
     try:
         compiled = compile_plan(
             plan,
             policy=load_policy(policy),
             trusted_local=trust_local_app,
             overrides=RunPlanOverrides(
+                dataset_path=dataset_override,
                 limit=limit,
                 sample_size=sample_size,
                 selection_seed=selection_seed,
@@ -692,9 +743,7 @@ def run_plan(
                 max_judge_tokens=max_judge_tokens,
                 max_wall_seconds=max_wall_seconds,
                 max_cost_usd=max_cost_usd,
-                estimated_cost_per_application_call_usd=(
-                    estimated_cost_per_application_call_usd
-                ),
+                estimated_cost_per_application_call_usd=(estimated_cost_per_application_call_usd),
                 estimated_cost_per_evaluation_usd=estimated_cost_per_evaluation_usd,
                 cache_executions=cache_executions,
                 cache_evaluations=cache_evaluations,
@@ -704,6 +753,15 @@ def run_plan(
         raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(None, json_output=json_output) from exc
+    if suite_record is not None and compiled.dataset.content_hash != (
+        suite_record.dataset_content_hash
+    ):
+        raise _fail(
+            f"dataset suite {suite_record.suite_name}@{suite_record.suite_version} changed "
+            "while the plan was compiling; nothing was dispatched",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
     if dry_run:
         _print_run_preview(_run_preview(compiled, run_seed=run_seed), json_output=json_output)
         return

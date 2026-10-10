@@ -122,6 +122,7 @@ class SelectedWorld:
 class RunPlanOverrides:
     """Validated command-line adjustments applied to a plan before it is frozen."""
 
+    dataset_path: str | None = None
     limit: int | None = None
     sample_size: int | None = None
     selection_seed: int | None = None
@@ -751,14 +752,14 @@ def compile_plan(
     return compiled_from(analysis)
 
 
-def apply_run_plan_overrides(
-    plan: ExecutablePlan, overrides: RunPlanOverrides
-) -> ExecutablePlan:
+def apply_run_plan_overrides(plan: ExecutablePlan, overrides: RunPlanOverrides) -> ExecutablePlan:
     """Apply direct run controls to a plan and validate the complete effective plan."""
     if overrides.limit is not None and overrides.sample_size is not None:
         raise PlanInvalid(["--limit and --sample-size cannot be used together"])
 
     data = plan.model_dump(mode="json")
+    if overrides.dataset_path is not None:
+        data["dataset"] = overrides.dataset_path
     selection = data["selection"]
     if overrides.limit is not None:
         selection.update({"limit": overrides.limit, "sample_size": None, "seed": None})

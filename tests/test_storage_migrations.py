@@ -91,6 +91,7 @@ def test_expected_tables_exist_after_migration() -> None:
         "run_baselines",
         "baseline_promotions",
         "run_control_state",
+        "dataset_suites",
         "schema_migrations",
     }
     assert expected.issubset(tables)
@@ -273,7 +274,9 @@ def test_migration_4_rekeys_existing_evaluation_attempts() -> None:
         "'ok','pass','h',?, 'now')",
         (legacy.model_dump_json(),),
     )
-    assert apply_migrations(conn) == [m.version for m in migrations_module.MIGRATIONS if m.version >= 4]
+    assert apply_migrations(conn) == [
+        m.version for m in migrations_module.MIGRATIONS if m.version >= 4
+    ]
     row = conn.execute(
         "SELECT repetition_id, binding_hash, scoring_id FROM evaluation_attempts"
     ).fetchone()

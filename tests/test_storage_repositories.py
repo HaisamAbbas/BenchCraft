@@ -78,6 +78,29 @@ def test_commit_dataset_conflict_on_mismatched_manifest_under_same_hash(storage)
         storage.commit_dataset(manifest2)
 
 
+def test_dataset_suite_versions_are_idempotent_and_immutable(storage) -> None:
+    fields = {
+        "suite_name": "support",
+        "suite_version": "1.0.0",
+        "dataset_content_hash": "sha256:abc",
+        "dataset_path": "dataset-suites/support/1.0.0.jsonl",
+        "case_count": 3,
+        "description": "support benchmark",
+    }
+    assert storage.register_dataset_suite(**fields) is True
+    assert storage.register_dataset_suite(**fields) is False
+    record = storage.get_dataset_suite("support", "1.0.0")
+    assert record is not None
+    assert record.dataset_content_hash == "sha256:abc"
+    assert record.case_count == 3
+    assert storage.list_dataset_suites("support") == [record]
+    assert storage.list_dataset_suites("missing") == []
+
+    with pytest.raises(ConflictError):
+        storage.register_dataset_suite(**{**fields, "description": "changed metadata"})
+    assert storage.get_dataset_suite("support", "1.0.0") == record
+
+
 def test_commit_cases_is_idempotent_and_preserves_duplicates(storage) -> None:
     manifest = DatasetManifest(dataset_id="ds1", content_hash="sha256:abc", case_count=2)
     storage.commit_dataset(manifest)
@@ -383,10 +406,14 @@ def test_commit_artifact_conflicts_on_metadata_mismatch_even_with_same_digest(
 
 def test_referenced_artifact_digests(storage) -> None:
     storage.commit_artifact_unverified(
-        ArtifactRef(artifact_id="a1", digest="sha256:aaa", uri="/x", mime_type="text/plain", size_bytes=1)
+        ArtifactRef(
+            artifact_id="a1", digest="sha256:aaa", uri="/x", mime_type="text/plain", size_bytes=1
+        )
     )
     storage.commit_artifact_unverified(
-        ArtifactRef(artifact_id="a2", digest="sha256:bbb", uri="/y", mime_type="text/plain", size_bytes=1)
+        ArtifactRef(
+            artifact_id="a2", digest="sha256:bbb", uri="/y", mime_type="text/plain", size_bytes=1
+        )
     )
     assert storage.referenced_artifact_digests() == {"sha256:aaa", "sha256:bbb"}
 

@@ -38,9 +38,7 @@ def test_direct_selection_overrides_preserve_plan_predicates_and_ids() -> None:
     )
 
     limited = apply_run_plan_overrides(plan, RunPlanOverrides(limit=1))
-    sampled = apply_run_plan_overrides(
-        plan, RunPlanOverrides(sample_size=1, selection_seed=42)
-    )
+    sampled = apply_run_plan_overrides(plan, RunPlanOverrides(sample_size=1, selection_seed=42))
 
     assert limited.selection.limit == 1
     assert limited.selection.sample_size is None
@@ -49,6 +47,14 @@ def test_direct_selection_overrides_preserve_plan_predicates_and_ids() -> None:
     assert sampled.selection.limit is None
     assert sampled.selection.sample_size == 1 and sampled.selection.seed == 42
     assert sampled.selection.case_ids == ("a", "b")
+
+
+def test_dataset_path_override_is_applied_before_plan_validation() -> None:
+    plan = _plan(dataset="original.jsonl")
+    updated = apply_run_plan_overrides(
+        plan, RunPlanOverrides(dataset_path=".aibench/dataset-suites/support/1.0.0.jsonl")
+    )
+    assert updated.dataset == ".aibench/dataset-suites/support/1.0.0.jsonl"
 
 
 def test_direct_overrides_update_plan_and_respect_plan_validation() -> None:

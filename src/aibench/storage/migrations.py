@@ -245,8 +245,7 @@ def _backfill_content_hash_columns(conn: sqlite3.Connection) -> None:
         )
 
     for row in conn.execute(
-        "SELECT artifact_id, digest, uri, mime_type, size_bytes, redaction, run_id "
-        "FROM artifacts"
+        "SELECT artifact_id, digest, uri, mime_type, size_bytes, redaction, run_id FROM artifacts"
     ).fetchall():
         ref = ArtifactRef(
             artifact_id=row[0],
@@ -619,6 +618,25 @@ _0013_run_control = Migration(
     """,
 )
 
+_0014_dataset_suites = Migration(
+    version=14,
+    name="dataset_suite_catalog",
+    sql="""
+    CREATE TABLE dataset_suites (
+        suite_name          TEXT NOT NULL,
+        suite_version       TEXT NOT NULL,
+        dataset_content_hash TEXT NOT NULL,
+        dataset_path        TEXT NOT NULL,
+        case_count          INTEGER NOT NULL CHECK (case_count > 0),
+        description         TEXT NOT NULL,
+        record_hash         TEXT NOT NULL,
+        created_at          TEXT NOT NULL,
+        PRIMARY KEY (suite_name, suite_version)
+    );
+    CREATE INDEX idx_dataset_suites_hash ON dataset_suites(dataset_content_hash);
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
@@ -633,6 +651,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _0011_experiments,
     _0012_run_catalog,
     _0013_run_control,
+    _0014_dataset_suites,
 )
 
 
