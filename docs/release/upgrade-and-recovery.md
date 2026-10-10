@@ -124,6 +124,33 @@ should be in progress and no chat open. The database uses a write-ahead log, so
 `aibench.db-wal` and `aibench.db-shm` must be copied with `aibench.db`. Restoring means
 putting the copied directory back.
 
+### Cleaning stale artifacts
+
+Preview storage cleanup before deleting anything:
+
+```console
+aibench workspace gc --workspace .
+aibench workspace gc --workspace . --json
+```
+
+The command lists unreferenced content-addressed artifacts and abandoned write temporaries.
+It keeps catalog-referenced objects and files within the grace period. Deletion requires the
+explicit `--apply` flag and at least the default one-hour grace period:
+
+```console
+aibench workspace gc --workspace . --apply
+```
+
+Only recognized artifact shards and object names are considered. Symbolic links, reparse points,
+hard-linked objects, and files that change during cleanup are skipped; the command reports how
+many files and bytes it removed.
+It does not create a workspace when none exists.
+To keep its catalog read pinned while cleanup runs, it briefly creates a temporary hard-link
+snapshot of `aibench.db` and any live WAL sidecars under `.aibench/`. A preview therefore needs
+temporary write permission and filesystem hard-link support there. The snapshot is removed on
+normal exit; an interrupted command may leave a `.aibench-gc-*` directory, which does not prevent
+later cleanup.
+
 ## Recovering
 
 | What happened | What you see | What to do | Tested by |
