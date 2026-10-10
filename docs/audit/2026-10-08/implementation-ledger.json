@@ -720,7 +720,8 @@
         "Terminal-run bundle and CLI regression batch: 90 passed, 10 skipped",
         "Ruff lint/format and Mypy passed for changed Python modules; final independent review reported no findings; see evidence/G19-run-bundles-review.md",
         "Portable session bundles: 19 focused tests passed and 3 POSIX-only race tests skipped on Windows; broad session/run/storage/chat batch: 111 passed, 3 skipped, and 1 unrelated recovery test deselected",
-        "Ruff lint/format, Mypy, and git diff --check passed; independent review reported no findings; POSIX ancestor-chain runtime tests remain unexecuted locally; see evidence/G19-session-bundles-review.md"
+        "Ruff lint/format, Mypy, and git diff --check passed; independent review reported no findings; POSIX ancestor-chain runtime tests remain unexecuted locally; see evidence/G19-session-bundles-review.md",
+        "Post-delivery ZIP entry-count preflight regression: 1 focused test passed; independent hotfix review found no findings; correction commit aa47f821 pushed"
       ],
       "review": "evidence/G19-session-bundles-review.md",
       "commit": "a6bb8ac8229e51be864eac0cd2f7be306950ac6b",

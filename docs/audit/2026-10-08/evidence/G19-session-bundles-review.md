@@ -33,3 +33,11 @@ rolled back with the database transaction on detected path changes.
 
 The local WSL default distribution could not access the Windows checkout, and the Docker engine
 was not running, so a Linux execution environment was unavailable for this delivery.
+
+## Post-delivery regression correction
+
+The archive entry-count regression test exposed that default argument values captured the configured
+limits at import time, preventing tests and runtime configuration from changing them dynamically.
+Both archive helpers now resolve omitted limits at call time. The focused regression test passed,
+the independent review found no findings, and correction commit `aa47f821` was pushed to
+`origin/fix/plugin-core-match`.
