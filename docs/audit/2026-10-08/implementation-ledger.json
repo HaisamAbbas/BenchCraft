@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G13",
+  "current_item": "G14",
   "items": [
     {
       "id": "F01",
@@ -559,11 +559,16 @@
       "title": "Structured progress and durable logs",
       "detail": "**Partial.** Terminal progress and persisted run events exist. Scripts lack a consistent JSONL event stream, log-file selection, verbosity/quiet controls, and documented noninteractive logging contract.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "56 focused CLI, output-contract, global-option, and supervision tests passed",
+        "Ruff src/tests/plugins passed; mypy passed for 151 source files",
+        "CLI help checks passed; runs events exposes the signed 64-bit cursor bound",
+        "Two initial review findings and the preflight handoff race were fixed; final independent review found no remaining actionable findings"
+      ],
+      "review": "evidence/G13-review.md",
+      "commit": "599b35e860d02a10f4898c228a8ac3caaf9dce07",
+      "pushed": true
     },
     {
       "id": "G14",
@@ -696,4 +701,4 @@
       ]
     }
   ]
-}\n
+}
