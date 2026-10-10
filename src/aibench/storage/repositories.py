@@ -79,6 +79,14 @@ class RunLease:
     heartbeat_at: float
 
 
+@dataclass(frozen=True)
+class RunControlState:
+    run_id: str
+    desired_state: str
+    sequence: int
+    updated_at: str
+
+
 class LeaseHeld(ConflictError):
     """Another live session is running this run."""
 
@@ -1187,6 +1195,69 @@ class Storage:
         return updated
 
     # ---------------------------------------------------------------- run events
+
+    def get_run_control_state(self, run_id: str) -> RunControlState | None:
+        row = self.conn.execute(
+            "SELECT desired_state, sequence, updated_at FROM run_control_state WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return RunControlState(run_id, row[0], int(row[1]), row[2])
+
+    def set_run_control_state(
+        self,
+        run_id: str,
+        *,
+        desired_state: str,
+        action: str,
+        requested_by: str,
+        allowed_run_statuses: frozenset[str],
+    ) -> RunControlState:
+        """Persist a last-writer-wins control request and its audit event atomically."""
+        if desired_state not in {"running", "paused", "cancelled"}:
+            raise ValueError(f"invalid desired run control state {desired_state!r}")
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            run = self.conn.execute(
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if run is None:
+                raise KeyError(f"no run committed with run_id={run_id!r}")
+            if run[0] not in allowed_run_statuses:
+                raise ValueError(
+                    f"run {run_id!r} is {run[0]}; it no longer accepts control requests"
+                )
+            current = self.conn.execute(
+                "SELECT desired_state, sequence FROM run_control_state WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if current is not None and current[0] == "cancelled" and desired_state != "cancelled":
+                raise ValueError(f"run {run_id!r} has a durable cancel request and cannot resume")
+            sequence = (int(current[1]) if current is not None else 0) + 1
+            updated_at = _now()
+            self.conn.execute(
+                "INSERT INTO run_control_state (run_id, desired_state, sequence, updated_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET "
+                "desired_state = excluded.desired_state, sequence = excluded.sequence, "
+                "updated_at = excluded.updated_at",
+                (run_id, desired_state, sequence, updated_at),
+            )
+            self._insert_run_event(
+                run_id,
+                "run_control_requested",
+                {
+                    "action": action,
+                    "desired_state": desired_state,
+                    "control_sequence": sequence,
+                    "requested_by": requested_by,
+                },
+            )
+            self.conn.execute("COMMIT")
+            return RunControlState(run_id, desired_state, sequence, updated_at)
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
 
     def append_run_event(self, run_id: str, event_type: str, payload: dict[str, object]) -> int:
         """Append an event with the next per-run sequence number; returns that number."""

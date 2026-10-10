@@ -20,7 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
+import socket
+import subprocess
+import sys
 from pathlib import Path
 
 import typer
@@ -58,7 +62,9 @@ from aibench.services.runs import (
     create_run,
     evaluate_run,
     execute_run,
+    lease_state,
     outcome_json,
+    request_run_control,
     run_exit_code,
     run_status,
 )
@@ -268,6 +274,73 @@ def _run_preview(compiled: CompiledRun, *, run_seed: int | None) -> dict[str, ob
     }
 
 
+def _launch_detached(run_id: str, project_root: Path, storage: Storage) -> dict[str, object]:
+    """Start a separately supervised CLI worker and retain its output in the workspace."""
+    record = storage.get_run(run_id)
+    if record is None:
+        raise RunError(f"no run committed with run_id={run_id!r}")
+    if record.status not in RESUMABLE_STATES:
+        raise RunError(f"run {run_id} is {record.status}; only unfinished runs can be detached")
+    if lease_state(storage, run_id) == "live":
+        raise RunError(f"run {run_id} already has a live worker")
+    digest = content_hash(run_id).split(":", 1)[-1][:24]
+    workspace = Workspace.at(project_root)
+    log_path = workspace.root / "logs" / f"run-{digest}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    relative_log = log_path.relative_to(workspace.root.parent).as_posix()
+    storage.append_run_event(
+        run_id,
+        "detached_worker_launching",
+        {"log_path": relative_log, "requested_by": "cli"},
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "aibench.cli.main",
+        "--non-interactive",
+        "--json",
+        "resume",
+        run_id,
+        "--workspace",
+        str(project_root.resolve()),
+        "--worker",
+    ]
+    creationflags = 0
+    start_new_session = os.name != "nt"
+    if os.name == "nt":
+        creationflags = (
+            subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_NO_WINDOW
+        )
+    try:
+        with log_path.open("ab") as log_file:
+            worker = subprocess.Popen(
+                command,
+                cwd=project_root,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                creationflags=creationflags,
+                start_new_session=start_new_session,
+            )
+    except OSError as exc:
+        storage.append_run_event(
+            run_id,
+            "detached_worker_launch_failed",
+            {"log_path": relative_log, "reason": str(exc)},
+        )
+        raise RunError(f"could not start detached worker: {exc}") from exc
+    payload: dict[str, object] = {
+        "pid": worker.pid,
+        "host": socket.gethostname(),
+        "log_path": relative_log,
+    }
+    storage.append_run_event(run_id, "detached_worker_started", payload)
+    return {"run_id": run_id, "worker": {"state": "started", **payload}}
+
+
 def _print_run_preview(preview: dict[str, object], *, json_output: bool) -> None:
     if json_output:
         console.print_json(data=preview)
@@ -449,6 +522,9 @@ def run_plan(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Validate and print the exact frozen scope without creating a run."
     ),
+    detach: bool = typer.Option(
+        False, "--detach", help="Run in a separate supervised process and write output to its log."
+    ),
     workspace: Path | None = _WORKSPACE,
     json_output: bool = _JSON,
 ) -> None:
@@ -462,6 +538,10 @@ def run_plan(
             "pass either --plan FILE or a project directory/dataset, not both",
             EXIT_INVALID,
             json_output=json_output,
+        )
+    if dry_run and detach:
+        raise _fail(
+            "--detach cannot be combined with --dry-run", EXIT_INVALID, json_output=json_output
         )
     try:
         compiled = compile_plan(
@@ -513,8 +593,23 @@ def run_plan(
             console.print(
                 f"run [bold]{run_id}[/bold] created from plan {escape(compiled.plan.plan_id)}"
             )
-        outcome = asyncio.run(_execute(run_id, storage, artifacts))
-        code = _finish(run_id, outcome, storage, artifacts, json_output)
+        if detach:
+            project_root = (workspace or Path.cwd()).resolve()
+            launch = _launch_detached(run_id, project_root, storage)
+            code = 0
+            if json_output:
+                console.print_json(data={**launch, "exit_code": code})
+            else:
+                worker = launch["worker"]
+                assert isinstance(worker, dict)
+                console.print(
+                    f"detached worker started for run [bold]{run_id}[/bold] "
+                    f"(pid {worker['pid']}); log: {worker['log_path']}"
+                )
+                console.print(f"control it with: aibench runs control {run_id} pause|resume|cancel")
+        else:
+            outcome = asyncio.run(_execute(run_id, storage, artifacts))
+            code = _finish(run_id, outcome, storage, artifacts, json_output)
     except AibenchError as exc:
         raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
@@ -526,14 +621,82 @@ def run_plan(
 
 def resume(
     run_id: str = typer.Argument(..., help="Run to continue."),
+    detach: bool = typer.Option(
+        False,
+        "--detach",
+        help="Resume in a separate supervised process and write output to its log.",
+    ),
+    worker_process: bool = typer.Option(
+        False, "--worker", hidden=True, help="Internal detached worker entry point."
+    ),
     workspace: Path | None = _WORKSPACE,
     json_output: bool = _JSON,
 ) -> None:
     """Continue eligible unfinished work under the run's frozen plan and identities."""
     storage, artifacts = _open(workspace, json_output=json_output)
     try:
-        outcome = asyncio.run(_execute(run_id, storage, artifacts))
-        code = _finish(run_id, outcome, storage, artifacts, json_output)
+        if worker_process:
+            outcome = asyncio.run(_execute(run_id, storage, artifacts))
+            code = _finish(run_id, outcome, storage, artifacts, json_output)
+        else:
+            record = storage.get_run(run_id)
+            if record is None:
+                raise RunError(f"no run committed with run_id={run_id!r}")
+            if record.status not in RESUMABLE_STATES:
+                raise RunError(
+                    f"run {run_id} is {record.status}; only interrupted or unfinished runs resume"
+                )
+            if record.manifest.parameters.get("mode") != "manual_plan":
+                raise RunError(f"run {run_id} was not created from a plan")
+            control = storage.get_run_control_state(run_id)
+            pending_cancel = record.status == "cancelling" or (
+                control is not None and control.desired_state == "cancelled"
+            )
+            if pending_cancel:
+                if control is None or control.desired_state != "cancelled":
+                    control = request_run_control(
+                        storage, run_id, "cancel", requested_by="aibench resume recovery"
+                    )
+            else:
+                control = request_run_control(
+                    storage, run_id, "resume", requested_by="aibench resume"
+                )
+            if lease_state(storage, run_id) == "live":
+                accepted: dict[str, object] = {
+                    "run_id": run_id,
+                    "action": "cancel" if pending_cancel else "resume",
+                    "desired_state": control.desired_state if control else "running",
+                    "sequence": control.sequence if control else 0,
+                    "accepted": True,
+                    "accepted_by": "live worker",
+                }
+                code = 0
+                if json_output:
+                    console.print_json(data=accepted)
+                else:
+                    action_text = "pending cancel" if pending_cancel else "resume request"
+                    console.print(f"{action_text} accepted for live run [bold]{run_id}[/bold]")
+            elif detach:
+                launch = _launch_detached(run_id, (workspace or Path.cwd()).resolve(), storage)
+                code = 0
+                if json_output:
+                    console.print_json(
+                        data={
+                            **launch,
+                            "control_sequence": control.sequence if control else 0,
+                            "pending_cancel": pending_cancel,
+                        }
+                    )
+                else:
+                    worker = launch["worker"]
+                    assert isinstance(worker, dict)
+                    console.print(
+                        f"detached worker started for run [bold]{run_id}[/bold] "
+                        f"(pid {worker['pid']}); log: {worker['log_path']}"
+                    )
+            else:
+                outcome = asyncio.run(_execute(run_id, storage, artifacts))
+                code = _finish(run_id, outcome, storage, artifacts, json_output)
     except AibenchError as exc:  # includes RunError, PolicyDenied and LeaseHeld
         raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
@@ -541,6 +704,47 @@ def resume(
     finally:
         storage.db.close()
     raise typer.Exit(code=code)
+
+
+def control(
+    run_id: str = typer.Argument(..., help="Run with a live or resumable worker."),
+    action: str = typer.Argument(..., help="Desired state: pause, resume, or cancel."),
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Send a durable desired-state request to a run's owning worker."""
+    if action not in {"pause", "resume", "cancel"}:
+        raise _fail(
+            "action must be pause, resume, or cancel", EXIT_INVALID, json_output=json_output
+        )
+    storage, _ = _open(workspace, json_output=json_output)
+    try:
+        state = request_run_control(storage, run_id, action, requested_by="aibench runs control")
+        data = {
+            "run_id": run_id,
+            "action": action,
+            "desired_state": state.desired_state,
+            "sequence": state.sequence,
+            "accepted": True,
+            "worker_lease": lease_state(storage, run_id),
+        }
+    except RunError as exc:
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
+    finally:
+        storage.db.close()
+    if json_output:
+        console.print_json(data=data)
+    else:
+        worker = data["worker_lease"]
+        message = (
+            "request accepted by live worker"
+            if worker == "live"
+            else "request saved for the next resume"
+        )
+        console.print(
+            f"{action} request accepted for run [bold]{run_id}[/bold] "
+            f"(sequence {state.sequence}; {message})"
+        )
 
 
 def retry(
@@ -823,3 +1027,15 @@ def status(
         )
     for warning in data["warnings"]:
         console.print(f"  [yellow]warning:[/yellow] {escape(warning)}")
+    supervision = data["supervision"]
+    control_state = supervision["control"]
+    console.print(
+        f"  worker lease: {supervision['worker_lease'] or 'none'}; "
+        f"desired state: {control_state['desired_state']} (sequence {control_state['sequence']})"
+    )
+    worker = supervision["detached_worker"]
+    if worker:
+        console.print(
+            f"  detached worker: {worker['state']} (pid {worker.get('pid', 'unknown')}); "
+            f"log: {worker.get('log_path', 'unknown')}"
+        )

@@ -605,6 +605,20 @@ _0012_run_catalog = Migration(
     """,
 )
 
+# External headless supervisors update a durable desired state; a running engine polls it.
+_0013_run_control = Migration(
+    version=13,
+    name="run_control",
+    sql="""
+    CREATE TABLE run_control_state (
+        run_id         TEXT PRIMARY KEY REFERENCES runs(run_id),
+        desired_state  TEXT NOT NULL CHECK (desired_state IN ('running', 'paused', 'cancelled')),
+        sequence       INTEGER NOT NULL CHECK (sequence > 0),
+        updated_at     TEXT NOT NULL
+    );
+    """,
+)
+
 MIGRATIONS: tuple[Migration, ...] = (
     _0001_initial,
     _0002_run_lookup_indexes,
@@ -618,6 +632,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     _0010_remote_jobs,
     _0011_experiments,
     _0012_run_catalog,
+    _0013_run_control,
 )
 
 

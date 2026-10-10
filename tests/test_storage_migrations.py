@@ -90,6 +90,7 @@ def test_expected_tables_exist_after_migration() -> None:
         "run_notes",
         "run_baselines",
         "baseline_promotions",
+        "run_control_state",
         "schema_migrations",
     }
     assert expected.issubset(tables)

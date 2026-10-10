@@ -64,7 +64,7 @@ from aibench.runners.base import BaseRunner, ResetReport, race
 from aibench.services.execution import invoke_and_record
 from aibench.services.scoring import BindingScorer, MissingExecution, episode_prefixes
 from aibench.storage.artifacts import ArtifactStore
-from aibench.storage.repositories import Storage
+from aibench.storage.repositories import RunControlState, Storage
 
 TERMINAL = frozenset(
     {
@@ -76,6 +76,7 @@ TERMINAL = frozenset(
     }
 )
 _POLL_SECONDS = 0.1
+_CONTROL_POLL_SECONDS = 0.25
 _T = TypeVar("_T")
 # Evaluations held by a quota that dispatch looks past per pass (bounded work per pass).
 _HELD_SCAN = 256
@@ -156,11 +157,15 @@ class RunController:
             getattr(self, action)()
 
     def pause(self) -> None:
-        if not self.cancelled and not self.interrupting:
+        if not self.cancelled and not self.abort_event.is_set():
+            self.interrupting = False
             self.paused = True
             self._wake.set()
 
     def resume(self) -> None:
+        if self.cancelled or self.abort_event.is_set():
+            return
+        self.interrupting = False
         self.paused = False
         self._wake.set()
 
@@ -246,6 +251,7 @@ class RunEngine:
     controller: RunController
     rng: random.Random
     heartbeat: Callable[[], bool] = lambda: True  # refresh the run lease; False if lost
+    run_control: Callable[[], RunControlState | None] = lambda: None
     # State between cases (§7): "none", "per_case" (reset before every attempt) or
     # "per_episode" (reset before an episode's first turn; turns run in order and share
     # state). The engine resets with the selected test world's seed.
@@ -277,6 +283,7 @@ class RunEngine:
     _seq: itertools.count[int] = field(default_factory=itertools.count)
     _stop_reason: str | None = None
     _last_heartbeat: float = field(default_factory=time.monotonic)
+    _last_control_sequence: int = 0
     # Start the reported wall time with the budget ledger, before resume identity and
     # runner setup, so replayed session time matches what hard wall limits consumed.
     _session_started: float = field(default_factory=time.monotonic)
@@ -386,7 +393,7 @@ class RunEngine:
             pending_executions=len(self._exec_queue),
             pending_evaluations=len(self._eval_queue) + sum(map(len, self._waiting_evals.values())),
         )
-        needs_runner = bool(self._exec_queue)
+        needs_runner = bool(self._exec_queue) and not self.controller.cancelled
         try:
             if needs_runner:
                 assert self.runner is not None, "execution work remains but no runner was given"
@@ -405,12 +412,18 @@ class RunEngine:
         task = asyncio.ensure_future(work)
         try:
             while True:
+                self._sync_run_control()
                 # Armed first: a change before this line is in the state recorded next,
                 # and one after it wakes the wait.
                 change = self.controller.next_change()
                 self._set_state(self._busy_state())
-                await asyncio.wait({task, change}, return_when=asyncio.FIRST_COMPLETED)
-                change.cancel()
+                done, _ = await asyncio.wait(
+                    {task, change},
+                    timeout=_CONTROL_POLL_SECONDS,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if change not in done:
+                    change.cancel()
                 if task.done():
                     return task.result()
         except BaseException:
@@ -441,6 +454,7 @@ class RunEngine:
                 self._scorers[metric.binding_hash] = scorer
 
     def _keep_lease(self) -> None:
+        self._sync_run_control()
         now = time.monotonic()
         if now - self._last_heartbeat < _HEARTBEAT_SECONDS:
             return
@@ -448,6 +462,27 @@ class RunEngine:
         if not self.heartbeat() and not self.controller.interrupting:
             self.warnings.append("run lease lost to another session; stopped dispatching")
             self.controller.interrupt()
+
+    def _sync_run_control(self) -> None:
+        state = self.run_control()
+        if state is None or state.sequence <= self._last_control_sequence:
+            return
+        action = {"running": "resume", "paused": "pause", "cancelled": "cancel"}[
+            state.desired_state
+        ]
+        if self.controller.cancelled and action != "cancel":
+            return
+        if self.controller.abort_event.is_set() and action != "cancel":
+            # A second interrupt has already aborted in-flight work. Keep the durable
+            # request for the next resumable session instead of claiming it was applied.
+            return
+        getattr(self.controller, action)()
+        self._last_control_sequence = state.sequence
+        self._event(
+            "run_control_applied",
+            control_sequence=state.sequence,
+            desired_state=state.desired_state,
+        )
 
     async def _loop(self) -> None:
         ctl = self.controller
@@ -664,6 +699,16 @@ class RunEngine:
             if len(held_back) >= _HELD_SCAN:
                 return
             item = self._eval_queue.popleft()
+            if self.controller.cancelled and (
+                item.binding_hash is None or item.binding_hash not in self._scorers
+            ):
+                self._transition(
+                    item,
+                    {WorkItemState.PENDING},
+                    WorkItemState.CANCELLED,
+                    error="run cancelled before evaluation",
+                )
+                continue
             assert item.binding_hash is not None
             scorer = self._scorers[item.binding_hash]
             exec_key = execution_key(item.case_id, item.repetition)

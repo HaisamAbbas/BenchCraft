@@ -97,6 +97,7 @@ from aibench.registry import (
     BindingValidationError,
     EvaluatorRegistry,
     RegistryError,
+    ResolvedMetric,
     dependency_lock_hash,
     plugin_paths_hash,
     worker_python_identity,
@@ -111,7 +112,7 @@ from aibench.services.scoring import (
     score_recorded_run,
 )
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
-from aibench.storage.repositories import RunLease, Storage, WorkItemSettlement
+from aibench.storage.repositories import RunControlState, RunLease, Storage, WorkItemSettlement
 
 LEASE_TTL_SECONDS = 60.0  # a lease not heartbeated for this long belongs to a dead session
 MAX_RUNTIME_BINARY_BYTES = 256 * 1024 * 1024
@@ -145,6 +146,34 @@ EXIT_OK, EXIT_GATES_FAILED, EXIT_INVALID, EXIT_INCOMPLETE, EXIT_DENIED, EXIT_INT
 
 class RunError(AibenchError):
     """A run cannot be started or resumed as asked."""
+
+
+class RunControlError(RunError):
+    """A durable run-control request is invalid for the current run state."""
+
+
+def request_run_control(
+    storage: Storage, run_id: str, action: str, *, requested_by: str
+) -> RunControlState:
+    """Persist an external last-writer-wins desired state for a live/resumable run."""
+    desired = {"pause": "paused", "resume": "running", "cancel": "cancelled"}.get(action)
+    if desired is None:
+        raise RunControlError(f"unknown run-control action {action!r}")
+    record = storage.get_run(run_id)
+    if record is None:
+        raise RunControlError(f"no run committed with run_id={run_id!r}")
+    if record.manifest.parameters.get("mode") != "manual_plan":
+        raise RunControlError(f"run {run_id} was not created from a plan")
+    try:
+        return storage.set_run_control_state(
+            run_id,
+            desired_state=desired,
+            action=action,
+            requested_by=requested_by,
+            allowed_run_statuses=frozenset(RESUMABLE_STATES),
+        )
+    except (KeyError, ValueError) as exc:
+        raise RunControlError(str(exc)) from exc
 
 
 def _approval_scope(run_id: str, manifest: RunManifest, policy_hash: str) -> str:
@@ -1281,13 +1310,23 @@ def _replay_prior_spend(
 def _pid_alive(pid: int) -> bool:
     if sys.platform == "win32":
         import ctypes
+        from ctypes import wintypes
 
         kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
             return False
         try:
-            code = ctypes.c_ulong()
+            code = wintypes.DWORD()
             kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
             return code.value == 259  # STILL_ACTIVE
         finally:
@@ -1400,6 +1439,10 @@ async def _execute_leased(
     environ: dict[str, str] | None,
     owner: str,
 ) -> RunOutcome:
+    controller = controller or RunController()
+    control = storage.get_run_control_state(run_id)
+    if control is not None and control.desired_state == "cancelled":
+        controller.cancel()
     current = storage.get_run(run_id)
     if current is None or current.status not in RESUMABLE_STATES:
         # Another session finished it between our first check and taking the lease.
@@ -1416,7 +1459,13 @@ async def _execute_leased(
         run_id, manifest, params["policy_hash"]
     ):
         raise PolicyDenied(["no approval is recorded for this run's frozen scope"])
-    _, metrics = _frozen_registry(plan, manifest, policy, spec)
+    control = storage.get_run_control_state(run_id)
+    if control is not None and control.desired_state == "cancelled":
+        controller.cancel()
+    if controller.cancelled:
+        metrics: list[ResolvedMetric] = []
+    else:
+        _, metrics = _frozen_registry(plan, manifest, policy, spec)
 
     cases = {c.case_id: c for c in storage.list_cases(manifest.dataset_hash)}
     needed = {parse_work_item_key(w.task_key, w.kind)[0] for w in storage.list_work_items(run_id)}
@@ -1435,15 +1484,24 @@ async def _execute_leased(
     )
     # A run that only settles stored observations/evaluations does not create a mixed app
     # revision. Check the live app identity exactly when further application dispatch is due.
-    if pending_exec and current.status != "cancelling":
-        _verify_application_resume_identity(
-            manifest,
-            spec,
-            status=current.status,
-            environ=environ,
-        )
+    if pending_exec and current.status != "cancelling" and not controller.cancelled:
+        try:
+            _verify_application_resume_identity(
+                manifest,
+                spec,
+                status=current.status,
+                environ=environ,
+            )
+        except RunError:
+            control = storage.get_run_control_state(run_id)
+            if control is None or control.desired_state != "cancelled":
+                raise
+            controller.cancel()
+    control = storage.get_run_control_state(run_id)
+    if control is not None and control.desired_state == "cancelled":
+        controller.cancel()
     runner = None
-    if pending_exec:
+    if pending_exec and not controller.cancelled:
         runner = create_runner(
             LoadedApplication(spec=spec, base_dir=Path(params["application_base_dir"])),
             trusted_local=policy.allow_trusted_local,
@@ -1463,7 +1521,7 @@ async def _execute_leased(
             "world_seed_hash": world.get("seed_hash"),
             "policy_hash": params["policy_hash"],
         }
-        if plan.cache.executions
+        if plan.cache.executions and not controller.cancelled
         else None
     )
     engine = RunEngine(
@@ -1483,15 +1541,48 @@ async def _execute_leased(
         dependency_lock_hash=manifest.dependency_lock_hash,
         scoring_id=params["scoring_id"],
         ledger=ledger,
-        controller=controller or RunController(),
+        controller=controller,
         rng=random.Random(manifest.seed),
         heartbeat=lambda: storage.heartbeat_run_lease(run_id, owner, time.time()),
+        run_control=lambda: storage.get_run_control_state(run_id),
         _session_started=ledger.started,
     )
     return await engine.execute()
 
 
 # --------------------------------------------------------------------------- status / rescore
+
+
+def _detached_worker_view(
+    event: dict[str, Any] | None,
+    *,
+    worker_lease: str | None,
+    lease_owner: tuple[str, int] | None,
+) -> dict[str, Any] | None:
+    if event is None:
+        return None
+    event_type = event["event_type"]
+    if event_type == "detached_worker_launch_failed":
+        state = "failed"
+    elif event_type == "detached_worker_launching":
+        state = "launching"
+    else:
+        pid = event["payload"].get("pid")
+        host = event["payload"].get("host")
+        owns_lease = isinstance(pid, int) and lease_owner == (host, pid)
+        if owns_lease and worker_lease == "stale":
+            state = "stale"
+        elif owns_lease:
+            state = "running"
+        elif host == socket.gethostname() and isinstance(pid, int):
+            state = "running" if _pid_alive(pid) else "exited"
+        else:
+            state = "unknown"
+    details = {key: value for key, value in event["payload"].items() if key != "host"}
+    pid = event["payload"].get("pid")
+    host = event["payload"].get("host")
+    owns_lease = isinstance(pid, int) and lease_owner == (host, pid)
+    return {"state": state, "owns_lease": owns_lease, **details}
 
 
 def _evaluation_identity(task_key: str) -> tuple[str, int, str | None]:
@@ -1572,6 +1663,20 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
     )
     items = storage.list_work_items(run_id)
     counts = work_counts(storage, run_id)
+    control = storage.get_run_control_state(run_id)
+    detached_event = next(
+        (
+            event
+            for event in reversed(events)
+            if event["event_type"]
+            in (
+                "detached_worker_launching",
+                "detached_worker_started",
+                "detached_worker_launch_failed",
+            )
+        ),
+        None,
+    )
     blocked = [
         {"task_key": w.task_key, "state": w.state.value, "reason": w.last_error}
         for w in items
@@ -1612,6 +1717,11 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
     warnings = list(last_session["payload"].get("warnings") or []) if last_session else []
     if record.status in _FINISHED and (same := same_answer_warning(storage, run_id)):
         warnings.append(same)
+    lease_row = storage.conn.execute(
+        "SELECT host, pid FROM run_leases WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    lease_owner = (lease_row["host"], int(lease_row["pid"])) if lease_row else None
+    worker_lease = lease_state(storage, run_id)
     return {
         "run_id": run_id,
         "status": record.status,
@@ -1620,6 +1730,19 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
         "budget": last_session["payload"].get("budget") if last_session else None,
         "warnings": warnings,
         "last_event_sequence": events[-1]["sequence"] if events else 0,
+        "supervision": {
+            "worker_lease": worker_lease,
+            "control": {
+                "desired_state": control.desired_state if control else "running",
+                "sequence": control.sequence if control else 0,
+                "updated_at": control.updated_at if control else None,
+            },
+            "detached_worker": _detached_worker_view(
+                detached_event,
+                worker_lease=worker_lease,
+                lease_owner=lease_owner,
+            ),
+        },
     }
 
 
