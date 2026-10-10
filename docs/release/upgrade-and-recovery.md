@@ -119,10 +119,32 @@ To re-execute its unfinished cases, start a new run.
 
 ### Backing up a workspace
 
-Copy the whole `.aibench/` directory while **no aibench process is using it**. No run
-should be in progress and no chat open. The database uses a write-ahead log, so
-`aibench.db-wal` and `aibench.db-shm` must be copied with `aibench.db`. Restoring means
-putting the copied directory back.
+Create an online, verified snapshot with:
+
+```console
+aibench workspace backup ../workspace-backup.zip --workspace .
+```
+
+The command snapshots SQLite consistently while the app is running, includes catalogued
+artifacts and other durable regular workspace files, and records checksums for restore-time
+verification. It omits unreferenced artifact blobs, SQLite sidecars, lock files, and interrupted
+temporary staging directories. Snapshotting temporarily hard-links the database and live WAL
+sidecars inside `.aibench/`, so backup needs write permission and filesystem hard-link support.
+The archive contains `.aibench/` data only; it excludes project source, external datasets,
+credentials, and files outside the workspace. Backup refuses to overwrite an existing archive.
+Restore into a project with no `.aibench/` directory:
+
+```console
+aibench workspace restore ../workspace-backup.zip --workspace .
+```
+
+Restore verifies a bounded private snapshot of the archive and database before atomically
+publishing the workspace, and refuses to replace existing data. The temporary snapshot can
+require disk space up to the archive's size. The restored database stays protected from writes
+until publication and is checked again after the move. On POSIX systems, restored files and
+directories are created with owner-only permissions. Archives support up to one million files
+and 1 TiB of uncompressed data. Manual copies must be made while **no aibench process is using the
+workspace** and must include `aibench.db`, `aibench.db-wal`, and `aibench.db-shm` together.
 
 ### Cleaning stale artifacts
 

@@ -17,6 +17,10 @@ from aibench.core.errors import AibenchError, ValidationError
 from aibench.storage.artifacts import DEFAULT_GC_GRACE_SECONDS, ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
+from aibench.storage.workspace_backup import (
+    create_workspace_backup,
+    restore_workspace_backup,
+)
 from aibench.tui.render import safe
 
 app = typer.Typer(help="Inspect and safely maintain workspace storage.")
@@ -173,6 +177,52 @@ def garbage_collect(
         console.print(f"  {safe(path)}")
     if len(candidates) > _MAX_PATHS:
         console.print(f"  ... {len(candidates) - _MAX_PATHS} more path(s) omitted")
+
+
+@app.command("backup")
+def backup(
+    destination: Path,
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Create a verified archive of the workspace database and durable files."""
+    project_root = workspace or Path.cwd()
+    try:
+        result = create_workspace_backup(project_root, destination)
+    except AibenchError as exc:
+        raise _fail(str(exc), json_output=json_output) from exc
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        raise _fail(f"could not create workspace backup: {exc}", json_output=json_output) from exc
+    if json_output:
+        console.print_json(data=result)
+        return
+    console.print(
+        f"Backup created at {safe(result['backup'])}: {result['file_count']} file(s), "
+        f"{result['artifact_count']} referenced artifact(s), {result['total_bytes']} bytes."
+    )
+
+
+@app.command("restore")
+def restore(
+    archive: Path,
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Restore a verified workspace archive without replacing existing workspace data."""
+    project_root = workspace or Path.cwd()
+    try:
+        result = restore_workspace_backup(archive, project_root)
+    except AibenchError as exc:
+        raise _fail(str(exc), json_output=json_output) from exc
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        raise _fail(f"could not restore workspace backup: {exc}", json_output=json_output) from exc
+    if json_output:
+        console.print_json(data=result)
+        return
+    console.print(
+        f"Workspace restored at {safe(result['workspace'])}: {result['file_count']} file(s), "
+        f"{result['artifact_count']} referenced artifact(s), {result['total_bytes']} bytes."
+    )
 
 
 def _workspace_relative(workspace: Workspace, path: Path) -> str:

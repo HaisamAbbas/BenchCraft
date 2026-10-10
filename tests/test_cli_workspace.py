@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
+import stat
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -454,3 +457,1113 @@ def test_artifact_gc_rejects_invalid_grace_period(tmp_path: Path) -> None:
     for grace in (-1.0, float("nan"), float("inf")):
         with pytest.raises(ValidationError, match="finite and non-negative"):
             store.garbage_collect(set(), grace_seconds=grace)
+
+
+def test_workspace_backup_restores_database_artifacts_and_auxiliary_files(
+    tmp_path: Path,
+) -> None:
+    source_project = tmp_path / "source"
+    source_project.mkdir()
+    source_workspace = Workspace.at(source_project)
+    database = Database.open_workspace(source_workspace)
+    storage = Storage(database)
+    artifacts = ArtifactStore(source_workspace.artifacts_dir)
+    referenced = artifacts.write_bytes(b"backup payload", mime_type="text/plain")
+    commit_verified_artifact(artifacts, storage, referenced)
+    orphan = artifacts.write_bytes(b"orphan omitted from backup", mime_type="text/plain")
+    log = source_workspace.root / "logs" / "run-a.log"
+    log.parent.mkdir()
+    log.write_text("durable event log\n", encoding="utf-8")
+
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source_project), "--json"],
+    )
+
+    assert backup.exit_code == 0, backup.output
+    backup_payload = json.loads(backup.stdout)
+    assert backup_payload["artifact_count"] == 1
+    assert archive.is_file()
+    if os.name != "nt":
+        assert stat.S_IMODE(archive.stat().st_mode) == 0o600
+    database.close()
+
+    restored_project = tmp_path / "restored"
+    restored_project.mkdir()
+    restore = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(restored_project), "--json"],
+    )
+
+    assert restore.exit_code == 0, restore.output
+    restore_payload = json.loads(restore.stdout)
+    assert restore_payload["artifact_count"] == 1
+    restored_workspace = Workspace.at(restored_project)
+    if os.name != "nt":
+        assert stat.S_IMODE(restored_workspace.root.stat().st_mode) == 0o700
+        assert stat.S_IMODE(restored_workspace.db_path.stat().st_mode) == 0o600
+    assert (restored_workspace.root / "logs" / "run-a.log").read_text(encoding="utf-8") == (
+        "durable event log\n"
+    )
+    restored_database = Database.open_workspace(restored_workspace)
+    try:
+        restored_storage = Storage(restored_database)
+        restored_ref = restored_storage.get_artifact(referenced.artifact_id)
+        assert restored_ref is not None
+        assert Path(restored_ref.uri).is_relative_to(restored_workspace.artifacts_dir)
+        if os.name != "nt":
+            assert stat.S_IMODE(Path(restored_ref.uri).stat().st_mode) == 0o600
+        restored_store = ArtifactStore(restored_workspace.artifacts_dir, create=False)
+        assert restored_store.read_bytes(restored_ref) == b"backup payload"
+        assert commit_verified_artifact(restored_store, restored_storage, restored_ref) is False
+    finally:
+        restored_database.close()
+    orphan_hex = Path(orphan.uri).name
+    assert not (restored_workspace.artifacts_dir / orphan_hex[:2] / orphan_hex).exists()
+
+
+def test_workspace_backup_rejects_casefolded_sqlite_sidecar_alias(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    alias = workspace.root / "AIBENCH.DB-WAL"
+    alias.write_bytes(b"must not become a restored SQLite WAL")
+    archive = tmp_path / "workspace.zip"
+
+    result = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(project), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "collides with reserved storage" in json.loads(result.stdout)["message"]
+    assert not archive.exists()
+
+
+def test_workspace_backup_enforces_size_limit_before_copying_auxiliary_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import workspace_backup
+
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    (workspace.root / "oversized.log").write_bytes(b"x" * 4096)
+    monkeypatch.setattr(
+        workspace_backup, "_MAX_TOTAL_BYTES", workspace.db_path.stat().st_size + 1024
+    )
+
+    def unexpected_copy(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("auxiliary file was copied before its size limit was enforced")
+
+    monkeypatch.setattr(workspace_backup, "_copy_regular_file", unexpected_copy)
+    archive = tmp_path / "workspace.zip"
+
+    result = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(project), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "too large" in json.loads(result.stdout)["message"]
+    assert not archive.exists()
+
+
+def test_workspace_backup_bounds_sqlite_snapshot_pages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import workspace_backup
+
+    project = tmp_path / "project"
+    project.mkdir()
+    database = Database.open_workspace(Workspace.at(project))
+    database.close()
+    monkeypatch.setattr(workspace_backup, "_MAX_TOTAL_BYTES", 4096)
+    archive = tmp_path / "workspace.zip"
+
+    result = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(project), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "database exceeds" in json.loads(result.stdout)["message"]
+    assert not archive.exists()
+
+
+def test_workspace_restore_publishes_under_the_pinned_project_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("directory-handle-relative publication is a POSIX restore check")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    selected_parent = tmp_path / "selected-parent"
+    selected_parent.mkdir()
+    selected = selected_parent / "project"
+    selected.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    displaced = tmp_path / "displaced-project-parent"
+    real_publish = workspace_backup._publish_directory
+
+    def redirect_during_publish(*args: object, **kwargs: object) -> None:
+        selected_parent.rename(displaced)
+        selected_parent.symlink_to(outside, target_is_directory=True)
+        try:
+            real_publish(*args, **kwargs)
+        finally:
+            selected_parent.unlink()
+            displaced.rename(selected_parent)
+
+    monkeypatch.setattr(workspace_backup, "_publish_directory", redirect_during_publish)
+    restore = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert restore.exit_code == 0, restore.output
+    assert (selected / ".aibench" / "aibench.db").is_file()
+    assert not (outside / "project" / ".aibench").exists()
+
+
+def test_workspace_restore_rejects_replaced_staging_child_without_writing_outside(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("Windows directory handles prevent renaming an open staging child")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    (Workspace.at(source).root / "notes.txt").write_text("private backup data", encoding="utf-8")
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    displaced = tmp_path / "displaced-stage-workspace"
+    real_extract = workspace_backup._extract_verified_files
+
+    def replace_staging_child(*args: object, **kwargs: object) -> None:
+        payload = args[3]
+        assert isinstance(payload, Path)
+        staged_path = payload.resolve(strict=True)
+        staged_path.rename(displaced)
+        staged_path.symlink_to(outside, target_is_directory=True)
+        real_extract(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_backup, "_extract_verified_files", replace_staging_child)
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert not (selected / ".aibench").exists()
+    assert list(outside.iterdir()) == []
+    assert not displaced.exists() or not any(displaced.iterdir())
+
+
+def test_workspace_restore_rejects_staging_replacement_at_publish_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX publication uses directory-handle-relative rename")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    displaced: Path | None = None
+    real_publish = workspace_backup._publish_directory
+
+    def replace_at_publish(*args: object, **kwargs: object) -> None:
+        nonlocal displaced
+        payload = args[0]
+        assert isinstance(payload, Path)
+        staged_path = payload.resolve(strict=True)
+        displaced = staged_path.parent / "displaced-workspace"
+        staged_path.rename(displaced)
+        staged_path.symlink_to(outside, target_is_directory=True)
+        real_publish(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_backup, "_publish_directory", replace_at_publish)
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert (selected / ".aibench").is_symlink()
+    assert (selected / ".aibench").resolve() == outside
+    assert list(outside.iterdir()) == []
+    assert displaced is not None
+    assert not displaced.exists() or not any(displaced.iterdir())
+
+
+def test_workspace_restore_preserves_real_directory_replaced_after_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX publication uses directory-handle-relative rename")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    displaced: Path | None = None
+    real_rename = workspace_backup._rename_directory_without_replacement
+
+    def replace_after_rename(*args: object, **kwargs: object) -> None:
+        nonlocal displaced
+        real_rename(*args, **kwargs)
+        if kwargs.get("root_dir_fd") is not None and kwargs.get("source_name") == "workspace":
+            target = args[1]
+            assert isinstance(target, Path)
+            displaced = target.parent / "displaced-workspace"
+            target.rename(displaced)
+            target.mkdir()
+            (target / "unrelated.txt").write_text("preserve this", encoding="utf-8")
+
+    monkeypatch.setattr(
+        workspace_backup, "_rename_directory_without_replacement", replace_after_rename
+    )
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "changed during publication" in json.loads(result.stdout)["message"]
+    assert (selected / ".aibench" / "unrelated.txt").read_text(encoding="utf-8") == (
+        "preserve this"
+    )
+    assert displaced is not None
+    assert not displaced.exists() or not any(displaced.iterdir())
+    assert not list(selected.glob(".aibench-restore-*"))
+
+
+def test_workspace_restore_preflights_zip_entry_count_before_materializing_central_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import workspace_backup
+
+    archive = tmp_path / "oversized-directory.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("manifest.json", b"{}")
+        zipped.writestr("workspace/aibench.db", b"database")
+        zipped.writestr("workspace/extra", b"extra")
+    monkeypatch.setattr(workspace_backup, "_MAX_ENTRIES", 1)
+
+    def must_not_materialize(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("ZipFile was opened before checking the central-directory count")
+
+    monkeypatch.setattr(workspace_backup.zipfile, "ZipFile", must_not_materialize)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "invalid number of entries" in json.loads(result.stdout)["message"]
+    assert not (selected / ".aibench").exists()
+
+
+def test_workspace_restore_uses_private_archive_snapshot_after_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("Windows archive handles prevent in-place mutation")
+    import struct
+
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    (Workspace.at(source).root / "notes.txt").write_text("saved bytes", encoding="utf-8")
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    with zipfile.ZipFile(archive) as zipped:
+        info = zipped.getinfo("workspace/notes.txt")
+    archive_bytes = bytearray(archive.read_bytes())
+    name_length, extra_length = struct.unpack_from("<HH", archive_bytes, info.header_offset + 26)
+    data_offset = info.header_offset + 30 + name_length + extra_length
+    original_preflight = workspace_backup._preflight_zip_archive
+
+    def mutate_original_after_snapshot(snapshot: object) -> None:
+        original_preflight(snapshot)
+        changed = bytearray(archive.read_bytes())
+        changed[data_offset] ^= 0xFF
+        archive.write_bytes(changed)
+
+    monkeypatch.setattr(workspace_backup, "_preflight_zip_archive", mutate_original_after_snapshot)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (selected / ".aibench" / "notes.txt").read_text(encoding="utf-8") == "saved bytes"
+
+
+def test_workspace_restore_normalizes_deeply_nested_manifest_json(tmp_path: Path) -> None:
+    archive = tmp_path / "deep-manifest.zip"
+    nested = b"[" * 5_000 + b"0" + b"]" * 5_000
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
+        zipped.writestr("manifest.json", nested)
+        zipped.writestr("workspace/aibench.db", b"database")
+    selected = tmp_path / "selected"
+    selected.mkdir()
+
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "manifest is malformed" in json.loads(result.stdout)["message"]
+    assert not (selected / ".aibench").exists()
+
+
+def test_workspace_restore_detects_database_replacement_before_sqlite_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("Windows sharing handles prevent the staged path replacement")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    external_database = tmp_path / "external.db"
+    external = sqlite3.connect(external_database)
+    external.execute("CREATE TABLE protected_data (value TEXT)")
+    external.execute("INSERT INTO protected_data VALUES ('untouched')")
+    external.commit()
+    external.close()
+    external_bytes = external_database.read_bytes()
+    real_connect = workspace_backup.sqlite3.connect
+
+    def replace_before_connect(database_path: object, *args: object, **kwargs: object):
+        path = Path(database_path) if isinstance(database_path, (str, Path)) else None
+        if path is not None and path.name == "aibench.db" and ".aibench-restore-" in str(path):
+            path.unlink()
+            os.link(external_database, path)
+        return real_connect(database_path, *args, **kwargs)
+
+    monkeypatch.setattr(workspace_backup.sqlite3, "connect", replace_before_connect)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "changed while it was being opened" in json.loads(result.stdout)["message"]
+    assert external_database.read_bytes() == external_bytes
+    check = sqlite3.connect(external_database)
+    try:
+        assert check.execute("SELECT value FROM protected_data").fetchone() == ("untouched",)
+    finally:
+        check.close()
+    assert not (selected / ".aibench").exists()
+
+
+def test_workspace_restore_rejects_database_hardlinked_before_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    source_db = Workspace.at(source).db_path
+    original_bytes = source_db.read_bytes()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    real_extract = workspace_backup._extract_verified_files
+
+    def hardlink_before_validation(*args: object, **kwargs: object) -> None:
+        real_extract(*args, **kwargs)
+        payload = args[3]
+        assert isinstance(payload, Path)
+        restored_db = payload / "aibench.db"
+        restored_db.unlink()
+        os.link(source_db, restored_db)
+
+    monkeypatch.setattr(workspace_backup, "_extract_verified_files", hardlink_before_validation)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "changed while it was being opened" in json.loads(result.stdout)["message"]
+    assert source_db.read_bytes() == original_bytes
+    assert not (selected / ".aibench").exists()
+
+
+def test_workspace_restore_caps_aggregate_path_components(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aibench.storage import workspace_backup
+
+    monkeypatch.setattr(workspace_backup, "_MAX_PATH_COMPONENTS", 3)
+    with pytest.raises(ValidationError, match="too many path components"):
+        workspace_backup._validate_portable_file_paths(["workspace/a/b", "workspace/c"])
+
+
+def test_workspace_restore_pins_database_against_windows_path_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows file handles pin restored SQLite files during open")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    real_connect = workspace_backup.sqlite3.connect
+    blocked = False
+
+    def connect_while_pinned(database_path: object, *args: object, **kwargs: object):
+        nonlocal blocked
+        path = Path(database_path) if isinstance(database_path, (str, Path)) else None
+        if path is not None and path.name == "aibench.db" and ".aibench-restore-" in str(path):
+            with pytest.raises(OSError):
+                path.unlink()
+            blocked = True
+        return real_connect(database_path, *args, **kwargs)
+
+    monkeypatch.setattr(workspace_backup.sqlite3, "connect", connect_while_pinned)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert blocked
+
+
+def test_workspace_restore_handles_malformed_deflate_without_publishing(
+    tmp_path: Path,
+) -> None:
+    import struct
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    (Workspace.at(source).root / "notes.txt").write_text("A" * 200_000, encoding="utf-8")
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    with zipfile.ZipFile(archive) as zipped:
+        info = zipped.getinfo("workspace/notes.txt")
+        assert info.compress_type == zipfile.ZIP_DEFLATED
+        name_length, extra_length = struct.unpack_from(
+            "<HH", archive.read_bytes(), info.header_offset + 26
+        )
+        data_offset = info.header_offset + 30 + name_length + extra_length
+        corrupted = bytearray(archive.read_bytes())
+        corrupted[data_offset : data_offset + min(info.compress_size, 8)] = b"\xff" * min(
+            info.compress_size, 8
+        )
+    malformed = tmp_path / "malformed.zip"
+    malformed.write_bytes(corrupted)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(malformed), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert not (selected / ".aibench").exists()
+
+
+def test_workspace_restore_bounds_catalog_rows_before_materializing_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    workspace = Workspace.at(source)
+    database = Database.open_workspace(workspace)
+    storage = Storage(database)
+    artifacts = ArtifactStore(workspace.artifacts_dir)
+    for payload in (b"first catalog object", b"second catalog object"):
+        reference = artifacts.write_bytes(payload, mime_type="text/plain")
+        commit_verified_artifact(artifacts, storage, reference)
+    database.close()
+
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    monkeypatch.setattr(workspace_backup, "_MAX_CATALOG_ROWS", 1)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "too many artifact records" in json.loads(result.stdout)["message"]
+    assert not (selected / ".aibench").exists()
+
+
+def test_workspace_restore_rejects_copied_database_swapped_after_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    alternate_database = tmp_path / "copied-valid-database.db"
+    real_extract = workspace_backup._extract_verified_files
+
+    def replace_with_copied_database(*args: object, **kwargs: object) -> None:
+        payload = args[3]
+        assert isinstance(payload, Path)
+        real_extract(*args, **kwargs)
+        staged_database = payload / "aibench.db"
+        shutil.copyfile(staged_database, alternate_database)
+        connection = sqlite3.connect(alternate_database)
+        (version, applied_at) = connection.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version LIMIT 1"
+        ).fetchone()
+        replacement_timestamp = "9" * len(applied_at)
+        assert replacement_timestamp != applied_at
+        connection.execute(
+            "UPDATE schema_migrations SET applied_at = ? WHERE version = ?",
+            (replacement_timestamp, version),
+        )
+        connection.commit()
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        connection.close()
+        assert alternate_database.stat().st_size == staged_database.stat().st_size
+        assert workspace_backup._hash_file(alternate_database) != workspace_backup._hash_file(
+            staged_database
+        )
+        shutil.copyfile(alternate_database, staged_database)
+
+    monkeypatch.setattr(workspace_backup, "_extract_verified_files", replace_with_copied_database)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "does not match its archive manifest" in json.loads(result.stdout)["message"]
+    assert not (selected / ".aibench").exists()
+
+
+def _workspace_payload_with_artifact(tmp_path: Path) -> Workspace:
+    payload = tmp_path / "payload"
+    workspace = Workspace(root=payload)
+    database = Database.open_workspace(workspace)
+    storage = Storage(database)
+    artifacts = ArtifactStore(workspace.artifacts_dir)
+    reference = artifacts.write_bytes(b"catalog value", mime_type="text/plain")
+    commit_verified_artifact(artifacts, storage, reference)
+    database.close()
+    return workspace
+
+
+def test_workspace_restore_rejects_oversized_catalog_field_before_fetching_rows(
+    tmp_path: Path,
+) -> None:
+    from aibench.storage import workspace_backup
+
+    workspace = _workspace_payload_with_artifact(tmp_path)
+    connection = sqlite3.connect(workspace.db_path)
+    connection.execute("UPDATE artifacts SET uri = ?", ("x" * (300 * 1024),))
+    connection.commit()
+    connection.close()
+
+    expected_size, expected_sha256 = workspace_backup._hash_file(workspace.db_path)
+    with pytest.raises(ValidationError, match="invalid or oversized artifact metadata"):
+        workspace_backup._relocate_and_verify_database(
+            workspace.root,
+            tmp_path / "restored",
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
+
+
+def test_workspace_restore_rejects_non_text_catalog_digest_without_traceback(
+    tmp_path: Path,
+) -> None:
+    from aibench.storage import workspace_backup
+
+    workspace = _workspace_payload_with_artifact(tmp_path)
+    connection = sqlite3.connect(workspace.db_path)
+    connection.execute("UPDATE artifacts SET digest = ?", (sqlite3.Binary(b"sha256:bad"),))
+    connection.commit()
+    connection.close()
+
+    expected_size, expected_sha256 = workspace_backup._hash_file(workspace.db_path)
+    with pytest.raises(ValidationError, match="invalid or oversized artifact metadata"):
+        workspace_backup._relocate_and_verify_database(
+            workspace.root,
+            tmp_path / "restored",
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
+
+
+def test_windows_restore_pins_project_ancestors(tmp_path: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows directory handles protect against ancestor replacement")
+    from aibench.storage import workspace_backup
+
+    parent = tmp_path / "selected-parent"
+    root = parent / "project"
+    root.mkdir(parents=True)
+    info = root.stat()
+    moved = tmp_path / "moved-parent"
+
+    with (
+        workspace_backup._pin_project_root(root, (info.st_dev, info.st_ino)),
+        pytest.raises(OSError),
+    ):
+        parent.rename(moved)
+
+    assert parent.is_dir()
+    assert not moved.exists()
+
+
+def test_windows_restore_rejects_stage_replacement_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows stage identity is checked against its opened directory handle")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    displaced = tmp_path / "displaced-restore-stage"
+    marker: Path | None = None
+    real_open = workspace_backup._open_windows_directory_fd
+
+    def replace_before_open(path: Path, **kwargs: object) -> int:
+        nonlocal marker
+        if path.name.startswith(".aibench-restore-"):
+            path.rename(displaced)
+            path.mkdir()
+            marker = path / "unrelated.txt"
+            marker.write_text("preserve this", encoding="utf-8")
+            return real_open(path, **kwargs)
+        return real_open(path, **kwargs)
+
+    monkeypatch.setattr(workspace_backup, "_open_windows_directory_fd", replace_before_open)
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "changed while it was opened" in json.loads(result.stdout)["message"]
+    assert not (selected / ".aibench").exists()
+    assert marker is not None
+    assert marker.read_text(encoding="utf-8") == "preserve this"
+    assert displaced.is_dir()
+
+
+def test_windows_restore_pins_staging_child_through_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows directory handles protect staging entries during publication")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    moved = tmp_path / "attacker-selected-payload"
+    real_publish = workspace_backup._publish_directory
+
+    def replace_before_publish(*args: object, **kwargs: object) -> None:
+        source_path = args[0]
+        assert isinstance(source_path, Path)
+        with pytest.raises(OSError):
+            source_path.rename(moved)
+        assert not moved.exists()
+        real_publish(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_backup, "_publish_directory", replace_before_publish)
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (selected / ".aibench" / "aibench.db").is_file()
+    assert not moved.exists()
+
+
+def test_windows_restore_cleanup_keeps_the_pinned_stage_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows cleanup uses handle-relative deletion")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    real_extract = workspace_backup._extract_verified_files
+    real_cleanup = workspace_backup._cleanup_windows_restore_stage
+    moved = tmp_path / "attacker-stage"
+
+    def fail_after_extract(*args: object, **kwargs: object) -> None:
+        real_extract(*args, **kwargs)
+        raise ValidationError("force restore cleanup")
+
+    def check_stage_pin(
+        stage: Path | None,
+        stage_fd: int | None,
+        payload: Path | None,
+        payload_fd: int | None,
+        *,
+        published: bool,
+    ) -> None:
+        assert stage is not None
+        with pytest.raises(OSError):
+            stage.rename(moved)
+        real_cleanup(stage, stage_fd, payload, payload_fd, published=published)
+
+    monkeypatch.setattr(workspace_backup, "_extract_verified_files", fail_after_extract)
+    monkeypatch.setattr(workspace_backup, "_cleanup_windows_restore_stage", check_stage_pin)
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(selected), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "force restore cleanup" in json.loads(result.stdout)["message"]
+    assert not moved.exists()
+    assert not list(selected.glob(".aibench-restore-*"))
+
+
+def test_project_root_resolution_rejects_a_symlink_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("Windows root handles prevent renaming during path resolution")
+    from aibench.storage import workspace_backup
+
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    displaced = tmp_path / "displaced-selected"
+    original_resolve = Path.resolve
+
+    def swap_during_resolution(path: Path, *, strict: bool = False) -> Path:
+        if path == selected:
+            selected.rename(displaced)
+            selected.symlink_to(outside, target_is_directory=True)
+            try:
+                resolved = original_resolve(path, strict=strict)
+            finally:
+                selected.unlink()
+                displaced.rename(selected)
+            return resolved
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", swap_during_resolution)
+
+    with pytest.raises(ValidationError, match="changed while it was being resolved"):
+        workspace_backup._project_root(selected)
+
+    assert selected.is_dir()
+    assert not selected.is_symlink()
+
+
+def test_workspace_backup_refuses_existing_or_inside_destination(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    database = Database.open_workspace(Workspace.at(project))
+    database.close()
+    inside = project / ".aibench" / "backup.zip"
+    existing = tmp_path / "existing.zip"
+    existing.write_bytes(b"keep")
+
+    inside_result = cli.invoke(
+        app,
+        ["workspace", "backup", str(inside), "--workspace", str(project), "--json"],
+    )
+    existing_result = cli.invoke(
+        app,
+        ["workspace", "backup", str(existing), "--workspace", str(project), "--json"],
+    )
+
+    assert inside_result.exit_code == 2, inside_result.output
+    assert json.loads(inside_result.stdout)["status"] == "error"
+    assert existing_result.exit_code == 2, existing_result.output
+    assert json.loads(existing_result.stdout)["status"] == "error"
+    assert not inside.exists()
+    assert existing.read_bytes() == b"keep"
+
+
+def test_workspace_restore_never_replaces_existing_workspace(tmp_path: Path) -> None:
+    archive = tmp_path / "invalid.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "format": "aibench-workspace-backup",
+                    "format_version": 1,
+                    "files": [],
+                }
+            ),
+        )
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    marker = workspace.root / "keep.txt"
+    marker.write_text("preserve", encoding="utf-8")
+
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(project), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert marker.read_text(encoding="utf-8") == "preserve"
+
+
+def test_workspace_restore_rejects_traversal_before_creating_workspace(tmp_path: Path) -> None:
+    archive = tmp_path / "traversal.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "format": "aibench-workspace-backup",
+                    "format_version": 1,
+                    "files": [
+                        {
+                            "path": "workspace/../outside.txt",
+                            "size_bytes": 0,
+                            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                        }
+                    ],
+                }
+            ),
+        )
+        zipped.writestr("workspace/../outside.txt", b"")
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(archive), "--workspace", str(project), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert not (project / ".aibench").exists()
+    assert not (tmp_path / "outside.txt").exists()
+
+
+def test_workspace_restore_rejects_tampered_payload_without_publishing(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    workspace = Workspace.at(source)
+    database = Database.open_workspace(workspace)
+    database.close()
+    (workspace.root / "notes.txt").write_text("original", encoding="utf-8")
+    archive = tmp_path / "backup.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    tampered = tmp_path / "tampered.zip"
+    with zipfile.ZipFile(archive, "r") as original, zipfile.ZipFile(tampered, "w") as altered:
+        for info in original.infolist():
+            data = original.read(info.filename)
+            if info.filename == "workspace/notes.txt":
+                data = b"changed"
+            altered.writestr(info.filename, data)
+    target = tmp_path / "target"
+    target.mkdir()
+
+    result = cli.invoke(
+        app,
+        ["workspace", "restore", str(tampered), "--workspace", str(target), "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert not (target / ".aibench").exists()
+
+
+def test_workspace_backup_requires_an_existing_workspace(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = cli.invoke(
+        app,
+        [
+            "workspace",
+            "backup",
+            str(tmp_path / "backup.zip"),
+            "--workspace",
+            str(project),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert not (project / ".aibench").exists()
+    assert not (tmp_path / "backup.zip").exists()
