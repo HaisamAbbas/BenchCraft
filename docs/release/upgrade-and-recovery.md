@@ -146,6 +146,34 @@ directories are created with owner-only permissions. Archives support up to one 
 and 1 TiB of uncompressed data. Manual copies must be made while **no aibench process is using the
 workspace** and must include `aibench.db`, `aibench.db-wal`, and `aibench.db-shm` together.
 
+Check a workspace without changing it:
+
+```console
+aibench workspace check --workspace .
+aibench workspace check --workspace . --json
+```
+
+The check validates SQLite integrity and references to artifact objects, session plans, and
+dataset-suite snapshots. It exits 0 when healthy, 1 when it finds data-integrity issues, and 2 if
+it cannot safely inspect the workspace. JSON output keeps these exit codes, so CI can fail on
+detected corruption.
+
+Recover a workspace from a verified backup with a preview first:
+
+```console
+aibench workspace repair ../workspace-backup.zip --workspace .
+aibench workspace repair ../workspace-backup.zip --workspace . --apply
+```
+
+Repair validates the backup by restoring it into a private workspace and running the integrity
+checks before it changes the selected workspace. Without `--apply`, it reports the verified
+backup and leaves the workspace untouched. With `--apply`, it retains the existing `.aibench/`
+directory as `.aibench-recovery-*`, publishes the verified restore, and checks it again. If the
+published workspace fails its final check, repair moves it aside and restores the retained
+workspace. The operation needs temporary disk space for a private archive copy and a full staged
+restore alongside the existing workspace. Stop all BenchCraft processes that use the workspace
+before applying repair; open database handles can prevent the directory swap.
+
 ### Moving one completed run to another workspace
 
 Run bundles move one terminal run and its database dependencies and artifact bytes. They do not

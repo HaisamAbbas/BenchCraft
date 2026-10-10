@@ -25,6 +25,7 @@ referenced in the DB or written too recently to safely assume it is orphaned.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import re
@@ -397,6 +398,84 @@ class ArtifactStore:
             )
         return data
 
+    def verify_ref_integrity(self, ref: ArtifactRef) -> None:
+        """Verify a stored artifact without retaining up to 200 MB of payload in memory."""
+        self._resolve_and_validate_uri(ref.uri)
+        canonical_path = self._path_for_digest(ref.digest)
+        if os.path.normcase(os.path.abspath(ref.uri)) != os.path.normcase(
+            os.path.abspath(canonical_path)
+        ):
+            raise ValidationError("artifact uri does not match its content-addressed digest path")
+        _require_real_directory(self.artifacts_dir, "artifact store")
+        try:
+            shard_metadata = canonical_path.parent.lstat()
+        except FileNotFoundError as exc:
+            raise ValidationError(f"artifact file missing: {canonical_path}") from exc
+        if _is_reparse_or_symlink(canonical_path.parent, shard_metadata) or not stat.S_ISDIR(
+            shard_metadata.st_mode
+        ):
+            raise ValidationError("artifact shard must be a real directory, not a link or file")
+        try:
+            expected = canonical_path.lstat()
+        except FileNotFoundError as exc:
+            raise ValidationError(f"artifact file missing: {canonical_path}") from exc
+        if (
+            _is_reparse_or_symlink(canonical_path, expected)
+            or not stat.S_ISREG(expected.st_mode)
+            or expected.st_nlink != 1
+        ):
+            raise ValidationError("artifact object path must be a private regular file")
+        if expected.st_size != ref.size_bytes:
+            raise ValidationError(
+                f"artifact {ref.artifact_id!r} size mismatch: ref says {ref.size_bytes}, "
+                f"file is {expected.st_size} bytes"
+            )
+        if ref.size_bytes > self.max_bytes:
+            raise ValidationError("artifact exceeds the supported size")
+
+        try:
+            descriptor = _open_artifact_for_integrity_check(canonical_path)
+        except OSError as exc:
+            raise ValidationError(f"could not safely open artifact {ref.artifact_id!r}") from exc
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                _is_reparse_or_symlink(canonical_path, opened)
+                or not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or not _same_file_identity(expected, opened)
+                or opened.st_size != ref.size_bytes
+            ):
+                raise ValidationError(f"artifact {ref.artifact_id!r} changed while being checked")
+            hasher = hashlib.sha256()
+            total_bytes = 0
+            with _lock_artifact_for_integrity_check(descriptor, ref.size_bytes):
+                while block := os.read(descriptor, 1024 * 1024):
+                    total_bytes += len(block)
+                    if total_bytes > ref.size_bytes:
+                        raise ValidationError(
+                            f"artifact {ref.artifact_id!r} grew while being checked"
+                        )
+                    hasher.update(block)
+            final = os.fstat(descriptor)
+            current_path = canonical_path.lstat()
+            if (
+                not _same_file_integrity_state(opened, final)
+                or total_bytes != ref.size_bytes
+                or _is_reparse_or_symlink(canonical_path, current_path)
+                or not _same_file_integrity_state(final, current_path)
+            ):
+                raise ValidationError(f"artifact {ref.artifact_id!r} changed while being checked")
+        finally:
+            os.close(descriptor)
+
+        actual_digest = f"sha256:{hasher.hexdigest()}"
+        if actual_digest != ref.digest:
+            raise ValidationError(
+                f"artifact {ref.artifact_id!r} digest mismatch: ref says {ref.digest}, "
+                f"file hashes to {actual_digest}"
+            )
+
     def read_bytes(self, ref: ArtifactRef) -> bytes:
         """Verified read: never trusts `ref.uri` blindly (see `verify_ref`)."""
         return self.verify_ref(ref)
@@ -552,6 +631,115 @@ class ArtifactStore:
             bytes_reclaimable,
             bytes_removed,
         )
+
+
+def _open_artifact_for_integrity_check(path: Path) -> int:
+    """Open without following links; on Windows, deny new write/delete handles while reading."""
+    if os.name != "nt":
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        return os.open(path, flags)
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+    handle = create_file(
+        str(path),
+        0x80000000,  # GENERIC_READ
+        0x00000001,  # FILE_SHARE_READ: disallow concurrent writes and renames.
+        None,
+        3,  # OPEN_EXISTING
+        0x00200000 | 0x08000000,  # OPEN_REPARSE_POINT | SEQUENTIAL_SCAN
+        None,
+    )
+    if handle in (None, ctypes.c_void_p(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = msvcrt.open_osfhandle(int(handle), os.O_RDONLY | os.O_BINARY)
+        handle = None
+        return descriptor
+    finally:
+        if handle is not None:
+            close_handle(handle)
+
+
+@contextmanager
+def _lock_artifact_for_integrity_check(descriptor: int, size_bytes: int) -> Iterator[None]:
+    """Hold a stable read lock for the artifact digest pass."""
+    if os.name == "nt":
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        class Overlapped(ctypes.Structure):
+            _fields_ = [
+                ("internal", ctypes.c_void_p),
+                ("internal_high", ctypes.c_void_p),
+                ("offset", wintypes.DWORD),
+                ("offset_high", wintypes.DWORD),
+                ("event", wintypes.HANDLE),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        lock_file = kernel32.LockFileEx
+        lock_file.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(Overlapped),
+        ]
+        lock_file.restype = wintypes.BOOL
+        unlock_file = kernel32.UnlockFileEx
+        unlock_file.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(Overlapped),
+        ]
+        unlock_file.restype = wintypes.BOOL
+        overlap = Overlapped()
+        lock_length = max(size_bytes, 1)
+        handle = msvcrt.get_osfhandle(descriptor)
+        if not lock_file(handle, 0x00000003, 0, lock_length, 0, ctypes.byref(overlap)):
+            raise ValidationError("artifact is being modified and cannot be locked for checking")
+        try:
+            yield
+        finally:
+            if not unlock_file(handle, 0, lock_length, 0, ctypes.byref(overlap)):
+                raise ctypes.WinError(ctypes.get_last_error())
+        return
+
+    import fcntl
+
+    fcntl_api: Any = fcntl
+    try:
+        fcntl_api.flock(descriptor, fcntl_api.LOCK_SH | fcntl_api.LOCK_NB)
+    except OSError as exc:
+        raise ValidationError(
+            "artifact is being modified and cannot be locked for checking"
+        ) from exc
+    try:
+        yield
+    finally:
+        fcntl_api.flock(descriptor, fcntl_api.LOCK_UN)
 
 
 def _is_reparse_or_symlink(path: Path, metadata: os.stat_result) -> bool:
@@ -992,6 +1180,13 @@ def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
         and left.st_ino == right.st_ino
         and left.st_size == right.st_size
         and left.st_mtime_ns == right.st_mtime_ns
+    )
+
+
+def _same_file_integrity_state(left: os.stat_result, right: os.stat_result) -> bool:
+    """Compare write-sensitive metadata; POSIX ctime cannot be restored by os.utime."""
+    return _same_file_identity(left, right) and (
+        os.name == "nt" or left.st_ctime_ns == right.st_ctime_ns
     )
 
 

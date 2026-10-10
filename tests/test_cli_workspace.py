@@ -523,6 +523,274 @@ def test_workspace_backup_restores_database_artifacts_and_auxiliary_files(
     assert not (restored_workspace.artifacts_dir / orphan_hex[:2] / orphan_hex).exists()
 
 
+def test_workspace_repair_previews_then_recovers_and_retains_previous_workspace(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    source_workspace = Workspace.at(source)
+    source_database = Database.open_workspace(source_workspace)
+    source_store = ArtifactStore(source_workspace.artifacts_dir)
+    reference = source_store.write_bytes(b"verified recovery", mime_type="text/plain")
+    commit_verified_artifact(source_store, Storage(source_database), reference)
+    source_database.close()
+    archive = tmp_path / "backup.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    project = tmp_path / "project"
+    project.mkdir()
+    previous_workspace = Workspace.at(project)
+    previous_database = Database.open_workspace(previous_workspace)
+    previous_database.close()
+    previous_marker = previous_workspace.root / "operator-note.txt"
+    previous_marker.write_text("preserve this workspace", encoding="utf-8")
+
+    preview = cli.invoke(
+        app,
+        ["workspace", "repair", str(archive), "--workspace", str(project), "--json"],
+    )
+
+    assert preview.exit_code == 0, preview.output
+    preview_payload = json.loads(preview.stdout)
+    assert preview_payload["mode"] == "dry_run"
+    assert preview_payload["verified"] is True
+    assert preview_payload["existing_workspace"] == "will_be_retained"
+    assert previous_marker.read_text(encoding="utf-8") == "preserve this workspace"
+    assert not list(project.glob(".aibench-repair-*"))
+
+    applied = cli.invoke(
+        app,
+        [
+            "workspace",
+            "repair",
+            str(archive),
+            "--workspace",
+            str(project),
+            "--apply",
+            "--json",
+        ],
+    )
+
+    assert applied.exit_code == 0, applied.output
+    applied_payload = json.loads(applied.stdout)
+    assert applied_payload["mode"] == "applied"
+    assert applied_payload["existing_workspace"] == "replaced_and_retained"
+    retained = Path(applied_payload["retained_workspace"])
+    assert retained == project / retained.name
+    assert (retained / "operator-note.txt").read_text(encoding="utf-8") == (
+        "preserve this workspace"
+    )
+    from aibench.storage.workspace_integrity import check_workspace
+
+    assert check_workspace(project)["ok"] is True
+    restored_database = Database.open_workspace(Workspace.at(project))
+    try:
+        restored_ref = Storage(restored_database).get_artifact(reference.artifact_id)
+        assert restored_ref is not None
+        assert Path(restored_ref.uri).is_relative_to(Workspace.at(project).artifacts_dir)
+        assert (
+            ArtifactStore(Workspace.at(project).artifacts_dir, create=False).read_bytes(
+                restored_ref
+            )
+            == b"verified recovery"
+        )
+    finally:
+        restored_database.close()
+    assert not list(project.glob(".aibench-repair-*"))
+
+
+def test_workspace_repair_rejects_an_unverified_backup_without_changing_workspace(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    marker = workspace.root / "keep.txt"
+    marker.write_text("original", encoding="utf-8")
+    archive = tmp_path / "invalid.zip"
+    archive.write_bytes(b"not a workspace backup")
+
+    result = cli.invoke(
+        app,
+        [
+            "workspace",
+            "repair",
+            str(archive),
+            "--workspace",
+            str(project),
+            "--apply",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert marker.read_text(encoding="utf-8") == "original"
+    assert workspace.db_path.is_file()
+    assert not list(project.glob(".aibench-recovery-*"))
+
+
+def test_workspace_repair_rolls_back_if_the_published_workspace_fails_its_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    source_database = Database.open_workspace(Workspace.at(source))
+    source_database.close()
+    archive = tmp_path / "backup.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    marker = workspace.root / "keep.txt"
+    marker.write_text("original", encoding="utf-8")
+
+    from aibench.storage import workspace_integrity
+
+    real_check = workspace_integrity.check_workspace
+    checks = 0
+
+    def fail_final_check(root: Path) -> dict[str, object]:
+        nonlocal checks
+        checks += 1
+        report = real_check(root)
+        if checks == 2:
+            return {**report, "ok": False, "issue_count": 1}
+        return report
+
+    monkeypatch.setattr(workspace_integrity, "check_workspace", fail_final_check)
+    result = cli.invoke(
+        app,
+        [
+            "workspace",
+            "repair",
+            str(archive),
+            "--workspace",
+            str(project),
+            "--apply",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "failed its final integrity check" in json.loads(result.stdout)["message"]
+    assert marker.read_text(encoding="utf-8") == "original"
+    assert workspace.db_path.is_file()
+    assert list(project.glob(".aibench-repair-rejected-*"))
+
+
+def test_workspace_repair_preserves_a_workspace_that_wins_the_publication_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    source_database = Database.open_workspace(Workspace.at(source))
+    source_database.close()
+    archive = tmp_path / "backup.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+
+    project = tmp_path / "project"
+    project.mkdir()
+    old_workspace = Workspace.at(project)
+    old_database = Database.open_workspace(old_workspace)
+    old_database.close()
+    old_marker = old_workspace.root / "owner.txt"
+    old_marker.write_text("original workspace", encoding="utf-8")
+
+    real_restore = workspace_backup.restore_workspace_backup
+    concurrent_marker = project / ".aibench" / "concurrent-owner.txt"
+
+    def race_publication(
+        archive_path: Path,
+        project_root: Path,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        if project_root.resolve() == project.resolve():
+            concurrent_workspace = Workspace.at(project)
+            concurrent_database = Database.open_workspace(concurrent_workspace)
+            concurrent_database.close()
+            concurrent_marker.write_text("concurrent workspace", encoding="utf-8")
+        return real_restore(archive_path, project_root, **kwargs)
+
+    monkeypatch.setattr(workspace_backup, "restore_workspace_backup", race_publication)
+    result = cli.invoke(
+        app,
+        [
+            "workspace",
+            "repair",
+            str(archive),
+            "--workspace",
+            str(project),
+            "--apply",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    message = json.loads(result.stdout)["message"]
+    assert "automatic rollback was incomplete" in message
+    retained = next(project.glob(".aibench-recovery-*"))
+    assert str(retained) in message
+    assert (retained / "owner.txt").read_text(encoding="utf-8") == "original workspace"
+    assert concurrent_marker.read_text(encoding="utf-8") == "concurrent workspace"
+    assert not list(project.glob(".aibench-repair-rejected-*"))
+
+
+def test_workspace_repair_can_recover_an_absent_workspace(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    database = Database.open_workspace(Workspace.at(source))
+    database.close()
+    archive = tmp_path / "backup.zip"
+    backup = cli.invoke(
+        app,
+        ["workspace", "backup", str(archive), "--workspace", str(source), "--json"],
+    )
+    assert backup.exit_code == 0, backup.output
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = cli.invoke(
+        app,
+        [
+            "workspace",
+            "repair",
+            str(archive),
+            "--workspace",
+            str(project),
+            "--apply",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "applied"
+    assert payload["existing_workspace"] == "absent"
+    assert payload["retained_workspace"] is None
+    assert (project / ".aibench" / "aibench.db").is_file()
+    assert not list(project.glob(".aibench-repair-*"))
+
+
 def test_workspace_backup_rejects_casefolded_sqlite_sidecar_alias(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()

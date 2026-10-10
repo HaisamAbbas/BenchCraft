@@ -15,6 +15,9 @@ from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database
 from aibench.storage.repositories import Storage
 
+_PROCESS_START_TIMEOUT_SECONDS = 15
+_PROCESS_RELEASE_TIMEOUT_SECONDS = 30
+
 
 def _artifact_lock_worker(
     artifacts_dir: str,
@@ -28,7 +31,7 @@ def _artifact_lock_worker(
     attempted.set()
     with _artifact_digest_lock(Path(artifacts_dir), digest):
         acquired.set()
-        if release is not None and not release.wait(10):
+        if release is not None and not release.wait(_PROCESS_RELEASE_TIMEOUT_SECONDS):
             raise TimeoutError("test process was not released from artifact digest lock")
 
 
@@ -110,13 +113,15 @@ def test_artifact_digest_bucket_lock_serializes_processes(store: ArtifactStore) 
 
     first.start()
     try:
-        assert first_attempted.wait(5)
-        assert first_acquired.wait(5)
+        # Spawned Windows interpreters can take longer than a few seconds to import pytest's
+        # module graph; keep startup time separate from the lock assertions below.
+        assert first_attempted.wait(_PROCESS_START_TIMEOUT_SECONDS)
+        assert first_acquired.wait(_PROCESS_START_TIMEOUT_SECONDS)
         second.start()
-        assert second_attempted.wait(5)
+        assert second_attempted.wait(_PROCESS_START_TIMEOUT_SECONDS)
         assert not second_acquired.wait(0.25)
         release_first.set()
-        assert second_acquired.wait(5)
+        assert second_acquired.wait(_PROCESS_START_TIMEOUT_SECONDS)
     finally:
         release_first.set()
         first.join(5)
@@ -153,8 +158,8 @@ def test_gc_waits_for_the_writer_lock_before_removing_a_stale_temp(store: Artifa
     )
     writer.start()
     try:
-        assert attempted.wait(5)
-        assert acquired.wait(5)
+        assert attempted.wait(_PROCESS_START_TIMEOUT_SECONDS)
+        assert acquired.wait(_PROCESS_START_TIMEOUT_SECONDS)
         with ThreadPoolExecutor(max_workers=1) as pool:
             cleanup = pool.submit(store.garbage_collect, set(), grace_seconds=3600)
             assert not cleanup.done()  # GC saw the stale temp but must wait for its writer.
@@ -233,6 +238,75 @@ def test_read_bytes_detects_a_tampered_file(store) -> None:
     Path(ref.uri).write_bytes(tampered)
     with pytest.raises(ValidationError, match="digest mismatch"):
         store.read_bytes(ref)
+
+
+def test_verify_ref_integrity_streams_and_rejects_tampered_content(store, monkeypatch) -> None:
+    ref = store.write_bytes(b"original content", mime_type="text/plain")
+
+    def read_all(_path: Path) -> bytes:
+        raise AssertionError("integrity checks must not buffer the artifact payload")
+
+    monkeypatch.setattr(Path, "read_bytes", read_all)
+    store.verify_ref_integrity(ref)
+
+    Path(ref.uri).write_bytes(b"tampered-content")
+    with pytest.raises(ValidationError, match="digest mismatch"):
+        store.verify_ref_integrity(ref)
+
+
+def test_verify_ref_integrity_blocks_concurrent_windows_rewrite(store, monkeypatch) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows sharing and byte-range locks are platform-specific")
+    from aibench.storage import artifacts as artifacts_module
+
+    payload = b"original content"
+    ref = store.write_bytes(payload, mime_type="text/plain")
+    real_read = os.read
+    write_attempts: list[str] = []
+
+    def rewrite_after_read(descriptor: int, size: int) -> bytes:
+        block = real_read(descriptor, size)
+        if block and not write_attempts:
+            try:
+                Path(ref.uri).write_bytes(b"tampered-content")
+            except OSError:
+                write_attempts.append("blocked")
+            else:
+                write_attempts.append("unexpectedly wrote")
+        return block
+
+    monkeypatch.setattr(artifacts_module.os, "read", rewrite_after_read)
+    store.verify_ref_integrity(ref)
+
+    assert write_attempts == ["blocked"]
+    assert Path(ref.uri).read_bytes() == payload
+
+
+def test_verify_ref_integrity_detects_posix_rewrite_with_restored_mtime(store, monkeypatch) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX change-time detection is platform-specific")
+    from aibench.storage import artifacts as artifacts_module
+
+    payload = b"original content"
+    ref = store.write_bytes(payload, mime_type="text/plain")
+    real_read = os.read
+    rewritten = False
+
+    def rewrite_after_read(descriptor: int, size: int) -> bytes:
+        nonlocal rewritten
+        block = real_read(descriptor, size)
+        if block and not rewritten:
+            path = Path(ref.uri)
+            metadata = path.stat()
+            path.write_bytes(b"tampered-content")
+            os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+            rewritten = True
+        return block
+
+    monkeypatch.setattr(artifacts_module.os, "read", rewrite_after_read)
+    with pytest.raises(ValidationError, match="changed while being checked"):
+        store.verify_ref_integrity(ref)
+    assert rewritten
 
 
 def test_verify_ref_rejects_a_missing_file(store) -> None:

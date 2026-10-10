@@ -128,7 +128,12 @@ def create_workspace_backup(project_root: Path, destination: Path) -> dict[str, 
         raise ValidationError(f"could not create workspace backup: {exc}") from exc
 
 
-def restore_workspace_backup(archive_path: Path, project_root: Path) -> dict[str, Any]:
+def restore_workspace_backup(
+    archive_path: Path,
+    project_root: Path,
+    *,
+    _publication_identity: list[tuple[int, int]] | None = None,
+) -> dict[str, Any]:
     """Restore a validated backup into an absent `.aibench/` directory."""
     archive = _regular_file(archive_path, "backup archive")
     root, root_identity = _project_root(project_root)
@@ -246,6 +251,11 @@ def restore_workspace_backup(archive_path: Path, project_root: Path) -> dict[str
                         extraction_fds.clear()
                     else:
                         _verify_pinned_payload(stage_fd, payload_fd)
+                    if _publication_identity is not None:
+                        if payload_fd is None:
+                            raise ValidationError("restored workspace could not be pinned")
+                        payload_info = os.fstat(payload_fd)
+                        _publication_identity.append((payload_info.st_dev, payload_info.st_ino))
                     _publish_directory(
                         payload,
                         target,
@@ -315,6 +325,315 @@ def restore_workspace_backup(archive_path: Path, project_root: Path) -> dict[str
         "total_bytes": sum(item["size_bytes"] for item in manifest["files"]),
         "format_version": _FORMAT_VERSION,
     }
+
+
+def repair_workspace_from_backup(
+    archive_path: Path, project_root: Path, *, apply: bool = False
+) -> dict[str, Any]:
+    """Verify a backup, then optionally publish it while retaining the old workspace."""
+    archive = _regular_file(archive_path, "backup archive")
+    root, root_identity = _project_root(project_root)
+    with _pin_project_root(root, root_identity):
+        return _repair_workspace_from_backup_pinned(archive, root, root_identity, apply=apply)
+
+
+def _repair_workspace_from_backup_pinned(
+    archive: Path, root: Path, root_identity: tuple[int, int], *, apply: bool
+) -> dict[str, Any]:
+    workspace_path = root / ".aibench"
+    if _is_inside(archive.resolve(strict=True), workspace_path):
+        raise ValidationError("repair backup must be outside the .aibench workspace")
+
+    with tempfile.TemporaryDirectory(prefix=".aibench-repair-", dir=root) as temporary:
+        temporary_root = Path(temporary)
+        private_archive = temporary_root / "verified-backup.zip"
+        _snapshot_repair_archive(archive, private_archive)
+        preview_root = temporary_root / "preview"
+        preview_root.mkdir()
+        preview = restore_workspace_backup(private_archive, preview_root)
+        from aibench.storage.workspace_integrity import check_workspace
+
+        preview_check = check_workspace(preview_root)
+        if not preview_check["ok"]:
+            raise ValidationError(
+                "verified backup does not pass workspace integrity checks "
+                f"({preview_check['issue_count']} issue(s))"
+            )
+
+        payload: dict[str, Any] = {
+            "mode": "dry_run",
+            "workspace": str(workspace_path),
+            "backup": _repair_backup_summary(preview),
+            "verified": True,
+            "checks": preview_check["checks"],
+            "existing_workspace": "absent",
+            "retained_workspace": None,
+        }
+        if not apply:
+            try:
+                current = workspace_path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if _is_link(current) or not stat.S_ISDIR(current.st_mode):
+                    raise ValidationError("workspace .aibench path must be a real directory")
+                payload["existing_workspace"] = "will_be_retained"
+            return payload
+
+        _verify_project_root(root, root_identity)
+        current_metadata: os.stat_result | None
+        try:
+            current_metadata = workspace_path.lstat()
+        except FileNotFoundError:
+            current_metadata = None
+        if current_metadata is not None and (
+            _is_link(current_metadata) or not stat.S_ISDIR(current_metadata.st_mode)
+        ):
+            raise ValidationError("workspace .aibench path must be a real directory")
+        shutil.rmtree(preview_root)
+
+        token = secrets.token_hex(8)
+        retained_name = f".aibench-recovery-{token}"
+        rejected_name = f".aibench-repair-rejected-{token}"
+        retained_path = root / retained_name
+        moved_original = False
+        publication_identity: list[tuple[int, int]] = []
+        try:
+            with _pin_project_root(root, root_identity) as root_fd:
+                if current_metadata is not None:
+                    try:
+                        _move_workspace_directory(
+                            root,
+                            root_fd,
+                            ".aibench",
+                            retained_name,
+                            expected=(current_metadata.st_dev, current_metadata.st_ino),
+                        )
+                    except (OSError, ValidationError):
+                        try:
+                            retained_metadata = retained_path.lstat()
+                        except FileNotFoundError:
+                            pass
+                        else:
+                            moved_original = (
+                                retained_metadata.st_dev,
+                                retained_metadata.st_ino,
+                            ) == (
+                                current_metadata.st_dev,
+                                current_metadata.st_ino,
+                            )
+                        raise
+                    moved_original = True
+                _verify_project_root(root, root_identity)
+                restore_workspace_backup(
+                    private_archive, root, _publication_identity=publication_identity
+                )
+                if not publication_identity:
+                    raise ValidationError("restored workspace publication was not verified")
+                expected_replacement = publication_identity[-1]
+                final_check = check_workspace(root)
+                if not final_check["ok"]:
+                    raise ValidationError(
+                        "restored workspace failed its final integrity check "
+                        f"({final_check['issue_count']} issue(s))"
+                    )
+                _verify_repair_workspace_identity(root, expected_replacement)
+        except BaseException as exc:
+            rollback_error: OSError | ValidationError | None = None
+            try:
+                with _pin_project_root(root, root_identity) as rollback_root_fd:
+                    if publication_identity:
+                        try:
+                            actual = (root / ".aibench").lstat()
+                        except FileNotFoundError:
+                            pass
+                        else:
+                            expected_replacement = publication_identity[-1]
+                            if (actual.st_dev, actual.st_ino) == expected_replacement:
+                                _move_workspace_directory(
+                                    root,
+                                    rollback_root_fd,
+                                    ".aibench",
+                                    rejected_name,
+                                    expected=expected_replacement,
+                                )
+                    if moved_original:
+                        _move_workspace_directory(
+                            root,
+                            rollback_root_fd,
+                            retained_name,
+                            ".aibench",
+                        )
+            except (OSError, ValidationError) as rollback_exc:
+                rollback_error = rollback_exc
+            if rollback_error is not None:
+                raise ValidationError(
+                    "workspace repair failed and automatic rollback was incomplete; "
+                    f"preserved data is at {retained_path}: {rollback_error}"
+                ) from exc
+            raise
+
+        payload.update(
+            {
+                "mode": "applied",
+                "existing_workspace": "replaced_and_retained" if moved_original else "absent",
+                "retained_workspace": str(retained_path) if moved_original else None,
+                "checks": final_check["checks"],
+            }
+        )
+        return payload
+
+
+def _repair_backup_summary(restore_result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: restore_result[key]
+        for key in ("file_count", "artifact_count", "total_bytes", "format_version")
+    }
+
+
+def _snapshot_repair_archive(source: Path, destination: Path) -> None:
+    """Copy the chosen archive to a private, stable file before preview and publication."""
+    info = source.lstat()
+    if _is_link(info) or not stat.S_ISREG(info.st_mode):
+        raise ValidationError("backup archive must be a regular file, not a link")
+    if info.st_size < 22 or info.st_size > _MAX_ARCHIVE_BYTES:
+        raise ValidationError("backup archive has an unsupported size")
+    try:
+        if os.name == "nt":
+            descriptor = _open_windows_regular_file_fd(source, share_mode=0x01)
+        else:
+            descriptor = os.open(
+                source, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            )
+    except OSError as exc:
+        raise ValidationError(f"could not pin repair backup: {exc}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not _same_regular_file_metadata(info, opened):
+            raise ValidationError("backup archive changed while it was being opened")
+        copied = 0
+        try:
+            with (
+                os.fdopen(descriptor, "rb", closefd=False) as input_file,
+                destination.open("xb") as output_file,
+            ):
+                _restrict_file_permissions(output_file.fileno())
+                while block := input_file.read(1024 * 1024):
+                    copied += len(block)
+                    if copied > info.st_size:
+                        raise ValidationError("backup archive changed while it was being copied")
+                    output_file.write(block)
+                output_file.flush()
+                os.fsync(output_file.fileno())
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            raise
+        final = os.fstat(descriptor)
+        current = source.lstat()
+        if (
+            copied != info.st_size
+            or not _same_regular_file_metadata(info, final)
+            or not _same_regular_file_metadata(info, current)
+        ):
+            destination.unlink(missing_ok=True)
+            raise ValidationError("backup archive changed while it was being copied")
+    finally:
+        os.close(descriptor)
+
+
+def _same_regular_file_metadata(expected: os.stat_result, actual: os.stat_result) -> bool:
+    same_identity_and_content_metadata = (
+        expected.st_dev,
+        expected.st_ino,
+        expected.st_size,
+        expected.st_mtime_ns,
+    ) == (
+        actual.st_dev,
+        actual.st_ino,
+        actual.st_size,
+        actual.st_mtime_ns,
+    )
+    same_change_time = os.name == "nt" or expected.st_ctime_ns == actual.st_ctime_ns
+    return stat.S_ISREG(actual.st_mode) and same_identity_and_content_metadata and same_change_time
+
+
+def _move_workspace_directory(
+    root: Path,
+    root_fd: int | None,
+    source_name: str,
+    target_name: str,
+    *,
+    expected: tuple[int, int] | None = None,
+) -> None:
+    source = root / source_name
+    target = root / target_name
+    try:
+        source_metadata = source.lstat()
+    except OSError as exc:
+        raise ValidationError(
+            f"could not inspect workspace directory {source_name}: {exc}"
+        ) from exc
+    if _is_link(source_metadata) or not stat.S_ISDIR(source_metadata.st_mode):
+        raise ValidationError(f"workspace path must be a real directory: {source_name}")
+    source_identity = (source_metadata.st_dev, source_metadata.st_ino)
+    if expected is not None and source_identity != expected:
+        raise ValidationError("workspace directory changed before repair publication")
+
+    descriptor: int | None = None
+    try:
+        if os.name == "nt":
+            descriptor = _open_windows_directory_fd(source, desired_access=0x10080)
+        else:
+            if root_fd is None:
+                raise ValidationError("repair cannot pin the project directory")
+            descriptor = os.open(
+                source_name,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=root_fd,
+            )
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode) or (opened.st_dev, opened.st_ino) != source_identity:
+            raise ValidationError("workspace directory changed while repair was opening it")
+        _rename_directory_without_replacement(
+            source,
+            target,
+            root_dir_fd=root_fd if os.name != "nt" else None,
+            source_dir_fd=root_fd if os.name != "nt" else None,
+            source_name=source_name if os.name != "nt" else None,
+            source_fd=descriptor,
+        )
+        try:
+            published = target.lstat()
+        except OSError as exc:
+            raise ValidationError("workspace directory changed during repair publication") from exc
+        if (
+            _is_link(published)
+            or not stat.S_ISDIR(published.st_mode)
+            or (
+                published.st_dev,
+                published.st_ino,
+            )
+            != source_identity
+        ):
+            raise ValidationError("workspace directory changed during repair publication")
+    except FileExistsError as exc:
+        raise ValidationError(f"repair destination already exists: {target}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _verify_repair_workspace_identity(root: Path, expected: tuple[int, int]) -> None:
+    try:
+        current = (root / ".aibench").lstat()
+    except OSError as exc:
+        raise ValidationError("repaired workspace changed after publication") from exc
+    if (
+        _is_link(current)
+        or not stat.S_ISDIR(current.st_mode)
+        or (current.st_dev, current.st_ino) != expected
+    ):
+        raise ValidationError("repaired workspace changed after publication")
 
 
 def _existing_workspace(

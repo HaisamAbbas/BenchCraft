@@ -19,8 +19,10 @@ from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
 from aibench.storage.workspace_backup import (
     create_workspace_backup,
+    repair_workspace_from_backup,
     restore_workspace_backup,
 )
+from aibench.storage.workspace_integrity import check_workspace
 from aibench.tui.render import safe
 
 app = typer.Typer(help="Inspect and safely maintain workspace storage.")
@@ -202,6 +204,45 @@ def backup(
     )
 
 
+@app.command("check")
+def check(
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Check database, artifact, frozen-plan, and dataset-suite integrity."""
+    try:
+        result = check_workspace(workspace or Path.cwd())
+    except (AibenchError, OSError, sqlite3.Error, ValueError) as exc:
+        raise _fail(f"could not check workspace: {exc}", json_output=json_output) from exc
+    if json_output:
+        console.print_json(data=result)
+        if not result["ok"]:
+            raise typer.Exit(code=1)
+    elif result["ok"]:
+        console.print(f"workspace is healthy: {safe(result['workspace'])}")
+        for name, check_result in result["checks"].items():
+            if check_result["status"] == "ok":
+                verified = check_result.get("verified")
+                records = check_result.get("records")
+                count = verified if verified is not None else records
+                if count is not None:
+                    console.print(f"  {name}: {count} verified")
+                else:
+                    console.print(f"  {name}: ok")
+    else:
+        console.print(
+            f"workspace has {result['issue_count']} integrity issue(s): {safe(result['workspace'])}"
+        )
+        for issue in result["issues"]:
+            console.print(
+                f"  [{safe(issue['category'])}/{safe(issue['code'])}] "
+                f"{safe(issue['path'])}: {safe(issue['message'])}"
+            )
+        if result["issues_truncated"]:
+            console.print("  additional issues omitted; use --json for bounded issue details")
+        raise typer.Exit(code=1)
+
+
 @app.command("restore")
 def restore(
     archive: Path,
@@ -222,6 +263,42 @@ def restore(
     console.print(
         f"Workspace restored at {safe(result['workspace'])}: {result['file_count']} file(s), "
         f"{result['artifact_count']} referenced artifact(s), {result['total_bytes']} bytes."
+    )
+
+
+@app.command("repair")
+def repair(
+    archive: Path,
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Replace the workspace with the verified backup. The old workspace is retained.",
+    ),
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Recover a workspace from a verified backup; preview unless --apply is given."""
+    try:
+        result = repair_workspace_from_backup(archive, workspace or Path.cwd(), apply=apply)
+    except AibenchError as exc:
+        raise _fail(str(exc), json_output=json_output) from exc
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        raise _fail(f"could not repair workspace: {exc}", json_output=json_output) from exc
+    if json_output:
+        console.print_json(data=result)
+        return
+    if result["mode"] == "dry_run":
+        console.print(
+            f"Verified {result['backup']['file_count']} backup file(s) for "
+            f"{safe(result['workspace'])}; no workspace data changed. "
+            "Use --apply to recover from this backup."
+        )
+        return
+    retained = result["retained_workspace"]
+    retained_message = f" Previous workspace retained at {safe(retained)}." if retained else ""
+    console.print(
+        f"Workspace recovered at {safe(result['workspace'])} from "
+        f"{result['backup']['file_count']} verified backup file(s).{retained_message}"
     )
 
 
