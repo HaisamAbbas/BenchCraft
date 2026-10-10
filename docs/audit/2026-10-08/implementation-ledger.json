@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G11",
+  "current_item": "G12",
   "items": [
     {
       "id": "F01",
@@ -525,11 +525,16 @@
       "title": "Headless run supervision",
       "detail": "**Deferred/partial.** Status exists; live pause/stop controls belong to the owning terminal/session. Detached execution and durable external pause/resume/cancel requests are absent.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "Affected run, CLI, migration, and engine regression batch: 86 passed",
+        "Focused supervision regressions: 6 passed",
+        "Ruff passed; mypy passed for 149 source files; git diff --check passed",
+        "Final independent review: no remaining actionable findings"
+      ],
+      "review": "evidence/G11-review.md",
+      "commit": "250a71fc",
+      "pushed": true
     },
     {
       "id": "G12",

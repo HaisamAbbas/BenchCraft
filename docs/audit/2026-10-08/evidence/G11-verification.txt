@@ -1,0 +1,19 @@
+G11: headless run supervision
+
+Final affected run, CLI, migration, and engine regression batch:
+  .venv/Scripts/python -m pytest tests/test_run_supervision.py tests/test_cli_run.py tests/test_cli_runs.py tests/test_storage_migrations.py tests/test_engine.py tests/test_engine_review_regressions.py -q
+  86 passed in 162.78s
+
+Focused final supervision regressions:
+  .venv/Scripts/python -m pytest tests/test_run_supervision.py -q
+  6 passed in 21.31s
+
+Final static checks:
+  .venv/Scripts/python -m ruff check src tests plugins
+  All checks passed
+  .venv/Scripts/python -m mypy src/aibench
+  Success: no issues found in 149 source files
+  git diff --check
+  Passed (Git printed only LF-to-CRLF working-copy notices)
+
+Final independent review: no remaining actionable findings (G11-review.md).
