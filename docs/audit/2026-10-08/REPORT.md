@@ -380,7 +380,7 @@ For context, established tools expose practical scriptable controls: Hyperfine d
 | G09 | P1 | Release gates in conversation drafts | **Missing; documented limitation.** Gates can be authored in executable plans but not declared through session draft choices/patches. |
 | G10 | P2 | Retry only failed application work | **Implemented.** `runs retry` creates a bounded child from safe final application failures or explicit parent-scoped cases on finished runs; it rechecks current/frozen policy, dataset identity, and frozen test-world seed, previews with `--dry-run`, and records lineage in run manifests and reports. |
 | G11 | P2 | Headless run supervision | **Implemented.** **run --detach** and **resume --detach** launch supervised workers with workspace logs; **runs control RUN_ID pause|resume|cancel** and **resume RUN_ID** send sequenced, durable requests that the owning worker applies. Offline cancellation is finalized on resume without dispatch. **runs status** distinguishes the detached process from the current lease owner. |
-| G12 | P2 | Configuration management | **Partial.** Config files, setup, and doctor exist. There is no `config show/validate/set` workflow showing effective values and source precedence with secrets redacted, or named provider profiles. |
+| G12 | P2 | Configuration management | **Implemented.** `config show/validate/set` reports effective values and source precedence, validates schemas before atomic edits, and redacts secret-like values. `config profiles add/list/show/use/remove` manages validated per-user provider profiles used by chat and model planning. |
 | G13 | P2 | Structured progress and durable logs | **Partial.** Terminal progress and persisted run events exist. Scripts lack a consistent JSONL event stream, log-file selection, verbosity/quiet controls, and documented noninteractive logging contract. |
 | G14 | P2 | Warmup and measurement phases | **Missing; performance extension.** No bounded warmup count or exclusion phase before latency sampling. Warmup effects and spend need to be accounted explicitly. |
 | G15 | P2 | Richer performance statistics | **Partial.** Successful final-attempt p50/p95 and failure counts exist. User-facing throughput, p99, dispersion, retry-inclusive elapsed latency, and cold/warm separation are absent. |
@@ -406,7 +406,7 @@ benchcraft run --plan plan.json --dry-run --limit 100 --repetitions 3 --seed 42
 benchcraft compare main-baseline RUN_ID --fail-on-regression regression-policy.json
 benchcraft runs export RUN_ID --format jsonl --include-passing
 benchcraft runs cancel RUN_ID
-benchcraft config show --effective --redacted
+benchcraft config show --json
 benchcraft workspace check
 ```
 

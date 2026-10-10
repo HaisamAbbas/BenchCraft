@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G12",
+  "current_item": "G13",
   "items": [
     {
       "id": "F01",
@@ -542,11 +542,16 @@
       "title": "Configuration management",
       "detail": "**Partial.** Config files, setup, and doctor exist. There is no `config show/validate/set` workflow showing effective values and source precedence with secrets redacted, or named provider profiles.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "Affected configuration, setup, planning, project, and chat regressions: 102 passed",
+        "Isolated ConPTY CLI regressions: 5 passed; run CLI regressions: 15 passed",
+        "Ruff passed; mypy passed for 150 source files; git diff --check passed",
+        "Final independent review: no remaining actionable findings"
+      ],
+      "review": "evidence/G12-review.md",
+      "commit": "35f15507",
+      "pushed": true
     },
     {
       "id": "G13",
@@ -691,4 +696,4 @@
       ]
     }
   ]
-}
+}\n
