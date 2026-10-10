@@ -642,13 +642,38 @@
       "id": "G18",
       "priority": "P2",
       "title": "Dataset utilities and versioned suites",
-      "detail": "**Partial.** Validation, candidate review/promotion, episodes, and content hashes exist. General schema-aware CSV/JSON/Parquet import, diff/dedup/split tools, and a named suite catalog are missing.",
+      "detail": "**Partial.** Validation, candidate review/promotion, episodes, content hashes, and schema-aware CSV/JSON/JSONL import exist. Optional Parquet import requires explicit trust because PyArrow decompresses pages before row-size checks. Dataset diff, deduplication/splitting tools, and a named suite catalog remain missing.",
       "kind": "feature",
       "status": "pending",
-      "verification": [],
-      "review": null,
+      "verification": [
+        "Importer delivery: 81 focused dataset, discovery, finite-number, and episode tests passed; 1 skipped",
+        "Ruff and formatting passed; mypy passed for 156 source files; uv lock --check and git diff --check passed",
+        "CLI help confirms repeatable field mapping and explicit --trust-parquet acknowledgement; real optional PyArrow import and oversized-row rejection covered",
+        "Final independent review found no remaining actionable findings"
+      ],
+      "review": "evidence/G18-import-review.md",
       "commit": null,
-      "pushed": false
+      "pushed": false,
+      "subrequirements": [
+        {
+          "name": "schema-aware CSV, JSON, JSONL, and optional Parquet import",
+          "status": "delivered",
+          "commit": "248098964c286e1e2413a3afbb173a132f7e9901",
+          "pushed": true
+        },
+        {
+          "name": "dataset diff",
+          "status": "pending"
+        },
+        {
+          "name": "deduplication and split tools",
+          "status": "pending"
+        },
+        {
+          "name": "named suite catalog",
+          "status": "pending"
+        }
+      ]
     },
     {
       "id": "G19",
