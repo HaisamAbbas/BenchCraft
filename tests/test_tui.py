@@ -750,6 +750,13 @@ def test_human_comparison_shows_richer_application_performance() -> None:
                     "retry_inclusive_latency": {"p95_ms": 140},
                     "throughput": {"successful_requests_per_second": 12.5},
                     "warmup_latency_statistics": {"p95_ms": 40},
+                    "streaming_performance": {
+                        "requests": 2,
+                        "time_to_first_token_ms": {"p50_ms": 20, "p95_ms": 30},
+                        "inter_token_latency_ms": {"mean_ms": 8},
+                        "output_tokens_per_second": {"p50": 40},
+                        "integrity": {"complete": 2, "incomplete": 0},
+                    },
                 }
                 for side in ("baseline", "current")
             },
@@ -761,3 +768,6 @@ def test_human_comparison_shows_richer_application_performance() -> None:
     assert "retry-inclusive p95 140 ms" in shown
     assert "throughput 12.5 req/s" in shown
     assert "warmup p95 40 ms" in shown
+    assert "streaming: TTFT p50/p95 20/30 ms" in shown
+    assert "inter-token mean 8 ms" in shown
+    assert "output 40 tokens/s median" in shown

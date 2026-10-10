@@ -1151,6 +1151,19 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
                 "wall_ms": 100,
                 "started_at": "2024-01-01T00:00:00Z",
                 "finished_at": "2024-01-01T00:00:00.100Z",
+                "streaming": {
+                    "time_to_first_token_ms": 22,
+                    "output_tokens": 12,
+                    "output_tokens_per_second": 24,
+                    "inter_token_latency_ms": {
+                        "samples": 3,
+                        "observed_intervals": 3,
+                        "mean_ms": 5,
+                        "p95_ms": 8,
+                        "samples_truncated": False,
+                    },
+                    "integrity": {"complete": True},
+                },
             },
             ("b1", 0): {
                 "wall_ms": 200,
@@ -1166,6 +1179,13 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
                 "wall_ms": 50,
                 "started_at": "2024-01-01T00:00:00Z",
                 "finished_at": "2024-01-01T00:00:00.050Z",
+                "streaming": {
+                    "time_to_first_token_ms": 11,
+                    "output_tokens": 4,
+                    "output_tokens_per_second": 16,
+                    "inter_token_latency_ms": {"samples": 2, "observed_intervals": 2},
+                    "integrity": {"complete": True},
+                },
             },
             ("b1", 0): {
                 "wall_ms": 50,
@@ -1233,6 +1253,10 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
     assert performance["baseline"]["warmup_latency_statistics"]["p99_ms"] == 50
     assert performance["baseline"]["warmup_retry_inclusive_latency"]["p50_ms"] == 50
     assert performance["current"]["warmup_throughput"]["successful_requests_per_second"] == 15.385
+    assert performance["baseline"]["streaming_performance"]["requests"] == 1
+    assert performance["baseline"]["streaming_performance"]["time_to_first_token_ms"]["p50_ms"] == 22
+    assert performance["baseline"]["streaming_performance"]["inter_token_latency_ms"]["mean_ms"] == 5
+    assert performance["baseline"]["warmup_streaming_performance"]["requests"] == 1
 
     policy = parse_regression_policy(
         {

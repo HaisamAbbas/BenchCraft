@@ -189,6 +189,11 @@ A chat-completions endpoint as the application under test:
 - **What is observed.** The message content (the output), the `usage` the endpoint
   reports, and the `tool_calls` it asks for (as `tool_events`). A tool call is a request by
   the model, never an executed effect. Cost and the application's internals are unknown.
+- **Streaming.** Set `parameters.stream` to `true` to consume server-sent events. The runner
+  requests reported usage by default with `stream_options.include_usage`; set it to `false`
+  for providers that do not support that option. Reports expose TTFT, inter-content-delta
+  timing, output tokens per second when usage is available, and stream completion integrity.
+  Incomplete streams are application failures and are excluded from evaluation.
 - **Policy.** The endpoint's origin must be loopback or listed in `allowed_http_origins`,
   and the key reference in `allowed_secret_refs`.
 - **Not an evaluator.** This transport is unrelated to any OpenAI evaluator plugin.

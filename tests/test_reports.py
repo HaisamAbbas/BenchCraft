@@ -21,7 +21,13 @@ from aibench.cli.main import app
 from aibench.core.models import Decision, EvaluationResult, ExecutionStatus, MetricValue
 from aibench.engine.compile import compile_plan
 from aibench.engine.engine import RunController
-from aibench.reporting.render import _retry_inclusive_text, _throughput_text, _value_summary, render
+from aibench.reporting.render import (
+    _retry_inclusive_text,
+    _streaming_text,
+    _throughput_text,
+    _value_summary,
+    render,
+)
 from aibench.security.policy import ExecutionPolicy
 from aibench.services.reports import build_report, percentile, report_facts
 from aibench.services.runs import create_run, execute_run, run_budget
@@ -224,6 +230,8 @@ def test_every_number_reconciles_with_the_stored_records(tmp_path: Path) -> None
     assert latency["throughput"]["successful_requests"] == 3
     assert latency["throughput"]["wall_seconds"] > 0
     assert latency["warmup"]["samples"] == 0
+    assert latency["streaming"]["requests"] == 0
+    assert latency["warmup_streaming"]["requests"] == 0
     assert latency["excluded_failures"] == 1 and latency["excluded_timeouts"] == 0
 
     # the application reports no cost: unknown, never $0; model-free evaluators: complete
@@ -254,6 +262,26 @@ def test_performance_render_labels_unknown_recovery_phase_as_incomplete() -> Non
     assert _retry_inclusive_text({"phase_attribution_complete": False}) == (
         "unavailable (recovered dispatch phase is unknown)"
     )
+
+
+def test_performance_render_explains_stream_latency_and_integrity() -> None:
+    text = _streaming_text(
+        {
+            "requests": 2,
+            "time_to_first_token_ms": {"p50_ms": 20, "p95_ms": 25},
+            "inter_token_latency_ms": {
+                "mean_ms": 4,
+                "request_mean_ms": {"p50_ms": 3},
+            },
+            "output_tokens_per_second": {"p50": 40},
+            "integrity": {"complete": 1, "incomplete": 1, "unknown": 0},
+        }
+    )
+
+    assert "TTFT p50/p95 20/25 ms" in text
+    assert "inter-token gap mean 4 ms" in text
+    assert "output 40 tokens/s median" in text
+    assert "1 complete, 1 incomplete, 0 unknown" in text
 
 
 def test_missing_accounting_is_never_totalled() -> None:

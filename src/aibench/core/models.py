@@ -962,6 +962,31 @@ class OpenAICompatibleTransport(FrozenModel):
     max_request_bytes: int = Field(default=1_048_576, gt=0)
     max_response_bytes: int = Field(default=4_194_304, gt=0)
 
+    @model_validator(mode="after")
+    def _stream_parameters_are_valid(self) -> OpenAICompatibleTransport:
+        parameters = deep_unfreeze(self.parameters)
+        if not isinstance(parameters, Mapping):
+            # Pydantic wraps ValueError as a validation error; TypeError escapes model_validate.
+            raise ValueError("openai_compatible parameters must be an object")  # noqa: TRY004
+        if "stream" in parameters and type(parameters["stream"]) is not bool:
+            raise ValueError("openai_compatible parameters.stream must be a boolean")
+        options = parameters.get("stream_options")
+        if options is not None and not isinstance(options, Mapping):
+            # Pydantic wraps ValueError as a validation error; TypeError escapes model_validate.
+            raise ValueError("openai_compatible parameters.stream_options must be an object")
+        if (
+            isinstance(options, Mapping)
+            and "include_usage" in options
+            and type(options["include_usage"]) is not bool
+        ):
+            raise ValueError("stream_options.include_usage must be a boolean")
+        return self
+
+    @property
+    def streaming_enabled(self) -> bool:
+        parameters = deep_unfreeze(self.parameters)
+        return isinstance(parameters, Mapping) and parameters.get("stream") is True
+
 
 class TestWorldSpec(FrozenModel):
     """A named, versioned starting state for a stateful application (§7 "State"): the seed

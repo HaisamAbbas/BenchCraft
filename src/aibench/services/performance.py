@@ -103,16 +103,20 @@ def summarize_latency(values: Sequence[float]) -> dict[str, float | int | None]:
         "stddev_ms": round(stddev, 3),
         "iqr_ms": round(p75 - p25, 3) if p25 is not None and p75 is not None else None,
         "coefficient_of_variation_percent": (
-            round(normalized_stddev / normalized_mean * 100, 3)
-            if normalized_mean > 0
-            else None
+            round(normalized_stddev / normalized_mean * 100, 3) if normalized_mean > 0 else None
         ),
     }
 
 
-def successful_latency_values(
-    finals: Sequence[ExecutionResult], *, warmup: bool
-) -> list[float]:
+def _summarize_rate(values: Sequence[float]) -> dict[str, float | int | None]:
+    """Summarize rates without assigning the latency unit suffix to their values."""
+    return {
+        (key.removesuffix("_ms") if key.endswith("_ms") else key): value
+        for key, value in summarize_latency(values).items()
+    }
+
+
+def successful_latency_values(finals: Sequence[ExecutionResult], *, warmup: bool) -> list[float]:
     return [
         value
         for execution in finals
@@ -121,6 +125,118 @@ def successful_latency_values(
         and not execution.cache
         and (value := wall_milliseconds(execution)) is not None
     ]
+
+
+def stream_performance_summary(
+    finals: Sequence[ExecutionResult], *, warmup: bool
+) -> dict[str, Any]:
+    """Summarize stream observations while preserving their request-level denominators.
+
+    Providers may combine tokenizer tokens in one content delta, and receive buffering may
+    coalesce events. Each request therefore records its own interval summary; this function
+    weights the overall mean by observed intervals and summarizes request means/p95 values.
+    """
+    streams: list[Mapping[str, Any]] = []
+    for execution in finals:
+        if execution.warmup is not warmup or execution.cache:
+            continue
+        timing = deep_unfreeze(execution.timing) or {}
+        stream = timing.get("streaming") if isinstance(timing, Mapping) else None
+        if isinstance(stream, Mapping):
+            streams.append(stream)
+
+    ttft: list[float] = []
+    output_rates: list[float] = []
+    request_gap_means: list[float] = []
+    request_gap_p95s: list[float] = []
+    summarized_intervals = 0
+    observed_intervals = 0
+    weighted_gap_total = 0.0
+    truncated_gap_requests = 0
+    known_tokens = 0
+    requests_with_tokens = 0
+    complete = incomplete = unknown = 0
+    for stream in streams:
+        if (value := finite_nonnegative(stream.get("time_to_first_token_ms"))) is not None:
+            ttft.append(value)
+        if (value := finite_nonnegative(stream.get("output_tokens_per_second"))) is not None:
+            output_rates.append(value)
+        token_count = stream.get("output_tokens")
+        if isinstance(token_count, int) and not isinstance(token_count, bool) and token_count >= 0:
+            known_tokens += token_count
+            requests_with_tokens += 1
+        integrity = stream.get("integrity")
+        if isinstance(integrity, Mapping) and isinstance(integrity.get("complete"), bool):
+            if integrity["complete"]:
+                complete += 1
+            else:
+                incomplete += 1
+        else:
+            unknown += 1
+        gaps = stream.get("inter_token_latency_ms")
+        if not isinstance(gaps, Mapping):
+            continue
+        sample_count = gaps.get("samples")
+        mean = finite_nonnegative(gaps.get("mean_ms"))
+        observed_count = gaps.get("observed_intervals", sample_count)
+        if isinstance(observed_count, int) and not isinstance(observed_count, bool):
+            observed_intervals += max(0, observed_count)
+        if (
+            isinstance(sample_count, int)
+            and not isinstance(sample_count, bool)
+            and sample_count > 0
+        ):
+            if mean is not None:
+                summarized_intervals += sample_count
+                weighted_gap_total += mean * sample_count
+                request_gap_means.append(mean)
+            if (value := finite_nonnegative(gaps.get("p95_ms"))) is not None:
+                request_gap_p95s.append(value)
+        if gaps.get("samples_truncated") is True:
+            truncated_gap_requests += 1
+
+    return {
+        "requests": len(streams),
+        "integrity": {"complete": complete, "incomplete": incomplete, "unknown": unknown},
+        "time_to_first_token_ms": {
+            **summarize_latency(ttft),
+            "eligible_streams": len(streams),
+            "missing_measurements": len(streams) - len(ttft),
+        },
+        "inter_token_latency_ms": {
+            "observed_intervals": observed_intervals,
+            "summarized_intervals": summarized_intervals,
+            "mean_ms": (
+                round(weighted_gap_total / summarized_intervals, 3)
+                if summarized_intervals
+                else None
+            ),
+            "request_mean_ms": summarize_latency(request_gap_means),
+            "request_p95_ms": summarize_latency(request_gap_p95s),
+            "requests_with_intervals": len(request_gap_means),
+            "requests_with_truncated_samples": truncated_gap_requests,
+            "definition": (
+                "Intervals are client receive-time gaps between non-empty content delta events. "
+                "Providers may combine tokens in a delta and network buffering may coalesce events. "
+                "The overall mean is interval-weighted; request summaries preserve each stream's "
+                "sample distribution."
+            ),
+        },
+        "output_tokens": {
+            "total": known_tokens if requests_with_tokens else None,
+            "requests_with_usage": requests_with_tokens,
+            "requests_without_usage": len(streams) - requests_with_tokens,
+        },
+        "output_tokens_per_second": {
+            **_summarize_rate(output_rates),
+            "eligible_streams": len(streams),
+            "missing_measurements": len(streams) - len(output_rates),
+            "definition": (
+                "reported completion_tokens divided by time from first content delta to the "
+                "stream completion marker; only complete streams with reported usage are included"
+            ),
+        },
+    }
 
 
 def _work_key(execution: ExecutionResult) -> tuple[str, int, bool]:
@@ -195,9 +311,7 @@ def phase_throughput(
         if execution.warmup is warmup and not execution.cache
     ]
     phase_finals = [
-        execution
-        for execution in finals
-        if execution.warmup is warmup and not execution.cache
+        execution for execution in finals if execution.warmup is warmup and not execution.cache
     ]
     starts = [instant for item in phase_attempts if (instant := started_at(item)) is not None]
     finishes = [instant for item in phase_finals if (instant := finished_at(item)) is not None]

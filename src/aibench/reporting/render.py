@@ -122,6 +122,24 @@ def _retry_inclusive_text(summary: dict[str, Any]) -> str:
     )
 
 
+def _streaming_text(summary: dict[str, Any]) -> str:
+    if not summary.get("requests"):
+        return "no streaming requests recorded"
+    ttft = summary.get("time_to_first_token_ms") or {}
+    gaps = summary.get("inter_token_latency_ms") or {}
+    gap_means = gaps.get("request_mean_ms") or {}
+    token_rate = summary.get("output_tokens_per_second") or {}
+    integrity = summary.get("integrity") or {}
+    return (
+        f"TTFT p50/p95 {_number(ttft.get('p50_ms'))}/{_number(ttft.get('p95_ms'))} ms; "
+        f"inter-token gap mean {_number(gaps.get('mean_ms'))} ms "
+        f"(request-mean p50 {_number(gap_means.get('p50_ms'))} ms); "
+        f"output {_number(token_rate.get('p50'))} tokens/s median; "
+        f"stream integrity {integrity.get('complete', 0)} complete, "
+        f"{integrity.get('incomplete', 0)} incomplete, {integrity.get('unknown', 0)} unknown"
+    )
+
+
 def _usd(block: dict[str, Any]) -> str:
     accounting = block.get("accounting")
     if accounting == "no_calls":
@@ -371,6 +389,12 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         ("Imported traces", _traces_text(report.get("traces"))),
         ("Cache", _cache_text(report.get("cache"))),
     ]
+    if latency["streaming"].get("requests"):
+        application.append(("Streaming performance", _streaming_text(latency["streaming"])))
+    if latency["warmup_streaming"].get("requests"):
+        application.append(
+            ("Warmup streaming performance", _streaming_text(latency["warmup_streaming"]))
+        )
     cost = report["cost"]
     costs = [
         ("Application", _usd(cost["application"])),

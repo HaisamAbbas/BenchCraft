@@ -37,7 +37,7 @@ that way.
 |---|---|---|
 | `cli`, `http` | Windows 11, Python 3.12 and 3.11 (see Release 0.1.0rc1) | Linux/macOS (CI configured, no result observed) |
 | `python` (callable in a fresh interpreter) | Windows 11, Python 3.12: end to end through `aibench app smoke`, timeout kill, exception capture, reset callable (`tests/test_runner_transports.py`) | Other interpreters as the application's environment |
-| `openai_compatible` | Windows 11, against the local stub `examples/apps/openai_stub.py`: request shape, bearer secret redaction, usage, tool-call requests | Any live hosted endpoint |
+| `openai_compatible` | Windows 11, against the local stub `examples/apps/openai_stub.py`: request shape, bearer secret redaction, usage, tool-call requests, streamed response accumulation, TTFT/inter-delta metrics and completion integrity | Any live hosted endpoint |
 | `container` | Docker Engine 29.7.2 via Docker Desktop (linux/amd64 VM) on Windows 11, image `python@sha256:2f17fc04...06a9`: non-root uid 65534, read-only root and mount, tmpfs `/tmp`, no network, timeout removal, missing-image refusal | Linux or macOS hosts, rootless engines, Podman, Windows containers |
 
 ## Model providers (assistant model, model planner, judges)

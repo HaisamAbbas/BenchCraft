@@ -61,6 +61,7 @@ from aibench.services.performance import (
     nearest_rank,
     phase_throughput,
     retry_inclusive_latency,
+    stream_performance_summary,
     successful_latency_values,
     summarize_latency,
 )
@@ -3010,6 +3011,10 @@ def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
             phase_attribution_incomplete=bool(unclassified_uncommitted),
         ),
         "warmup_latency_statistics": summarize_latency(warmup_latencies),
+        "streaming_performance": stream_performance_summary(finals, warmup=False),
+        "warmup_streaming_performance": stream_performance_summary(
+            warmup_finals, warmup=True
+        ),
         "warmup_retry_inclusive_latency": retry_inclusive_latency(
             dispatched,
             finals,

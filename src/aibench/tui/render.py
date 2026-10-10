@@ -711,6 +711,7 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
         retry = side.get("retry_inclusive_latency") or {}
         throughput = side.get("throughput") or {}
         warmup = side.get("warmup_latency_statistics") or {}
+        streaming = side.get("streaming_performance") or {}
         if stats or retry or throughput or warmup:
             out(
                 console,
@@ -719,6 +720,20 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
                 f"retry-inclusive p95 {_number(retry.get('p95_ms'))} ms; "
                 f"throughput {_number(throughput.get('successful_requests_per_second'))} req/s; "
                 f"warmup p95 {_number(warmup.get('p95_ms'))} ms",
+            )
+        if streaming.get("requests"):
+            ttft = streaming.get("time_to_first_token_ms") or {}
+            inter_token = streaming.get("inter_token_latency_ms") or {}
+            output_rate = streaming.get("output_tokens_per_second") or {}
+            integrity = streaming.get("integrity") or {}
+            out(
+                console,
+                f"  {side_name} streaming: TTFT p50/p95 {_number(ttft.get('p50_ms'))}/"
+                f"{_number(ttft.get('p95_ms'))} ms, inter-token mean "
+                f"{_number(inter_token.get('mean_ms'))} ms, output "
+                f"{_number(output_rate.get('p50'))} "
+                f"tokens/s median, {integrity.get('complete', 0)} complete / "
+                f"{integrity.get('incomplete', 0)} incomplete streams",
             )
     gate: dict[str, Any] = data.get("overall_coverage_gate") or data.get("gate") or {}
     if gate:

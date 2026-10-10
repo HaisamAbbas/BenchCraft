@@ -57,6 +57,7 @@ from aibench.services.performance import (
     nearest_rank,
     phase_throughput,
     retry_inclusive_latency,
+    stream_performance_summary,
     successful_latency_values,
     summarize_latency,
 )
@@ -375,6 +376,8 @@ def _application_section(
                 incomplete_items=retry_incomplete_items,
                 phase_attribution_incomplete=bool(unclassified_uncommitted),
             ),
+            "streaming": stream_performance_summary(measurement_finals, warmup=False),
+            "warmup_streaming": stream_performance_summary(warmup_finals, warmup=True),
             "throughput": phase_throughput(
                 dispatched,
                 measurement_finals,
@@ -1016,6 +1019,8 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
         "throughput": app["latency"]["throughput"],
         "warmup_latency_ms": app["latency"]["warmup"],
         "warmup_throughput": app["latency"]["warmup_throughput"],
+        "streaming_performance": app["latency"]["streaming"],
+        "warmup_streaming_performance": app["latency"]["warmup_streaming"],
         "cost": {
             role: {
                 k: block.get(k) for k in ("calls", "known_cost_usd", "total_cost_usd", "accounting")
