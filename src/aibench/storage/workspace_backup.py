@@ -1197,11 +1197,18 @@ def _write_archive(path: Path, payload: Path, manifest: bytes, files: list[dict[
 def _pinned_zip_archive(
     path: Path,
     *,
-    max_archive_bytes: int = _MAX_ARCHIVE_BYTES,
-    max_entries: int = _MAX_ENTRIES + 1,
-    max_central_directory_bytes: int = _MAX_CENTRAL_DIRECTORY_BYTES,
+    max_archive_bytes: int | None = None,
+    max_entries: int | None = None,
+    max_central_directory_bytes: int | None = None,
 ) -> Iterator[zipfile.ZipFile]:
     """Parse a bounded private snapshot so ZIP metadata cannot change after preflight."""
+    max_archive_bytes = _MAX_ARCHIVE_BYTES if max_archive_bytes is None else max_archive_bytes
+    max_entries = _MAX_ENTRIES + 1 if max_entries is None else max_entries
+    max_central_directory_bytes = (
+        _MAX_CENTRAL_DIRECTORY_BYTES
+        if max_central_directory_bytes is None
+        else max_central_directory_bytes
+    )
     descriptor: int | None = None
     try:
         if os.name == "nt":
@@ -1261,13 +1268,20 @@ def _pinned_zip_archive(
 def _preflight_zip_archive(
     archive: BinaryIO,
     *,
-    max_archive_bytes: int = _MAX_ARCHIVE_BYTES,
-    max_entries: int = _MAX_ENTRIES + 1,
-    max_central_directory_bytes: int = _MAX_CENTRAL_DIRECTORY_BYTES,
+    max_archive_bytes: int | None = None,
+    max_entries: int | None = None,
+    max_central_directory_bytes: int | None = None,
 ) -> None:
     """Bound ZIP metadata before ZipFile materializes its central directory."""
     import struct
 
+    max_archive_bytes = _MAX_ARCHIVE_BYTES if max_archive_bytes is None else max_archive_bytes
+    max_entries = _MAX_ENTRIES + 1 if max_entries is None else max_entries
+    max_central_directory_bytes = (
+        _MAX_CENTRAL_DIRECTORY_BYTES
+        if max_central_directory_bytes is None
+        else max_central_directory_bytes
+    )
     size = os.fstat(archive.fileno()).st_size
     if size < 22 or size > max_archive_bytes:
         raise ValidationError("backup archive has an unsupported size")
