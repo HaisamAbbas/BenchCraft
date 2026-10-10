@@ -1,4 +1,4 @@
-"""`aibench sessions list` / `show SESSION_ID` / `delete SESSION_ID` (§13, §14).
+"""`aibench sessions list` / `show SESSION_ID` / `export` / `import` / `delete` (§13, §14).
 
 Views of persisted benchmark sessions: the conversation, each decision with the revision
 it produced, open questions, action requests and the runs they started. `delete` removes a
@@ -8,6 +8,7 @@ are benchmark records, not session data (10-T4).
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +16,14 @@ import typer
 
 from aibench.cli.errors import error_exit
 from aibench.cli.output import Console
+from aibench.core.errors import AibenchError
 from aibench.core.models import deep_unfreeze
 from aibench.security.redaction import sanitize_value
 from aibench.sessions.drafting import draft_summary
 from aibench.sessions.store import SessionStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import Storage
+from aibench.storage.session_bundle import export_session_bundle, import_session_bundle
 from aibench.tui.render import safe
 
 app = typer.Typer(help="Inspect persistent benchmark sessions.")
@@ -176,6 +179,67 @@ def show_session(
         console.print(f"  action {action['kind']}: {action['state']}{run}{reason}")
 
 
+@app.command("export")
+def export_session(
+    session_id: str = typer.Argument(..., help="Session to package."),
+    destination: Path = typer.Argument(..., help="New .zip file to create."),  # noqa: B008
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Create a portable archive of the conversation and its reviewed draft plans."""
+    try:
+        result = export_session_bundle(workspace or Path.cwd(), session_id, destination)
+    except (AibenchError, OSError, sqlite3.Error) as exc:
+        raise error_exit(
+            str(exc),
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(
+            f"exported session {safe(session_id)} with {result['revision_count']} revision(s) "
+            f"to {safe(result['bundle'])}"
+        )
+        if result["referenced_run_ids"]:
+            console.print(
+                "  referenced runs are separate records and can be imported with "
+                "`aibench runs import`"
+            )
+
+
+@app.command("import")
+def import_session(
+    bundle: Path = typer.Argument(..., help="Verified session bundle (.zip) to import."),  # noqa: B008
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Import a session into a matching project tree, rebasing project paths."""
+    try:
+        result = import_session_bundle(bundle, workspace or Path.cwd())
+    except (AibenchError, OSError, sqlite3.Error) as exc:
+        raise error_exit(
+            str(exc),
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+    if json_output:
+        console.print_json(data=result)
+    else:
+        state = "already present" if result["already_present"] else "imported"
+        console.print(f"{state} session {safe(result['session_id'])}")
+        if result["referenced_run_ids"]:
+            console.print(
+                "  referenced run records must also be imported with `aibench runs import` "
+                "before run details are available"
+            )
+
+
 @app.command("delete")
 def delete_session(
     session_id: str = typer.Argument(..., help="Session to delete."),
@@ -217,7 +281,11 @@ def delete_session(
             result = controller.delete()
         except SessionError as exc:
             raise error_exit(
-                str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+                str(exc),
+                exit_code=2,
+                json_output=json_output,
+                console=console,
+                err_console=err_console,
             ) from exc
     finally:
         storage.db.close()

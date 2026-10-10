@@ -168,6 +168,23 @@ the results are preserved as pointers and are not treated as artifact IDs. Devel
 include only their selected case records; the dataset manifest retains the original total case
 count, so a smoke bundle is a portable record of that sample rather than a complete dataset copy.
 
+### Moving a conversation to another workspace
+
+Session bundles preserve a conversation's decisions, turns, questions, actions, and frozen draft
+plans. They do not include application or dataset files, plugin environments, or benchmark run
+records. Import into a project copy with the same relative application, dataset, and policy files;
+the importer rebases those paths and clears the session's prior local-trust grant. Export refuses
+an active session run. Import matching terminal runs separately with `aibench runs import`.
+
+```console
+aibench sessions export SESSION_ID ../session-bundle.zip --workspace .
+aibench sessions import ../session-bundle.zip --workspace ../other-project
+```
+
+Conflicting session rows or plan files are refused, and importing the same bundle again is
+idempotent. Conversation records contain user and assistant messages, so treat the archive as
+project data with the same access controls as the workspace.
+
 ### Cleaning stale artifacts
 
 Preview storage cleanup before deleting anything:

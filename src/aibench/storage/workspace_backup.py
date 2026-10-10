@@ -1194,7 +1194,13 @@ def _write_archive(path: Path, payload: Path, manifest: bytes, files: list[dict[
 
 
 @contextmanager
-def _pinned_zip_archive(path: Path) -> Iterator[zipfile.ZipFile]:
+def _pinned_zip_archive(
+    path: Path,
+    *,
+    max_archive_bytes: int = _MAX_ARCHIVE_BYTES,
+    max_entries: int = _MAX_ENTRIES + 1,
+    max_central_directory_bytes: int = _MAX_CENTRAL_DIRECTORY_BYTES,
+) -> Iterator[zipfile.ZipFile]:
     """Parse a bounded private snapshot so ZIP metadata cannot change after preflight."""
     descriptor: int | None = None
     try:
@@ -1211,7 +1217,7 @@ def _pinned_zip_archive(path: Path) -> Iterator[zipfile.ZipFile]:
             or (current.st_dev, current.st_ino) != (pinned.st_dev, pinned.st_ino)
         ):
             raise ValidationError("backup archive changed while it was being opened")
-        if pinned.st_size > _MAX_ARCHIVE_BYTES:
+        if pinned.st_size > max_archive_bytes:
             raise ValidationError("backup archive has an unsupported size")
         with os.fdopen(descriptor, "rb") as source:
             descriptor = None
@@ -1235,7 +1241,12 @@ def _pinned_zip_archive(path: Path) -> Iterator[zipfile.ZipFile]:
                     raise ValidationError("backup archive changed while it was being copied")
                 snapshot.flush()
                 snapshot.seek(0)
-                _preflight_zip_archive(cast(BinaryIO, snapshot))
+                _preflight_zip_archive(
+                    cast(BinaryIO, snapshot),
+                    max_archive_bytes=max_archive_bytes,
+                    max_entries=max_entries,
+                    max_central_directory_bytes=max_central_directory_bytes,
+                )
                 with zipfile.ZipFile(snapshot, "r") as zipped:
                     yield zipped
     except ValidationError:
@@ -1247,12 +1258,18 @@ def _pinned_zip_archive(path: Path) -> Iterator[zipfile.ZipFile]:
             os.close(descriptor)
 
 
-def _preflight_zip_archive(archive: BinaryIO) -> None:
+def _preflight_zip_archive(
+    archive: BinaryIO,
+    *,
+    max_archive_bytes: int = _MAX_ARCHIVE_BYTES,
+    max_entries: int = _MAX_ENTRIES + 1,
+    max_central_directory_bytes: int = _MAX_CENTRAL_DIRECTORY_BYTES,
+) -> None:
     """Bound ZIP metadata before ZipFile materializes its central directory."""
     import struct
 
     size = os.fstat(archive.fileno()).st_size
-    if size < 22 or size > _MAX_ARCHIVE_BYTES:
+    if size < 22 or size > max_archive_bytes:
         raise ValidationError("backup archive has an unsupported size")
     tail_size = min(size, 22 + 65_535)
     archive.seek(size - tail_size)
@@ -1327,9 +1344,9 @@ def _preflight_zip_archive(archive: BinaryIO) -> None:
     else:
         central_end_limit = eocd_offset
 
-    if total_entries > _MAX_ENTRIES + 1:
+    if total_entries > max_entries:
         raise ValidationError("backup archive has an invalid number of entries")
-    if central_size > _MAX_CENTRAL_DIRECTORY_BYTES:
+    if central_size > max_central_directory_bytes:
         raise ValidationError("backup archive central directory exceeds the supported size")
     if central_offset + central_size > central_end_limit:
         raise ValidationError("backup archive has an invalid central directory")
