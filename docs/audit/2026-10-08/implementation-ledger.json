@@ -642,7 +642,7 @@
       "id": "G18",
       "priority": "P2",
       "title": "Dataset utilities and versioned suites",
-      "detail": "**Partial.** Validation, candidate review/promotion, episodes, content hashes, schema-aware import, bounded JSONL diff, and identity-based deduplication with explicit conflict policies exist. Optional Parquet import requires explicit trust because PyArrow decompresses pages before row-size checks. Deterministic grouped splitting and a named suite catalog remain missing.",
+      "detail": "**Partial.** Validation, candidate review/promotion, episodes, content hashes, schema-aware import, bounded JSONL diff, identity-based deduplication, and deterministic grouped splitting exist. Optional Parquet import requires explicit trust because PyArrow decompresses pages before row-size checks. A named suite catalog remains missing.",
       "kind": "feature",
       "status": "pending",
       "verification": [
@@ -655,9 +655,13 @@
         "Deduplication delivery: 114 focused dataset, ingest, discovery, finite-number, and episode tests passed; 1 skipped",
         "Ruff, formatting, and git diff --check passed; Mypy passed for 158 source files",
         "Identical normalized duplicates are removed; conflicting IDs fail by default or require an explicit first/last policy; warnings remain visible",
-        "Final independent reviews found no remaining actionable findings for importer, diff, and deduplication"
+        "Final independent reviews found no remaining actionable findings for importer, diff, deduplication, and deterministic grouped splitting",
+        "Deterministic split delivery: 122 focused dataset/ingest/finite-number/discovery/episode tests passed; 2 skipped",
+        "Ruff and formatting passed; Mypy passed for 158 source files; git diff --check passed",
+        "Split guarantees at least one group per active ratio when possible, rejects too few independent groups, preserves group IDs, and publishes complete output atomically without replacing a racing destination",
+        "Cleanup and path-resolution failures return bounded JSON errors with retained staging paths; final independent review found no remaining actionable findings"
       ],
-      "review": "evidence/G18-dedup-review.md",
+      "review": "evidence/G18-split-review.md",
       "commit": null,
       "pushed": false,
       "subrequirements": [
@@ -681,7 +685,9 @@
         },
         {
           "name": "deterministic grouped splitting",
-          "status": "pending"
+          "status": "delivered",
+          "commit": "bacd1d029df073ee73f7fbd0bd162bdb4aac9a1c",
+          "pushed": true
         },
         {
           "name": "named suite catalog",
