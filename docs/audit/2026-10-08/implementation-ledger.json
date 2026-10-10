@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G17",
+  "current_item": "G18",
   "items": [
     {
       "id": "F01",
@@ -625,13 +625,18 @@
       "id": "G17",
       "priority": "P2",
       "title": "Segment/slice analysis",
-      "detail": "**Partial.** Case predicates and independent grouping for comparisons exist. Reports lack general summaries by metadata segment, customer, language, difficulty, or model configuration.",
+      "detail": "**Implemented.** Reports independently summarize application outcomes, latency/streaming, warmups, and metric decisions by group_id or nested case metadata. Output is bounded and respects --no-content; JUnit/SARIF reject the unsupported option. See implementation/G17.md.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "59 report, report-regression, and TUI tests passed",
+        "Repeated CLI/TUI grouping, no-content privacy, sanitized and literal-marker labels, JUnit/SARIF rejection, and 101-category coalescing verified",
+        "Ruff src/tests and changed-file formatting passed; mypy passed for 155 source files; git diff --check passed",
+        "Final independent review: no remaining actionable findings"
+      ],
+      "review": "evidence/G17-review.md",
+      "commit": "9b064181",
+      "pushed": true
     },
     {
       "id": "G18",
