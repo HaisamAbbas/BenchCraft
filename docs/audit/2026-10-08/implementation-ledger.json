@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G19",
+  "current_item": "G19.2: workspace backup and restore",
   "items": [
     {
       "id": "F01",
@@ -705,13 +705,45 @@
       "id": "G19",
       "priority": "P2",
       "title": "Workspace maintenance and portability",
-      "detail": "**Partial.** Migrations and an artifact GC library exist. CLI backup/restore, portable run/session bundles, workspace integrity/repair, retention/storage usage, and safe GC commands are missing. Absolute recorded paths complicate migration.",
+      "detail": "**Partial.** `aibench workspace gc` previews orphaned artifacts by default and requires explicit `--apply` plus a minimum grace period before deletion. CLI backup/restore, portable run/session bundles, workspace integrity/repair, retention/storage usage, and absolute-path migration support remain outstanding.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "partial",
+      "verification": [
+        "Workspace/artifact focused tests: 59 passed, 5 skipped on Windows; skips cover link creation unavailable in this environment",
+        "Mypy passed for 161 source files; Ruff lint and formatting passed; git diff --check passed",
+        "Independent review-agent final review reported no findings; see evidence/G19-gc-review.md"
+      ],
+      "review": "evidence/G19-gc-review.md",
+      "commit": "739abfe1a41f2d76313b4d475b830f1791941f1c",
+      "pushed": true,
+      "subrequirements": [
+        {
+          "name": "safe artifact garbage collection CLI",
+          "status": "delivered",
+          "commit": "739abfe1a41f2d76313b4d475b830f1791941f1c",
+          "pushed": true
+        },
+        {
+          "name": "workspace backup and restore",
+          "status": "pending"
+        },
+        {
+          "name": "portable run and session bundles",
+          "status": "pending"
+        },
+        {
+          "name": "workspace integrity checks and repair",
+          "status": "pending"
+        },
+        {
+          "name": "retention policy and storage usage",
+          "status": "pending"
+        },
+        {
+          "name": "absolute-path migration support",
+          "status": "pending"
+        }
+      ]
     },
     {
       "id": "G20",
