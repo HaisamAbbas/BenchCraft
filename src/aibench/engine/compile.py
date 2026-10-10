@@ -126,6 +126,7 @@ class RunPlanOverrides:
     sample_size: int | None = None
     selection_seed: int | None = None
     repetitions: int | None = None
+    warmup_repetitions: int | None = None
     application_concurrency: int | None = None
     evaluation_concurrency: int | None = None
     max_attempts: int | None = None
@@ -207,7 +208,12 @@ def load_plan(path: Path) -> ExecutablePlan:
 
 
 def freeze_plan(plan: ExecutablePlan) -> tuple[bytes, str]:
-    data = json.dumps(plan.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    # Preserve the canonical bytes of plans written before warmup support. The new field's
+    # zero default has no semantic effect, so it must not invalidate an existing run ID.
+    frozen = plan.model_dump(mode="json")
+    if frozen.get("warmup_repetitions") == 0:
+        frozen.pop("warmup_repetitions")
+    data = json.dumps(frozen, sort_keys=True, separators=(",", ":"))
     raw = data.encode("utf-8")
     return raw, bytes_hash(raw)
 
@@ -577,13 +583,15 @@ def _check_coverage(analysis: PlanAnalysis) -> None:
 
 
 def work_graph(
-    case_ids: list[str], repetitions: int, binding_hashes: list[str]
+    case_ids: list[str], repetitions: int, binding_hashes: list[str], warmup_repetitions: int = 0
 ) -> dict[str, tuple[str, ...]]:
     """The plan's work DAG: task key -> dependency keys. Executions depend on nothing; each
     evaluation depends on exactly its execution. (Matches `engine.execution_key` and
     `engine.evaluation_key`.)"""
     graph: dict[str, tuple[str, ...]] = {}
     for case_id in case_ids:
+        for repetition in range(repetitions, repetitions + warmup_repetitions):
+            graph[f"exec:{case_id}:r{repetition}"] = ()
         for repetition in range(repetitions):
             exec_key = f"exec:{case_id}:r{repetition}"
             graph[exec_key] = ()
@@ -625,8 +633,8 @@ def dag_problems(graph: dict[str, tuple[str, ...]]) -> list[str]:
 
 def _check_budgets(analysis: PlanAnalysis) -> None:
     plan, budgets = analysis.plan, analysis.plan.budgets
-    executions = len(analysis.cases) * plan.repetitions
-    evaluations = executions * len(analysis.metrics)
+    executions = len(analysis.cases) * (plan.repetitions + plan.warmup_repetitions)
+    evaluations = len(analysis.cases) * plan.repetitions * len(analysis.metrics)
     if budgets.max_application_calls is not None and budgets.max_application_calls < executions:
         analysis.add(
             "missing_information",
@@ -719,6 +727,7 @@ def analyze_plan(
         [c.case_id for c in analysis.cases],
         plan.repetitions,
         [m.binding_hash for m in analysis.metrics],
+        plan.warmup_repetitions,
     )
     for problem in dag_problems(graph):
         analysis.add("invalid", f"work graph: {problem}", "plan")
@@ -765,6 +774,8 @@ def apply_run_plan_overrides(
 
     if overrides.repetitions is not None:
         data["repetitions"] = overrides.repetitions
+    if overrides.warmup_repetitions is not None:
+        data["warmup_repetitions"] = overrides.warmup_repetitions
     concurrency = data["concurrency"]
     if overrides.application_concurrency is not None:
         concurrency["application"] = overrides.application_concurrency

@@ -536,7 +536,11 @@ def validate_plan(
         "findings": [f.as_dict() for f in analysis.findings],
         "cases": len(analysis.cases),
         "repetitions": loaded.repetitions,
-        "execution_items": len(analysis.cases) * loaded.repetitions,
+        "warmup_repetitions": loaded.warmup_repetitions,
+        "execution_items": len(analysis.cases)
+        * (loaded.repetitions + loaded.warmup_repetitions),
+        "measurement_execution_items": len(analysis.cases) * loaded.repetitions,
+        "warmup_execution_items": len(analysis.cases) * loaded.warmup_repetitions,
         "evaluation_items": len(analysis.cases) * loaded.repetitions * len(analysis.metrics),
         "metrics": [f"{m.manifest.evaluator_id}@{m.manifest.version}" for m in analysis.metrics],
         "coverage": [
@@ -557,7 +561,8 @@ def validate_plan(
         if code == EXIT_OK:
             console.print(
                 f"plan valid: {summary['cases']} case(s) x {summary['repetitions']} "
-                f"repetition(s), {len(summary['metrics'])} metric(s); nothing was dispatched"
+                f"measured repetition(s) + {summary['warmup_repetitions']} warmup(s), "
+                f"{len(summary['metrics'])} metric(s); nothing was dispatched"
             )
         elif code == EXIT_DENIED:
             err_console.print("nothing was dispatched: the policy denies this plan")

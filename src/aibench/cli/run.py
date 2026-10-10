@@ -286,7 +286,9 @@ def _print_outcome(run_id: str, outcome: RunOutcome) -> None:
 def _run_preview(compiled: CompiledRun, *, run_seed: int | None) -> dict[str, object]:
     """Describe the exact compiled inputs and selected work without persisting a run."""
     plan = compiled.plan
-    executions = len(compiled.cases) * plan.repetitions
+    measurements = len(compiled.cases) * plan.repetitions
+    warmups = len(compiled.cases) * plan.warmup_repetitions
+    executions = measurements + warmups
     return {
         "schema": "aibench.run-preview/1",
         "status": "dry_run",
@@ -317,8 +319,11 @@ def _run_preview(compiled: CompiledRun, *, run_seed: int | None) -> dict[str, ob
             "case_ids": [case.case_id for case in compiled.cases],
             "case_count": len(compiled.cases),
             "repetitions": plan.repetitions,
+            "warmup_repetitions": plan.warmup_repetitions,
             "execution_items": executions,
-            "evaluation_items": executions * len(compiled.metrics),
+            "measurement_execution_items": measurements,
+            "warmup_execution_items": warmups,
+            "evaluation_items": measurements * len(compiled.metrics),
             "metrics": [
                 {
                     "binding_hash": metric.binding_hash,
@@ -454,7 +459,7 @@ def _retry_failure_case_ids(
     failed = {
         execution.case_id
         for execution in final_executions
-        if execution.status is ExecutionStatus.ERROR
+        if not execution.warmup and execution.status is ExecutionStatus.ERROR
     }
     effect_risk: set[str] = set()
     safe_states = (EffectState.NONE_DECLARED, EffectState.NOT_DISPATCHED)
@@ -560,6 +565,13 @@ def run_plan(
     ),
     repetitions: int | None = typer.Option(
         None, "--repetitions", min=1, max=100, help="Override the plan's repetition count."
+    ),
+    warmup_repetitions: int | None = typer.Option(
+        None,
+        "--warmup-repetitions",
+        min=0,
+        max=100,
+        help="Override the plan's warmup application-call count per case (excluded from metrics).",
     ),
     application_concurrency: int | None = typer.Option(
         None, "--application-concurrency", min=1, max=64,
@@ -669,6 +681,7 @@ def run_plan(
                 sample_size=sample_size,
                 selection_seed=selection_seed,
                 repetitions=repetitions,
+                warmup_repetitions=warmup_repetitions,
                 application_concurrency=application_concurrency,
                 evaluation_concurrency=evaluation_concurrency,
                 max_attempts=max_attempts,
@@ -1073,7 +1086,11 @@ def retry(
             "selected_case_ids": [case.case_id for case in compiled.cases],
             "case_count": len(compiled.cases),
             "repetitions": compiled.plan.repetitions,
-            "execution_items": len(compiled.cases) * compiled.plan.repetitions,
+            "warmup_repetitions": compiled.plan.warmup_repetitions,
+            "execution_items": len(compiled.cases)
+            * (compiled.plan.repetitions + compiled.plan.warmup_repetitions),
+            "measurement_execution_items": len(compiled.cases) * compiled.plan.repetitions,
+            "warmup_execution_items": len(compiled.cases) * compiled.plan.warmup_repetitions,
             "evaluation_items": len(compiled.cases)
             * compiled.plan.repetitions
             * len(compiled.metrics),

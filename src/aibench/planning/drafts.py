@@ -106,6 +106,9 @@ class DraftProposal(FrozenModel):
 class SpendEstimate(FrozenModel):
     selected_cases: int
     repetitions: int
+    warmup_repetitions: int = 0
+    measurement_executions: int = 0
+    warmup_executions: int = 0
     executions: int
     application_calls_upper_bound: int  # with every retry the retry policy allows
     evaluations: int
@@ -233,9 +236,11 @@ def build_plan(proposal: DraftProposal, ctx: DraftContext) -> ExecutablePlan:
 
 def estimate_spend(plan: ExecutablePlan, analysis: PlanAnalysis) -> SpendEstimate:
     selected = len(analysis.cases)
-    executions = selected * plan.repetitions
+    measurement_executions = selected * plan.repetitions
+    warmup_executions = selected * plan.warmup_repetitions
+    executions = measurement_executions + warmup_executions
     model_metrics = sum(1 for m in analysis.metrics if m.manifest.uses_models)
-    evaluations = executions * len(analysis.metrics)
+    evaluations = measurement_executions * len(analysis.metrics)
     budgets = plan.budgets
     app_rate, eval_rate = (
         budgets.estimated_cost_per_application_call_usd,
@@ -256,10 +261,13 @@ def estimate_spend(plan: ExecutablePlan, analysis: PlanAnalysis) -> SpendEstimat
     return SpendEstimate(
         selected_cases=selected,
         repetitions=plan.repetitions,
+        warmup_repetitions=plan.warmup_repetitions,
+        measurement_executions=measurement_executions,
+        warmup_executions=warmup_executions,
         executions=executions,
         application_calls_upper_bound=executions * plan.retry.max_attempts,
         evaluations=evaluations,
-        model_evaluations=executions * model_metrics,
+        model_evaluations=measurement_executions * model_metrics,
         estimated_cost_usd=cost,
         cost_basis=basis,
     )

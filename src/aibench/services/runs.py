@@ -745,6 +745,7 @@ def create_run(
                     "plan_id": compiled.plan.plan_id,
                     "cases": len(compiled.cases),
                     "repetitions": compiled.plan.repetitions,
+                    "warmup_repetitions": compiled.plan.warmup_repetitions,
                     "metrics": len(compiled.metrics),
                     "parent_run_id": parent_run_id,
                 },
@@ -854,6 +855,7 @@ def create_run(
             "plan_id": compiled.plan.plan_id,
             "cases": len(compiled.cases),
             "repetitions": compiled.plan.repetitions,
+            "warmup_repetitions": compiled.plan.warmup_repetitions,
             "metrics": len(compiled.metrics),
             "parent_run_id": parent_run_id,
         },
@@ -926,6 +928,7 @@ def compile_retry_run(
         update={
             "selection": CaseSelection(case_ids=selected),
             "repetitions": repetitions,
+            "warmup_repetitions": plan.warmup_repetitions,
         }
     )
     try:
@@ -960,6 +963,20 @@ def compile_retry_run(
 def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str) -> None:
     """Idempotently materialize a plan's work graph, including after interrupted creation."""
     for case in compiled.cases:
+        for repetition in range(
+            compiled.plan.repetitions,
+            compiled.plan.repetitions + compiled.plan.warmup_repetitions,
+        ):
+            exec_key = execution_key(case.case_id, repetition)
+            storage.commit_work_item(
+                WorkItem(
+                    work_item_id=f"{run_id}:{exec_key}",
+                    run_id=run_id,
+                    task_key=exec_key,
+                    kind="execution",
+                    warmup=True,
+                )
+            )
         for repetition in range(compiled.plan.repetitions):
             exec_key = execution_key(case.case_id, repetition)
             storage.commit_work_item(
@@ -1637,7 +1654,7 @@ def same_answer_warning(storage: Storage, run_id: str) -> str | None:
     query." to all 15 questions, with HTTP 200, and every execution counted as a success."""
     latest: dict[tuple[str, int], Any] = {}
     for attempt in storage.list_execution_attempts(run_id):  # oldest first
-        if attempt.status is ExecutionStatus.OK:
+        if attempt.status is ExecutionStatus.OK and not attempt.warmup:
             latest[(attempt.case_id, attempt.repetition_id)] = attempt.output
     if len({case for case, _ in latest}) < SAME_ANSWER_MIN_CASES:
         return None

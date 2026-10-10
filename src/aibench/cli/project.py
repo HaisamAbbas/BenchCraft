@@ -253,7 +253,8 @@ def _plan_checks(path: Path, policy: Any, environ: dict[str, str]) -> list[Check
             Check(
                 "plan",
                 "ok",
-                f"{plan.plan_id}: {len(analysis.cases)} case(s) x {plan.repetitions}, "
+                f"{plan.plan_id}: {len(analysis.cases)} case(s) x {plan.repetitions}"
+                f" + {plan.warmup_repetitions} warmup(s), "
                 f"{len(analysis.metrics)} metric(s), {len(plan.gates)} release gate(s)",
             )
         )

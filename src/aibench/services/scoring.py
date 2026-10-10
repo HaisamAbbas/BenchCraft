@@ -551,7 +551,7 @@ def rescore_selected_count(items: Sequence[WorkItem], recorded_count: int) -> in
     Legacy runs without a work graph use final recorded executions. The observed count
     also prevents dropping historical outputs whose work records are unavailable.
     """
-    return max(sum(item.kind == "execution" for item in items), recorded_count)
+    return max(sum(item.kind == "execution" and not item.warmup for item in items), recorded_count)
 
 
 def decide(
@@ -689,7 +689,11 @@ async def score_recorded_run(
     # Freeze the identity of the metrics/environment actually resolved for this pass.
     dependency_lock_hash = declared_dependency_identity(resolved)
 
-    executions = select_final_executions(storage.list_execution_attempts(run_id))
+    executions = [
+        execution
+        for execution in select_final_executions(storage.list_execution_attempts(run_id))
+        if not execution.warmup
+    ]
     selected_count = rescore_selected_count(storage.list_work_items(run_id), len(executions))
     if not selected_count:
         raise ScoringError(f"run {run_id!r} has no recorded executions to score")

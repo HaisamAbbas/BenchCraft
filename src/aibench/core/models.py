@@ -1089,6 +1089,7 @@ class ExecutionResult(FrozenModel):
     case_id: str
     repetition_id: int = 0
     attempt_id: int = 0
+    warmup: bool = False
     status: ExecutionStatus
     output: FrozenValue = None
     retrieved_context: tuple[str, ...] | None = None
@@ -1346,6 +1347,7 @@ class WorkItem(FrozenModel):
     run_id: str
     task_key: str  # stable logical key; unique per run so a retried commit cannot duplicate it
     kind: str  # e.g. "execution", "evaluation"
+    warmup: bool = False
     dependency_keys: tuple[str, ...] = Field(default_factory=tuple)
     state: WorkItemState = WorkItemState.PENDING
     attempt: int = 0

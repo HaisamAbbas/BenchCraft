@@ -4,6 +4,7 @@ seeded sampling, aggregation semantics, DAG checks and budgets. All outside any 
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from aibench.engine.compile import (
     analyze_plan,
     compile_plan,
     dag_problems,
+    freeze_plan,
     work_graph,
 )
 from aibench.security.policy import ExecutionPolicy
@@ -48,6 +50,18 @@ def _analyze(tmp_path: Path, plan: ExecutablePlan, **kwargs: Any) -> Any:
 
 def _kinds(analysis: Any) -> set[tuple[str, bool]]:
     return {(f.kind, f.blocking) for f in analysis.findings}
+
+
+def test_zero_warmup_preserves_legacy_frozen_plan_bytes() -> None:
+    plan = _plan()
+    expected = plan.model_dump(mode="json")
+    expected.pop("warmup_repetitions")
+    expected_bytes = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
+
+    frozen, _ = freeze_plan(plan)
+    assert frozen == expected_bytes
+    warmed, _ = freeze_plan(plan.model_copy(update={"warmup_repetitions": 1}))
+    assert b'"warmup_repetitions":1' in warmed
 
 
 def test_unknown_evaluator_is_invalid_and_rejected_outside_any_model(tmp_path: Path) -> None:

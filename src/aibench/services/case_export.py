@@ -155,6 +155,8 @@ def build_case_export(
         for item in work_items:
             if item.kind != "execution":
                 continue
+            if item.warmup:
+                continue
             try:
                 case_id, repetition, _ = parse_work_item_key(item.task_key, item.kind)
             except ValueError as exc:
@@ -167,7 +169,11 @@ def build_case_export(
     else:
         selected_basis = "recorded final executions (legacy run without a work graph)"
 
-    finals = select_final_executions(storage.list_execution_attempts(run_id))
+    finals = [
+        item
+        for item in select_final_executions(storage.list_execution_attempts(run_id))
+        if not item.warmup
+    ]
     executions = {(item.case_id, item.repetition_id): item for item in finals}
     for key in executions:
         selected.setdefault(key, "recorded")

@@ -14,6 +14,8 @@ import pytest
 from aibench.core.models import ExecutionStatus, WorkItemState
 from aibench.engine.engine import RunController, RunState
 from aibench.security.policy import ExecutionPolicy
+from aibench.services.case_export import build_case_export
+from aibench.services.reports import build_report
 from aibench.services.runs import evaluate_run, run_status
 from tests.engine_support import Harness, max_overlap
 
@@ -72,6 +74,79 @@ def test_manual_plan_runs_end_to_end_and_saved_executions_rescore(tmp_path: Path
     assert h.count() == 6  # rescoring never invoked the application
     [summary] = report.summaries
     assert (summary.selected, summary.completed, summary.decisions["pass"]) == (6, 4, 4)
+
+
+def test_warmups_run_before_measurement_and_are_excluded_from_scoring_and_latency(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path)
+    plan = h.plan(
+        dataset=h.dataset({"a": "hi", "b": "hi"}),
+        application=h.cli_app(),
+        repetitions=2,
+        warmup_repetitions=1,
+        concurrency={"application": 1, "evaluation": 1},
+    )
+    run_id = h.create(plan)
+    outcome = h.execute(run_id)
+
+    # The first two calls are the warmup phase (one per case); all four measurements follow.
+    assert [call["case"] for call in h.invocations()] == ["a", "b", "a", "a", "b", "b"]
+    assert outcome.state is RunState.COMPLETED
+    assert outcome.counts == {
+        "execution": {"succeeded": 6},
+        "evaluation": {"succeeded": 4},
+    }
+    storage, artifacts = h.storage()
+    try:
+        attempts = storage.list_execution_attempts(run_id)
+        assert sum(attempt.warmup for attempt in attempts) == 2
+        items = storage.list_work_items(run_id)
+        assert sum(item.kind == "execution" and item.warmup for item in items) == 2
+        assert sum(item.kind == "evaluation" for item in items) == 4
+        report = build_report(storage, artifacts, run_id)
+        case_export = build_case_export(storage, artifacts, run_id)
+    finally:
+        storage.db.close()
+
+    assert report["application"]["latency"]["successful_requests"] == 4
+    assert report["application"]["measurement"] == {
+        "planned": 4,
+        "recorded": 4,
+        "not_recorded": 0,
+        "completed": 4,
+        "failed": 0,
+    }
+    assert report["application"]["warmup"]["planned"] == 2
+    assert report["application"]["warmup"]["recorded"] == 2
+    assert report["application"]["warmup"]["dispatched_calls"] == 2
+    assert report["application"]["warmup"]["cost"]["calls_with_unknown_cost"] == 2
+    assert len(case_export["rows"]) == 4
+    assert all(row["repetition"] < 2 for row in case_export["rows"])
+
+
+def test_warmups_consume_application_budget_before_measurements(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    plan = h.plan(
+        dataset=h.dataset({"a": "hi", "b": "hi"}),
+        application=h.cli_app(),
+        repetitions=1,
+        warmup_repetitions=1,
+        budgets={"max_application_calls": 1},
+        concurrency={"application": 1, "evaluation": 1},
+    )
+    run_id = h.create(plan)
+    outcome = h.execute(run_id)
+    assert outcome.state is RunState.BUDGET_EXHAUSTED
+    assert h.count() == 1
+    assert outcome.budget["application"]["calls"] == 1
+    storage, _ = h.storage()
+    try:
+        attempts = storage.list_execution_attempts(run_id)
+        assert len(attempts) == 1 and attempts[0].warmup
+        assert sum(item.kind == "execution" and item.warmup for item in storage.list_work_items(run_id)) == 2
+    finally:
+        storage.db.close()
 
 
 # --------------------------------------------------------------------------- 06-T3 retries

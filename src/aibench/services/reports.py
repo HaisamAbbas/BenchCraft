@@ -44,6 +44,7 @@ from aibench.core.models import (
     EvaluatorManifest,
     ExecutionResult,
     ExecutionStatus,
+    WorkItem,
     WorkItemState,
     deep_unfreeze,
 )
@@ -52,6 +53,7 @@ from aibench.engine.engine import parse_work_item_key, was_dispatched, work_coun
 from aibench.reporting.aggregation import MetricSummary, reason_code, summarize
 from aibench.reporting.render import render
 from aibench.security.redaction import sanitize
+from aibench.services.phase_accounting import recovered_uncommitted_warmup_dispatches
 from aibench.services.runs import _FINISHED, RunError, _frozen_application, _frozen_plan
 from aibench.services.scoring import rescore_selected_count, select_final_executions
 from aibench.services.suspect_answers import looks_like_error
@@ -270,6 +272,9 @@ def _application_section(
     storage: Storage,
     run_id: str,
     planned_executions: int | None,
+    planned_measurements: int | None,
+    planned_warmups: int | None,
+    work_items: list[WorkItem],
     concurrency: int | None,
     events: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[ExecutionResult]]:
@@ -282,22 +287,31 @@ def _application_section(
         if e["event_type"] == "recovered"
     )
     finals = select_final_executions(attempts)
+    warmup_finals = [e for e in finals if e.warmup]
+    measurement_finals = [e for e in finals if not e.warmup]
+    warmup_attempts = [a for a in attempts if a.warmup and was_dispatched(a)]
+    warmup_uncommitted = recovered_uncommitted_warmup_dispatches(events, work_items)
     status = Counter(e.status.value for e in finals)
     error_kinds = Counter(e.error_kind.value for e in finals if e.error_kind is not None)
     cache_hits = sum(1 for e in finals if e.cache)
     ok_wall = [
         float(w)
-        for e in finals
+        for e in measurement_finals
         if e.status is ExecutionStatus.OK
         and not e.cache  # a cached output is not a fresh latency measurement (§14)
         and isinstance(w := (deep_unfreeze(e.timing) or {}).get("wall_ms"), (int, float))
     ]
-    timeouts = sum(
-        1 for e in finals if e.error_kind is not None and e.error_kind.value == "timeout"
+    measurement_timeouts = sum(
+        1
+        for e in measurement_finals
+        if e.error_kind is not None and e.error_kind.value == "timeout"
     )
+    measurement_failed = sum(e.status is not ExecutionStatus.OK for e in measurement_finals)
     failed = sum(1 for e in finals if e.status is not ExecutionStatus.OK)
     error_like = sorted(
-        e.case_id for e in finals if e.status is ExecutionStatus.OK and looks_like_error(e.output)
+        e.case_id
+        for e in measurement_finals
+        if e.status is ExecutionStatus.OK and looks_like_error(e.output)
     )
     dispatched = [a for a in attempts if was_dispatched(a)]
     known = sum(float(a.cost) for a in dispatched if a.cost is not None)
@@ -320,17 +334,17 @@ def _application_section(
         "latency": {
             "definition": (
                 "wall time of the final attempt of each successful request, measured by the "
-                "runner around the invocation; p50/p95 by nearest rank. Failed and timed-out "
-                "requests are excluded from the percentiles and counted separately. Cache "
-                "hits are excluded: a cached output is not a fresh measurement."
+                "runner around the invocation for measured requests only; warmups, failed and "
+                "timed-out requests are excluded from p50/p95 by nearest rank. Cache hits are "
+                "excluded: a cached output is not a fresh measurement."
             ),
             "successful_requests": len(ok_wall),
             "p50_ms": percentile(ok_wall, 50),
             "p95_ms": percentile(ok_wall, 95),
             "min_ms": min(ok_wall) if ok_wall else None,
             "max_ms": max(ok_wall) if ok_wall else None,
-            "excluded_failures": failed - timeouts,
-            "excluded_timeouts": timeouts,
+            "excluded_failures": measurement_failed - measurement_timeouts,
+            "excluded_timeouts": measurement_timeouts,
             "concurrency": concurrency,
             "cache": (
                 f"{cache_hits} cached execution(s) excluded from latency"
@@ -339,6 +353,50 @@ def _application_section(
             ),
         },
         "cost": _cost_block(len(dispatched) + uncommitted, known, unknown),
+        "measurement": {
+            "planned": planned_measurements,
+            "recorded": len(measurement_finals),
+            "not_recorded": (
+                None
+                if planned_measurements is None
+                else planned_measurements - len(measurement_finals)
+            ),
+            "completed": sum(e.status is ExecutionStatus.OK for e in measurement_finals),
+            "failed": sum(e.status is not ExecutionStatus.OK for e in measurement_finals),
+        },
+        "warmup": {
+            "planned": planned_warmups,
+            "recorded": len(warmup_finals),
+            "not_recorded": (
+                None if planned_warmups is None else planned_warmups - len(warmup_finals)
+            ),
+            "completed": sum(e.status is ExecutionStatus.OK for e in warmup_finals),
+            "failed": sum(e.status is not ExecutionStatus.OK for e in warmup_finals),
+            "attempts": len(warmup_attempts),
+            "dispatched_calls": len(warmup_attempts) + warmup_uncommitted,
+            "uncommitted_dispatches": warmup_uncommitted,
+            "cost": _cost_block(
+                len(warmup_attempts) + warmup_uncommitted,
+                sum(float(a.cost) for a in warmup_attempts if a.cost is not None),
+                sum(a.cost is None for a in warmup_attempts) + warmup_uncommitted,
+            ),
+            "work_item_states": dict(
+                sorted(
+                    Counter(
+                        item.state.value
+                        for item in work_items
+                        if item.kind == "execution" and item.warmup
+                    ).items()
+                )
+            ),
+            "effect_states": dict(
+                sorted(
+                    Counter(
+                        e.effect_state.value for e in warmup_finals if e.effect_state is not None
+                    ).items()
+                )
+            ),
+        },
     }
     return section, finals
 
@@ -444,7 +502,7 @@ def _evidence(
             or r.status is ExecutionStatus.ERROR
         ):
             by_item[(r.case_id, r.repetition_id)].append(r)
-    executions = {(e.case_id, e.repetition_id): e for e in finals}
+    executions = {(e.case_id, e.repetition_id): e for e in finals if not e.warmup}
     for key, final in executions.items():
         if final.status is not ExecutionStatus.OK:
             by_item.setdefault(key, [])
@@ -549,8 +607,23 @@ def build_report(
         )
 
     planned_exec = sum(1 for w in items if w.kind == "execution") if items else None
+    planned_measurements = (
+        sum(1 for w in items if w.kind == "execution" and not w.warmup)
+        if items
+        else planned_exec
+    )
+    planned_warmups = (
+        sum(1 for w in items if w.kind == "execution" and w.warmup) if items else 0
+    )
     application, finals = _application_section(
-        storage, run_id, planned_exec, plan.concurrency.application if plan else None, events
+        storage,
+        run_id,
+        planned_exec,
+        planned_measurements,
+        planned_warmups,
+        items,
+        plan.concurrency.application if plan else None,
+        events,
     )
     application["state"] = _state_section(params, events)
 
@@ -706,6 +779,7 @@ def build_report(
             "plugins": dict(sorted((deep_unfreeze(manifest.plugin_hashes) or {}).items())),
             "seed": manifest.seed,
             "repetitions": plan.repetitions if plan else None,
+            "warmup_repetitions": plan.warmup_repetitions if plan else 0,
             "environment": deep_unfreeze(manifest.environment) or {},
             "approved_by": approval.granted_by if approval else None,
         },
@@ -845,6 +919,7 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
         "provisional": run["provisional"],
         "partial": run["partial"],
         "as_of_event_sequence": report["as_of_event_sequence"],
+        "warmup_repetitions": run.get("warmup_repetitions", 0),
         "basis": report["basis"],
         "provenance": {
             key: run[key]
@@ -877,6 +952,8 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
                 "error_like_answers",
             )
         },
+        "measurement": app["measurement"],
+        "warmup": app["warmup"],
         "latency_ms": {
             k: app["latency"][k]
             for k in ("p50_ms", "p95_ms", "successful_requests", "excluded_failures")

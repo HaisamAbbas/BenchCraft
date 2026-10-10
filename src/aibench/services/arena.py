@@ -39,7 +39,7 @@ def _answers(storage: Storage, run_id: str) -> dict[tuple[str, int], ExecutionRe
     """The latest successful attempt of each (case, repetition) of a run."""
     found: dict[tuple[str, int], ExecutionResult] = {}
     for attempt in storage.list_execution_attempts(run_id):
-        if attempt.status is ExecutionStatus.OK:
+        if attempt.status is ExecutionStatus.OK and not attempt.warmup:
             found[(attempt.case_id, attempt.repetition_id)] = attempt
     return found
 

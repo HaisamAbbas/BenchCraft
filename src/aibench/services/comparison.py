@@ -57,6 +57,7 @@ from aibench.reporting.statistics import (
     compare_numeric_metric,
     summarize_judge_stability,
 )
+from aibench.services.phase_accounting import recovered_uncommitted_warmup_dispatches
 from aibench.services.scoring import select_final_executions
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import Storage
@@ -665,6 +666,7 @@ def _plan_facts(
     raw, problem, raw_digest = _artifact_json(storage, artifacts, artifact_id)
     warnings: list[dict[str, Any]] = []
     repetitions: int | None = None
+    warmup_repetitions: int | None = None
     selection_digest: str | None = None
     source = "unknown"
     artifact_expected = isinstance(artifact_id, str) and bool(artifact_id)
@@ -698,6 +700,7 @@ def _plan_facts(
         else:
             plan_content_verified = True
             repetitions = plan.repetitions
+            warmup_repetitions = plan.warmup_repetitions
             source = "frozen_plan_artifact"
             selection_digest = _digest(plan.selection.model_dump(mode="json"))
 
@@ -719,6 +722,12 @@ def _plan_facts(
             if observed_repetitions == expected:
                 repetitions = max(observed_repetitions) + 1
                 source = "observed_work_items"
+    if warmup_repetitions is None and not artifact_expected:
+        candidate = params.get("warmup_repetitions", 0)
+        if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate >= 0:
+            warmup_repetitions = candidate
+        else:
+            warmup_repetitions = 0
 
     # Without a frozen plan, an inferred repetition count is useful context but
     # cannot satisfy a strict comparison's repetition-policy identity.
@@ -731,6 +740,7 @@ def _plan_facts(
     return (
         {
             "repetitions": repetitions,
+            "warmup_repetitions": warmup_repetitions,
             "selection_digest": selection_digest,
             "source": source,
             "verified": verified,
@@ -941,6 +951,7 @@ def _run_facts(
         int(item.task_key.partition(":r")[2].partition(":")[0])
         for item in work_items
         if item.kind in {"execution", "evaluation"}
+        and not item.warmup
         and ":r" in item.task_key
         and item.task_key.partition(":r")[2].partition(":")[0].isdigit()
     }
@@ -957,7 +968,9 @@ def _run_facts(
         storage,
         artifacts,
         manifest,
-        observed_repetitions=observed_reps | {r.repetition_id for r in results},
+        observed_repetitions=observed_reps
+        | {r.repetition_id for r in results}
+        | {r.repetition_id for r in executions if not r.warmup},
         declared_repetitions=declared_reps,
     )
     if plan_warnings:
@@ -1759,6 +1772,7 @@ def _global_identity(
         and not baseline.plan.get("warnings")
         and not current.plan.get("warnings")
         and baseline.plan.get("repetitions") == current.plan.get("repetitions")
+        and baseline.plan.get("warmup_repetitions") == current.plan.get("warmup_repetitions")
         and baseline.plan.get("selection_digest") == current.plan.get("selection_digest")
     )
     plan_check = _check(
@@ -1914,6 +1928,8 @@ def _selected_keys(run: _RunFacts, spec: _MetricSpec) -> set[PairKey]:
         execution_work: set[PairKey] = set()
         for item in run.work_items:
             if item.kind != "execution":
+                continue
+            if item.warmup:
                 continue
             try:
                 case_id, repetition, _ = parse_work_item_key(item.task_key, item.kind)
@@ -2197,6 +2213,8 @@ def _judge_observations(
     # repetition units.
     final: dict[tuple[str, int], ExecutionResult] = {}
     for execution in run.executions:
+        if execution.warmup:
+            continue
         unit_key = (execution.case_id, execution.repetition_id)
         old = final.get(unit_key)
         if old is None or execution.attempt_id > old.attempt_id:
@@ -2923,7 +2941,7 @@ def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
     latencies: list[float] = []
     expected_latency_requests = 0
     for execution in finals:
-        if execution.status is not ExecutionStatus.OK or execution.cache:
+        if execution.warmup or execution.status is not ExecutionStatus.OK or execution.cache:
             continue
         expected_latency_requests += 1
         timing = deep_unfreeze(execution.timing) or {}
@@ -2942,6 +2960,13 @@ def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
         and not isinstance(payload.get("uncommitted_dispatches", 0), bool)
         and payload.get("uncommitted_dispatches", 0) > 0
     )
+    warmup_dispatches = [execution for execution in dispatched if execution.warmup]
+    warmup_finals = [execution for execution in finals if execution.warmup]
+    warmup_uncommitted = recovered_uncommitted_warmup_dispatches(run.events, run.work_items)
+    warmup_unknown_costs = (
+        sum(execution.cost is None for execution in warmup_dispatches) + warmup_uncommitted
+    )
+    warmup_calls = len(warmup_dispatches) + warmup_uncommitted
     valid_costs = [
         cost
         for execution in dispatched
@@ -2956,12 +2981,38 @@ def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
         "latency_uncached_successful_requests": expected_latency_requests,
         "latency_missing_measurements": expected_latency_requests - len(latencies),
         "latency_definition": (
-            "nearest-rank p95 of final successful uncached request wall times; "
-            "failed requests and cache hits are excluded"
+            "nearest-rank p95 of final successful uncached measured request wall times; "
+            "warmups, failed requests and cache hits are excluded"
         ),
         "total_cost_usd": round(known_cost, 6) if calls and unknown_costs == 0 else None,
         "cost_dispatches": calls,
         "cost_dispatches_with_unknown_cost": unknown_costs,
+        "warmup_dispatches": warmup_calls,
+        "warmup_uncommitted_dispatches": warmup_uncommitted,
+        "warmup_cost_usd": (
+            round(sum(float(e.cost) for e in warmup_dispatches if e.cost is not None), 6)
+            if warmup_calls and warmup_unknown_costs == 0
+            else None
+        ),
+        "warmup_cost_calls_with_unknown_cost": warmup_unknown_costs,
+        "warmup_work_item_states": dict(
+            sorted(
+                Counter(
+                    item.state.value
+                    for item in run.work_items
+                    if item.kind == "execution" and item.warmup
+                ).items()
+            )
+        ),
+        "warmup_effect_states": dict(
+            sorted(
+                Counter(
+                    execution.effect_state.value
+                    for execution in warmup_finals
+                    if execution.effect_state is not None
+                ).items()
+            )
+        ),
         "cost_accounting": (
             "complete" if calls and unknown_costs == 0 else "partial" if calls else "none"
         ),

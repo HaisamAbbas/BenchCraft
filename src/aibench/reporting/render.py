@@ -174,6 +174,7 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         ("Policy", run["policy_hash"] or "unknown"),
         ("Evaluator plugins", ", ".join(f"{k}: {v}" for k, v in run["plugins"].items()) or "none"),
         ("Repetitions", _number(run["repetitions"])),
+        ("Warmup repetitions", _number(run.get("warmup_repetitions", 0))),
         ("Seed", _number(run["seed"])),
         ("Environment", ", ".join(f"{k} {v}" for k, v in run["environment"].items())),
         ("Approved by", run["approved_by"] or "unknown"),
@@ -272,6 +273,22 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
     application = [
         ("Planned executions", _number(app["planned"])),
         ("Recorded", _number(app["recorded"])),
+        (
+            "Measurement requests",
+            (
+                f"{app['measurement']['completed']} completed, "
+                f"{app['measurement']['failed']} failed of {app['measurement']['planned']} planned"
+            ),
+        ),
+        (
+            "Warmup requests",
+            (
+                f"{app['warmup']['completed']} completed, {app['warmup']['failed']} failed "
+                f"of {app['warmup']['planned']} planned; "
+                f"{app['warmup']['cost']['calls']} dispatched, "
+                f"{_usd(app['warmup']['cost'])}"
+            ),
+        ),
         ("Completed", fraction(app["completed"], app["planned"] or app["recorded"])),
         (
             "Application failures",

@@ -19,6 +19,7 @@ from aibench.core.models import (
     BenchmarkCase,
     DatasetManifest,
     Decision,
+    EffectState,
     EvaluationResult,
     ExecutionResult,
     ExecutionStatus,
@@ -185,6 +186,8 @@ def _seed_run(
     timings: dict[tuple[str, int], dict[str, Any]] | None = None,
     costs: dict[tuple[str, int], float | None] | None = None,
     cached_execution_keys: set[tuple[str, int]] | None = None,
+    warmup_repetitions: int = 0,
+    warmup_costs: dict[tuple[str, int], float | None] | None = None,
 ) -> tuple[str, str]:
     scoring_id = scoring_id or f"engine-{run_id}"
     binding, metric_profile = profile or _profile()
@@ -206,6 +209,7 @@ def _seed_run(
         dataset="dataset.jsonl",
         application="application.json",
         repetitions=repetitions,
+        warmup_repetitions=warmup_repetitions,
     )
     plan_bytes = plan.model_dump_json().encode("utf-8")
     plan_ref = _TEST_ARTIFACTS.write_bytes(plan_bytes, mime_type="application/json")
@@ -219,6 +223,7 @@ def _seed_run(
             parameters={
                 "scoring_id": scoring_id,
                 "repetitions": repetitions,
+                "warmup_repetitions": warmup_repetitions,
                 "plan_artifact_id": plan_ref.artifact_id,
                 "metric_profiles": {binding: metric_profile},
             },
@@ -228,6 +233,7 @@ def _seed_run(
     execution_ids = execution_ids or {}
     timings = timings or {}
     costs = costs or {}
+    warmup_costs = warmup_costs or {}
     for case in cases:
         for repetition in range(repetitions):
             key = (case.case_id, repetition)
@@ -261,6 +267,32 @@ def _seed_run(
                     run_id=run_id,
                     task_key=f"eval:{case.case_id}:r{repetition}:{binding[7:23]}",
                     kind="evaluation",
+                    state=WorkItemState.SUCCEEDED,
+                )
+            )
+        for warmup_index in range(warmup_repetitions):
+            repetition_id = repetitions + warmup_index
+            storage.commit_execution_attempt(
+                ExecutionResult(
+                    execution_id=f"{run_id}:{case.case_id}:warmup{warmup_index}:a0",
+                    run_id=run_id,
+                    case_id=case.case_id,
+                    repetition_id=repetition_id,
+                    attempt_id=0,
+                    warmup=True,
+                    status=ExecutionStatus.OK,
+                    output=f"warmup {case.case_id}",
+                    cost=warmup_costs.get((case.case_id, warmup_index)),
+                    effect_state=EffectState.COMPLETED,
+                )
+            )
+            storage.commit_work_item(
+                WorkItem(
+                    work_item_id=f"{run_id}:exec:{case.case_id}:r{repetition_id}",
+                    run_id=run_id,
+                    task_key=f"exec:{case.case_id}:r{repetition_id}",
+                    kind="execution",
+                    warmup=True,
                     state=WorkItemState.SUCCEEDED,
                 )
             )
@@ -1113,6 +1145,8 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
         values=_values(("a1", 0, 1), ("b1", 0, 1)),
         timings={("a1", 0): {"wall_ms": 100}, ("b1", 0): {"wall_ms": 200}},
         costs={("a1", 0): 0.1, ("b1", 0): 0.2},
+        warmup_repetitions=1,
+        warmup_costs={("a1", 0): 0.03, ("b1", 0): 0.04},
     )
     _seed_run(
         storage,
@@ -1122,6 +1156,8 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
         values=_values(("a1", 0, 0.5), ("b1", 0, 0.5)),
         timings={("a1", 0): {"wall_ms": 180}, ("b1", 0): {"wall_ms": 280}},
         costs={("a1", 0): 0.2, ("b1", 0): 0.35},
+        warmup_repetitions=1,
+        warmup_costs={("a1", 0): 0.05, ("b1", 0): 0.06},
     )
 
     report = compare_runs(
@@ -1135,15 +1171,19 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
     assert report["status"] == "qualified"
     assert performance["baseline"]["latency_p95_ms"] == 200
     assert performance["current"]["latency_p95_ms"] == 280
-    assert performance["baseline"]["total_cost_usd"] == 0.3
-    assert performance["current"]["total_cost_usd"] == 0.55
+    assert performance["baseline"]["total_cost_usd"] == 0.37
+    assert performance["current"]["total_cost_usd"] == 0.66
+    assert performance["baseline"]["warmup_dispatches"] == 2
+    assert performance["baseline"]["warmup_cost_usd"] == 0.07
+    assert performance["current"]["warmup_cost_usd"] == 0.11
+    assert performance["baseline"]["warmup_effect_states"] == {"completed": 2}
 
     policy = parse_regression_policy(
         {
             "schema": "aibench.regression-policy/1",
             "metric_rules": [{"metric_id": "native.exact_match", "max_degradation": 0.4}],
             "max_latency_p95_increase_ms": 79,
-            "max_application_cost_increase_usd": 0.24,
+            "max_application_cost_increase_usd": 0.28,
         }
     )
     report["regression_gate"] = evaluate_regression_policy(report, policy)
@@ -1153,7 +1193,7 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
         gate["rules"], indent=2
     )
     assert gate["rules"][1]["observed"] == 80
-    assert gate["rules"][2]["observed"] == pytest.approx(0.25)
+    assert gate["rules"][2]["observed"] == pytest.approx(0.29)
     assert comparison_exit_code(report) == 1
 
 

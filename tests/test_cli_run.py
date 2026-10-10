@@ -76,12 +76,14 @@ def test_run_dry_run_shows_exact_overridden_scope_and_dispatch_matches_it(
         "1",
         "--repetitions",
         "2",
+        "--warmup-repetitions",
+        "1",
         "--application-concurrency",
         "2",
         "--evaluation-concurrency",
         "2",
         "--max-app-calls",
-        "2",
+        "3",
         "--max-attempts",
         "1",
         "--no-cache-executions",
@@ -100,10 +102,13 @@ def test_run_dry_run_shows_exact_overridden_scope_and_dispatch_matches_it(
         "seed_will_be_random": False,
     }
     assert preview["scope"]["case_ids"] == ["case-a"]
-    assert preview["scope"]["execution_items"] == 2
+    assert preview["scope"]["execution_items"] == 3
+    assert preview["scope"]["measurement_execution_items"] == 2
+    assert preview["scope"]["warmup_execution_items"] == 1
     assert preview["scope"]["evaluation_items"] == 2
     assert preview["frozen"]["effective_plan"]["repetitions"] == 2
-    assert preview["frozen"]["effective_plan"]["budgets"]["max_application_calls"] == 2
+    assert preview["frozen"]["effective_plan"]["warmup_repetitions"] == 1
+    assert preview["frozen"]["effective_plan"]["budgets"]["max_application_calls"] == 3
     assert preview["frozen"]["effective_plan"]["concurrency"]["evaluation"] == 2
     assert preview["frozen"]["effective_plan"]["cache"] == {
         "executions": False,
@@ -122,7 +127,7 @@ def test_run_dry_run_shows_exact_overridden_scope_and_dispatch_matches_it(
     outcome = _json(run_result.stdout)
     run_id = outcome["run_id"]
     assert outcome["run_seed"] == 1729
-    assert h.count() == 2
+    assert h.count() == 3
     storage, _ = h.storage()
     try:
         record = storage.get_run(run_id)

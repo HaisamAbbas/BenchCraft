@@ -16,6 +16,7 @@ import pytest
 from aibench.core.models import ExecutionStatus, WorkItemState
 from aibench.engine.engine import RunState
 from aibench.security.policy import ExecutionPolicy
+from aibench.services.reports import build_report
 from aibench.storage.repositories import Storage
 from tests.engine_support import Harness
 
@@ -168,6 +169,41 @@ def test_crash_at_response_boundary_repeats_only_effect_free_work(
     assert "re-dispatch (no declared effects)" in events[0]["payload"]["items"][0]
     assert [a.attempt_id for a in attempts] == [2]  # attempt 1 never committed; ids never reused
     _no_duplicate_commits(h, run_id)
+
+
+def test_recovered_uncommitted_warmup_reports_unknown_cost_and_effect_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    h = Harness(tmp_path)
+    plan = h.plan(
+        dataset=h.dataset({"a": "hi"}),
+        application=h.cli_app(effects="reversible", environment_digest="test-runtime-pin"),
+        repetitions=1,
+        warmup_repetitions=1,
+    )
+    run_id = h.create(plan, policy=ExecutionPolicy(max_effects="reversible"))
+    _crash_once(monkeypatch, Storage, "commit_execution_attempt", lambda self, result: True)
+    _run_with_crash(h, run_id)
+    monkeypatch.undo()
+
+    outcome = h.execute(run_id)
+    assert outcome.state is RunState.COMPLETED
+    storage, artifacts = h.storage()
+    try:
+        report = build_report(storage, artifacts, run_id)
+        warmup_item = next(
+            item
+            for item in storage.list_work_items(run_id)
+            if item.kind == "execution" and item.warmup
+        )
+    finally:
+        storage.db.close()
+
+    assert warmup_item.state is WorkItemState.UNKNOWN_EFFECT
+    assert report["application"]["warmup"]["dispatched_calls"] == 1
+    assert report["application"]["warmup"]["uncommitted_dispatches"] == 1
+    assert report["application"]["warmup"]["cost"]["calls_with_unknown_cost"] == 1
+    assert report["application"]["warmup"]["work_item_states"] == {"unknown_effect": 1}
 
 
 def test_crash_at_commit_boundary_settles_from_the_committed_attempt(

@@ -81,6 +81,22 @@ def test_a_repeat_run_is_served_from_the_cache_and_labelled(tmp_path: Path) -> N
     assert report["application"]["attempts"] == 2  # recorded, but no call was made
 
 
+def test_warmups_bypass_execution_cache_while_measurements_use_it(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    _run(h)
+    assert h.count() == 2
+
+    second = _run(h, warmup_repetitions=1)
+    assert h.count() == 4  # two warmup calls; both measured calls came from cache
+    storage, _ = h.storage()
+    try:
+        attempts = storage.list_execution_attempts(second)
+    finally:
+        storage.db.close()
+    assert sum(attempt.warmup and not attempt.cache for attempt in attempts) == 2
+    assert sum(not attempt.warmup and bool(attempt.cache) for attempt in attempts) == 2
+
+
 @pytest.mark.parametrize(
     ("change", "execution_hits", "evaluation_hits"),
     [

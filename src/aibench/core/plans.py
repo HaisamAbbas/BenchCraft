@@ -165,6 +165,7 @@ class ExecutablePlan(FrozenModel):
     application: str  # application config path, relative to the plan file
     metrics: tuple[MetricBinding, ...] = ()
     repetitions: int = Field(default=1, ge=1, le=100)
+    warmup_repetitions: int = Field(default=0, ge=0, le=100)
     selection: CaseSelection = Field(default_factory=CaseSelection)
     concurrency: ConcurrencyLimits = Field(default_factory=ConcurrencyLimits)
     retry: RetryPolicy = Field(default_factory=RetryPolicy)

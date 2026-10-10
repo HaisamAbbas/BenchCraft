@@ -152,7 +152,8 @@ def draft(console: Console, summary: dict[str, Any]) -> None:
         cost_text = "unknown" if cost is None else f"${cost:g} (estimate)"
         out(
             console,
-            f"  {estimate['selected_cases']} case(s) x {estimate['repetitions']} repetition(s): "
+            f"  {estimate['selected_cases']} case(s) x {estimate['repetitions']} measured "
+            f"repetition(s) + {estimate['warmup_repetitions']} warmup(s): "
             f"up to {estimate['application_calls_upper_bound']} application call(s), "
             f"{estimate['evaluations']} evaluation(s), {estimate['model_evaluations']} by a "
             f"model judge; cost {cost_text}",
