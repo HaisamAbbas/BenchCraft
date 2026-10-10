@@ -16,6 +16,16 @@ runner = CliRunner()
 FIXTURES = Path(__file__).resolve().parents[1] / "examples" / "datasets"
 
 
+def _write_cases(path: Path, cases: list[dict[str, object]]) -> None:
+    path.write_text(
+        "".join(
+            json.dumps(case, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n"
+            for case in cases
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_valid_dataset_exits_zero() -> None:
     result = runner.invoke(app, ["dataset", "validate", str(FIXTURES / "rag.valid.jsonl")])
     assert result.exit_code == 0
@@ -35,6 +45,187 @@ def test_json_output_is_well_formed() -> None:
     payload = json.loads(result.stdout)
     assert payload["valid"] is True
     assert payload["case_count"] == 2
+
+
+def test_dataset_diff_counts_changes_by_case_id_and_bounds_details(tmp_path: Path) -> None:
+    left = tmp_path / "old.jsonl"
+    right = tmp_path / "new.jsonl"
+    _write_cases(
+        left,
+        [
+            {"case_id": "stable", "input": "same"},
+            {"case_id": "changed", "input": "old"},
+            {"case_id": "removed", "input": "gone"},
+        ],
+    )
+    _write_cases(
+        right,
+        [
+            {"case_id": "stable", "input": "same"},
+            {"case_id": "changed", "input": "new"},
+            {"case_id": "added-a", "input": "first"},
+            {"case_id": "added-b", "input": "second"},
+        ],
+    )
+
+    result = runner.invoke(
+        app, ["dataset", "diff", str(left), str(right), "--limit", "1", "--json"]
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {
+        "added": 2,
+        "removed": 1,
+        "changed": 1,
+        "unchanged": 1,
+        "has_changes": True,
+    }
+    assert payload["details"]["added_case_ids"] == ["added-a"]
+    assert payload["details"]["added_omitted"] == 1
+    assert payload["details"]["removed_case_ids"] == ["removed"]
+    assert payload["details"]["changed_case_ids"] == ["changed"]
+    assert payload["left"]["content_hash"].startswith("sha256:")
+
+
+def test_dataset_diff_ignores_input_order_and_json_formatting(tmp_path: Path) -> None:
+    left = tmp_path / "left.jsonl"
+    right = tmp_path / "right.jsonl"
+    left.write_text(
+        '{"case_id":"a", "input":{"a":1,"b":2}}\n{"case_id":"b","input":"two"}\n',
+        encoding="utf-8",
+    )
+    right.write_text(
+        '{"input":"two","case_id":"b"}\n{"input":{"b":2,"a":1},"case_id":"a"}\n',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["dataset", "diff", str(left), str(right), "--fail-on-change", "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["has_changes"] is False
+    assert payload["summary"]["unchanged"] == 2
+    assert payload["left"]["content_hash"] != payload["right"]["content_hash"]
+    assert payload["_cli"]["exit_code"] == 0
+
+
+def test_dataset_diff_bounds_limit_with_json_error_document(tmp_path: Path) -> None:
+    left = tmp_path / "left.jsonl"
+    right = tmp_path / "right.jsonl"
+    _write_cases(left, [{"case_id": "a", "input": "one"}])
+    _write_cases(right, [{"case_id": "a", "input": "two"}])
+
+    result = runner.invoke(
+        app, ["dataset", "diff", str(left), str(right), "--limit", "1001", "--json"]
+    )
+
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert "between 0 and 1000" in payload["message"]
+
+
+def test_dataset_diff_rejects_non_integer_limit_as_json_error(tmp_path: Path) -> None:
+    left = tmp_path / "left.jsonl"
+    right = tmp_path / "right.jsonl"
+    _write_cases(left, [{"case_id": "a", "input": "one"}])
+    _write_cases(right, [{"case_id": "a", "input": "two"}])
+
+    result = runner.invoke(
+        app, ["dataset", "diff", str(left), str(right), "--limit", "nope", "--json"]
+    )
+
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert payload["message"] == "--limit must be an integer"
+
+
+def test_dataset_diff_byte_bounds_large_case_id_details(tmp_path: Path) -> None:
+    left = tmp_path / "left.jsonl"
+    right = tmp_path / "right.jsonl"
+    _write_cases(left, [])
+    _write_cases(right, [{"case_id": "z" * 20_000, "input": "prompt"}])
+
+    result = runner.invoke(app, ["dataset", "diff", str(left), str(right), "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["added"] == 1
+    assert payload["details"]["added_case_ids"] == []
+    assert payload["details"]["added_omitted"] == 1
+    assert len(result.stdout) < 2_000
+
+
+def test_dataset_diff_escapes_terminal_control_sequences_in_case_ids(tmp_path: Path) -> None:
+    left = tmp_path / "left.jsonl"
+    right = tmp_path / "right.jsonl"
+    _write_cases(left, [])
+    _write_cases(right, [{"case_id": "\x1b]0;owned\x07[bold]", "input": "prompt"}])
+
+    result = runner.invoke(app, ["dataset", "diff", str(left), str(right)])
+
+    assert result.exit_code == 0, result.output
+    assert "\x1b" not in result.stdout
+    assert "\\u001b" in result.stdout
+    assert "[bold]" in result.stdout
+
+
+def test_dataset_diff_fail_on_change_has_stable_json_exit_code(tmp_path: Path) -> None:
+    left = tmp_path / "left.jsonl"
+    right = tmp_path / "right.jsonl"
+    _write_cases(left, [{"case_id": "a", "input": "before"}])
+    _write_cases(right, [{"case_id": "a", "input": "after"}])
+
+    result = runner.invoke(
+        app, ["dataset", "diff", str(left), str(right), "--fail-on-change", "--json"]
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["changed"] == 1
+    assert payload["_cli"]["exit_code"] == result.exit_code
+
+
+def test_dataset_diff_rejects_duplicate_ids_and_reports_json_error(tmp_path: Path) -> None:
+    left = tmp_path / "duplicate.jsonl"
+    right = tmp_path / "right.jsonl"
+    _write_cases(
+        left,
+        [
+            {"case_id": "duplicate", "input": "first"},
+            {"case_id": "duplicate", "input": "second"},
+        ],
+    )
+    _write_cases(right, [{"case_id": "other", "input": "value"}])
+
+    result = runner.invoke(app, ["dataset", "diff", str(left), str(right), "--json"])
+
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "error"
+    assert "duplicate case_id at line 2" in payload["message"]
+    assert payload["exit_code"] == result.exit_code
+
+
+@pytest.mark.parametrize("case", [{"input": "missing"}, {"case_id": "  ", "input": "blank"}])
+def test_dataset_diff_requires_non_empty_explicit_case_ids(
+    tmp_path: Path, case: dict[str, object]
+) -> None:
+    left = tmp_path / "left.jsonl"
+    right = tmp_path / "right.jsonl"
+    _write_cases(left, [case])
+    _write_cases(right, [{"case_id": "other", "input": "value"}])
+
+    result = runner.invoke(app, ["dataset", "diff", str(left), str(right), "--json"])
+
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    assert "requires a non-empty explicit case_id" in payload["message"]
 
 
 def test_missing_file_exits_two() -> None:
@@ -65,6 +256,29 @@ def test_invalid_utf8_dataset_is_a_json_input_error(tmp_path: Path) -> None:
     assert payload["status"] == "error"
     assert payload["message"] == f"invalid dataset: dataset file is not valid UTF-8: {invalid}"
     assert payload["exit_code"] == payload["_cli"]["exit_code"] == result.exit_code
+
+
+def test_validate_rejects_jsonl_with_nonstandard_whitespace(tmp_path: Path) -> None:
+    source = tmp_path / "unicode-whitespace.jsonl"
+    source.write_text('\u00a0{"case_id":"bad","input":"prompt"}\n', encoding="utf-8")
+
+    result = runner.invoke(app, ["dataset", "validate", str(source), "--json"])
+
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    assert payload["valid"] is False
+    assert payload["errors"][0]["line"] == 1
+    assert "invalid JSON" in payload["errors"][0]["message"]
+
+
+def test_validate_rejects_oversized_jsonl_without_newline(tmp_path: Path) -> None:
+    source = tmp_path / "oversized.jsonl"
+    source.write_text('{"case_id":"large","input":"' + ("x" * 1_010_000) + '"}', encoding="utf-8")
+
+    result = runner.invoke(app, ["dataset", "validate", str(source), "--json"])
+
+    assert result.exit_code == 2, result.output
+    assert "line exceeds max size of 1000000 bytes" in json.loads(result.stdout)["message"]
 
 
 def test_import_csv_normalizes_schema_and_reports_content_hash(tmp_path: Path) -> None:

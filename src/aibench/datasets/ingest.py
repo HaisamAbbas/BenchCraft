@@ -146,19 +146,20 @@ def _reject_json_constant(name: str) -> NoReturn:
 
 
 def iter_jsonl_lines(path: Path) -> Iterator[tuple[int, str]]:
-    """Yield (line_number, stripped_text) for each nonblank line, streaming one line at a
-    time so memory stays bounded regardless of file size."""
+    """Yield (line_number, stripped_text) for each nonblank line with a byte-bounded read."""
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            for lineno, raw_line in enumerate(handle, start=1):
-                if len(raw_line.encode("utf-8")) > MAX_LINE_BYTES:
+        with path.open("rb") as handle:
+            lineno = 0
+            while raw_line := handle.readline(MAX_LINE_BYTES + 1):
+                lineno += 1
+                if len(raw_line) > MAX_LINE_BYTES:
                     raise ValidationError(
                         f"line exceeds max size of {MAX_LINE_BYTES} bytes", line=lineno
                     )
-                stripped = raw_line.strip()
+                stripped = raw_line.strip(b" \t\r\n")
                 if not stripped:
                     continue
-                yield lineno, stripped
+                yield lineno, stripped.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValidationError(f"dataset file is not valid UTF-8: {path}") from exc
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import cast
 
@@ -12,6 +13,12 @@ from aibench.cli import episodes as episodes_cli
 from aibench.cli.errors import error_exit
 from aibench.cli.output import Console
 from aibench.core.errors import ValidationError
+from aibench.datasets.diff import (
+    DEFAULT_DETAIL_LIMIT,
+    MAX_DETAIL_LIMIT,
+    DatasetDiffError,
+    diff_datasets,
+)
 from aibench.datasets.importers import DatasetFormat, DatasetImportError, import_dataset
 from aibench.datasets.ingest import ingest_dataset
 
@@ -20,6 +27,78 @@ console = Console()
 err_console = Console(stderr=True)
 app.add_typer(candidates_cli.app, name="candidates")
 app.add_typer(episodes_cli.app, name="episodes")
+
+
+@app.command("diff")
+def diff(
+    left: Path = typer.Argument(..., help="Earlier dataset JSONL file."),  # noqa: B008
+    right: Path = typer.Argument(..., help="Newer dataset JSONL file."),  # noqa: B008
+    limit: str = typer.Option(
+        str(DEFAULT_DETAIL_LIMIT),
+        "--limit",
+        help=f"Maximum case IDs shown per change category (0-{MAX_DETAIL_LIMIT}).",
+    ),
+    fail_on_change: bool = typer.Option(
+        False, "--fail-on-change", help="Exit 1 when cases were added, removed, or changed."
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print a machine-readable diff."),
+) -> None:
+    """Compare normalized cases by unique case_id without retaining them in memory."""
+    try:
+        detail_limit = int(limit)
+    except ValueError as exc:
+        raise error_exit(
+            "--limit must be an integer",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+    try:
+        result = diff_datasets(left, right, limit=detail_limit)
+    except (DatasetDiffError, ValidationError, OSError) as exc:
+        raise error_exit(
+            f"dataset diff failed: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+
+    has_changes = bool(result["summary"]["has_changes"])
+    exit_code = 1 if fail_on_change and has_changes else 0
+    if json_output:
+        console.print_json(data=result, cli_exit_code=exit_code)
+    else:
+        summary = result["summary"]
+        console.print(
+            f"dataset diff: {summary['added']} added, {summary['removed']} removed, "
+            f"{summary['changed']} changed, {summary['unchanged']} unchanged"
+        )
+        console.print(
+            f"  left:  {result['left']['dataset_id']} "
+            f"({result['left']['case_count']} cases, {result['left']['content_hash']})"
+        )
+        console.print(
+            f"  right: {result['right']['dataset_id']} "
+            f"({result['right']['case_count']} cases, {result['right']['content_hash']})"
+        )
+        for label, detail_key, omitted_key in (
+            ("added", "added_case_ids", "added_omitted"),
+            ("removed", "removed_case_ids", "removed_omitted"),
+            ("changed", "changed_case_ids", "changed_omitted"),
+        ):
+            case_ids = result["details"][detail_key]
+            if case_ids:
+                escaped_ids = ", ".join(
+                    json.dumps(case_id, ensure_ascii=True) for case_id in case_ids
+                )
+                console.print(f"  {label} case IDs: {escaped_ids}", markup=False)
+            omitted = result["details"][omitted_key]
+            if omitted:
+                console.print(f"  {label}: {omitted} additional case ID(s) omitted")
+    if exit_code:
+        raise typer.Exit(code=exit_code)
 
 
 @app.command("import")
