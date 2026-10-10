@@ -228,6 +228,185 @@ def test_dataset_diff_requires_non_empty_explicit_case_ids(
     assert "requires a non-empty explicit case_id" in payload["message"]
 
 
+def test_dataset_deduplicate_removes_identical_records_and_normalizes_output(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.jsonl"
+    output = tmp_path / "deduplicated.jsonl"
+    _write_cases(
+        source,
+        [
+            {"case_id": "a", "input": {"x": 1, "y": 2}},
+            {"case_id": "b", "input": "other"},
+            {"input": {"y": 2, "x": 1}, "case_id": "a"},
+        ],
+    )
+
+    result = runner.invoke(app, ["dataset", "deduplicate", str(source), str(output), "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["input_case_count"] == 3
+    assert payload["output_case_count"] == 2
+    assert payload["duplicates_removed"] == 1
+    assert payload["conflicting_duplicate_count"] == 0
+    cases = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert [case["case_id"] for case in cases] == ["a", "b"]
+    assert cases[0]["input"] == {"x": 1, "y": 2}
+
+
+def test_dataset_deduplicate_rejects_conflicts_without_publishing(tmp_path: Path) -> None:
+    source = tmp_path / "source.jsonl"
+    output = tmp_path / "deduplicated.jsonl"
+    _write_cases(
+        source,
+        [
+            {"case_id": "same", "input": "first"},
+            {"case_id": "same", "input": "second"},
+        ],
+    )
+
+    result = runner.invoke(app, ["dataset", "deduplicate", str(source), str(output), "--json"])
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert "choose --on-conflict first or last" in result.stdout
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [("first", "before"), ("last", "after")],
+)
+def test_dataset_deduplicate_explicitly_resolves_conflicting_ids(
+    tmp_path: Path, policy: str, expected: str
+) -> None:
+    source = tmp_path / f"{policy}.jsonl"
+    output = tmp_path / f"{policy}-deduplicated.jsonl"
+    _write_cases(
+        source,
+        [
+            {"case_id": "same", "input": "before"},
+            {"case_id": "between", "input": "stable"},
+            {"case_id": "same", "input": "after"},
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "dataset",
+            "deduplicate",
+            str(source),
+            str(output),
+            "--on-conflict",
+            policy,
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["conflicting_duplicate_count"] == 1
+    cases = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert [case["case_id"] for case in cases] == (
+        ["same", "between"] if policy == "first" else ["between", "same"]
+    )
+    selected = next(case for case in cases if case["case_id"] == "same")
+    assert selected["input"] == expected
+
+
+def test_dataset_deduplicate_never_replaces_output_and_invalid_policy_is_json(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.jsonl"
+    output = tmp_path / "existing.jsonl"
+    _write_cases(source, [{"case_id": "a", "input": "value"}])
+    output.write_text("preserve\n", encoding="utf-8")
+
+    existing = runner.invoke(app, ["dataset", "deduplicate", str(source), str(output), "--json"])
+    invalid = runner.invoke(
+        app,
+        [
+            "dataset",
+            "deduplicate",
+            str(source),
+            str(tmp_path / "other.jsonl"),
+            "--on-conflict",
+            "skip",
+            "--json",
+        ],
+    )
+
+    assert existing.exit_code == 2, existing.output
+    assert output.read_text(encoding="utf-8") == "preserve\n"
+    assert invalid.exit_code == 2, invalid.output
+    assert json.loads(invalid.stdout)["status"] == "error"
+
+
+def test_dataset_deduplicate_requires_explicit_case_ids(tmp_path: Path) -> None:
+    source = tmp_path / "source.jsonl"
+    output = tmp_path / "deduplicated.jsonl"
+    _write_cases(source, [{"input": "generated ids are order-dependent"}])
+
+    result = runner.invoke(app, ["dataset", "deduplicate", str(source), str(output), "--json"])
+
+    assert result.exit_code == 2, result.output
+    assert "non-empty explicit case_id" in json.loads(result.stdout)["message"]
+    assert not output.exists()
+
+
+def test_dataset_deduplicate_reports_normalization_warnings(tmp_path: Path) -> None:
+    source = tmp_path / "legacy.jsonl"
+    output = tmp_path / "normalized.jsonl"
+    _write_cases(
+        source,
+        [
+            {
+                "case_id": "legacy",
+                "input": "prompt",
+                "context": ["judge-only context"],
+                "expected_tools": ["search"],
+            }
+        ],
+    )
+
+    result = runner.invoke(app, ["dataset", "deduplicate", str(source), str(output), "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert any("context" in warning for warning in payload["warnings"])
+    assert any("expected_tools" in warning for warning in payload["warnings"])
+    canonical = json.loads(output.read_text(encoding="utf-8"))
+    assert canonical["reference"]["context"] == ["judge-only context"]
+
+
+def test_dataset_deduplicate_reports_temp_cleanup_failure_after_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.jsonl"
+    output = tmp_path / "deduplicated.jsonl"
+    _write_cases(source, [{"case_id": "a", "input": "value"}])
+    original_unlink = Path.unlink
+
+    def fail_output_temp_unlink(path: Path, *, missing_ok: bool = False) -> None:
+        if path.name.startswith(".deduplicated.jsonl.") and path.suffix == ".tmp":
+            raise PermissionError("temporary link is held by another process")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_output_temp_unlink)
+    result = runner.invoke(app, ["dataset", "deduplicate", str(source), str(output), "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["temporary_cleanup_warning"] is True
+    assert output.is_file()
+    assert json.loads(output.read_text(encoding="utf-8"))["case_id"] == "a"
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    for temporary in tmp_path.glob(".deduplicated.jsonl.*.tmp"):
+        temporary.unlink(missing_ok=True)
+
+
 def test_missing_file_exits_two() -> None:
     result = runner.invoke(app, ["dataset", "validate", str(FIXTURES / "nope.jsonl")])
     assert result.exit_code == 2

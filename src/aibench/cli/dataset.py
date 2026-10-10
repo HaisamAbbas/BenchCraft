@@ -21,6 +21,7 @@ from aibench.datasets.diff import (
 )
 from aibench.datasets.importers import DatasetFormat, DatasetImportError, import_dataset
 from aibench.datasets.ingest import ingest_dataset
+from aibench.datasets.transform import DatasetTransformError, deduplicate_dataset
 
 app = typer.Typer(help="Import, validate, and inspect benchmark datasets.")
 console = Console()
@@ -99,6 +100,56 @@ def diff(
                 console.print(f"  {label}: {omitted} additional case ID(s) omitted")
     if exit_code:
         raise typer.Exit(code=exit_code)
+
+
+@app.command("deduplicate")
+def deduplicate(
+    source: Path = typer.Argument(..., help="Input JSONL dataset."),  # noqa: B008
+    output: Path = typer.Argument(..., help="New deduplicated JSONL output path."),  # noqa: B008
+    on_conflict: str = typer.Option(
+        "error",
+        "--on-conflict",
+        help="How to resolve the same case_id with different content: error, first, or last.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print a machine-readable summary."),
+) -> None:
+    """Remove duplicate case IDs after validating and normalizing every record."""
+    try:
+        result = deduplicate_dataset(source, output, on_conflict=on_conflict)
+    except (DatasetTransformError, ValidationError, OSError) as exc:
+        raise error_exit(
+            f"dataset deduplication failed: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(
+            f"deduplicated {result['input_case_count']} case(s) to "
+            f"{result['output_case_count']} ({result['duplicates_removed']} removed)",
+            markup=False,
+        )
+        console.print(f"  output: {result['output']}", markup=False)
+        console.print(f"  content hash: {result['content_hash']}", markup=False)
+        if result["conflicting_duplicate_count"]:
+            console.print(
+                f"  conflicting duplicate records resolved: "
+                f"{result['conflicting_duplicate_count']} ({on_conflict})",
+                markup=False,
+            )
+        for warning in result["warnings"]:
+            console.print(f"  warning: {warning}", markup=False)
+        if result["warnings_truncated"]:
+            console.print("  warning list truncated", markup=False)
+        if result["temporary_cleanup_warning"]:
+            console.print(
+                "  warning: output was published but its temporary link could not be removed",
+                markup=False,
+            )
 
 
 @app.command("import")
