@@ -19,6 +19,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from aibench.core.errors import ValidationError
 from aibench.core.hashes import content_hash
 from aibench.core.models import (
     ApplicationSpec,
@@ -175,6 +176,8 @@ async def run_developer_smoke(
 ) -> SmokeReport:
     """Invoke each case once, in order, recording every attempt. The run is labelled
     `developer_smoke` in its manifest so it can never be mistaken for a planned benchmark."""
+    if len({case.case_id for case in cases}) != len(cases):
+        raise ValidationError("smoke case IDs must be unique")
     # A re-ingested dataset has a fresh `created_at`; the stored manifest for the same
     # content hash is the identity, so reuse it rather than conflict with it.
     if storage.get_dataset(dataset.content_hash) is None:

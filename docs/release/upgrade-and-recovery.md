@@ -146,6 +146,28 @@ directories are created with owner-only permissions. Archives support up to one 
 and 1 TiB of uncompressed data. Manual copies must be made while **no aibench process is using the
 workspace** and must include `aibench.db`, `aibench.db-wal`, and `aibench.db-shm` together.
 
+### Moving one completed run to another workspace
+
+Run bundles move one terminal run and its database dependencies and artifact bytes. They do not
+include project source files, external datasets, credentials, or conversation sessions. The
+frozen application specification is retained for provenance, but the application source still
+needs to be available separately if you want to run new benchmarks in the destination project.
+
+```console
+aibench runs export RUN_ID ../run-bundle.zip --workspace .
+aibench runs import ../run-bundle.zip --workspace ../other-project
+```
+
+Import creates `.aibench/` in the destination project if needed. It verifies the archive and
+artifact digests before writing catalog rows, relocates artifact references to the destination,
+and refuses conflicting run or artifact IDs. Importing the same bundle again is idempotent when
+the stored records match. Run approval records are preserved so imported reports retain their
+`approved_by` provenance. Only completed, cancelled, budget-exhausted, failed, and legacy
+`succeeded` runs can be bundled; active or unknown run states are refused. Evidence pointers in
+the results are preserved as pointers and are not treated as artifact IDs. Developer smoke runs
+include only their selected case records; the dataset manifest retains the original total case
+count, so a smoke bundle is a portable record of that sample rather than a complete dataset copy.
+
 ### Cleaning stale artifacts
 
 Preview storage cleanup before deleting anything:

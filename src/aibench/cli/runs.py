@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from aibench.services.runs import RESUMABLE_STATES, lease_state
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
 from aibench.storage.repositories import BaselinePromotion, RunBaseline, RunRecord, Storage
+from aibench.storage.run_bundle import export_run_bundle, import_run_bundle
 
 app = typer.Typer(help="Inspect committed runs.")
 baseline_app = typer.Typer(help="Inspect and promote approved named baselines.")
@@ -271,6 +273,63 @@ def show_run(
     console.print(f"  baselines: {escape(', '.join(metadata['baselines']) or '(none)')}")
     if metadata["note"]:
         console.print(f"  note: {escape(metadata['note'])}")
+
+
+@app.command("export")
+def export_run(
+    run_id: str = typer.Argument(..., help="Terminal run to package."),
+    destination: Path = typer.Argument(..., help="New .zip file to create."),  # noqa: B008
+    workspace: Path | None = typer.Option(  # noqa: B008
+        None, "--workspace", help="Project root containing .aibench/."
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print bundle metadata as JSON."),
+) -> None:
+    """Create a portable, checksummed archive of one completed run."""
+    try:
+        result = export_run_bundle(workspace or Path.cwd(), run_id, destination)
+    except (AibenchError, OSError, sqlite3.Error) as exc:
+        raise error_exit(
+            str(exc),
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(
+            f"exported run {escape(run_id)} with {result['artifact_count']} artifact(s) "
+            f"to {escape(result['bundle'])}"
+        )
+
+
+@app.command("import")
+def import_run(
+    bundle: Path = typer.Argument(..., help="Verified run bundle (.zip) to import."),  # noqa: B008
+    workspace: Path | None = typer.Option(  # noqa: B008
+        None, "--workspace", help="Destination project root; .aibench/ is created if needed."
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print import metadata as JSON."),
+) -> None:
+    """Import a terminal run and its artifacts into a workspace."""
+    try:
+        result = import_run_bundle(bundle, workspace or Path.cwd())
+    except (AibenchError, OSError, sqlite3.Error) as exc:
+        raise error_exit(
+            str(exc),
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+    if json_output:
+        console.print_json(data=result)
+    else:
+        state = "already present" if result["already_present"] else "imported"
+        console.print(
+            f"{state} run {escape(result['run_id'])} with {result['artifact_count']} artifact(s)"
+        )
 
 
 @app.command("events")

@@ -33,6 +33,29 @@ def test_smoke_refuses_local_execution_without_explicit_trust(tmp_path: Path) ->
     assert "trusted-local" in result.output
 
 
+def test_smoke_rejects_duplicate_case_selection_before_creating_workspace(tmp_path: Path) -> None:
+    result = cli.invoke(
+        app,
+        [
+            "app",
+            "smoke",
+            CHATBOT_APP,
+            "--dataset",
+            CHAT_DATA,
+            "--workspace",
+            str(tmp_path),
+            "--trust-local-app",
+            "--case",
+            "chat-001",
+            "--case",
+            "chat-001",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "case IDs must be unique" in result.output
+    assert not (tmp_path / ".aibench").exists()
+
+
 def test_smoke_runs_records_and_is_visible_to_runs_commands(tmp_path: Path) -> None:
     result = cli.invoke(
         app,

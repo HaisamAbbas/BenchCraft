@@ -102,6 +102,8 @@ def describe(
 
 def _select(cases: list[BenchmarkCase], case_ids: list[str], limit: int) -> list[BenchmarkCase]:
     if case_ids:
+        if len(case_ids) != len(set(case_ids)):
+            raise _fail("case IDs must be unique when selecting smoke cases")
         by_id = {c.case_id: c for c in cases}
         missing = [cid for cid in case_ids if cid not in by_id]
         if missing:
