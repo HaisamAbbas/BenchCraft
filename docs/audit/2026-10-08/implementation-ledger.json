@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G18",
+  "current_item": "G19",
   "items": [
     {
       "id": "F01",
@@ -642,9 +642,9 @@
       "id": "G18",
       "priority": "P2",
       "title": "Dataset utilities and versioned suites",
-      "detail": "**Partial.** Validation, candidate review/promotion, episodes, content hashes, schema-aware import, bounded JSONL diff, identity-based deduplication, and deterministic grouped splitting exist. Optional Parquet import requires explicit trust because PyArrow decompresses pages before row-size checks. A named suite catalog remains missing.",
+      "detail": "**Delivered.** Validation, candidate review/promotion, episodes, content hashes, schema-aware import, bounded JSONL diff, identity-based deduplication, deterministic grouped splitting, and an immutable named suite catalog exist. Optional Parquet import requires explicit trust because PyArrow decompresses pages before row-size checks. Suites are workspace-local, integrity-checked, and can be pinned to runs by NAME@VERSION.",
       "kind": "feature",
-      "status": "pending",
+      "status": "delivered",
       "verification": [
         "Importer delivery: 81 focused dataset, discovery, finite-number, and episode tests passed; 1 skipped",
         "Ruff and formatting passed; mypy passed for 156 source files; uv lock --check and git diff --check passed",
@@ -659,11 +659,15 @@
         "Deterministic split delivery: 122 focused dataset/ingest/finite-number/discovery/episode tests passed; 2 skipped",
         "Ruff and formatting passed; Mypy passed for 158 source files; git diff --check passed",
         "Split guarantees at least one group per active ratio when possible, rejects too few independent groups, preserves group IDs, and publishes complete output atomically without replacing a racing destination",
-        "Cleanup and path-resolution failures return bounded JSON errors with retained staging paths; final independent review found no remaining actionable findings"
+        "Cleanup and path-resolution failures return bounded JSON errors with retained staging paths; final independent review found no remaining actionable findings",
+        "Named suite catalog: 11 focused tests passed, 1 skipped because file-symlink creation was unavailable; 75 suite, run, storage, migration, and CLI regression tests passed, 1 skipped",
+        "Ruff on src/aibench and tests, formatting, Mypy on 160 source files, and git diff --check passed",
+        "Version snapshots use cross-process per-version locking, portable collision-safe filenames, orphan recovery, and no-follow lock file opens; run selection verifies content before dispatch",
+        "Final independent review found no actionable findings"
       ],
-      "review": "evidence/G18-split-review.md",
-      "commit": null,
-      "pushed": false,
+      "review": "evidence/G18-suites-review.md",
+      "commit": "cf2efc2f6c8e927d84c66d684793720bec7ac8db",
+      "pushed": true,
       "subrequirements": [
         {
           "name": "schema-aware CSV, JSON, JSONL, and optional Parquet import",
@@ -691,7 +695,9 @@
         },
         {
           "name": "named suite catalog",
-          "status": "pending"
+          "status": "delivered",
+          "commit": "cf2efc2f6c8e927d84c66d684793720bec7ac8db",
+          "pushed": true
         }
       ]
     },
