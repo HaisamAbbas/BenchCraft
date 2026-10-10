@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G15",
+  "current_item": "G16",
   "items": [
     {
       "id": "F01",
@@ -591,13 +591,18 @@
       "id": "G15",
       "priority": "P2",
       "title": "Richer performance statistics",
-      "detail": "**Partial.** Successful final-attempt p50/p95 and failure counts exist. User-facing throughput, p99, dispersion, retry-inclusive elapsed latency, and cold/warm separation are absent.",
+      "detail": "**Implemented.** Reports and comparisons expose p50/p75/p95/p99, mean and dispersion, retry-inclusive latency, successful-request throughput, and distinct warmup measurements; incomplete timing and unknown phase attribution stay explicit.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "uv run pytest tests/test_performance.py tests/test_reports.py tests/test_comparison_service.py tests/test_comparison_statistics.py tests/test_tui.py -q — 102 passed",
+        "uv run pytest tests/test_performance.py tests/test_reports.py -q — 25 passed after final report-rendering changes",
+        "Ruff src/tests passed; mypy passed for 153 source files; git diff --check passed",
+        "Recovery regressions cover phase-neutral dispatches, incomplete retry-inclusive timing, throughput, and human-readable reporting"
+      ],
+      "review": "evidence/G15-review.md",
+      "commit": "3ea1c961",
+      "pushed": true
     },
     {
       "id": "G16",
