@@ -734,3 +734,30 @@ def test_human_comparison_explains_an_undetermined_regression_rule() -> None:
     )
 
     assert "reason: complete successful latency measurements required" in output.getvalue()
+
+
+def test_human_comparison_shows_richer_application_performance() -> None:
+    from aibench.tui.render import comparison
+
+    output = io.StringIO()
+    comparison(
+        Console(file=output, width=160, highlight=False),
+        {
+            "status": "qualified",
+            "application_performance": {
+                side: {
+                    "latency_statistics": {"p95_ms": 95, "p99_ms": 99, "stddev_ms": 8},
+                    "retry_inclusive_latency": {"p95_ms": 140},
+                    "throughput": {"successful_requests_per_second": 12.5},
+                    "warmup_latency_statistics": {"p95_ms": 40},
+                }
+                for side in ("baseline", "current")
+            },
+        },
+    )
+
+    shown = output.getvalue()
+    assert "p95/p99 95/99 ms" in shown
+    assert "retry-inclusive p95 140 ms" in shown
+    assert "throughput 12.5 req/s" in shown
+    assert "warmup p95 40 ms" in shown

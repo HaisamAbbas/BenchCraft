@@ -17,8 +17,9 @@ What a report states, and on which basis:
   items without recorded executions. Legacy runs use final recorded executions.
 - **Application failures** (the app did not produce a usable output) are separate from
   **evaluator failures** (a metric could not be computed). Neither is a low score.
-- **Latency** is the wall time of successful final attempts, p50/p95 by nearest rank.
-  Failed and timed-out requests are counted separately, never mixed into the percentiles.
+- **Latency** reports successful final-attempt p50/p95/p99, mean, dispersion and observed
+  throughput. Retry-inclusive lifecycle latency and warmup samples are separate summaries;
+  failed and timed-out attempts are counted separately.
 - **Cost** is observed spend plus how complete the accounting is. A total is given only
   when every call reported its cost; otherwise the known amount is a lower bound.
 - **Gates** are the plan's predeclared release gates, decided only for a finished run.
@@ -30,7 +31,6 @@ What a report states, and on which basis:
 from __future__ import annotations
 
 import json
-import math
 import os
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
@@ -53,7 +53,14 @@ from aibench.engine.engine import parse_work_item_key, was_dispatched, work_coun
 from aibench.reporting.aggregation import MetricSummary, reason_code, summarize
 from aibench.reporting.render import render
 from aibench.security.redaction import sanitize
-from aibench.services.phase_accounting import recovered_uncommitted_warmup_dispatches
+from aibench.services.performance import (
+    nearest_rank,
+    phase_throughput,
+    retry_inclusive_latency,
+    successful_latency_values,
+    summarize_latency,
+)
+from aibench.services.phase_accounting import recovered_uncommitted_execution_items
 from aibench.services.runs import _FINISHED, RunError, _frozen_application, _frozen_plan
 from aibench.services.scoring import rescore_selected_count, select_final_executions
 from aibench.services.suspect_answers import looks_like_error
@@ -86,11 +93,7 @@ def excerpt(value: Any, limit: int = EXCERPT_CHARS) -> str | None:
 def percentile(values: list[float], p: float) -> float | None:
     """Nearest-rank percentile: the smallest value with at least p% of values at or below
     it. No interpolation, so the result is always an observed value."""
-    if not values:
-        return None
-    ordered = sorted(values)
-    rank = max(1, math.ceil(p / 100 * len(ordered)))
-    return ordered[rank - 1]
+    return nearest_rank(values, p)
 
 
 # --------------------------------------------------------------------------- profiles
@@ -290,17 +293,27 @@ def _application_section(
     warmup_finals = [e for e in finals if e.warmup]
     measurement_finals = [e for e in finals if not e.warmup]
     warmup_attempts = [a for a in attempts if a.warmup and was_dispatched(a)]
-    warmup_uncommitted = recovered_uncommitted_warmup_dispatches(events, work_items)
+    recovered_items = recovered_uncommitted_execution_items(events, work_items)
+    warmup_uncommitted = sum(item.warmup for item in recovered_items)
+    unclassified_uncommitted = max(0, uncommitted - len(recovered_items))
+    retry_incomplete_items: set[tuple[str, int, bool]] = set()
+    for item in recovered_items:
+        try:
+            case_id, repetition, _ = parse_work_item_key(item.task_key, item.kind)
+        except ValueError:
+            continue
+        retry_incomplete_items.add((case_id, repetition, item.warmup))
     status = Counter(e.status.value for e in finals)
     error_kinds = Counter(e.error_kind.value for e in finals if e.error_kind is not None)
     cache_hits = sum(1 for e in finals if e.cache)
-    ok_wall = [
-        float(w)
-        for e in measurement_finals
-        if e.status is ExecutionStatus.OK
-        and not e.cache  # a cached output is not a fresh latency measurement (§14)
-        and isinstance(w := (deep_unfreeze(e.timing) or {}).get("wall_ms"), (int, float))
-    ]
+    ok_wall = successful_latency_values(measurement_finals, warmup=False)
+    warmup_wall = successful_latency_values(warmup_finals, warmup=True)
+    expected_measurement_latency = sum(
+        e.status is ExecutionStatus.OK and not e.cache for e in measurement_finals
+    )
+    expected_warmup_latency = sum(
+        e.status is ExecutionStatus.OK and not e.cache for e in warmup_finals
+    )
     measurement_timeouts = sum(
         1
         for e in measurement_finals
@@ -326,6 +339,7 @@ def _application_section(
         "error_kinds": dict(sorted(error_kinds.items())),
         "attempts": len(attempts),
         "uncommitted_dispatches": uncommitted,
+        "unclassified_uncommitted_dispatches": unclassified_uncommitted,
         "retried_items": sum(1 for e in finals if e.attempt_id > 1),
         # Answers that read like the application failing while reporting success (see
         # services.suspect_answers): every metric would score an error message.
@@ -335,17 +349,46 @@ def _application_section(
             "definition": (
                 "wall time of the final attempt of each successful request, measured by the "
                 "runner around the invocation for measured requests only; warmups, failed and "
-                "timed-out requests are excluded from p50/p95 by nearest rank. Cache hits are "
+                "timed-out requests are excluded from nearest-rank percentiles. Cache hits are "
                 "excluded: a cached output is not a fresh measurement."
             ),
+            **summarize_latency(ok_wall),
             "successful_requests": len(ok_wall),
-            "p50_ms": percentile(ok_wall, 50),
-            "p95_ms": percentile(ok_wall, 95),
-            "min_ms": min(ok_wall) if ok_wall else None,
-            "max_ms": max(ok_wall) if ok_wall else None,
+            "eligible_successful_requests": expected_measurement_latency,
+            "missing_measurements": expected_measurement_latency - len(ok_wall),
             "excluded_failures": measurement_failed - measurement_timeouts,
             "excluded_timeouts": measurement_timeouts,
             "concurrency": concurrency,
+            "dispersion_definition": (
+                "stddev is population standard deviation; IQR is nearest-rank p75 minus p25"
+            ),
+            "warmup": {
+                **summarize_latency(warmup_wall),
+                "eligible_successful_requests": expected_warmup_latency,
+                "missing_measurements": expected_warmup_latency - len(warmup_wall),
+                "definition": "successful final uncached warmup attempts, summarized separately",
+            },
+            "retry_inclusive": retry_inclusive_latency(
+                dispatched,
+                measurement_finals,
+                warmup=False,
+                incomplete_items=retry_incomplete_items,
+                phase_attribution_incomplete=bool(unclassified_uncommitted),
+            ),
+            "throughput": phase_throughput(
+                dispatched,
+                measurement_finals,
+                warmup=False,
+                uncommitted_dispatches=sum(not item.warmup for item in recovered_items),
+                phase_attribution_incomplete=bool(unclassified_uncommitted),
+            ),
+            "warmup_throughput": phase_throughput(
+                dispatched,
+                warmup_finals,
+                warmup=True,
+                uncommitted_dispatches=warmup_uncommitted,
+                phase_attribution_incomplete=bool(unclassified_uncommitted),
+            ),
             "cache": (
                 f"{cache_hits} cached execution(s) excluded from latency"
                 if cache_hits
@@ -956,8 +999,23 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
         "warmup": app["warmup"],
         "latency_ms": {
             k: app["latency"][k]
-            for k in ("p50_ms", "p95_ms", "successful_requests", "excluded_failures")
+            for k in (
+                "p50_ms",
+                "p95_ms",
+                "p99_ms",
+                "mean_ms",
+                "stddev_ms",
+                "iqr_ms",
+                "successful_requests",
+                "eligible_successful_requests",
+                "missing_measurements",
+                "excluded_failures",
+            )
         },
+        "retry_inclusive_latency_ms": app["latency"]["retry_inclusive"],
+        "throughput": app["latency"]["throughput"],
+        "warmup_latency_ms": app["latency"]["warmup"],
+        "warmup_throughput": app["latency"]["warmup_throughput"],
         "cost": {
             role: {
                 k: block.get(k) for k in ("calls", "known_cost_usd", "total_cost_usd", "accounting")

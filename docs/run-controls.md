@@ -41,3 +41,7 @@ hashes, selected case IDs, metric bindings, and planned execution/evaluation cou
 creating a run or dispatching application/evaluation work. `--json` wraps this preview in the
 versioned CLI output envelope. A dry-run has no run ID or run seed because neither is created
 until execution begins.
+
+Reports include p99 and dispersion, throughput, retry-inclusive elapsed latency, and separate
+warmup measurements. Their exact denominators and completeness rules are in
+[performance measurements](performance-measurements.md).

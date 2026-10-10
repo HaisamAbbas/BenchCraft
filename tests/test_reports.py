@@ -21,7 +21,7 @@ from aibench.cli.main import app
 from aibench.core.models import Decision, EvaluationResult, ExecutionStatus, MetricValue
 from aibench.engine.compile import compile_plan
 from aibench.engine.engine import RunController
-from aibench.reporting.render import _value_summary, render
+from aibench.reporting.render import _retry_inclusive_text, _throughput_text, _value_summary, render
 from aibench.security.policy import ExecutionPolicy
 from aibench.services.reports import build_report, percentile, report_facts
 from aibench.services.runs import create_run, execute_run, run_budget
@@ -217,6 +217,13 @@ def test_every_number_reconciles_with_the_stored_records(tmp_path: Path) -> None
     latency = application["latency"]
     assert latency["successful_requests"] == 3
     assert latency["p50_ms"] == percentile(walls, 50) and latency["p95_ms"] == max(walls)
+    assert latency["p99_ms"] == max(walls)
+    assert latency["mean_ms"] == pytest.approx(sum(walls) / len(walls), abs=0.001)
+    assert latency["stddev_ms"] >= 0 and latency["iqr_ms"] >= 0
+    assert latency["retry_inclusive"]["successful_requests"] == 3
+    assert latency["throughput"]["successful_requests"] == 3
+    assert latency["throughput"]["wall_seconds"] > 0
+    assert latency["warmup"]["samples"] == 0
     assert latency["excluded_failures"] == 1 and latency["excluded_timeouts"] == 0
 
     # the application reports no cost: unknown, never $0; model-free evaluators: complete
@@ -238,6 +245,15 @@ def test_every_number_reconciles_with_the_stored_records(tmp_path: Path) -> None
         assert "3/4 = 75.0%" in text  # completed / selected
         assert "true 2/3 = 66.7% of completed" in text
         assert "unknown: no call reported its cost (4 calls)" in text
+
+
+def test_performance_render_labels_unknown_recovery_phase_as_incomplete() -> None:
+    assert _throughput_text({"phase_attribution_complete": False}) == (
+        "unavailable (recovered dispatch phase is unknown)"
+    )
+    assert _retry_inclusive_text({"phase_attribution_complete": False}) == (
+        "unavailable (recovered dispatch phase is unknown)"
+    )
 
 
 def test_missing_accounting_is_never_totalled() -> None:

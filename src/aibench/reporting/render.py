@@ -97,6 +97,31 @@ def _number(value: Any, unit: str = "") -> str:
     return f"{text}{unit}"
 
 
+def _throughput_text(summary: dict[str, Any]) -> str:
+    if not summary.get("phase_attribution_complete", True):
+        return "unavailable (recovered dispatch phase is unknown)"
+    rate = summary.get("successful_requests_per_second")
+    if rate is None:
+        if summary.get("missing_dispatch_timestamps") or summary.get("missing_final_timestamps"):
+            return "unavailable (dispatch or completion timestamps are incomplete)"
+        return "unavailable (no positive observed phase duration)"
+    return (
+        f"{_number(rate, ' requests/s')} over "
+        f"{_number(summary.get('wall_seconds'), ' s')} observed phase time"
+    )
+
+
+def _retry_inclusive_text(summary: dict[str, Any]) -> str:
+    if not summary.get("phase_attribution_complete", True):
+        return "unavailable (recovered dispatch phase is unknown)"
+    return (
+        f"p50 {_number(summary.get('p50_ms'), ' ms')}, "
+        f"p95 {_number(summary.get('p95_ms'), ' ms')}, "
+        f"over {summary.get('samples', 0)} measured request(s); "
+        f"{summary.get('missing_measurements', 0)} incomplete lifecycle measurement(s)"
+    )
+
+
 def _usd(block: dict[str, Any]) -> str:
     accounting = block.get("accounting")
     if accounting == "no_calls":
@@ -313,11 +338,32 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
             "Successful-request latency",
             (
                 f"p50 {_number(latency['p50_ms'], ' ms')}, "
-                f"p95 {_number(latency['p95_ms'], ' ms')} "
-                f"over {latency['successful_requests']} successful requests; excluded: "
+                f"p95 {_number(latency['p95_ms'], ' ms')}, "
+                f"p99 {_number(latency['p99_ms'], ' ms')} "
+                f"over {latency['samples']} timed successful requests; excluded: "
                 f"{latency['excluded_failures']} failed, "
                 f"{latency['excluded_timeouts']} timed out; "
+                f"mean {_number(latency['mean_ms'], ' ms')}, "
+                f"population stddev {_number(latency['stddev_ms'], ' ms')}, "
+                f"IQR {_number(latency['iqr_ms'], ' ms')}; "
                 f"concurrency {_number(latency['concurrency'])}"
+            ),
+        ),
+        (
+            "Measured throughput",
+            _throughput_text(latency["throughput"]),
+        ),
+        (
+            "Retry-inclusive request latency",
+            _retry_inclusive_text(latency["retry_inclusive"]),
+        ),
+        (
+            "Warmup latency",
+            (
+                f"p50 {_number(latency['warmup']['p50_ms'], ' ms')}, "
+                f"p95 {_number(latency['warmup']['p95_ms'], ' ms')}, "
+                f"p99 {_number(latency['warmup']['p99_ms'], ' ms')} "
+                f"over {latency['warmup']['samples']} successful uncached warmup(s)"
             ),
         ),
         ("Latency definition", latency["definition"]),

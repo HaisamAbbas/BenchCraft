@@ -57,7 +57,14 @@ from aibench.reporting.statistics import (
     compare_numeric_metric,
     summarize_judge_stability,
 )
-from aibench.services.phase_accounting import recovered_uncommitted_warmup_dispatches
+from aibench.services.performance import (
+    nearest_rank,
+    phase_throughput,
+    retry_inclusive_latency,
+    successful_latency_values,
+    summarize_latency,
+)
+from aibench.services.phase_accounting import recovered_uncommitted_execution_items
 from aibench.services.scoring import select_final_executions
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import Storage
@@ -2917,11 +2924,7 @@ def _json_safe(value: Any) -> Any:
 
 
 def _nearest_rank_p95(values: list[float]) -> float | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    rank = max(1, math.ceil(0.95 * len(ordered)))
-    return ordered[rank - 1]
+    return nearest_rank(values, 95)
 
 
 def _finite_float(value: Any) -> float | None:
@@ -2938,17 +2941,13 @@ def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
     """Summarize observed runtime signals using the report's measurement rules."""
 
     finals = select_final_executions(run.executions)
-    latencies: list[float] = []
-    expected_latency_requests = 0
-    for execution in finals:
-        if execution.warmup or execution.status is not ExecutionStatus.OK or execution.cache:
-            continue
-        expected_latency_requests += 1
-        timing = deep_unfreeze(execution.timing) or {}
-        wall_ms = timing.get("wall_ms") if isinstance(timing, Mapping) else None
-        latency = _finite_float(wall_ms)
-        if latency is not None and latency >= 0:
-            latencies.append(latency)
+    latencies = successful_latency_values(finals, warmup=False)
+    expected_latency_requests = sum(
+        not execution.warmup
+        and execution.status is ExecutionStatus.OK
+        and not execution.cache
+        for execution in finals
+    )
 
     dispatched = [execution for execution in run.executions if was_dispatched(execution)]
     uncommitted = sum(
@@ -2962,7 +2961,17 @@ def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
     )
     warmup_dispatches = [execution for execution in dispatched if execution.warmup]
     warmup_finals = [execution for execution in finals if execution.warmup]
-    warmup_uncommitted = recovered_uncommitted_warmup_dispatches(run.events, run.work_items)
+    warmup_latencies = successful_latency_values(warmup_finals, warmup=True)
+    recovered_items = recovered_uncommitted_execution_items(run.events, run.work_items)
+    warmup_uncommitted = sum(item.warmup for item in recovered_items)
+    unclassified_uncommitted = max(0, uncommitted - len(recovered_items))
+    retry_incomplete_items: set[tuple[str, int, bool]] = set()
+    for item in recovered_items:
+        try:
+            case_id, repetition, _ = parse_work_item_key(item.task_key, item.kind)
+        except ValueError:
+            continue
+        retry_incomplete_items.add((case_id, repetition, item.warmup))
     warmup_unknown_costs = (
         sum(execution.cost is None for execution in warmup_dispatches) + warmup_uncommitted
     )
@@ -2977,12 +2986,43 @@ def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
     calls = len(dispatched) + uncommitted
     return {
         "latency_p95_ms": _nearest_rank_p95(latencies),
+        "latency_statistics": summarize_latency(latencies),
         "latency_successful_requests": len(latencies),
         "latency_uncached_successful_requests": expected_latency_requests,
         "latency_missing_measurements": expected_latency_requests - len(latencies),
         "latency_definition": (
-            "nearest-rank p95 of final successful uncached measured request wall times; "
+            "nearest-rank percentiles of final successful uncached measured request wall times; "
             "warmups, failed requests and cache hits are excluded"
+        ),
+        "unclassified_uncommitted_dispatches": unclassified_uncommitted,
+        "retry_inclusive_latency": retry_inclusive_latency(
+            dispatched,
+            finals,
+            warmup=False,
+            incomplete_items=retry_incomplete_items,
+            phase_attribution_incomplete=bool(unclassified_uncommitted),
+        ),
+        "throughput": phase_throughput(
+            dispatched,
+            finals,
+            warmup=False,
+            uncommitted_dispatches=sum(not item.warmup for item in recovered_items),
+            phase_attribution_incomplete=bool(unclassified_uncommitted),
+        ),
+        "warmup_latency_statistics": summarize_latency(warmup_latencies),
+        "warmup_retry_inclusive_latency": retry_inclusive_latency(
+            dispatched,
+            finals,
+            warmup=True,
+            incomplete_items=retry_incomplete_items,
+            phase_attribution_incomplete=bool(unclassified_uncommitted),
+        ),
+        "warmup_throughput": phase_throughput(
+            dispatched,
+            finals,
+            warmup=True,
+            uncommitted_dispatches=warmup_uncommitted,
+            phase_attribution_incomplete=bool(unclassified_uncommitted),
         ),
         "total_cost_usd": round(known_cost, 6) if calls and unknown_costs == 0 else None,
         "cost_dispatches": calls,

@@ -704,6 +704,22 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
         f"  {safe(baseline.get('run_id', '?'))} -> {safe(current.get('run_id', '?'))}; "
         f"{safe(data.get('basis', 'stored facts only'))}",
     )
+    performance = data.get("application_performance") or {}
+    for side_name in ("baseline", "current"):
+        side = performance.get(side_name) or {}
+        stats = side.get("latency_statistics") or {}
+        retry = side.get("retry_inclusive_latency") or {}
+        throughput = side.get("throughput") or {}
+        warmup = side.get("warmup_latency_statistics") or {}
+        if stats or retry or throughput or warmup:
+            out(
+                console,
+                f"  {side_name} application: p95/p99 {_number(stats.get('p95_ms'))}/"
+                f"{_number(stats.get('p99_ms'))} ms, stddev {_number(stats.get('stddev_ms'))} ms; "
+                f"retry-inclusive p95 {_number(retry.get('p95_ms'))} ms; "
+                f"throughput {_number(throughput.get('successful_requests_per_second'))} req/s; "
+                f"warmup p95 {_number(warmup.get('p95_ms'))} ms",
+            )
     gate: dict[str, Any] = data.get("overall_coverage_gate") or data.get("gate") or {}
     if gate:
         gate_status = str(gate.get("status", "unknown"))

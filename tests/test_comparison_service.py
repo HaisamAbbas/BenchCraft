@@ -188,6 +188,7 @@ def _seed_run(
     cached_execution_keys: set[tuple[str, int]] | None = None,
     warmup_repetitions: int = 0,
     warmup_costs: dict[tuple[str, int], float | None] | None = None,
+    warmup_timings: dict[tuple[str, int], dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
     scoring_id = scoring_id or f"engine-{run_id}"
     binding, metric_profile = profile or _profile()
@@ -234,6 +235,7 @@ def _seed_run(
     timings = timings or {}
     costs = costs or {}
     warmup_costs = warmup_costs or {}
+    warmup_timings = warmup_timings or {}
     for case in cases:
         for repetition in range(repetitions):
             key = (case.case_id, repetition)
@@ -282,6 +284,7 @@ def _seed_run(
                     warmup=True,
                     status=ExecutionStatus.OK,
                     output=f"warmup {case.case_id}",
+                    timing=warmup_timings.get((case.case_id, warmup_index), {}),
                     cost=warmup_costs.get((case.case_id, warmup_index)),
                     effect_state=EffectState.COMPLETED,
                 )
@@ -1143,10 +1146,33 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
         "baseline",
         cases=cases,
         values=_values(("a1", 0, 1), ("b1", 0, 1)),
-        timings={("a1", 0): {"wall_ms": 100}, ("b1", 0): {"wall_ms": 200}},
+        timings={
+            ("a1", 0): {
+                "wall_ms": 100,
+                "started_at": "2024-01-01T00:00:00Z",
+                "finished_at": "2024-01-01T00:00:00.100Z",
+            },
+            ("b1", 0): {
+                "wall_ms": 200,
+                "started_at": "2024-01-01T00:00:00.100Z",
+                "finished_at": "2024-01-01T00:00:00.300Z",
+            },
+        },
         costs={("a1", 0): 0.1, ("b1", 0): 0.2},
         warmup_repetitions=1,
         warmup_costs={("a1", 0): 0.03, ("b1", 0): 0.04},
+        warmup_timings={
+            ("a1", 0): {
+                "wall_ms": 50,
+                "started_at": "2024-01-01T00:00:00Z",
+                "finished_at": "2024-01-01T00:00:00.050Z",
+            },
+            ("b1", 0): {
+                "wall_ms": 50,
+                "started_at": "2024-01-01T00:00:00.050Z",
+                "finished_at": "2024-01-01T00:00:00.100Z",
+            },
+        },
     )
     _seed_run(
         storage,
@@ -1154,10 +1180,33 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
         cases=cases,
         application_hash="sha256:app-b-intentional-change",
         values=_values(("a1", 0, 0.5), ("b1", 0, 0.5)),
-        timings={("a1", 0): {"wall_ms": 180}, ("b1", 0): {"wall_ms": 280}},
+        timings={
+            ("a1", 0): {
+                "wall_ms": 180,
+                "started_at": "2024-01-01T00:00:01Z",
+                "finished_at": "2024-01-01T00:00:01.180Z",
+            },
+            ("b1", 0): {
+                "wall_ms": 280,
+                "started_at": "2024-01-01T00:00:01.180Z",
+                "finished_at": "2024-01-01T00:00:01.460Z",
+            },
+        },
         costs={("a1", 0): 0.2, ("b1", 0): 0.35},
         warmup_repetitions=1,
         warmup_costs={("a1", 0): 0.05, ("b1", 0): 0.06},
+        warmup_timings={
+            ("a1", 0): {
+                "wall_ms": 60,
+                "started_at": "2024-01-01T00:00:01Z",
+                "finished_at": "2024-01-01T00:00:01.060Z",
+            },
+            ("b1", 0): {
+                "wall_ms": 70,
+                "started_at": "2024-01-01T00:00:01.060Z",
+                "finished_at": "2024-01-01T00:00:01.130Z",
+            },
+        },
     )
 
     report = compare_runs(
@@ -1177,6 +1226,13 @@ def test_comparison_reports_performance_and_applies_predeclared_regression_polic
     assert performance["baseline"]["warmup_cost_usd"] == 0.07
     assert performance["current"]["warmup_cost_usd"] == 0.11
     assert performance["baseline"]["warmup_effect_states"] == {"completed": 2}
+    assert performance["baseline"]["latency_statistics"]["p99_ms"] == 200
+    assert performance["baseline"]["latency_statistics"]["stddev_ms"] == 50
+    assert performance["baseline"]["retry_inclusive_latency"]["p50_ms"] == 100
+    assert performance["baseline"]["throughput"]["successful_requests_per_second"] == 6.667
+    assert performance["baseline"]["warmup_latency_statistics"]["p99_ms"] == 50
+    assert performance["baseline"]["warmup_retry_inclusive_latency"]["p50_ms"] == 50
+    assert performance["current"]["warmup_throughput"]["successful_requests_per_second"] == 15.385
 
     policy = parse_regression_policy(
         {
