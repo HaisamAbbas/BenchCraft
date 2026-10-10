@@ -15,6 +15,7 @@ from aibench.cli import app as app_cli
 from aibench.cli import benchmark as benchmark_cli
 from aibench.cli import cache as cache_cli
 from aibench.cli import chat as chat_cli
+from aibench.cli import config as config_cli
 from aibench.cli import connect as connect_cli
 from aibench.cli import dataset as dataset_cli
 from aibench.cli import experiments as experiments_cli
@@ -54,6 +55,7 @@ app.add_typer(runs_cli.app, name="runs")
 app.add_typer(sessions_cli.app, name="sessions")
 app.add_typer(traces_cli.app, name="traces")
 app.add_typer(connect_cli.app, name="connect")
+app.add_typer(config_cli.app, name="config")
 app.add_typer(cache_cli.app, name="cache")
 app.add_typer(openai_evals_oss_cli.app, name="openai-evals-oss")
 app.add_typer(openai_evals_api_cli.app, name="openai-evals-api")
@@ -163,6 +165,7 @@ def main(
                 policy=None,
                 trust_local_app=False,
                 provider_config=None,
+                provider_profile=None,
                 send=None,
                 json_output=False,
                 objectives=[],

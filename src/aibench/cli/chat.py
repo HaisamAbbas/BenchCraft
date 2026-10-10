@@ -11,6 +11,8 @@
 - `--provider-config` names the assistant model (the planning role, §2). It is refused,
   with the reasons shown, unless the policy permits the endpoint; the session still opens
   and every slash command works without it.
+- `--provider-profile NAME` selects a saved profile instead; `aibench config profiles use
+  NAME` selects the per-user default.
 - Without a terminal, `chat` needs `--send TEXT`: one message or slash command, answered
   non-interactively (`--json` for machine output). A run or controlled experiment it starts
   is followed to its end.
@@ -245,6 +247,9 @@ _TRUST = typer.Option(
 _PROVIDER = typer.Option(
     None, "--provider-config", help="Assistant model config (OpenAI-compatible)."
 )
+_PROVIDER_PROFILE = typer.Option(
+    None, "--provider-profile", help="Named profile from `aibench config profiles`."
+)
 _SEND = typer.Option(None, "--send", help="Non-interactive: send one message or /command.")
 _JSON = typer.Option(False, "--json", help="With --send: machine-readable output.")
 _OBJECTIVE = typer.Option(
@@ -261,6 +266,7 @@ def chat(
     policy: Path | None = _POLICY,
     trust_local_app: bool = _TRUST,
     provider_config: Path | None = _PROVIDER,
+    provider_profile: str | None = _PROVIDER_PROFILE,
     send: str | None = _SEND,
     json_output: bool = _JSON,
     objectives: list[str] = _OBJECTIVE,
@@ -284,7 +290,9 @@ def chat(
         settings = project_settings(root, app, dataset, policy)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
-    chosen = _assistant_model(provider_config, interactive=send is None)
+    chosen = _assistant_model(
+        provider_config, interactive=send is None, provider_profile=provider_profile
+    )
     workspace = Workspace.at(root)
     if settings["application"] is None and not workspace.db_path.is_file():
         # Not a BenchCraft project (e.g. the home or a system folder): explain how to
@@ -370,14 +378,21 @@ def _not_connected(root: Path) -> str:
 
 
 def _assistant_model(
-    provider_config: Path | None, *, interactive: bool
+    provider_config: Path | None, *, interactive: bool, provider_profile: str | None = None
 ) -> Path | OpenAICompatibleConfig | None:
-    """`--provider-config` when given; else the model saved by `benchcraft setup`, asking
-    for one on the first interactive start."""
+    """Explicit config/profile, then the selected saved model, prompting only on first use."""
     from aibench import userconfig
 
+    if provider_config is not None and provider_profile is not None:
+        raise _fail("use only one of --provider-config and --provider-profile")
     if provider_config is not None:
         return provider_config
+    if provider_profile is not None:
+        selected = userconfig.saved_provider(provider_profile)
+        if selected is None:
+            names = ", ".join(userconfig.provider_profile_names()) or "none"
+            raise _fail(f"provider profile {provider_profile!r} is unavailable (saved: {names})")
+        return selected
     if interactive and not userconfig.decided():
         return userconfig.run_setup(lambda line: console.print(safe(line)))
     return userconfig.saved_provider()

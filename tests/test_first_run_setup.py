@@ -56,6 +56,26 @@ def test_skipping_is_remembered_and_asks_nothing_about_keys() -> None:
     assert config is None and userconfig.decided() and userconfig.saved_provider() is None
 
 
+def test_explicit_setup_replaces_a_selected_provider_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = OpenAICompatibleConfig(
+        base_url="https://profile.test/v1", model="profile-model", api_key="env:PROFILE_KEY"
+    )
+    userconfig.save_provider_profile("selected", profile)
+    userconfig.select_provider_profile("selected")
+    monkeypatch.setenv("MY_SETUP_KEY", "present")
+
+    setup = userconfig.run_setup(
+        lambda _line: None,
+        ask=_scripted(["4", "https://setup.test/v1", "setup-model", "MY_SETUP_KEY"]),
+        secret=_scripted([]),
+        persist=lambda *_: False,
+    )
+
+    assert setup is not None and setup.model == "setup-model"
+    assert userconfig.active_provider_profile() is None
+    assert userconfig.saved_provider() == setup
+
+
 def test_a_custom_endpoint_and_a_key_already_in_the_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

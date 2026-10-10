@@ -42,6 +42,7 @@ from aibench.planning.drafts import PlanDraft, estimate_spend
 from aibench.planning.opportunities import OpportunityReport, discover_opportunities
 from aibench.planning.planner import PlannerLimits, plan_with_model, plan_with_template
 from aibench.planning.service import gather_inputs, write_draft
+from aibench.security.secrets import SUPPORTED_SOURCES
 
 plan_app = typer.Typer(
     help="Draft (`aibench plan --app ... --dataset ...`) or validate executable plans.",
@@ -185,7 +186,7 @@ def _rules(items: list[str], *, json_output: bool = False) -> dict[str, Decision
 
 
 def _provider(
-    config_path: Path, policy_path: Path | None, *, json_output: bool = False
+    config_source: Path | Any, policy_path: Path | None, *, json_output: bool = False
 ) -> tuple[Any, list[str]]:
     """The provider, or (None, denials) when the policy does not permit contacting it."""
     from aibench.planning.openai_provider import (
@@ -194,12 +195,36 @@ def _provider(
         provider_denials,
     )
 
-    try:
-        config = OpenAICompatibleConfig.model_validate(load_mapping_file(config_path))
-    except (PydanticValidationError, AibenchError, OSError) as exc:
+    if isinstance(config_source, OpenAICompatibleConfig):
+        config = config_source
+    else:
+        try:
+            config = OpenAICompatibleConfig.model_validate(load_mapping_file(config_source))
+        except PydanticValidationError as exc:
+            problems = "; ".join(
+                f"{'.'.join(str(part) for part in error['loc'])}: "
+                f"{'must be a secret reference' if 'api_key' in error['loc'] else error['msg']}"
+                for error in exc.errors(
+                    include_url=False, include_context=False, include_input=False
+                )
+            )
+            raise _fail(
+                f"invalid provider config {config_source}: {problems}",
+                EXIT_INVALID,
+                json_output=json_output,
+            ) from exc
+        except (AibenchError, OSError) as exc:
+            raise _fail(
+                f"invalid provider config {config_source}: {type(exc).__name__}",
+                EXIT_INVALID,
+                json_output=json_output,
+            ) from exc
+    if config.api_key is not None and config.api_key.partition(":")[0] not in SUPPORTED_SOURCES:
         raise _fail(
-            f"invalid provider config {config_path}: {exc}", EXIT_INVALID, json_output=json_output
-        ) from exc
+            "invalid provider config: api_key must use a supported secret source (env)",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
     try:
         denials = provider_denials(config, load_policy(policy_path))
     except AibenchError as exc:
@@ -241,6 +266,31 @@ def _summary(document: PlanDraft) -> None:
         )
 
 
+def _provider_source(
+    provider_config: Path | None, provider_profile: str | None, *, json_output: bool
+) -> Path | Any | None:
+    if provider_config is not None and provider_profile is not None:
+        raise _fail(
+            "use only one of --provider-config and --provider-profile",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if provider_config is not None:
+        return provider_config
+    from aibench import userconfig
+
+    if provider_profile is not None:
+        config = userconfig.saved_provider(provider_profile)
+        if config is None:
+            raise _fail(
+                f"provider profile {provider_profile!r} is unavailable",
+                EXIT_INVALID,
+                json_output=json_output,
+            )
+        return config
+    return userconfig.saved_provider()
+
+
 @plan_app.callback()
 def plan(
     ctx: typer.Context,
@@ -253,6 +303,9 @@ def plan(
     planner: str = typer.Option("template", "--planner", help="template | model"),
     provider_config: Path | None = typer.Option(  # noqa: B008
         None, "--provider-config", help="Model provider config (JSON/YAML) for --planner model."
+    ),
+    provider_profile: str | None = typer.Option(
+        None, "--provider-profile", help="Named provider profile for --planner model."
     ),
     policy: Path | None = _POLICY,
     trust_local_app: bool = typer.Option(
@@ -289,9 +342,12 @@ def plan(
         )
     if planner not in ("template", "model"):
         raise _fail("--planner must be template or model", EXIT_INVALID, json_output=json_output)
-    if planner == "model" and provider_config is None:
+    provider_source = _provider_source(provider_config, provider_profile, json_output=json_output)
+    if planner == "model" and provider_source is None:
         raise _fail(
-            "--planner model needs --provider-config", EXIT_INVALID, json_output=json_output
+            "--planner model needs --provider-config or a saved provider profile",
+            EXIT_INVALID,
+            json_output=json_output,
         )
     try:
         gathered = gather_inputs(
@@ -319,8 +375,8 @@ def plan(
     inputs = gathered.inputs
     provider_denied: list[str] = []
     if planner == "model":
-        assert provider_config is not None
-        provider, provider_denied = _provider(provider_config, policy, json_output=json_output)
+        assert provider_source is not None
+        provider, provider_denied = _provider(provider_source, policy, json_output=json_output)
         if provider is None:
             outcome = plan_with_template(inputs)
             outcome.provenance = outcome.provenance.model_copy(
@@ -522,6 +578,9 @@ def benchmark_planner(
     provider_config: Path | None = typer.Option(  # noqa: B008
         None, "--provider-config", help="Model provider config for --planner model."
     ),
+    provider_profile: str | None = typer.Option(
+        None, "--provider-profile", help="Named provider profile for --planner model."
+    ),
     policy: Path | None = _POLICY,
     out: Path | None = typer.Option(None, "--out", help="Write the full report (JSON) here."),  # noqa: B008
     require_targets: bool = typer.Option(
@@ -536,17 +595,20 @@ def benchmark_planner(
 
     if planner not in ("template", "model"):
         raise _fail("--planner must be template or model", EXIT_INVALID, json_output=json_output)
+    provider_source = _provider_source(provider_config, provider_profile, json_output=json_output)
     try:
         fixture_set = load_fixture_set(fixtures)
     except FixtureSetError as exc:
         raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     provider = None
     if planner == "model":
-        if provider_config is None:
+        if provider_source is None:
             raise _fail(
-                "--planner model needs --provider-config", EXIT_INVALID, json_output=json_output
+                "--planner model needs --provider-config or a saved provider profile",
+                EXIT_INVALID,
+                json_output=json_output,
             )
-        provider, denials = _provider(provider_config, policy, json_output=json_output)
+        provider, denials = _provider(provider_source, policy, json_output=json_output)
         if provider is None:
             if not json_output:
                 for denial in denials:

@@ -13,6 +13,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from aibench.planning.openai_provider import OpenAICompatibleConfig
+from aibench.security.secrets import SUPPORTED_SOURCES
 
 HOME_ENV = "BENCHCRAFT_HOME"
 
@@ -65,28 +67,114 @@ def load() -> dict[str, Any]:
 
 def decided() -> bool:
     """Whether first-run setup has happened (a model chosen, or explicitly skipped)."""
-    return "provider" in load()
+    data = load()
+    profiles = data.get("provider_profiles")
+    return "provider" in data or (isinstance(profiles, dict) and bool(profiles))
 
 
-def saved_provider() -> OpenAICompatibleConfig | None:
-    raw = load().get("provider")
+def provider_profile_names() -> list[str]:
+    profiles = load().get("provider_profiles")
+    if not isinstance(profiles, dict):
+        return []
+    return sorted(name for name in profiles if _valid_profile_name(name))
+
+
+def active_provider_profile() -> str | None:
+    data = load()
+    name = data.get("active_provider_profile")
+    profiles = data.get("provider_profiles")
+    if (
+        isinstance(name, str)
+        and _valid_profile_name(name)
+        and isinstance(profiles, dict)
+        and name in profiles
+    ):
+        return name
+    return None
+
+
+def saved_provider(profile_name: str | None = None) -> OpenAICompatibleConfig | None:
+    data = load()
+    selected = profile_name
+    if selected is None:
+        active = data.get("active_provider_profile")
+        profiles = data.get("provider_profiles")
+        if isinstance(active, str) and isinstance(profiles, dict) and active in profiles:
+            selected = active
+    if selected is not None:
+        profiles = data.get("provider_profiles")
+        raw = profiles.get(selected) if isinstance(profiles, dict) else None
+    else:
+        raw = data.get("provider")
     if not isinstance(raw, dict):
         return None
     try:
-        return OpenAICompatibleConfig.model_validate(raw)
+        config = OpenAICompatibleConfig.model_validate(raw)
     except ValidationError:
         return None
+    if config.api_key is not None and config.api_key.partition(":")[0] not in SUPPORTED_SOURCES:
+        return None
+    return config
 
 
-def save_provider(config: OpenAICompatibleConfig | None) -> Path:
+def save_provider_profile(name: str, config: OpenAICompatibleConfig) -> Path:
+    """Store a named provider profile; only the typed secret reference is persisted."""
+    if not _valid_profile_name(name):
+        raise ValueError("profile name must match [a-z][a-z0-9_-]*")
     data = load()
-    data["provider"] = config.model_dump(mode="json", exclude_none=True) if config else None
+    profiles = data.get("provider_profiles")
+    if not isinstance(profiles, dict):
+        profiles = {}
+    profiles[name] = config.model_dump(mode="json", exclude_none=True)
+    data["provider_profiles"] = profiles
+    if not data.get("active_provider_profile") and not data.get("provider"):
+        data["active_provider_profile"] = name
+    return _save(data)
+
+
+def select_provider_profile(name: str) -> Path:
+    if not _valid_profile_name(name) or saved_provider(name) is None:
+        raise ValueError(f"provider profile {name!r} does not exist or is invalid")
+    data = load()
+    data["active_provider_profile"] = name
+    return _save(data)
+
+
+def remove_provider_profile(name: str) -> Path:
+    data = load()
+    profiles = data.get("provider_profiles")
+    if not isinstance(profiles, dict) or name not in profiles:
+        raise KeyError(f"provider profile {name!r} does not exist")
+    del profiles[name]
+    data["provider_profiles"] = profiles
+    if data.get("active_provider_profile") == name:
+        remaining = sorted(key for key in profiles if _valid_profile_name(key))
+        if remaining:
+            data["active_provider_profile"] = remaining[0]
+        else:
+            data.pop("active_provider_profile", None)
+    return _save(data)
+
+
+def _valid_profile_name(name: object) -> bool:
+    return isinstance(name, str) and re.fullmatch(r"[a-z][a-z0-9_-]*", name) is not None
+
+
+def _save(data: dict[str, Any]) -> Path:
     path = config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     return path
+
+
+def save_provider(config: OpenAICompatibleConfig | None) -> Path:
+    """Set the setup-selected default and clear any named-profile selection."""
+    data = load()
+    data["provider"] = config.model_dump(mode="json", exclude_none=True) if config else None
+    data.pop("active_provider_profile", None)
+    return _save(data)
 
 
 KEY_SUFFIXES = ("_API_KEY", "_TOKEN")

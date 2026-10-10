@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
+
 from aibench.config.model import RESERVED_POLICY_KEYS, AibenchConfig, SecretRef
 from aibench.core.errors import ConfigError, PolicyError
 from aibench.core.hashes import content_hash
+from aibench.security.secrets import SUPPORTED_SOURCES
 
 # Only these environment variables are ever consulted. This is an explicit allowlist, not
 # a general os.environ merge, so undocumented variables cannot silently alter policy.
@@ -46,7 +49,7 @@ def load_mapping_file(path: Path) -> dict[str, Any]:
                 f"{path} is YAML but PyYAML is not installed; use JSON or install PyYAML"
             ) from exc
         try:
-            loaded = yaml.safe_load(text) or {}
+            loaded = yaml.safe_load(text) if text.strip() else {}
         except yaml.YAMLError as exc:
             mark = getattr(exc, "problem_mark", None)
             location = (
@@ -110,17 +113,52 @@ def resolve_config(
         merged[key] = value
         sources[key] = "cli"
 
-    secrets_raw = merged.pop("secrets", {}) or {}
-    secrets = {k: SecretRef.parse(v) if isinstance(v, str) else SecretRef(**v) for k, v in secrets_raw.items()}
+    secrets_raw = merged.pop("secrets", {})
+    if not isinstance(secrets_raw, dict):
+        raise ConfigError("invalid configuration: secrets must be an object of references")
+    secrets: dict[str, SecretRef] = {}
+    for name, value in secrets_raw.items():
+        try:
+            if isinstance(value, str):
+                secrets[name] = SecretRef.parse(value)
+            elif isinstance(value, dict):
+                secrets[name] = SecretRef.model_validate(value)
+            else:
+                raise TypeError
+        except (TypeError, ValueError, PydanticValidationError) as exc:
+            raise ConfigError(
+                f"invalid configuration: secrets.{name} must be a secret reference"
+            ) from exc
+        if secrets[name].source not in SUPPORTED_SOURCES:
+            raise ConfigError(
+                f"invalid configuration: secrets.{name} uses an unsupported secret source "
+                f"(supported: {', '.join(SUPPORTED_SOURCES)})"
+            )
     merged["secrets"] = secrets
 
-    extensions = merged.get("extensions", {}) or {}
+    extensions = merged.get("extensions", {})
+    if not isinstance(extensions, Mapping):
+        raise ConfigError("invalid configuration: extensions must be an object")
     assert_no_policy_keys_from_dataset(extensions)
 
     try:
         config = AibenchConfig(**merged)
-    except Exception as exc:  # pydantic ValidationError -> ConfigError
-        raise ConfigError(f"invalid configuration: {exc}") from exc
+    except PydanticValidationError as exc:
+        problems = [
+            f"{'.'.join(str(part) for part in error['loc'])}: "
+            f"{'must be a valid secret reference' if 'secret_env' in error['loc'] else error['msg']}"
+            for error in exc.errors(include_url=False, include_context=False, include_input=False)
+        ]
+        raise ConfigError("invalid configuration: " + "; ".join(problems)) from exc
+
+    for environment in config.plugin_environments:
+        for variable, reference in environment.secret_env.items():
+            source = reference.partition(":")[0]
+            if source not in SUPPORTED_SOURCES:
+                raise ConfigError(
+                    f"invalid configuration: plugin secret {environment.name}.{variable} "
+                    f"uses an unsupported secret source (supported: {', '.join(SUPPORTED_SOURCES)})"
+                )
 
     resolved_root = (root / config.project_root).resolve()
 

@@ -79,6 +79,9 @@ def benchmark(
     provider_config: Path | None = typer.Option(  # noqa: B008
         None, "--provider-config", help="Assistant model config for the conversation."
     ),
+    provider_profile: str | None = typer.Option(
+        None, "--provider-profile", help="Named assistant-provider profile."
+    ),
     revise: bool = typer.Option(False, "--revise", help="Replace a different existing plan."),
     workspace: Path | None = typer.Option(  # noqa: B008
         None, "--workspace", help="Project root containing .aibench/ (default: cwd)."
@@ -96,6 +99,7 @@ def benchmark(
             policy=policy,
             trust_local_app=trust_local_app,
             provider_config=provider_config,
+            provider_profile=provider_profile,
             send=None,
             json_output=False,
             objectives=list(objectives),

@@ -6,22 +6,24 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aibench.core.models import SecretRefStr
+
 RESERVED_POLICY_KEYS = {"policy", "credentials", "network", "budgets", "effects", "approvals"}
 
 
 class SecretRef(BaseModel):
-    """A reference to a secret, e.g. `env:OPENAI_API_KEY` or `keyring:aibench/judge`.
-    Never the literal secret value."""
+    """A reference to a secret, currently `env:OPENAI_API_KEY`.
+    Never the literal secret value; other sources need an implemented resolver first."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    source: str  # "env" | "keyring" | ...
-    name: str
+    source: str  # currently "env"
+    name: str = Field(min_length=1, pattern=r"^\S+$")
 
     @classmethod
     def parse(cls, raw: str) -> SecretRef:
         if ":" not in raw:
-            raise ValueError(f"secret reference must be 'source:name', got {raw!r}")
+            raise ValueError("secret reference must use the 'source:name' format")
         source, name = raw.split(":", 1)
         return cls(source=source, name=name)
 
@@ -40,7 +42,7 @@ class PluginEnvironmentConfig(BaseModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]*$")
     python: str
     paths: list[str] = Field(default_factory=list)
-    secret_env: dict[str, str] = Field(default_factory=dict)  # NAME -> source:name
+    secret_env: dict[str, SecretRefStr] = Field(default_factory=dict)  # NAME -> source:name
     startup_timeout_seconds: float = Field(default=120.0, gt=0, le=3_600)
     default_params: dict[str, dict[str, object]] = Field(default_factory=dict)
 
