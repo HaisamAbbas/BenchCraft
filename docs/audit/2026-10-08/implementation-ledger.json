@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G19.2: workspace backup and restore",
+  "current_item": "G19.3: portable run and session bundles",
   "items": [
     {
       "id": "F01",
@@ -705,16 +705,21 @@
       "id": "G19",
       "priority": "P2",
       "title": "Workspace maintenance and portability",
-      "detail": "**Partial.** `aibench workspace gc` previews orphaned artifacts by default and requires explicit `--apply` plus a minimum grace period before deletion. CLI backup/restore, portable run/session bundles, workspace integrity/repair, retention/storage usage, and absolute-path migration support remain outstanding.",
+      "detail": "**Partial.** `aibench workspace gc` previews orphaned artifacts by default and requires explicit `--apply` plus a minimum grace period before deletion. Verified online workspace backup and non-overwriting atomic restore now validate the archive, SQLite database, catalog and artifacts, and relocate artifact paths. Portable run/session bundles, workspace integrity/repair, retention/storage usage, and absolute-path migration remain outstanding.",
       "kind": "feature",
       "status": "partial",
       "verification": [
         "Workspace/artifact focused tests: 59 passed, 5 skipped on Windows; skips cover link creation unavailable in this environment",
         "Mypy passed for 161 source files; Ruff lint and formatting passed; git diff --check passed",
-        "Independent review-agent final review reported no findings; see evidence/G19-gc-review.md"
+        "Independent G19 garbage-collection review reported no findings; see evidence/G19-gc-review.md",
+        "Workspace backup/restore CLI tests on Windows: 35 passed, 10 skipped; POSIX publication tests were skipped",
+        "Mypy: 162 source files passed; Ruff src/tests and git diff --check passed",
+        "Independent final review of backup/restore reported no actionable findings; see evidence/G19-backup-review.md",
+        "Adjacent storage batch: 45 passed, 2 skipped, 1 failed, 1 deselected; resume test reported frozen application Git identity drift, while the excluded process-lock test passed alone",
+        "Full repository pytest run stopped at 4% after several minutes and was not completed"
       ],
-      "review": "evidence/G19-gc-review.md",
-      "commit": "739abfe1a41f2d76313b4d475b830f1791941f1c",
+      "review": "evidence/G19-backup-review.md",
+      "commit": "c55fa221",
       "pushed": true,
       "subrequirements": [
         {
@@ -725,7 +730,10 @@
         },
         {
           "name": "workspace backup and restore",
-          "status": "pending"
+          "status": "delivered",
+          "commit": "c55fa221",
+          "pushed": true,
+          "review": "evidence/G19-backup-review.md"
         },
         {
           "name": "portable run and session bundles",
