@@ -152,11 +152,11 @@ def test_vision_binding_refuses_non_compatible_judges() -> None:
         )
 
 
-def test_vision_endpoint_rejects_credentialed_and_insecure_destinations() -> None:
+def test_vision_endpoint_and_image_validation_reject_unsafe_inputs() -> None:
     result = plugin_python(
         """
 import json
-from aibench_deepeval.vision import validate_base_url
+from aibench_deepeval.vision import MAX_IMAGE_BYTES, decode_case_image, validate_base_url
 values = [
     "https://api.example/v1",
     "http://127.0.0.1:9000/v1",
@@ -174,10 +174,21 @@ for value in values:
         answers.append(False)
     else:
         answers.append(True)
-print(json.dumps(answers))
+image_errors = []
+for encoded in ("%%%", "A" * (((MAX_IMAGE_BYTES + 2) // 3) * 4 + 4)):
+    try:
+        decode_case_image({"image": {"mime_type": "image/png", "data_base64": encoded}})
+    except ValueError as exc:
+        image_errors.append(str(exc).split(":", 1)[0])
+    else:
+        image_errors.append("accepted")
+print(json.dumps({"endpoints": answers, "images": image_errors}))
 """
     )
-    assert result == [True, True, False, False, False, False, False]
+    assert result == {
+        "endpoints": [True, True, False, False, False, False, False],
+        "images": ["invalid", "oversized"],
+    }
 
 
 def test_vision_worker_sends_only_declared_fields_and_signature_checked_inline_image(
