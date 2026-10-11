@@ -301,15 +301,17 @@ def calibrate(
         Path("benchmarks/judges/v1"), "--set", help="Calibration set directory."
     ),
     out: Path | None = typer.Option(None, "--out", help="Write the full report (JSON) here."),  # noqa: B008
+    repetitions: int = typer.Option(
+        2, "--repetitions", min=1, max=100, help="Evaluator runs per case (default: 2)."
+    ),
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
-    """Measure the in-process (native) evaluators against labelled outputs: agreement,
-    false acceptance, false rejection and repeat stability, per category (§23)."""
+    """Measure native evaluators against labelled cases, with configurable repeat stability."""
     from aibench.services.calibration import CalibrationError, run_calibration
     from aibench.services.reports import write_text_atomic
 
     try:
-        report = run_calibration(set_dir)
+        report = run_calibration(set_dir, repetitions=repetitions)
     except (CalibrationError, BindingValidationError) as exc:
         raise _fail(str(exc)) from exc
     if out is not None:
@@ -318,7 +320,8 @@ def calibrate(
         console.print_json(data=report)
         return
     console.print(
-        f"calibration set {escape(str(report['set']))}; labels: {escape(report['label_review'])}"
+        f"calibration set {escape(str(report['set']))}; labels: {escape(report['label_review'])}; "
+        f"repetitions: {report['repetitions']}"
     )
     for binding, data in report["bindings"].items():
         o = data["overall"]
@@ -335,7 +338,7 @@ def calibrate(
         for d in data["disagreements"]:
             console.print(
                 f"  disagrees on {escape(d['id'])} ({escape(d['category'])}): labelled "
-                f"{d['label']}, decided {d['decision']}"
+                f"{d['label']}, decisions {', '.join(d['decisions'])}"
             )
     for item in report["not_measured"]:
         subject = item.get("evaluator") or item.get("measure")

@@ -20,6 +20,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import pytest
 from typer.testing import CliRunner
 
 from aibench.cli.main import app
@@ -43,7 +44,7 @@ from aibench.evaluators.protocol import (
     EvaluatorContext,
 )
 from aibench.registry import EvaluatorRegistry
-from aibench.services.calibration import run_calibration
+from aibench.services.calibration import CalibrationError, load_calibration_set, run_calibration
 from aibench.services.scoring import BindingScorer
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
@@ -71,9 +72,10 @@ def test_native_evaluators_against_the_labelled_calibration_set() -> None:
         assert measured["undecided"] == 0
         assert measured["repeat_stability"]["value"] == 1.0
     # the known limitation, quantified: correct but differently worded answers fail
-    assert _frac(strict["false_rejection"]) == (5, 7)
-    assert _frac(normalized["false_rejection"]) == (3, 7)
-    assert _frac(schema["agreement"]) == (7, 7)
+    assert strict["observations"] == 26
+    assert _frac(strict["false_rejection"]) == (10, 14)
+    assert _frac(normalized["false_rejection"]) == (6, 14)
+    assert _frac(schema["agreement"]) == (14, 14)
     rejected = {d["category"] for d in report["bindings"]["native.exact_match {}"]["disagreements"]}
     assert rejected == {"formatting", "paraphrase", "verbose", "non_text"}
     assert next(n.get("evaluator") for n in report["not_measured"]) == "deepeval.faithfulness@1"
@@ -86,9 +88,284 @@ def test_calibrate_command_reports_unmeasured_judges(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     text = " ".join(result.output.split())
-    assert "false rejection 5/7" in text and "labels: unreviewed" in text
+    assert "false rejection 10/14" in text and "labels: unreviewed" in text
     assert "not measured deepeval.faithfulness@1" in text
-    assert json.loads(out.read_text(encoding="utf-8"))["set"] == "judge-calibration-v1"
+    stored = json.loads(out.read_text(encoding="utf-8"))
+    assert stored["set"] == "judge-calibration-v1"
+    assert stored["schema"] == "aibench.judge-calibration-report/2"
+
+
+def test_calibration_repetitions_are_configurable_and_count_observations() -> None:
+    report = run_calibration(SET, repetitions=3)
+    strict = report["bindings"]["native.exact_match {}"]["overall"]
+    assert report["repetitions"] == 3
+    assert strict["observations"] == 39
+    assert _frac(strict["false_rejection"]) == (15, 21)
+    assert _frac(strict["repeat_stability"]) == (13, 13)
+
+
+class CalibrationFields(Evaluator):
+    manifest = EvaluatorManifest(
+        evaluator_id="test.calibration_fields",
+        version="1.0.0",
+        plugin_id="test",
+        plugin_version="0",
+        description="checks calibration case input and retrieved evidence",
+        value_kind="boolean",
+        direction=MetricDirection.HIGHER,
+        aggregation="rate",
+        requires=(
+            FieldRequirement(path="case.input"),
+            FieldRequirement(path="execution.output", non_empty=False),
+            FieldRequirement(path="execution.retrieved_context"),
+            FieldRequirement(path="case.reference.context"),
+        ),
+        default_rule=DecisionRule(comparator="is_true"),
+    )
+
+    async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
+        del ctx
+        valid = (
+            view.get("case.input") == "What is the return period?"
+            and view.get("execution.output") == "30 days"
+            and view.get("execution.retrieved_context") == ["Return within 30 days."]
+            and view.get("case.reference.context")
+            == ["Policy: returns are accepted within 30 days."]
+        )
+        return EvaluationOutcome.ok("boolean", valid)
+
+
+def test_calibration_carries_full_case_evidence_into_the_evaluator(tmp_path: Path) -> None:
+    (tmp_path / "set.json").write_text(
+        json.dumps({"schema": "aibench.judge-calibration/1", "version": "fields-v1"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "cases.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "field-case",
+                "category": "correct",
+                "metric": "test.calibration_fields",
+                "input": "What is the return period?",
+                "reference": {
+                    "answer": "30 days",
+                    "context": ["Policy: returns are accepted within 30 days."],
+                },
+                "output": "30 days",
+                "retrieved_context": ["Return within 30 days."],
+                "label": "acceptable",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = EvaluatorRegistry.with_native()
+    registry.register(CalibrationFields)
+    report = run_calibration(tmp_path, registry, repetitions=1)
+    result = report["cases"][0]
+    assert result["decision"] == "pass"
+    assert report["bindings"][result["binding"]]["overall"]["agreement"]["value"] == 1.0
+    assert report["bindings"][result["binding"]]["overall"]["repeat_stability"] == {
+        "value": None,
+        "numerator": 0,
+        "denominator": 0,
+    }
+
+
+class CalibrationModelJudge(Evaluator):
+    calls = 0
+    manifest = EvaluatorManifest(
+        evaluator_id="test.calibration_model",
+        version="1.0.0",
+        plugin_id="test",
+        plugin_version="0",
+        description="fake model judge for calibration safety and accounting tests",
+        value_kind="boolean",
+        direction=MetricDirection.HIGHER,
+        aggregation="rate",
+        requires=(FieldRequirement(path="case.input"),),
+        default_rule=DecisionRule(comparator="is_true"),
+        uses_models=True,
+    )
+
+    async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
+        type(self).calls += 1
+        ctx.report_usage(provider="fixture", calls=1, cost=None)
+        return EvaluationOutcome.ok("boolean", view.get("case.input") == "question")
+
+
+def test_model_calibration_requires_review_opt_in_and_a_bounded_repeat_count(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "set.json").write_text(
+        json.dumps(
+            {
+                "schema": "aibench.judge-calibration/1",
+                "version": "model-v1",
+                "review": {"status": "reviewed", "reviewer": "test reviewer"},
+                "not_measured": [
+                    {"evaluator": "test.calibration_model@1", "reason": "not run yet"},
+                    {"measure": "style sensitivity", "reason": "no paired cases"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "cases.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "model-case",
+                "category": "correct",
+                "metric": "test.calibration_model",
+                "input": "question",
+                "output": "answer",
+                "label": "acceptable",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = EvaluatorRegistry.with_native()
+    registry.register(CalibrationModelJudge)
+    CalibrationModelJudge.calls = 0
+
+    with pytest.raises(CalibrationError, match="explicit live authorization"):
+        run_calibration(tmp_path, registry, repetitions=2)
+    with pytest.raises(CalibrationError, match="--max-model-evaluations"):
+        run_calibration(
+            tmp_path, registry, repetitions=2, allow_models=True, max_model_evaluations=1
+        )
+    assert CalibrationModelJudge.calls == 0
+
+    report = run_calibration(tmp_path, registry, repetitions=2, allow_models=True)
+    assert CalibrationModelJudge.calls == 2
+    assert report["not_measured"] == [{"measure": "style sensitivity", "reason": "no paired cases"}]
+    assert report["usage"]["model_evaluations"] == 2
+    assert report["usage"]["reported_calls"] == 2
+    assert report["usage"]["reported_cost"] is None
+    assert report["usage"]["unknown_cost_evaluations"] == 2
+
+
+def test_model_calibration_missing_required_evidence_never_calls_the_judge(tmp_path: Path) -> None:
+    (tmp_path / "set.json").write_text(
+        json.dumps(
+            {
+                "schema": "aibench.judge-calibration/1",
+                "version": "missing-evidence-v1",
+                "review": {"status": "reviewed", "reviewer": "test reviewer"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "cases.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "no-input",
+                "category": "missing_evidence",
+                "metric": "test.calibration_model",
+                "output": "answer",
+                "label": "acceptable",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = EvaluatorRegistry.with_native()
+    registry.register(CalibrationModelJudge)
+    CalibrationModelJudge.calls = 0
+    report = run_calibration(
+        tmp_path, registry, repetitions=2, allow_models=True, max_model_evaluations=2
+    )
+    assert CalibrationModelJudge.calls == 0
+    assert report["usage"]["model_evaluations"] == 0
+    assert report["usage"]["model_evaluations_planned"] == 2
+    assert report["cases"][0]["repetitions"][0]["reason"] == "missing:case.input"
+
+
+def test_calibration_loader_rejects_duplicate_and_oversized_sets(tmp_path: Path) -> None:
+    (tmp_path / "set.json").write_text(
+        json.dumps({"schema": "aibench.judge-calibration/1", "version": "invalid-v1"}),
+        encoding="utf-8",
+    )
+    case = {
+        "id": "same",
+        "category": "correct",
+        "metric": "native.exact_match",
+        "reference": "yes",
+        "output": "yes",
+        "label": "acceptable",
+    }
+    path = tmp_path / "cases.jsonl"
+    path.write_text("\n".join(json.dumps(case) for _ in range(2)) + "\n", encoding="utf-8")
+    with pytest.raises(CalibrationError, match="duplicate case id"):
+        load_calibration_set(tmp_path)
+
+    path.write_text(
+        "\n".join(json.dumps({**case, "id": f"case-{number}"}) for number in range(1_001)) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CalibrationError, match="1000-case limit"):
+        load_calibration_set(tmp_path)
+
+
+class FailsFirstCalibration(Evaluator):
+    calls = 0
+    closes = 0
+    manifest = EvaluatorManifest(
+        evaluator_id="test.calibration_fails_first",
+        version="1.0.0",
+        plugin_id="test",
+        plugin_version="0",
+        description="fails one calibration repetition and then recovers",
+        value_kind="boolean",
+        direction=MetricDirection.HIGHER,
+        aggregation="rate",
+        default_rule=DecisionRule(comparator="is_true"),
+    )
+
+    async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
+        del view, ctx
+        type(self).calls += 1
+        if type(self).calls == 1:
+            raise RuntimeError("fixture failure")
+        return EvaluationOutcome.ok("boolean", True)
+
+    async def close(self) -> None:
+        type(self).closes += 1
+
+
+def test_calibration_keeps_later_repeats_after_an_evaluator_failure(tmp_path: Path) -> None:
+    (tmp_path / "set.json").write_text(
+        json.dumps({"schema": "aibench.judge-calibration/1", "version": "failure-v1"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "cases.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "unstable-case",
+                "category": "correct",
+                "metric": "test.calibration_fails_first",
+                "label": "acceptable",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = EvaluatorRegistry.with_native()
+    registry.register(FailsFirstCalibration)
+    FailsFirstCalibration.calls = 0
+    FailsFirstCalibration.closes = 0
+
+    report = run_calibration(tmp_path, registry, repetitions=2)
+    measured = report["bindings"][report["cases"][0]["binding"]]["overall"]
+    assert [item["decision"] for item in report["cases"][0]["repetitions"]] == [
+        "not_evaluated",
+        "pass",
+    ]
+    assert report["cases"][0]["repetitions"][0]["error_type"] == "RuntimeError"
+    assert measured["undecided"] == 1
+    assert measured["repeat_stability"] == {"value": 0.0, "numerator": 0, "denominator": 1}
+    assert FailsFirstCalibration.closes == 2
 
 
 # --------------------------------------------------------------------------- invariants
