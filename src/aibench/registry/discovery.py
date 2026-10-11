@@ -237,8 +237,9 @@ def environment_paths(
 
     The interpreter is queried with site startup disabled. `.pth` files are parsed as data;
     their executable lines are never run. A path-only `.pth` entry and the user site are
-    returned as import roots so callers can fingerprint their code. An executable or
-    unreadable `.pth` is opaque and requires an owner-supplied environment digest.
+    returned as import roots so callers can fingerprint their code. User site-packages are
+    included only for a base interpreter because Python disables them inside a venv. An
+    executable or unreadable `.pth` is opaque and requires an owner-supplied environment digest.
     """
     probe = (
         "import json, pathlib, site, sys, sysconfig; "
@@ -253,7 +254,10 @@ def environment_paths(
         "roots = [paths['purelib'], paths['platlib']] if venv else system; "
         "roots += system if venv and settings.get('include-system-site-packages', '').lower() "
         "== 'true' else []; "
+        "user_enabled = venv is None or settings.get('include-system-site-packages', '').lower() "
+        "== 'true'; "
         "print(json.dumps({'site': roots, 'user': site.getusersitepackages(), "
+        "'user_enabled': user_enabled, "
         "'stdlib': sys.path}))"
     )
     env = {k: os.environ[k] for k in _WORKER_ENV_KEEP if k in os.environ}
@@ -273,7 +277,7 @@ def environment_paths(
             raise ValueError("probe failed")
         layout = json.loads(result.stdout)
         site_roots = list(dict.fromkeys(Path(p) for p in layout["site"]))
-        user_site = Path(layout["user"])
+        user_site = Path(layout["user"]) if layout["user"] and layout["user_enabled"] else None
         stdlib_roots = list(dict.fromkeys(Path(p) for p in layout["stdlib"] if p))
     except (ValueError, TypeError):
         detail = result.stderr.decode("utf-8", "replace").strip().splitlines()
@@ -284,7 +288,7 @@ def environment_paths(
 
     site_paths: list[Path] = []
     import_roots = list(stdlib_roots)
-    readable_roots = [user_site, *site_roots]
+    readable_roots = ([user_site] if user_site is not None else []) + site_roots
     trackable = True
     for site_root in readable_roots:
         if site_root not in site_paths:

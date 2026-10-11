@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -253,5 +254,6 @@ def test_root_help_lists_global_scripting_and_selection_options() -> None:
         app, ["--help"], color=False
     )
     assert result.exit_code == 0
+    output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.output)
     for option in ("--config", "--json", "--non-interactive", "--policy"):
-        assert option in result.output
+        assert option in output

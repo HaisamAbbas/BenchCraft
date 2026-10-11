@@ -10,9 +10,12 @@ how to update it, and the chat says so in yellow when the session is reopened.""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from aibench import __version__
 from aibench.cli.chat import _with_project_plugins
@@ -38,6 +41,36 @@ EvaluatorManifest(
 )
 EVALUATORS = ()
 """
+
+
+def test_session_plugins_preserves_a_virtualenv_python_symlink(tmp_path: Path) -> None:
+    from aibench.services.plugins import session_plugins
+
+    root = tmp_path / "project"
+    python_relative = (
+        Path("Scripts/python.exe") if sys.platform == "win32" else Path("bin/python")
+    )
+    python = root / "plugin-env" / python_relative
+    python.parent.mkdir(parents=True)
+    try:
+        python.symlink_to(sys.executable)
+    except OSError as exc:
+        pytest.skip(f"virtualenv interpreter symlinks are unavailable: {exc}")
+    (root / "aibench.json").write_text(
+        json.dumps(
+            {
+                "plugin_environments": [
+                    {"name": "paired", "python": python.relative_to(root).as_posix()}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    environments, _defaults = session_plugins(root)
+
+    assert environments[0].python == os.path.abspath(python)
+    assert environments[0].python != str(python.resolve())
 
 
 def _dist(site: Path, name: str, version: str, entry_points: str = "") -> None:

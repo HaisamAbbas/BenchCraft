@@ -319,7 +319,7 @@ def test_cli_install_writes_config_and_policy_with_a_backup(tmp_path: Path) -> N
     ]
     assert (row["state"], row["missing"]) == ("installed", [])
     environments, defaults = session_plugins(root)
-    assert [e.python for e in environments] == [str(PLUGIN_ENV.resolve())]
+    assert [e.python for e in environments] == [str(PLUGIN_ENV.absolute())]
     assert defaults == {"deepeval.*": {"judge": JUDGE}}
 
 

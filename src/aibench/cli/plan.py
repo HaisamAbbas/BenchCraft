@@ -17,6 +17,7 @@ the missing fields").
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -139,7 +140,8 @@ def _plugin_environments(
     try:
         return (
             PluginEnvironmentRef(
-                python=str(python.resolve()),
+                # Venv Python is commonly a symlink to the base executable on POSIX.
+                python=os.path.abspath(python),
                 paths=tuple(str(p.resolve()) for p in paths),
                 secret_env=secret_env,
             ),

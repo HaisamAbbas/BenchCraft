@@ -92,7 +92,12 @@ def test_environment_paths_tracks_plain_pth_roots_without_running_code(
             timed_out=False,
             returncode=0,
             stdout=json.dumps(
-                {"site": [str(site), str(site)], "user": str(user_site), "stdlib": []}
+                {
+                    "site": [str(site), str(site)],
+                    "user": str(user_site),
+                    "user_enabled": True,
+                    "stdlib": [],
+                }
             ).encode(),
             stderr=b"",
         ),
@@ -113,6 +118,84 @@ def test_environment_paths_tracks_plain_pth_roots_without_running_code(
     assert imports_after_reorder == [user_site, site, alternate, editable]
 
 
+def test_environment_paths_omits_user_site_for_a_virtual_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.registry import discovery
+
+    venv = tmp_path / "venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text("include-system-site-packages = false\n", encoding="utf-8")
+    python = venv / "Scripts" / "python.exe"
+    python.parent.mkdir()
+    python.touch()
+    site = venv / "Lib" / "site-packages"
+    user_site = tmp_path / "base-user-site"
+    monkeypatch.setattr(
+        discovery,
+        "run_contained",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            timed_out=False,
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "site": [str(site)],
+                    "user": str(user_site),
+                    "user_enabled": False,
+                    "stdlib": [],
+                }
+            ).encode(),
+            stderr=b"",
+        ),
+    )
+
+    sites, imports, complete = environment_paths(python)
+
+    assert sites == [site]
+    assert imports == [site]
+    assert user_site not in sites
+    assert complete is True
+
+
+def test_environment_paths_tracks_user_site_for_system_site_virtual_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.registry import discovery
+
+    venv = tmp_path / "venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text("include-system-site-packages = true\n", encoding="utf-8")
+    python = venv / "Scripts" / "python.exe"
+    python.parent.mkdir()
+    python.touch()
+    venv_site = venv / "Lib" / "site-packages"
+    base_site = tmp_path / "base-site"
+    user_site = tmp_path / "base-user-site"
+    monkeypatch.setattr(
+        discovery,
+        "run_contained",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            timed_out=False,
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "site": [str(venv_site), str(base_site)],
+                    "user": str(user_site),
+                    "user_enabled": True,
+                    "stdlib": [],
+                }
+            ).encode(),
+            stderr=b"",
+        ),
+    )
+
+    sites, imports, complete = environment_paths(python)
+
+    assert sites == [user_site, venv_site, base_site]
+    assert imports == [user_site, venv_site, base_site]
+    assert complete is True
+
+
 def test_environment_paths_marks_executable_pth_opaque_without_running_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -128,7 +211,12 @@ def test_environment_paths_marks_executable_pth_opaque_without_running_it(
             timed_out=False,
             returncode=0,
             stdout=json.dumps(
-                {"site": [str(site)], "user": str(tmp_path / "user"), "stdlib": []}
+                {
+                    "site": [str(site)],
+                    "user": str(tmp_path / "user"),
+                    "user_enabled": True,
+                    "stdlib": [],
+                }
             ).encode(),
             stderr=b"",
         ),
