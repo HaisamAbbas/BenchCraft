@@ -108,7 +108,7 @@ environment manager already exists.
   `.venv/Scripts/pip freeze`, see header comment in that file)
 - Supported Python/platform matrix: `docs/engineering/platform-matrix.md`
 - CI: `.github/workflows/ci.yml` runs install, lint, type check, tests, CLI smoke, and build
-  across the supported matrix on `ubuntu-latest` and `windows-latest`
+  across the supported matrix on `ubuntu-latest`, `windows-latest`, and `macos-latest`
 
 Later prompts must use these exact commands (or record a change here) and print what was
 actually executed. Never treat a command listed in the prompt pack as evidence that it has
