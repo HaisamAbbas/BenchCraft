@@ -212,14 +212,19 @@ def _check_workspace_pins(workspace: Workspace, pins: _WorkspacePins) -> None:
 
     if pins.database_descriptor is not None and pins.descriptor_directory is not None:
         try:
-            opened_database = os.fstat(pins.database_descriptor)
+            opened_target, opened_database = _descriptor_identity(
+                pins.descriptor_directory, pins.database_descriptor
+            )
         except OSError as exc:
             raise ValidationError(
                 f"opened workspace database handle is unavailable: {exc}"
             ) from exc
-        if (opened_database.st_dev, opened_database.st_ino) != (
-            pins.database.st_dev,
-            pins.database.st_ino,
+        expected_database_path = os.path.normcase(os.path.normpath(str(workspace.db_path)))
+        if (
+            os.path.normcase(os.path.normpath(opened_target.removesuffix(" (deleted)")))
+            != expected_database_path
+            or (opened_database.st_dev, opened_database.st_ino)
+            != (pins.database.st_dev, pins.database.st_ino)
         ):
             raise ValidationError("opened workspace database no longer matches the pinned file")
 
@@ -256,14 +261,19 @@ def _check_workspace_pins(workspace: Workspace, pins: _WorkspacePins) -> None:
         descriptor = pins.sidecar_descriptors.get(path)
         if descriptor is not None and pins.descriptor_directory is not None:
             try:
-                opened_sidecar = (pins.descriptor_directory / str(descriptor)).stat()
+                opened_target, opened_sidecar = _descriptor_identity(
+                    pins.descriptor_directory, descriptor
+                )
             except OSError as exc:
                 raise ValidationError(
                     f"opened workspace database sidecar is unavailable: {path.name}"
                 ) from exc
-            if (opened_sidecar.st_dev, opened_sidecar.st_ino) != (
-                observed.st_dev,
-                observed.st_ino,
+            expected_sidecar_path = os.path.normcase(os.path.normpath(str(path)))
+            if (
+                os.path.normcase(os.path.normpath(opened_target.removesuffix(" (deleted)")))
+                != expected_sidecar_path
+                or (opened_sidecar.st_dev, opened_sidecar.st_ino)
+                != (observed.st_dev, observed.st_ino)
             ):
                 raise ValidationError(f"opened workspace database sidecar changed: {path.name}")
 

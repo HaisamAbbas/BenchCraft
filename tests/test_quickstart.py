@@ -215,6 +215,25 @@ def test_claims_are_linked_to_their_query_and_identifiers_are_not_claims() -> No
     assert unverified == ["12"]
 
 
+def test_fractional_latency_does_not_verify_a_percentage_claim() -> None:
+    sources = [
+        (
+            "get_report",
+            json.dumps(
+                {
+                    "metrics": [{"value_summary": {"rate": 0.8}}],
+                    "latency_ms": {"p50_ms": 0.42},
+                }
+            ),
+        )
+    ]
+
+    claims, unverified = check_claims("Latency was 42% and the pass rate was 80%.", sources)
+
+    assert unverified == ["42%"]
+    assert claims == [{"number": "80%", "source": "get_report"}]
+
+
 # --------------------------------------------------------------------------- model-free
 
 

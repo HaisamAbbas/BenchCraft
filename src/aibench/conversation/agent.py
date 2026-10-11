@@ -1510,6 +1510,15 @@ _DENOMINATORS = frozenset(
 )
 
 
+def _is_rate_field(name: str | None) -> bool:
+    if name is None:
+        return False
+    normalized = name.lower().replace("-", "_").replace(" ", "_")
+    return normalized == "rate" or normalized.endswith("_rate") or (
+        normalized == "coverage" or normalized.endswith("_coverage")
+    )
+
+
 def _matches(claim: float, decimals: int, value: float) -> bool:
     """`claim` is `value` rounded to the precision it was written with."""
     return abs(claim - value) <= 0.5 * 10**-decimals + 1e-9
@@ -1544,21 +1553,21 @@ def _source_facts(source: str) -> tuple[set[float], set[float]]:
             (str(k), v) for k, v in obj.items() if isinstance(v, int) and not isinstance(v, bool)
         ]
 
-    stack: list[Any] = [data]
+    stack: list[tuple[Any, str | None]] = [(data, None)]
     while stack:
-        item = stack.pop()
+        item, field_name = stack.pop()
         if isinstance(item, bool) or item is None:
             continue
         if isinstance(item, (int, float)):
             values.add(float(item))
-            if isinstance(item, float) and 0 <= item <= 1:
-                values.add(item * 100)  # a stored rate, stated as a percentage
+            if _is_rate_field(field_name) and 0 <= item <= 1:
+                values.add(float(item) * 100)  # a stored rate, stated as a percentage
         elif isinstance(item, str):
             values |= _text_numbers(item)
         elif isinstance(item, list):
-            stack.extend(item)
+            stack.extend((child, field_name) for child in item)
         elif isinstance(item, dict):
-            stack.extend(item.values())
+            stack.extend((child, str(key)) for key, child in item.items())
             record = counts(item)
             for child in item.values():
                 if isinstance(child, dict):
