@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22: Bounded in-memory work queue",
+  "current_item": "G22: Distributed workers (coordinator API)",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 batches run work-item persistence in bounded, atomic SQLite transactions; a local 1,000-row storage microbenchmark measured 0.602 s one-at-a-time versus 0.022 s in 500-row batches. In-memory queue paging, distributed workers, open-loop/ramping load, multimodal evaluators, and a dashboard remain pending.",
+      "detail": "**Partial.** G22.1 batches durable work-item creation and G22.2 pages scheduler work and recovery scans with bounded caches and retry buffers. A local 1,000-row storage microbenchmark measured 0.602 s one-at-a-time versus 0.022 s in 500-row batches; end-to-end capacity remains unmeasured and cases remain in memory. Distributed workers, open-loop/ramping load, multimodal evaluators, and a dashboard remain pending.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -869,7 +869,18 @@
         },
         {
           "name": "bounded in-memory work queue",
-          "status": "pending"
+          "status": "delivered",
+          "verification": [
+            "Engine, engine-fault, and engine-review regression suites: 59 passed",
+            "Workspace CLI/restore/repair suite: 55 passed, 16 platform-specific skips",
+            "Storage repository, recovery, storage-failure, and CLI-run suite: 72 passed",
+            "Ruff passed; Mypy on the Windows target passed for all 168 source files",
+            "Scheduler pages work in groups of 500; queue, held, delayed, and in-flight evaluation reservations and retry buffers are capped at 1,000; per-case streaming throughput and end-to-end memory remain unmeasured"
+          ],
+          "review": "implementation/G22.2-queue-paging-review.md",
+          "implementation": "implementation/G22.2-queue-paging.md",
+          "commit": "d5c7ac41",
+          "pushed": true
         },
         {
           "name": "distributed workers",
