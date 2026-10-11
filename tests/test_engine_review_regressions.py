@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 import socket
 import sys
 import time
@@ -21,9 +22,9 @@ from aibench.core.models import ExecutionStatus, WorkItemState
 from aibench.core.plans import BudgetLimits, ExecutablePlan, PluginEnvironmentRef
 from aibench.engine.budget import BudgetLedger
 from aibench.engine.compile import PolicyDenied, compile_plan
-from aibench.engine.engine import RunController, RunState
+from aibench.engine.engine import RunController, RunEngine, RunState, evaluation_key, execution_key
 from aibench.security.policy import ExecutionPolicy, plan_denials
-from aibench.services.runs import RunError, execute_run
+from aibench.services.runs import RunError, create_run, execute_run
 from aibench.storage.repositories import LeaseHeld, Storage
 from tests.engine_support import Harness
 
@@ -1008,6 +1009,98 @@ def test_cancel_during_retry_backoff_leaves_nothing_pending(tmp_path: Path) -> N
     assert outcome.state is RunState.CANCELLED
     assert "pending" not in _states(h, run_id).values()
     assert outcome.counts["execution"] == {"cancelled": 1}
+
+
+def test_evaluation_retry_waits_for_backoff_after_sql_refill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.services.scoring import BindingScorer
+
+    h = Harness(tmp_path)
+    run_id = h.create(
+        h.plan(
+            dataset=h.dataset({"a": "hi"}),
+            application=h.cli_app(),
+            retry={
+                "max_attempts": 2,
+                "initial_backoff_seconds": 0.15,
+                "max_backoff_seconds": 0.15,
+                "jitter": 0,
+            },
+        )
+    )
+    original = BindingScorer.score
+    starts: list[float] = []
+
+    async def fail_once(self: BindingScorer, execution: Any, cases: Any) -> Any:
+        starts.append(time.monotonic())
+        result = await original(self, execution, cases)
+        if len(starts) == 1:
+            return result.model_copy(
+                update={"status": ExecutionStatus.ERROR, "reason": "worker_failed:test"}
+            )
+        return result
+
+    monkeypatch.setattr(BindingScorer, "score", fail_once)
+    outcome = h.execute(run_id)
+
+    assert outcome.state is RunState.COMPLETED
+    assert len(starts) == 2
+    assert starts[1] - starts[0] >= 0.12
+
+
+def test_in_flight_evaluation_keeps_its_bounded_queue_reservation(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    compiled = compile_plan(
+        h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()),
+        policy=ExecutionPolicy(),
+        trusted_local=True,
+    )
+    storage, artifacts = h.storage()
+    try:
+        run_id = create_run(compiled, storage=storage, artifacts=artifacts, granted_by="test")
+        assert storage.transition_work_item(
+            run_id,
+            execution_key("a", 0),
+            from_states={WorkItemState.PENDING},
+            to_state=WorkItemState.SUCCEEDED,
+        )
+        engine = RunEngine(
+            storage=storage,
+            artifacts=artifacts,
+            run_id=run_id,
+            plan=compiled.plan,
+            application=compiled.application.spec,
+            runner=None,
+            cases={case.case_id: case for case in compiled.cases},
+            metrics=compiled.metrics,
+            scoring_id=f"engine-{run_id}",
+            ledger=BudgetLedger(compiled.plan.budgets),
+            controller=RunController(),
+            rng=random.Random(1),
+            reset_mode="per_case",
+        )
+        engine._load()
+        [metric] = compiled.metrics
+
+        async def score(*_args: Any) -> None:
+            return None
+
+        engine._scorers[metric.binding_hash] = SimpleNamespace(
+            manifest=SimpleNamespace(evaluator_id="test.evaluator"), score=score
+        )
+        engine._execution_result = lambda _item: object()  # type: ignore[method-assign]
+        task_key = evaluation_key("a", 0, metric.binding_hash)
+
+        async def dispatch() -> None:
+            await engine._dispatch_evaluations(stopping=False)
+            assert task_key in engine._queued_evaluations
+            assert any(item.task_key == task_key for item in engine._in_flight.values())
+            await asyncio.gather(*engine._in_flight)
+
+        asyncio.run(dispatch())
+    finally:
+        storage.db.close()
 
 
 def test_a_second_interrupt_aborts_in_flight_work_but_keeps_the_run_resumable(

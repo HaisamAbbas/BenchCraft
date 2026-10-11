@@ -1256,9 +1256,7 @@ def _recover_in_flight(
         settlements.append(WorkItemSettlement(item.task_key, running, state, error))
         notes.append(f"{item.task_key}: {note}")
 
-    for item in storage.list_work_items(run_id):
-        if item.state is not WorkItemState.RUNNING:
-            continue
+    for item in storage.iter_work_items(run_id, state=WorkItemState.RUNNING):
         case_id, repetition, binding_key = parse_work_item_key(item.task_key, item.kind)
         if item.kind == "execution":
             attempt = storage.get_execution_attempt(
@@ -1500,7 +1498,7 @@ async def _execute_leased(
         _, metrics = _frozen_registry(plan, manifest, policy, spec)
 
     cases = {c.case_id: c for c in storage.list_cases(manifest.dataset_hash)}
-    needed = {parse_work_item_key(w.task_key, w.kind)[0] for w in storage.list_work_items(run_id)}
+    needed = {parse_work_item_key(w.task_key, w.kind)[0] for w in storage.iter_work_items(run_id)}
     if not needed <= set(cases):
         raise RunError("stored Goldens are missing for some of this run's cases")
 
@@ -1510,9 +1508,8 @@ async def _execute_leased(
     for _ in range(uncommitted):
         ledger.record_prior_application(None)
 
-    pending_exec = any(
-        w.kind == "execution" and w.state is WorkItemState.PENDING
-        for w in storage.list_work_items(run_id)
+    pending_exec = (
+        storage.count_work_items(run_id, kind="execution", state=WorkItemState.PENDING) > 0
     )
     # A run that only settles stored observations/evaluations does not create a mixed app
     # revision. Check the live app identity exactly when further application dispatch is due.

@@ -1600,11 +1600,156 @@ class Storage:
         ).fetchone()
         return WorkItem.model_validate_json(row["data"]) if row else None
 
-    def list_work_items(self, run_id: str) -> list[WorkItem]:
+    def list_work_items(
+        self,
+        run_id: str,
+        *,
+        kind: str | None = None,
+        state: WorkItemState | None = None,
+    ) -> list[WorkItem]:
+        clauses = ["run_id = ?"]
+        params: list[object] = [run_id]
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if state is not None:
+            clauses.append("state = ?")
+            params.append(state.value)
         rows = self.conn.execute(
-            "SELECT data FROM work_items WHERE run_id = ?", (run_id,)
+            f"SELECT data FROM work_items WHERE {' AND '.join(clauses)}", params
         ).fetchall()
         return [WorkItem.model_validate_json(row["data"]) for row in rows]
+
+    def iter_work_items(
+        self,
+        run_id: str,
+        *,
+        kind: str | None = None,
+        state: WorkItemState | None = None,
+        page_size: int = 500,
+    ) -> Iterable[WorkItem]:
+        """Stream a run's work items in bounded pages ordered by their stable row IDs."""
+        if not 1 <= page_size <= 500:
+            raise ValueError("work-item page size must be between 1 and 500")
+        clauses = ["run_id = ?", "rowid > ?"]
+        base_params: list[object] = [run_id]
+        if kind is not None:
+            clauses.append("kind = ?")
+            base_params.append(kind)
+        if state is not None:
+            clauses.append("state = ?")
+            base_params.append(state.value)
+        after_row_id = 0
+        while True:
+            rows = self.conn.execute(
+                f"SELECT rowid AS row_id, data FROM work_items WHERE {' AND '.join(clauses)} "
+                "ORDER BY rowid LIMIT ?",
+                (*base_params[:1], after_row_id, *base_params[1:], page_size),
+            ).fetchall()
+            if not rows:
+                return
+            after_row_id = int(rows[-1]["row_id"])
+            for row in rows:
+                yield WorkItem.model_validate_json(row["data"])
+
+    def list_work_items_by_task_keys(self, run_id: str, task_keys: Iterable[str]) -> list[WorkItem]:
+        """Load a bounded set of work items by their stable logical keys."""
+        keys = tuple(dict.fromkeys(task_keys))
+        if not keys:
+            return []
+        if len(keys) > 500:
+            raise ValueError("a work-item lookup batch cannot exceed 500 task keys")
+        placeholders = ", ".join("?" for _ in keys)
+        rows = self.conn.execute(
+            f"SELECT data FROM work_items WHERE run_id = ? AND task_key IN ({placeholders})",
+            (run_id, *keys),
+        ).fetchall()
+        return [WorkItem.model_validate_json(row["data"]) for row in rows]
+
+    def list_ready_evaluation_work_items(
+        self, run_id: str, *, after_row_id: int = 0, limit: int = 500
+    ) -> list[tuple[int, WorkItem]]:
+        """Fetch a page of pending evaluations whose execution dependency is terminal."""
+        if not 1 <= limit <= 500:
+            raise ValueError("evaluation work-item page size must be between 1 and 500")
+        rows = self.conn.execute(
+            """
+            SELECT evaluation.rowid AS row_id, evaluation.data AS data
+            FROM work_items AS evaluation
+            WHERE evaluation.run_id = ?
+              AND evaluation.kind = 'evaluation'
+              AND evaluation.state = ?
+              AND evaluation.rowid > ?
+              AND EXISTS (
+                  SELECT 1 FROM work_items AS execution
+                  WHERE execution.run_id = evaluation.run_id
+                    AND execution.task_key = json_extract(evaluation.data, '$.dependency_keys[0]')
+                    AND execution.state IN (?, ?, ?, ?, ?)
+              )
+            ORDER BY evaluation.rowid
+            LIMIT ?
+            """,
+            (
+                run_id,
+                WorkItemState.PENDING.value,
+                after_row_id,
+                WorkItemState.SUCCEEDED.value,
+                WorkItemState.FAILED.value,
+                WorkItemState.BLOCKED.value,
+                WorkItemState.CANCELLED.value,
+                WorkItemState.UNKNOWN_EFFECT.value,
+                limit,
+            ),
+        ).fetchall()
+        return [(int(row["row_id"]), WorkItem.model_validate_json(row["data"])) for row in rows]
+
+    def get_work_item_state_by_task_key(self, run_id: str, task_key: str) -> WorkItemState | None:
+        row = self.conn.execute(
+            "SELECT state FROM work_items WHERE run_id = ? AND task_key = ?",
+            (run_id, task_key),
+        ).fetchone()
+        return WorkItemState(row["state"]) if row else None
+
+    def count_work_items(
+        self,
+        run_id: str,
+        *,
+        kind: str | None = None,
+        state: WorkItemState | None = None,
+    ) -> int:
+        clauses = ["run_id = ?"]
+        params: list[object] = [run_id]
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if state is not None:
+            clauses.append("state = ?")
+            params.append(state.value)
+        row = self.conn.execute(
+            f"SELECT COUNT(*) AS count FROM work_items WHERE {' AND '.join(clauses)}", params
+        ).fetchone()
+        return int(row["count"])
+
+    def work_item_counts(self, run_id: str) -> dict[str, dict[str, int]]:
+        """Return run work totals without decoding and retaining every work-item record."""
+        rows = self.conn.execute(
+            "SELECT kind, state, COUNT(*) AS count FROM work_items "
+            "WHERE run_id = ? GROUP BY kind, state",
+            (run_id,),
+        ).fetchall()
+        counts: dict[str, dict[str, int]] = {}
+        for row in rows:
+            counts.setdefault(str(row["kind"]), {})[str(row["state"])] = int(row["count"])
+        return counts
+
+    def pending_evaluation_binding_keys(self, run_id: str) -> set[str]:
+        """Return the compact binding suffixes needed to open pending evaluation scorers."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT substr(task_key, -16) AS binding_key FROM work_items "
+            "WHERE run_id = ? AND kind = 'evaluation' AND state = ?",
+            (run_id, WorkItemState.PENDING.value),
+        ).fetchall()
+        return {str(row["binding_key"]) for row in rows}
 
     # ---------------------------------------------------------------- execution attempts
 
@@ -1640,6 +1785,16 @@ class Storage:
     def get_execution_attempt(self, execution_id: str) -> ExecutionResult | None:
         row = self.conn.execute(
             "SELECT data FROM execution_attempts WHERE execution_id = ?", (execution_id,)
+        ).fetchone()
+        return ExecutionResult.model_validate_json(row["data"]) if row else None
+
+    def get_latest_execution_attempt(
+        self, run_id: str, case_id: str, repetition_id: int
+    ) -> ExecutionResult | None:
+        row = self.conn.execute(
+            "SELECT data FROM execution_attempts WHERE run_id = ? AND case_id = ? "
+            "AND repetition_id = ? ORDER BY attempt_id DESC LIMIT 1",
+            (run_id, case_id, repetition_id),
         ).fetchone()
         return ExecutionResult.model_validate_json(row["data"]) if row else None
 

@@ -32,8 +32,8 @@ import itertools
 import random
 import sqlite3
 import time
-from collections import deque
-from collections.abc import Awaitable, Callable
+from collections import OrderedDict, deque
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, TypeVar
@@ -47,6 +47,7 @@ from aibench.core.models import (
     ExecutionStatus,
     UsageEvent,
     UsageRole,
+    WorkItem,
     WorkItemState,
 )
 from aibench.core.plans import ExecutablePlan
@@ -77,6 +78,11 @@ TERMINAL = frozenset(
 )
 _POLL_SECONDS = 0.1
 _CONTROL_POLL_SECONDS = 0.25
+_WORK_QUEUE_PAGE_SIZE = 500
+# A due retry may join a page that was already prefetched. The delayed heap itself is capped
+# at one page, so this is the maximum queue size after promotion.
+_WORK_QUEUE_MAX_BUFFER = _WORK_QUEUE_PAGE_SIZE * 2
+_ENGINE_CACHE_SIZE = 500
 _T = TypeVar("_T")
 # Evaluations held by a quota that dispatch looks past per pass (bounded work per pass).
 _HELD_SCAN = 256
@@ -271,15 +277,20 @@ class RunEngine:
     _throttled: bool = False
     _episodes: dict[str, list[str]] = field(default_factory=dict)  # episode -> turn case IDs
     _episode_of: dict[str, str] = field(default_factory=dict)
-    _succeeded_here: set[str] = field(default_factory=set)  # execution keys, this session
+    _episode_success_key: dict[tuple[str, int], str] = field(default_factory=dict)
     _exec_queue: deque[_Item] = field(default_factory=deque)
     _warmup_queue: deque[_Item] = field(default_factory=deque)
     _eval_queue: deque[_Item] = field(default_factory=deque)
+    _exec_source: Iterator[_Item] | None = None
+    _warmup_source: Iterator[_Item] | None = None
+    _eval_after_row_id: int = 0
+    # IDs reserved across the queue, quota-held scans, delayed retries, and in-flight calls.
+    _queued_evaluations: set[str] = field(default_factory=set)
+    _binding_by_key: dict[str, str] = field(default_factory=dict)
     _delayed: list[tuple[float, int, _Item]] = field(default_factory=list)
     _in_flight: dict[asyncio.Task[Any], _Item] = field(default_factory=dict)
-    _waiting_evals: dict[str, list[_Item]] = field(default_factory=dict)  # by execution key
-    _executions: dict[str, ExecutionResult | None] = field(default_factory=dict)
-    _exec_states: dict[str, WorkItemState] = field(default_factory=dict)
+    _executions: OrderedDict[str, ExecutionResult | None] = field(default_factory=OrderedDict)
+    _exec_states: OrderedDict[str, WorkItemState] = field(default_factory=OrderedDict)
     _scorers: dict[str, BindingScorer] = field(default_factory=dict)
     _reserved: set[str] = field(default_factory=set)
     _seq: itertools.count[int] = field(default_factory=itertools.count)
@@ -295,6 +306,104 @@ class RunEngine:
 
     def _event(self, event_type: str, **payload: Any) -> None:
         self.storage.append_run_event(self.run_id, event_type, payload)
+
+    def _item(self, work_item: WorkItem) -> _Item:
+        case_id, repetition, binding_key = parse_work_item_key(work_item.task_key, work_item.kind)
+        return _Item(
+            work_item.task_key,
+            work_item.kind,
+            case_id,
+            repetition,
+            work_item.attempt,
+            self._binding_by_key.get(binding_key) if binding_key else None,
+            work_item.warmup,
+        )
+
+    def _execution_task_keys(self, *, warmup: bool) -> Iterator[str]:
+        if warmup:
+            repetitions = range(
+                self.plan.repetitions,
+                self.plan.repetitions + self.plan.warmup_repetitions,
+            )
+        else:
+            repetitions = range(self.plan.repetitions)
+        if self.reset_mode == "per_episode":
+            for turns in self._episodes.values():
+                for repetition in repetitions:
+                    for case_id in turns:
+                        yield execution_key(case_id, repetition)
+            return
+        for case_id in self.cases:
+            for repetition in repetitions:
+                yield execution_key(case_id, repetition)
+
+    def _iter_pending_items(self, task_keys: Iterator[str], *, kind: str) -> Iterator[_Item]:
+        while batch := list(itertools.islice(task_keys, _WORK_QUEUE_PAGE_SIZE)):
+            found = {
+                item.task_key: item
+                for item in self.storage.list_work_items_by_task_keys(self.run_id, batch)
+            }
+            for task_key in batch:
+                work_item = found.get(task_key)
+                if work_item is None or work_item.kind != kind:
+                    raise RuntimeError(
+                        f"run {self.run_id!r} is missing {kind} work item {task_key!r}"
+                    )
+                if work_item.state is WorkItemState.PENDING:
+                    yield self._item(work_item)
+
+    def _refill_queue(
+        self, queue: deque[_Item], source: Iterator[_Item] | None
+    ) -> Iterator[_Item] | None:
+        if source is None or len(queue) >= _WORK_QUEUE_PAGE_SIZE:
+            return source
+        while len(queue) < _WORK_QUEUE_PAGE_SIZE:
+            try:
+                queue.append(next(source))
+            except StopIteration:
+                return None
+        return source
+
+    def _refill_execution_queues(self) -> None:
+        self._warmup_source = self._refill_queue(self._warmup_queue, self._warmup_source)
+        self._exec_source = self._refill_queue(self._exec_queue, self._exec_source)
+
+    def _refill_evaluation_queue(self) -> None:
+        if len(self._eval_queue) >= _WORK_QUEUE_PAGE_SIZE:
+            return
+        wrapped = False
+        while (
+            len(self._eval_queue) < _WORK_QUEUE_PAGE_SIZE
+            and len(self._queued_evaluations) < _WORK_QUEUE_MAX_BUFFER
+        ):
+            capacity = min(
+                _WORK_QUEUE_PAGE_SIZE - len(self._eval_queue),
+                _WORK_QUEUE_MAX_BUFFER - len(self._queued_evaluations),
+            )
+            if capacity <= 0:
+                return
+            page = self.storage.list_ready_evaluation_work_items(
+                self.run_id,
+                after_row_id=self._eval_after_row_id,
+                limit=capacity,
+            )
+            if not page:
+                if self._eval_after_row_id and not wrapped:
+                    self._eval_after_row_id = 0
+                    wrapped = True
+                    continue
+                return
+            for row_id, work_item in page:
+                self._eval_after_row_id = row_id
+                if work_item.task_key in self._queued_evaluations:
+                    continue
+                item = self._item(work_item)
+                if item.binding_hash is None and not self.controller.cancelled:
+                    raise RuntimeError(
+                        f"evaluation work item {item.task_key!r} has no known metric binding"
+                    )
+                self._eval_queue.append(item)
+                self._queued_evaluations.add(item.task_key)
 
     def _transition(
         self,
@@ -325,33 +434,9 @@ class RunEngine:
         return True
 
     def _load(self) -> None:
-        by_binding = {m.binding_hash[7:23]: m.binding_hash for m in self.metrics}
-        items = self.storage.list_work_items(self.run_id)
-        executions: dict[str, ExecutionResult] = {}
-        for e in self.storage.list_execution_attempts(self.run_id):
-            key = execution_key(e.case_id, e.repetition_id)
-            if key not in executions or e.attempt_id > executions[key].attempt_id:
-                executions[key] = e
-        order = {case_id: i for i, case_id in enumerate(self.cases)}
-        pending_evals: list[_Item] = []
-        for w in sorted(items, key=lambda w: w.task_key):
-            case_id, repetition, binding_key = parse_work_item_key(w.task_key, w.kind)
-            item = _Item(
-                w.task_key,
-                w.kind,
-                case_id,
-                repetition,
-                w.attempt,
-                by_binding.get(binding_key) if binding_key else None,
-                w.warmup,
-            )
-            if w.kind == "execution":
-                self._exec_states[w.task_key] = w.state
-                self._executions[w.task_key] = executions.get(w.task_key)
-                if w.state is WorkItemState.PENDING:
-                    (self._warmup_queue if item.warmup else self._exec_queue).append(item)
-            elif w.state is WorkItemState.PENDING:
-                pending_evals.append(item)
+        self._binding_by_key = {
+            metric.binding_hash[7:23]: metric.binding_hash for metric in self.metrics
+        }
         if self.reset_mode == "per_episode":
             # An episode is the cases sharing a group_id, in dataset order; a case without
             # one is an episode of its own. Each (episode, repetition) runs contiguously.
@@ -359,31 +444,13 @@ class RunEngine:
                 episode = case.group_id or case_id
                 self._episode_of[case_id] = episode
                 self._episodes.setdefault(episode, []).append(case_id)
-            first = {ep: order.get(turns[0], 0) for ep, turns in self._episodes.items()}
-            sort_key = lambda i: (
-                first[self._episode_of[i.case_id]], i.repetition, order.get(i.case_id, 0)
-            )
-            self._exec_queue = deque(sorted(self._exec_queue, key=sort_key))
-            self._warmup_queue = deque(sorted(self._warmup_queue, key=sort_key))
-        else:
-            self._exec_queue = deque(
-                sorted(self._exec_queue, key=lambda i: (order.get(i.case_id, 0), i.repetition))
-            )
-            self._warmup_queue = deque(
-                sorted(
-                    self._warmup_queue,
-                    key=lambda i: (order.get(i.case_id, 0), i.repetition),
-                )
-            )
-        for item in sorted(
-            pending_evals, key=lambda i: (order.get(i.case_id, 0), i.repetition, i.task_key)
-        ):
-            if self._exec_states.get(execution_key(item.case_id, item.repetition)) in TERMINAL:
-                self._eval_queue.append(item)
-            else:
-                self._waiting_evals.setdefault(
-                    execution_key(item.case_id, item.repetition), []
-                ).append(item)
+        self._warmup_source = self._iter_pending_items(
+            self._execution_task_keys(warmup=True), kind="execution"
+        )
+        self._exec_source = self._iter_pending_items(
+            self._execution_task_keys(warmup=False), kind="execution"
+        )
+        self._refill_execution_queues()
 
     # ------------------------------------------------------------------ main loop
 
@@ -394,10 +461,20 @@ class RunEngine:
         self._set_state(RunState.RUNNING)
         self._event(
             "run_session_started",
-            pending_executions=len(self._exec_queue) + len(self._warmup_queue),
-            pending_evaluations=len(self._eval_queue) + sum(map(len, self._waiting_evals.values())),
+            pending_executions=self.storage.count_work_items(
+                self.run_id, kind="execution", state=WorkItemState.PENDING
+            ),
+            pending_evaluations=self.storage.count_work_items(
+                self.run_id, kind="evaluation", state=WorkItemState.PENDING
+            ),
         )
-        needs_runner = bool(self._exec_queue or self._warmup_queue) and not self.controller.cancelled
+        needs_runner = (
+            self.storage.count_work_items(
+                self.run_id, kind="execution", state=WorkItemState.PENDING
+            )
+            > 0
+            and not self.controller.cancelled
+        )
         try:
             if needs_runner:
                 assert self.runner is not None, "execution work remains but no runner was given"
@@ -435,8 +512,10 @@ class RunEngine:
             raise
 
     async def _open_scorers(self) -> None:
-        wanted = {i.binding_hash for i in self._eval_queue} | {
-            i.binding_hash for items in self._waiting_evals.values() for i in items
+        wanted = {
+            self._binding_by_key[key]
+            for key in self.storage.pending_evaluation_binding_keys(self.run_id)
+            if key in self._binding_by_key
         }
         for metric in self.metrics:
             if metric.binding_hash in wanted:
@@ -527,6 +606,9 @@ class RunEngine:
                 continue
             if self._settle_undispatchable(stopping):
                 continue  # newly unblocked evaluations to record
+            if ctl.interrupting and not ctl.cancelled:
+                return  # unstarted evaluations remain pending for resume
+            self._refill_evaluation_queue()
             if not self._eval_queue:
                 return
 
@@ -546,13 +628,20 @@ class RunEngine:
     def _drain_delayed(self) -> None:
         while self._delayed:
             _, _, item = heapq.heappop(self._delayed)
-            self._queue_for(item).append(item)
+            self._queue_for(item).appendleft(item)
+            if item.kind != "execution":
+                self._queued_evaluations.add(item.task_key)
 
     def _release_due_retries(self) -> None:
         now = time.monotonic()
         while self._delayed and self._delayed[0][0] <= now:
             _, _, item = heapq.heappop(self._delayed)
-            self._queue_for(item).appendleft(item)
+            queue = self._queue_for(item)
+            if len(queue) >= _WORK_QUEUE_MAX_BUFFER:
+                raise RuntimeError("work retry buffer exceeded its bounded capacity")
+            queue.appendleft(item)
+            if item.kind != "execution":
+                self._queued_evaluations.add(item.task_key)
 
     def _queue_for(self, item: _Item) -> deque[_Item]:
         if item.kind != "execution":
@@ -560,18 +649,18 @@ class RunEngine:
         return self._warmup_queue if item.warmup else self._exec_queue
 
     def _warmups_pending(self) -> bool:
-        return bool(self._warmup_queue) or any(
-            item.kind == "execution" and item.warmup
-            for _, _, item in self._delayed
-        ) or any(
-            item.kind == "execution" and item.warmup
-            for item in self._in_flight.values()
+        return (
+            self._warmup_source is not None
+            or bool(self._warmup_queue)
+            or any(item.kind == "execution" and item.warmup for _, _, item in self._delayed)
+            or any(item.kind == "execution" and item.warmup for item in self._in_flight.values())
         )
 
     # ------------------------------------------------------------------ dispatch
 
     def _dispatch_executions(self) -> None:
         while self._running("execution") < self.plan.concurrency.application:
+            self._refill_execution_queues()
             if self._warmup_queue:
                 queue = self._warmup_queue
             elif self._warmups_pending():
@@ -579,6 +668,8 @@ class RunEngine:
             else:
                 queue = self._exec_queue
             if not queue:
+                return
+            if len(self._delayed) + len(self._in_flight) >= _WORK_QUEUE_PAGE_SIZE:
                 return
             if self._stop_reason is not None:
                 return
@@ -609,6 +700,38 @@ class RunEngine:
     def _is_first_turn(self, item: _Item) -> bool:
         return self._episodes[self._episode_of[item.case_id]][0] == item.case_id
 
+    def _remember_execution_state(self, task_key: str, state: WorkItemState) -> None:
+        self._exec_states[task_key] = state
+        self._exec_states.move_to_end(task_key)
+        while len(self._exec_states) > _ENGINE_CACHE_SIZE:
+            self._exec_states.popitem(last=False)
+
+    def _execution_state(self, task_key: str) -> WorkItemState | None:
+        state = self._exec_states.get(task_key)
+        if state is None:
+            state = self.storage.get_work_item_state_by_task_key(self.run_id, task_key)
+            if state is not None:
+                self._remember_execution_state(task_key, state)
+        else:
+            self._exec_states.move_to_end(task_key)
+        return state
+
+    def _remember_execution(self, task_key: str, result: ExecutionResult | None) -> None:
+        self._executions[task_key] = result
+        self._executions.move_to_end(task_key)
+        while len(self._executions) > _ENGINE_CACHE_SIZE:
+            self._executions.popitem(last=False)
+
+    def _execution_result(self, item: _Item) -> ExecutionResult | None:
+        if item.task_key in self._executions:
+            self._executions.move_to_end(item.task_key)
+            return self._executions[item.task_key]
+        result = self.storage.get_latest_execution_attempt(
+            self.run_id, item.case_id, item.repetition
+        )
+        self._remember_execution(item.task_key, result)
+        return result
+
     def _episode_gate(self, item: _Item) -> str | None:
         """Why a later episode turn must not run: the turn before it did not succeed in
         this session, so the application's state is not what the episode built."""
@@ -617,9 +740,9 @@ class RunEngine:
         episode = self._episode_of[item.case_id]
         turns = self._episodes[episode]
         previous = execution_key(turns[turns.index(item.case_id) - 1], item.repetition)
-        if previous in self._succeeded_here:
+        if self._episode_success_key.get((episode, item.repetition)) == previous:
             return None
-        state = self._exec_states.get(previous)
+        state = self._execution_state(previous)
         if state is WorkItemState.SUCCEEDED:
             return (
                 f"episode_interrupted: episode {episode!r} stopped before this turn; the state "
@@ -665,8 +788,7 @@ class RunEngine:
 
     def _block_undispatched(self, item: _Item, reason: str) -> None:
         if self._transition(item, {WorkItemState.PENDING}, WorkItemState.BLOCKED, error=reason):
-            self._exec_states[item.task_key] = WorkItemState.BLOCKED
-            self._eval_queue.extend(self._waiting_evals.pop(item.task_key, []))
+            self._remember_execution_state(item.task_key, WorkItemState.BLOCKED)
 
     async def _reset_then_invoke(self, item: _Item) -> ExecutionResult:
         """Reset the application first when this attempt needs a known state, then invoke.
@@ -710,6 +832,7 @@ class RunEngine:
     async def _dispatch_evaluations(self, stopping: bool) -> None:
         if stopping and not self.controller.cancelled:
             return  # interrupt: unstarted evaluations stay pending for resume
+        self._refill_evaluation_queue()
         # Work held by one evaluator's quota does not hold back other evaluators or
         # records that need no evaluator: up to _HELD_SCAN held entries are looked past,
         # and put back in order.
@@ -719,11 +842,16 @@ class RunEngine:
             await self._dispatch_evaluations_past(held_back, held_evaluators)
         finally:
             self._eval_queue.extendleft(reversed(held_back))
+            self._queued_evaluations.update(item.task_key for item in held_back)
 
     async def _dispatch_evaluations_past(
         self, held_back: list[_Item], held_evaluators: set[str]
     ) -> None:
-        while self._eval_queue and self._running("evaluation") < self.plan.concurrency.evaluation:
+        while self._running("evaluation") < self.plan.concurrency.evaluation:
+            if not self._eval_queue:
+                self._refill_evaluation_queue()
+                if not self._eval_queue:
+                    return
             if len(held_back) >= _HELD_SCAN:
                 return
             item = self._eval_queue.popleft()
@@ -736,12 +864,13 @@ class RunEngine:
                     WorkItemState.CANCELLED,
                     error="run cancelled before evaluation",
                 )
+                self._queued_evaluations.discard(item.task_key)
                 continue
             assert item.binding_hash is not None
             scorer = self._scorers[item.binding_hash]
             exec_key = execution_key(item.case_id, item.repetition)
-            execution = self._executions.get(exec_key)
-            exec_state = self._exec_states.get(exec_key)
+            execution = self._execution_result(item)
+            exec_state = self._execution_state(exec_key)
             needs_evaluator = exec_state is WorkItemState.SUCCEEDED and execution is not None
             evaluator_id = scorer.manifest.evaluator_id
             gates = (
@@ -752,10 +881,12 @@ class RunEngine:
             if gates and (evaluator_id in held_evaluators or self._held(gates)):
                 self._throttled = True
                 held_evaluators.add(evaluator_id)
+                self._queued_evaluations.add(item.task_key)
                 held_back.append(item)
                 continue
             if needs_evaluator and self.controller.cancelled:
                 self._record_without_evaluator(item, scorer, "cancelled", ExecutionStatus.CANCELLED)
+                self._queued_evaluations.discard(item.task_key)
                 continue
             if needs_evaluator:
                 denial = self.ledger.reserve_evaluation()
@@ -764,18 +895,26 @@ class RunEngine:
                         self._stop_reason = denial
                         self._event("budget_exhausted", reason=denial)
                     self._record_without_evaluator(item, scorer, f"not_evaluated:{denial}")
+                    self._queued_evaluations.discard(item.task_key)
                     continue
                 self._reserved.add(item.task_key)
+            if len(self._delayed) + len(self._in_flight) >= _WORK_QUEUE_PAGE_SIZE:
+                self._release_evaluation(item)
+                self._queued_evaluations.add(item.task_key)
+                held_back.append(item)
+                continue
             item.attempt += 1
             if not self._transition(
                 item, {WorkItemState.PENDING}, WorkItemState.RUNNING, attempt=item.attempt
             ):
                 self._release_evaluation(item)
+                self._queued_evaluations.discard(item.task_key)
                 continue
             if execution is None:
                 self._finish_missing(
                     item, scorer, f"not_executed:{(exec_state or WorkItemState.BLOCKED).value}"
                 )
+                self._queued_evaluations.discard(item.task_key)
                 continue
             task = asyncio.ensure_future(scorer.score(execution, [self.cases[item.case_id]]))
             self._in_flight[task] = item
@@ -825,7 +964,7 @@ class RunEngine:
         reason: str,
         status: ExecutionStatus = ExecutionStatus.SKIPPED,
     ) -> None:
-        execution = self._executions.get(execution_key(item.case_id, item.repetition))
+        execution = self._execution_result(item)
         target = MissingExecution(
             self.run_id,
             item.case_id,
@@ -963,11 +1102,15 @@ class RunEngine:
         self, item: _Item, state: WorkItemState, reason: str | None, result: ExecutionResult | None
     ) -> None:
         self._transition(item, {WorkItemState.RUNNING}, state, error=reason)
-        if state is WorkItemState.SUCCEEDED:
-            self._succeeded_here.add(item.task_key)
-        self._exec_states[item.task_key] = state
-        self._executions[item.task_key] = result
-        self._eval_queue.extend(self._waiting_evals.pop(item.task_key, []))
+        if self.reset_mode == "per_episode":
+            episode = self._episode_of[item.case_id]
+            key = (episode, item.repetition)
+            if state is WorkItemState.SUCCEEDED and item.case_id != self._episodes[episode][-1]:
+                self._episode_success_key[key] = item.task_key
+            else:
+                self._episode_success_key.pop(key, None)
+        self._remember_execution_state(item.task_key, state)
+        self._remember_execution(item.task_key, result)
 
     def _stop_for_storage(self, item: _Item, exc: BaseException) -> None:
         """The workspace can't take writes (disk full, I/O error, ...). That is not a result
@@ -994,6 +1137,7 @@ class RunEngine:
             self._release_evaluation(item)
             if is_storage_failure(exc):
                 self._stop_for_storage(item, exc)
+                self._queued_evaluations.discard(item.task_key)
                 return
             status = (
                 ExecutionStatus.CANCELLED
@@ -1001,6 +1145,7 @@ class RunEngine:
                 else ExecutionStatus.ERROR
             )
             self._finish_missing(item, scorer, f"engine_error:{type(exc).__name__}", status)
+            self._queued_evaluations.discard(item.task_key)
             return
         if item.task_key in self._reserved:
             self._reserved.discard(item.task_key)
@@ -1029,6 +1174,7 @@ class RunEngine:
                     attempt=item.attempt,
                     delay_seconds=round(delay, 3),
                 )
+                self._queued_evaluations.add(item.task_key)
                 heapq.heappush(self._delayed, (time.monotonic() + delay, next(self._seq), item))
             return
         scorer.finalize(result)
@@ -1036,6 +1182,7 @@ class RunEngine:
         if verdict.retry:
             reason = f"{verdict.reason} (retries exhausted after {item.attempt} attempts)"
         self._transition(item, {WorkItemState.RUNNING}, verdict.final_state, error=reason)
+        self._queued_evaluations.discard(item.task_key)
 
     # ------------------------------------------------------------------ stopping
 
@@ -1046,9 +1193,10 @@ class RunEngine:
             self._exec_queue.clear()  # unstarted work stays pending for resume
             self._warmup_queue.clear()
             self._eval_queue.clear()
+            self._queued_evaluations.clear()
+            self._exec_source = None
+            self._warmup_source = None
             self._delayed.clear()
-            return False
-        if not self._exec_queue and not self._warmup_queue:
             return False
         if self.controller.cancelled:
             state, reason = WorkItemState.CANCELLED, "run cancelled before dispatch"
@@ -1056,13 +1204,23 @@ class RunEngine:
             state, reason = WorkItemState.BLOCKED, f"budget: {self._stop_reason}"
         else:
             return False
-        for queue in (self._warmup_queue, self._exec_queue):
-            while queue:
-                item = queue.popleft()
-                if self._transition(item, {WorkItemState.PENDING}, state, error=reason):
-                    self._exec_states[item.task_key] = state
-                    self._eval_queue.extend(self._waiting_evals.pop(item.task_key, []))
-        return True
+        changed = False
+        for _, _, item in self._delayed:
+            if item.kind == "execution" and self._transition(
+                item, {WorkItemState.PENDING}, state, error=reason
+            ):
+                self._remember_execution_state(item.task_key, state)
+                changed = True
+        self._delayed.clear()
+        while self._exec_queue or self._warmup_queue or self._exec_source or self._warmup_source:
+            self._refill_execution_queues()
+            for queue in (self._warmup_queue, self._exec_queue):
+                while queue:
+                    item = queue.popleft()
+                    if self._transition(item, {WorkItemState.PENDING}, state, error=reason):
+                        self._remember_execution_state(item.task_key, state)
+                        changed = True
+        return changed
 
     async def _shutdown(self, needs_runner: bool) -> None:
         for task in list(self._in_flight):
@@ -1082,8 +1240,8 @@ class RunEngine:
     def _finish(self) -> RunOutcome:
         ctl = self.controller
         pending = any(
-            w.state in (WorkItemState.PENDING, WorkItemState.RUNNING)
-            for w in self.storage.list_work_items(self.run_id)
+            self.storage.count_work_items(self.run_id, state=state) > 0
+            for state in (WorkItemState.PENDING, WorkItemState.RUNNING)
         )
         if ctl.cancelled:
             state = RunState.CANCELLED
@@ -1155,8 +1313,4 @@ def was_dispatched(result: ExecutionResult) -> bool:
 
 
 def work_counts(storage: Storage, run_id: str) -> dict[str, dict[str, int]]:
-    counts: dict[str, dict[str, int]] = {}
-    for item in storage.list_work_items(run_id):
-        kind = counts.setdefault(item.kind, {})
-        kind[item.state.value] = kind.get(item.state.value, 0) + 1
-    return counts
+    return storage.work_item_counts(run_id)

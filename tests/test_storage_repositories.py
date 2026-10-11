@@ -25,6 +25,7 @@ from aibench.core.models import (
     UsageEvent,
     UsageRole,
     WorkItem,
+    WorkItemState,
 )
 from aibench.storage.db import Database
 from aibench.storage.repositories import Storage
@@ -271,6 +272,71 @@ def test_commit_work_items_is_idempotent_and_rolls_back_conflicting_batch(storag
     with pytest.raises(sqlite3.IntegrityError):
         storage.commit_work_items((pending, duplicate_task))
     assert storage.get_work_item_by_task_key("r1", "exec:c3") is None
+
+
+def test_work_item_queue_queries_are_bounded_and_dependency_aware(storage) -> None:
+    storage.commit_run(_manifest())
+    first_execution = WorkItem(
+        work_item_id="exec-a",
+        run_id="r1",
+        task_key="exec:a:r0",
+        kind="execution",
+    )
+    first_evaluation = WorkItem(
+        work_item_id="eval-a",
+        run_id="r1",
+        task_key="eval:a:r0:0123456789abcdef",
+        kind="evaluation",
+        dependency_keys=(first_execution.task_key,),
+    )
+    second_execution = WorkItem(
+        work_item_id="exec-b",
+        run_id="r1",
+        task_key="exec:b:r0",
+        kind="execution",
+    )
+    second_evaluation = WorkItem(
+        work_item_id="eval-b",
+        run_id="r1",
+        task_key="eval:b:r0:0123456789abcdef",
+        kind="evaluation",
+        dependency_keys=(second_execution.task_key,),
+    )
+    storage.commit_work_items(
+        (first_execution, first_evaluation, second_execution, second_evaluation)
+    )
+    storage.transition_work_item(
+        "r1",
+        first_execution.task_key,
+        from_states={WorkItemState.PENDING},
+        to_state=WorkItemState.SUCCEEDED,
+    )
+
+    assert {
+        item.task_key
+        for item in storage.list_work_items_by_task_keys(
+            "r1", (second_evaluation.task_key, first_execution.task_key)
+        )
+    } == {first_execution.task_key, second_evaluation.task_key}
+    assert storage.count_work_items("r1", kind="execution", state=WorkItemState.PENDING) == 1
+    assert storage.pending_evaluation_binding_keys("r1") == {"0123456789abcdef"}
+
+    first_page = storage.list_ready_evaluation_work_items("r1", limit=1)
+    assert [item.task_key for _, item in first_page] == [first_evaluation.task_key]
+    storage.transition_work_item(
+        "r1",
+        second_execution.task_key,
+        from_states={WorkItemState.PENDING},
+        to_state=WorkItemState.FAILED,
+    )
+    second_page = storage.list_ready_evaluation_work_items(
+        "r1", after_row_id=first_page[0][0], limit=1
+    )
+    assert [item.task_key for _, item in second_page] == [second_evaluation.task_key]
+    assert storage.work_item_counts("r1") == {
+        "execution": {"succeeded": 1, "failed": 1},
+        "evaluation": {"pending": 2},
+    }
 
 
 # --------------------------------------------------------------------------- execution attempts

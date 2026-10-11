@@ -6,17 +6,29 @@ come from the application's own log, not from the engine's bookkeeping."""
 from __future__ import annotations
 
 import asyncio
+import random
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from aibench.core.models import ExecutionStatus, WorkItemState
-from aibench.engine.engine import RunController, RunState
+from aibench.core.models import ExecutionStatus, WorkItem, WorkItemState
+from aibench.engine.budget import BudgetLedger
+from aibench.engine.compile import compile_plan
+from aibench.engine.engine import (
+    RunController,
+    RunEngine,
+    RunState,
+    _Item,
+    evaluation_key,
+    execution_key,
+)
 from aibench.security.policy import ExecutionPolicy
 from aibench.services.case_export import build_case_export
 from aibench.services.reports import build_report
-from aibench.services.runs import evaluate_run, run_status
+from aibench.services.runs import create_run, evaluate_run, run_status
+from aibench.storage.repositories import WorkItemSettlement
 from tests.engine_support import Harness, max_overlap
 
 
@@ -29,6 +41,197 @@ def _states(h: Harness, run_id: str) -> dict[str, dict[str, int]]:
 
 
 # --------------------------------------------------------------------------- 06-G1
+
+
+def test_run_engine_pages_pending_work_queues(tmp_path: Path) -> None:
+    case_ids = [f"case-{index:04d}" for index in range(1207)]
+    h = Harness(tmp_path)
+    plan_path = h.plan(
+        dataset=h.dataset({case_id: "hi" for case_id in case_ids}),
+        application=h.cli_app(),
+    )
+    compiled = compile_plan(plan_path, policy=ExecutionPolicy(), trusted_local=True)
+    storage, artifacts = h.storage()
+    try:
+        run_id = create_run(compiled, storage=storage, artifacts=artifacts, granted_by="test")
+        engine = RunEngine(
+            storage=storage,
+            artifacts=artifacts,
+            run_id=run_id,
+            plan=compiled.plan,
+            application=compiled.application.spec,
+            runner=None,
+            cases={case.case_id: case for case in compiled.cases},
+            metrics=compiled.metrics,
+            scoring_id=f"engine-{run_id}",
+            ledger=BudgetLedger(compiled.plan.budgets),
+            controller=RunController(),
+            rng=random.Random(1),
+            reset_mode="per_case",
+        )
+        engine._load()
+
+        assert len(engine._exec_queue) == 500
+        assert len(engine._warmup_queue) == 0
+        seen_executions: list[str] = []
+        while engine._exec_queue or engine._exec_source is not None:
+            engine._refill_execution_queues()
+            assert len(engine._exec_queue) <= 500
+            seen_executions.extend(item.task_key for item in engine._exec_queue)
+            engine._exec_queue.clear()
+        assert seen_executions == [execution_key(case_id, 0) for case_id in case_ids]
+
+        for start in range(0, len(case_ids), 500):
+            settlements = [
+                WorkItemSettlement(
+                    task_key=execution_key(case_id, 0),
+                    from_states=frozenset({WorkItemState.PENDING}),
+                    to_state=WorkItemState.SUCCEEDED,
+                )
+                for case_id in case_ids[start : start + 500]
+            ]
+            storage.settle_work_items(
+                run_id,
+                settlements,
+                event_type="test_queue_ready",
+                payload={"count": len(settlements)},
+            )
+
+        [metric] = compiled.metrics
+        engine._queued_evaluations.update(
+            evaluation_key(case_id, 0, metric.binding_hash) for case_id in case_ids[:900]
+        )
+        engine._refill_evaluation_queue()
+        assert len(engine._eval_queue) == 100
+        assert len(engine._queued_evaluations) == 1000
+        engine._eval_queue.clear()
+        engine._queued_evaluations.clear()
+        engine._eval_after_row_id = 0
+
+        other_binding = "sha256:" + "b" * 64
+        other_evaluation = WorkItem(
+            work_item_id=f"{run_id}:eval:{case_ids[0]}:r0:{other_binding[7:23]}",
+            run_id=run_id,
+            task_key=evaluation_key(case_ids[0], 0, other_binding),
+            kind="evaluation",
+            dependency_keys=(execution_key(case_ids[0], 0),),
+        )
+        storage.commit_work_items([other_evaluation])
+        engine._binding_by_key[other_binding[7:23]] = other_binding
+        ready_page = storage.list_ready_evaluation_work_items(run_id, limit=500)
+        delayed = ready_page[:245]
+        held = ready_page[245:500]
+        engine._queued_evaluations.update(item.task_key for _, item in delayed)
+        engine._delayed = [
+            (
+                time.monotonic() + 3600,
+                index,
+                engine._item(work_item),
+            )
+            for index, (_, work_item) in enumerate(delayed)
+        ]
+        engine._eval_queue.extend(engine._item(item) for _, item in held)
+        engine._queued_evaluations.update(item.task_key for _, item in held)
+        cursor = 0
+        while True:
+            remaining = storage.list_ready_evaluation_work_items(
+                run_id, after_row_id=cursor, limit=500
+            )
+            if not remaining:
+                raise AssertionError("expected the independent evaluation to be ready")
+            if remaining[-1][1].task_key == other_evaluation.task_key:
+                engine._eval_after_row_id = remaining[-2][0]
+                break
+            cursor = remaining[-1][0]
+        engine._refill_evaluation_queue()
+        assert len(engine._eval_queue) == 500
+        assert len(engine._queued_evaluations) == 745
+        assert engine._eval_queue[255].task_key == other_evaluation.task_key
+        assert engine._eval_queue[255].binding_hash == other_binding
+        engine._eval_queue.clear()
+        engine._queued_evaluations.clear()
+        engine._delayed.clear()
+        engine._eval_after_row_id = 0
+        assert storage.transition_work_item(
+            run_id,
+            other_evaluation.task_key,
+            from_states={WorkItemState.PENDING},
+            to_state=WorkItemState.CANCELLED,
+        )
+
+        # Running evaluations retain reservations because retry completions can rejoin the
+        # delay heap while held work and a fresh page already occupy the rest of the buffer.
+        in_flight_page = storage.list_ready_evaluation_work_items(
+            run_id, after_row_id=ready_page[-1][0], limit=218
+        )
+        scenario_rows = ready_page + in_flight_page
+        delayed_rows = scenario_rows[:400]
+        held_rows = scenario_rows[400:655]
+        in_flight_rows = scenario_rows[655:718]
+        engine._queued_evaluations.update(item.task_key for _, item in scenario_rows[:718])
+        engine._eval_queue.extend(engine._item(item) for _, item in held_rows)
+        deadline = time.monotonic() - 1
+        engine._delayed = [
+            (deadline, index, engine._item(item))
+            for index, (_, item) in enumerate(delayed_rows)
+        ]
+        engine._eval_after_row_id = scenario_rows[717][0]
+        engine._refill_evaluation_queue()
+        assert len(engine._eval_queue) == 500
+        assert len(engine._queued_evaluations) == 963
+        engine._delayed.extend(
+            (deadline, 400 + index, engine._item(item))
+            for index, (_, item) in enumerate(in_flight_rows)
+        )
+        engine._release_due_retries()
+        assert not engine._delayed
+        assert len(engine._eval_queue) == 963
+        assert len(engine._queued_evaluations) == 963
+        engine._eval_queue.clear()
+        engine._queued_evaluations.clear()
+        engine._eval_after_row_id = 0
+
+        seen_evaluations: list[str] = []
+        while True:
+            engine._refill_evaluation_queue()
+            assert len(engine._eval_queue) <= 500
+            if not engine._eval_queue:
+                break
+            while engine._eval_queue:
+                item = engine._eval_queue.popleft()
+                engine._queued_evaluations.remove(item.task_key)
+                assert storage.transition_work_item(
+                    run_id,
+                    item.task_key,
+                    from_states={WorkItemState.PENDING},
+                    to_state=WorkItemState.RUNNING,
+                    attempt=1,
+                )
+                seen_evaluations.append(item.task_key)
+
+        assert seen_evaluations == [
+            evaluation_key(case_id, 0, metric.binding_hash) for case_id in case_ids
+        ]
+
+        # Promoting due retries must make progress even when the prefetched page is full.
+        engine._exec_queue.clear()
+        engine._exec_queue.extend(
+            _Item(f"queued-{index}", "execution", case_ids[0], 0, 1) for index in range(500)
+        )
+        deadline = time.monotonic() - 1
+        engine._delayed = [
+            (
+                deadline,
+                index,
+                _Item(f"retry-{index}", "execution", case_ids[0], 0, 1),
+            )
+            for index in range(500)
+        ]
+        engine._release_due_retries()
+        assert not engine._delayed
+        assert len(engine._exec_queue) == 1000
+    finally:
+        storage.db.close()
 
 
 def test_manual_plan_runs_end_to_end_and_saved_executions_rescore(tmp_path: Path) -> None:
