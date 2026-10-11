@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G20: Judge repeat/calibration workflow",
+  "current_item": "G20.2: Policy-gated live judge calibration",
   "items": [
     {
       "id": "F01",
@@ -789,13 +789,30 @@
       "id": "G20",
       "priority": "P2",
       "title": "Judge repeat/calibration workflow",
-      "detail": "**Partial.** Statistical primitives, native calibration, and comparisons exist. A practical command that repeats/calibrates the configured model judges against reviewed labels is incomplete; F12 affects a helper branch.",
+      "detail": "**In progress.** G20.1 adds configurable repeat observations, complete case evidence and usage accounting. G20.2 adds the policy-gated live model-judge CLI workflow; F12 is already delivered.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
       "review": null,
       "commit": null,
-      "pushed": false
+      "pushed": false,
+      "subrequirements": [
+        {
+          "name": "repeat measurements, full case evidence and usage reporting",
+          "status": "delivered",
+          "verification": [
+            "9 tests passed: repeats, evidence mapping, model opt-in/cap, missing evidence, malformed sizes and evaluator failures",
+            "Ruff check/format and Mypy passed for changed files"
+          ],
+          "review": "implementation/G20-calibration-core-review.md",
+          "commit": "e1236a7757db14eed1eae7d1470808d3d270ed0d",
+          "pushed": true
+        },
+        {
+          "name": "policy-gated live model-judge calibration CLI",
+          "status": "pending"
+        }
+      ]
     },
     {
       "id": "G21",
