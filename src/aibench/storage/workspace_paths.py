@@ -211,9 +211,8 @@ def _check_workspace_pins(workspace: Workspace, pins: _WorkspacePins) -> None:
             raise ValidationError(f"{label} changed while migration was running")
 
     if pins.database_descriptor is not None and pins.descriptor_directory is not None:
-        descriptor_path = pins.descriptor_directory / str(pins.database_descriptor)
         try:
-            opened_database = descriptor_path.stat()
+            opened_database = os.fstat(pins.database_descriptor)
         except OSError as exc:
             raise ValidationError(
                 f"opened workspace database handle is unavailable: {exc}"
@@ -286,10 +285,8 @@ def _refresh_sqlite_sidecar_descriptors(workspace: Workspace, pins: _WorkspacePi
         if not name.isdigit():
             continue
         descriptor = int(name)
-        descriptor_path = directory / name
         try:
-            target = _descriptor_target(directory, descriptor)
-            opened = descriptor_path.stat()
+            target, opened = _descriptor_identity(directory, descriptor)
         except OSError:
             continue
         identity = (target, opened.st_dev, opened.st_ino)
@@ -452,8 +449,7 @@ def _descriptor_snapshot() -> _OpenHandleSnapshot:
         identities = {}
         for descriptor in descriptors:
             try:
-                target = _descriptor_target(candidate, descriptor)
-                metadata = (candidate / str(descriptor)).stat()
+                target, metadata = _descriptor_identity(candidate, descriptor)
             except OSError:
                 continue
             identities[descriptor] = (target, metadata.st_dev, metadata.st_ino)
@@ -479,6 +475,22 @@ def _descriptor_target(directory: Path, descriptor: int) -> str:
             raise OSError("Darwin returned an empty path for an open descriptor")
         return os.fsdecode(path)
     return os.readlink(directory / str(descriptor))
+
+
+def _descriptor_identity(directory: Path, descriptor: int) -> tuple[str, os.stat_result]:
+    """Read a descriptor path and inode from one stable open handle.
+
+    Resolving ``/dev/fd/N`` and then statting that path can observe different files if
+    another thread closes and reuses N between the two operations. ``fstat`` brackets
+    the path lookup so such a reuse is rejected instead of combining unrelated identity
+    data. This matters on macOS, where descriptors are discovered through ``/dev/fd``.
+    """
+    before = os.fstat(descriptor)
+    target = _descriptor_target(directory, descriptor)
+    after = os.fstat(descriptor)
+    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+        raise OSError("descriptor changed while its identity was being verified")
+    return target, after
 
 
 def _pin_open_database_descriptors(
@@ -509,10 +521,8 @@ def _pin_open_database_descriptors(
         if not name.isdigit():
             continue
         descriptor = int(name)
-        descriptor_path = directory / name
         try:
-            target = _descriptor_target(directory, descriptor)
-            metadata = descriptor_path.stat()
+            target, metadata = _descriptor_identity(directory, descriptor)
         except OSError:
             continue
         identity = (target, metadata.st_dev, metadata.st_ino)
