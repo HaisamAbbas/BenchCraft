@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G20.2: Policy-gated live judge calibration",
+  "current_item": "G21: Platform and release confidence",
   "items": [
     {
       "id": "F01",
@@ -789,13 +789,18 @@
       "id": "G20",
       "priority": "P2",
       "title": "Judge repeat/calibration workflow",
-      "detail": "**In progress.** G20.1 adds configurable repeat observations, complete case evidence and usage accounting. G20.2 adds the policy-gated live model-judge CLI workflow; F12 is already delivered.",
+      "detail": "**Delivered.** G20.1 adds configurable repeat observations, complete case evidence and usage accounting. G20.2 adds policy-gated live model-judge calibration with reviewed labels, isolated plugin workers, data-root and evaluator-call checks, bounded invocations/timeouts, and usage reporting; unsupported policy ceilings fail closed. F12 was already delivered.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false,
+      "status": "delivered",
+      "verification": [
+        "Calibration, engine policy and worker isolation batch: 55 passed, 1 skipped; Windows could not create the interpreter symlink, and escaping calibration-file targets were exercised with a resolved-path simulation",
+        "Ruff lint/format and Mypy for the changed CLI, calibration service and execution policy passed; git diff --check passed",
+        "Live CLI completed against a local fake evaluator in an isolated worker; no paid provider was contacted",
+        "Final independent review found no findings; see implementation/G20-live-calibration-review.md"
+      ],
+      "review": "implementation/G20-live-calibration-review.md",
+      "commit": "59c7fd85e3ffe474aa61cd113ff4e3cf0551d1ec",
+      "pushed": true,
       "subrequirements": [
         {
           "name": "repeat measurements, full case evidence and usage reporting",
@@ -810,7 +815,10 @@
         },
         {
           "name": "policy-gated live model-judge calibration CLI",
-          "status": "pending"
+          "status": "delivered",
+          "commit": "59c7fd85e3ffe474aa61cd113ff4e3cf0551d1ec",
+          "pushed": true,
+          "review": "implementation/G20-live-calibration-review.md"
         }
       ]
     },
