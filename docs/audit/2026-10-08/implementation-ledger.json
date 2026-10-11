@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G19.7: absolute-path migration support",
+  "current_item": "G20: Judge repeat/calibration workflow",
   "items": [
     {
       "id": "F01",
@@ -705,9 +705,9 @@
       "id": "G19",
       "priority": "P2",
       "title": "Workspace maintenance and portability",
-      "detail": "**Partial.** `aibench workspace gc` previews orphaned artifacts by default and requires explicit `--apply` plus a minimum grace period before deletion. Verified online workspace backup and non-overwriting atomic restore validate the archive, SQLite database, catalog and artifacts, and relocate artifact paths. Portable terminal-run and session bundles can be exported and imported across workspaces with integrity checks and conflict-aware idempotence. `workspace check` validates database/schema, artifact, frozen-plan and dataset-suite integrity; `workspace repair BACKUP` previews a verified backup and, with `--apply`, retains the old workspace while publishing and checking the restore. Workspace-local artifact retention and read-only storage usage are delivered; absolute-path migration remains outstanding.",
+      "detail": "**Implemented.** Workspace GC, verified backup/restore and backup repair, integrity checks, portable run/session bundles, retention/usage, and absolute-path migration are delivered. Path migration previews by default and updates only workspace-rooted mutable references; external absolute paths, frozen plans, and immutable run/experiment history remain intact. It refuses moves that would change frozen-plan application or dataset resolution.",
       "kind": "feature",
-      "status": "partial",
+      "status": "delivered",
       "verification": [
         "Workspace/artifact focused tests: 59 passed, 5 skipped on Windows; skips cover link creation unavailable in this environment",
         "Mypy passed for 161 source files; Ruff lint and formatting passed; git diff --check passed",
@@ -726,10 +726,13 @@
         "Ruff lint/format, Mypy for changed storage and CLI modules, and git diff --check passed",
         "Independent G19.5 review found and led to a fix for a concurrent-publication rollback race, then reported no further findings; see evidence/G19-integrity-check-review.md",
         "G19.6 retention policy and read-only usage on Windows: combined workspace, integrity, and artifact batch passed (99 passed, 16 skipped); focused retention, usage, and extended-path tests passed (12 passed, 3 skipped)",
-        "Ruff lint/format, Mypy for three changed Python modules, and git diff --check passed; independent review found no remaining code findings after the extended-path fix; POSIX runtime cases were skipped on this Windows host; see implementation/G19-retention-review.md"
+        "Ruff lint/format, Mypy for three changed Python modules, and git diff --check passed; independent review found no remaining code findings after the extended-path fix; POSIX runtime cases were skipped on this Windows host; see implementation/G19-retention-review.md",
+        "G19.7 Windows migration and adjacent workspace/storage suite: 136 passed, 23 skipped; skips are POSIX-only runtime probes and platform-dependent cases",
+        "Ruff src/tests, Mypy (168 source files), changed-file formatting, and git diff --check passed",
+        "Independent final review found no remaining findings; see implementation/G19-path-migration-review.md"
       ],
-      "review": "evidence/G19-integrity-check-review.md",
-      "commit": "2bed73a4",
+      "review": "implementation/G19-path-migration-review.md",
+      "commit": "96f11e3a",
       "pushed": true,
       "subrequirements": [
         {
@@ -775,7 +778,10 @@
         },
         {
           "name": "absolute-path migration support",
-          "status": "pending"
+          "status": "delivered",
+          "commit": "96f11e3a",
+          "pushed": true,
+          "review": "implementation/G19-path-migration-review.md"
         }
       ]
     },
