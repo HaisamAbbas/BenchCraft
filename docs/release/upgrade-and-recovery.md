@@ -223,8 +223,9 @@ aibench workspace gc --workspace . --json
 ```
 
 The command lists unreferenced content-addressed artifacts and abandoned write temporaries.
-It keeps catalog-referenced objects and files within the grace period. Deletion requires the
-explicit `--apply` flag and at least the default one-hour grace period:
+It keeps catalog-referenced objects and files within the configured grace period. The default is
+one hour until you save a workspace retention setting. Deletion requires the explicit `--apply`
+flag, and applied collection cannot use a shorter grace than the saved setting:
 
 ```console
 aibench workspace gc --workspace . --apply
@@ -239,6 +240,12 @@ snapshot of `aibench.db` and any live WAL sidecars under `.aibench/`. A preview 
 temporary write permission and filesystem hard-link support there. The snapshot is removed on
 normal exit; an interrupted command may leave a `.aibench-gc-*` directory, which does not prevent
 later cleanup.
+
+Inspect or configure the artifact grace period with `aibench workspace retention`. Set a
+workspace-local minimum age in seconds with `--grace-seconds`; the minimum is one hour and the
+setting is included in workspace backups. `aibench workspace usage --json` reports file and byte
+totals by database, artifacts, sessions, dataset suites, logs, and other workspace files. Usage
+does not modify the workspace, skips links and special files, and stops after one million entries.
 
 ## Recovering
 
