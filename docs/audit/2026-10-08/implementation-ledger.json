@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22: Multimodal evaluators",
+  "current_item": "G22: Dashboard",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 batches run-work persistence, G22.2 bounds scheduler paging, G22.3 adds coordinator-backed workers without shared SQLite, and G22.4 adds bounded closed-loop, fixed open-loop, and ramp-up load profiles with runner-handoff lag reports. Distributed cross-host throughput remains unmeasured; multimodal evaluators and the dashboard are still pending.",
+      "detail": "**Partial.** G22.1 batches run-work persistence, G22.2 bounds scheduler paging, G22.3 adds coordinator-backed workers without shared SQLite, and G22.4 adds bounded closed-loop, fixed open-loop, and ramp-up load profiles with runner-handoff lag reports. Distributed cross-host throughput remains unmeasured; G22.5 delivers bounded image-first vision scoring and the dashboard remains pending.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -915,8 +915,22 @@
           "pushed": true
         },
         {
-          "name": "multimodal evaluators",
-          "status": "pending"
+          "name": "image-first vision evaluator",
+          "status": "delivered",
+          "implementation": "implementation/G22.5-image-vision.md",
+          "verification": [
+            "Five focused vision and plugin-discovery tests passed against the real isolated DeepEval plugin worker and a local OpenAI-compatible stub",
+            "Verified image signature and size checks, URL/path refusal, insecure endpoint refusal, declared-field projection, secret forwarding, provider-error call accounting, token usage, and frozen-rule enforcement",
+            "Ruff check and formatting passed for changed source and test files; Mypy passed for the new evaluator",
+            "The first combined adapter run reported 46 passed and two failures in new-test setup/contract assertions; the exact failures were fixed and the final five-test focused/discovery batch passed",
+            "No live provider call was made; semantic calibration across providers remains unmeasured"
+          ],
+          "review": "implementation/G22.5-image-vision-review.md",
+          "commit": "2dccecad29bf09543345dc302301c35763b4db58",
+          "additional_commits": [
+            "5a10fdbe2f0d02ade4c5ae7e1ff6b31790989c39"
+          ],
+          "pushed": true
         },
         {
           "name": "dashboard",

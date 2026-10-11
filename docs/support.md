@@ -50,7 +50,11 @@ tone"). The assistant can only suggest the install; you type the command. `aiben
 status` shows each optional plugin's state. The judge model is a paid external call; any
 OpenAI-compatible endpoint (such as GLM on Z.ai) works without code. Metrics, field mapping
 and judges are described in `plugins/deepeval/README.md`. Multi-turn conversational metrics
-Metrics that need images, audio or MCP servers are not included.
+are also available.
+DeepEval's native multimodal, audio, voice, and MCP metric families are not included.
+The DeepEval plugin does include the narrower `deepeval.vision_g_eval` path for text answers
+to image-backed cases with bounded inline PNG, JPEG, or WebP input; see
+[the plugin guide](../plugins/deepeval/README.md#image-first-vision-scoring).
 
 **Ragas faithfulness** (`ragas.faithfulness@1`, pinned to `ragas==0.4.3`) is the
 independent second ecosystem used by the Phase 2 comparison workflow. Install it separately:
