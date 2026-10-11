@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22: Distributed workers (coordinator API)",
+  "current_item": "G22: Open-loop and ramping load profiles",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 batches durable work-item creation and G22.2 pages scheduler work and recovery scans with bounded caches and retry buffers. A local 1,000-row storage microbenchmark measured 0.602 s one-at-a-time versus 0.022 s in 500-row batches; end-to-end capacity remains unmeasured and cases remain in memory. Distributed workers, open-loop/ramping load, multimodal evaluators, and a dashboard remain pending.",
+      "detail": "**Partial.** G22.1 batches durable work-item creation, G22.2 pages scheduler work and recovery scans with bounded caches and retry buffers, and G22.3 adds authenticated workers that pull application invocations from a coordinator API without sharing its SQLite workspace. The coordinator retains run state and persistence. G22.3 supports reset mode `none`; cross-host throughput and failure rates remain unmeasured. A local 1,000-row storage microbenchmark measured 0.602 s one-at-a-time versus 0.022 s in 500-row batches; end-to-end capacity remains unmeasured and cases remain in memory. Open-loop/ramping load, multimodal evaluators, and a dashboard remain pending.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -884,8 +884,19 @@
         },
         {
           "name": "distributed workers",
-          "status": "pending",
-          "architecture_decision": "Workers connect through a coordinator API and do not share a mounted SQLite workspace."
+          "status": "delivered",
+          "architecture_decision": "Workers connect through a coordinator API and do not share a mounted SQLite workspace.",
+          "verification": [
+            "12 focused distributed-worker tests passed, covering authenticated dispatch, full-run persistence, effect-state and lease safety, reconnect/loss handling, bounded results, CLI configuration, and missing-token refusal",
+            "Combined distributed-worker and run-CLI regression batch: 24 passed",
+            "Engine, engine-fault, and storage repository regressions: 59 passed",
+            "Ruff and git diff --check passed; Windows-target Mypy passed for all 172 source files",
+            "Cross-host latency, TLS deployment, throughput, and failure rates remain unmeasured; API v1 supports reset mode none only"
+          ],
+          "review": "implementation/G22.3-distributed-workers-review.md",
+          "implementation": "implementation/G22.3-distributed-workers.md",
+          "commit": "427a7c6659060c27d2dd0fd7c980031ff2f86c5a",
+          "pushed": true
         },
         {
           "name": "open-loop and ramping load profiles",
