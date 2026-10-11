@@ -160,7 +160,8 @@ def test_runs_events_rejects_a_log_file_with_an_active_writer(tmp_path) -> None:
             ],
         )
         assert result.exit_code == 2
-        assert "already in use by another writer" in result.output
+        # Rich may wrap this long Windows path at a terminal-width-dependent boundary.
+        assert "already in use by another writer" in " ".join(result.output.split())
     finally:
         writer.close()
 
