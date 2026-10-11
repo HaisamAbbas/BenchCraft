@@ -122,6 +122,7 @@ MAX_GIT_UNTRACKED_LIST_BYTES = 8 * 1024 * 1024
 MAX_GIT_UNTRACKED_FILES = 2_000
 MAX_GIT_UNTRACKED_BYTES = 64 * 1024 * 1024
 GIT_METADATA_TIMEOUT_SECONDS = 3.0
+WORK_ITEM_COMMIT_BATCH_SIZE = 500
 # A run in any of these states can be continued by a new session. A run left
 # `cancelling` by a session that died is continued only to finish its cancellation.
 RESUMABLE_STATES = {
@@ -309,7 +310,12 @@ def _git_untracked_files_identity(
         process.wait()
         return None
 
-    result: dict[str, int | bool | bytes] = {"bytes": 0, "too_large": False, "read_error": False, "data": b""}
+    result: dict[str, int | bool | bytes] = {
+        "bytes": 0,
+        "too_large": False,
+        "read_error": False,
+        "data": b"",
+    }
 
     def capture_names() -> None:
         captured = bytearray()
@@ -369,8 +375,11 @@ def _git_untracked_files_identity(
     for raw_name in relative_names:
         try:
             relative = Path(os.fsdecode(raw_name))
-            if relative.is_absolute() or relative.drive or not relative.parts or any(
-                part in ("", ".", "..") for part in relative.parts
+            if (
+                relative.is_absolute()
+                or relative.drive
+                or not relative.parts
+                or any(part in ("", ".", "..") for part in relative.parts)
             ):
                 return None
             candidate = base_dir
@@ -666,24 +675,19 @@ def create_run(
     application_environment_identity = _application_environment_identity(
         spec, compiled.application.base_dir, environ
     )
-    application_vcs_identity = _application_vcs_identity(
-        spec, compiled.application.base_dir
-    )
+    application_vcs_identity = _application_vcs_identity(spec, compiled.application.base_dir)
     owner_identity_declared = bool(spec.revision or spec.environment_digest)
     vcs_error = application_vcs_identity.get("reason") in {
         "git_metadata_unavailable",
         "git_revision_unavailable",
     }
-    if (
-        not owner_identity_declared
-        and (
-            vcs_error
-            or (
-                application_vcs_identity.get("kind") == "git"
-                  and (
-                      application_vcs_identity.get("tracked_diff_hash") is None
-                      or application_vcs_identity.get("untracked_files_hash") is None
-                  )
+    if not owner_identity_declared and (
+        vcs_error
+        or (
+            application_vcs_identity.get("kind") == "git"
+            and (
+                application_vcs_identity.get("tracked_diff_hash") is None
+                or application_vcs_identity.get("untracked_files_hash") is None
             )
         )
     ):
@@ -962,13 +966,22 @@ def compile_retry_run(
 
 def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str) -> None:
     """Idempotently materialize a plan's work graph, including after interrupted creation."""
+
+    batch: list[WorkItem] = []
+
+    def append(item: WorkItem) -> None:
+        batch.append(item)
+        if len(batch) == WORK_ITEM_COMMIT_BATCH_SIZE:
+            storage.commit_work_items(batch)
+            batch.clear()
+
     for case in compiled.cases:
         for repetition in range(
             compiled.plan.repetitions,
             compiled.plan.repetitions + compiled.plan.warmup_repetitions,
         ):
             exec_key = execution_key(case.case_id, repetition)
-            storage.commit_work_item(
+            append(
                 WorkItem(
                     work_item_id=f"{run_id}:{exec_key}",
                     run_id=run_id,
@@ -979,7 +992,7 @@ def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str)
             )
         for repetition in range(compiled.plan.repetitions):
             exec_key = execution_key(case.case_id, repetition)
-            storage.commit_work_item(
+            append(
                 WorkItem(
                     work_item_id=f"{run_id}:{exec_key}",
                     run_id=run_id,
@@ -989,7 +1002,7 @@ def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str)
             )
             for metric in compiled.metrics:
                 eval_key = evaluation_key(case.case_id, repetition, metric.binding_hash)
-                storage.commit_work_item(
+                append(
                     WorkItem(
                         work_item_id=f"{run_id}:{eval_key}",
                         run_id=run_id,
@@ -998,6 +1011,8 @@ def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str)
                         dependency_keys=(exec_key,),
                     )
                 )
+    if batch:
+        storage.commit_work_items(batch)
 
 
 # --------------------------------------------------------------------------- execute / resume

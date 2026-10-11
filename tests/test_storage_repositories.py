@@ -249,6 +249,30 @@ def test_work_item_task_key_collision_across_different_items_is_rejected(storage
         storage.commit_work_item(item2)  # same (run_id, task_key), different work_item_id
 
 
+def test_commit_work_items_is_idempotent_and_rolls_back_conflicting_batch(storage) -> None:
+    import sqlite3
+
+    storage.commit_run(_manifest())
+    first = WorkItem(work_item_id="w1", run_id="r1", task_key="exec:c1", kind="execution")
+    second = WorkItem(work_item_id="w2", run_id="r1", task_key="exec:c2", kind="execution")
+
+    assert storage.commit_work_items((first, second)) == [True, True]
+    assert storage.commit_work_items((first, second)) == [False, False]
+
+    pending = WorkItem(work_item_id="w3", run_id="r1", task_key="exec:c3", kind="execution")
+    changed = first.model_copy(update={"last_error": "different content"})
+    with pytest.raises(ConflictError):
+        storage.commit_work_items((pending, changed))
+
+    assert storage.get_work_item_by_task_key("r1", "exec:c3") is None
+    assert storage.get_work_item_by_task_key("r1", "exec:c1") == first
+
+    duplicate_task = WorkItem(work_item_id="w4", run_id="r1", task_key="exec:c1", kind="execution")
+    with pytest.raises(sqlite3.IntegrityError):
+        storage.commit_work_items((pending, duplicate_task))
+    assert storage.get_work_item_by_task_key("r1", "exec:c3") is None
+
+
 # --------------------------------------------------------------------------- execution attempts
 
 

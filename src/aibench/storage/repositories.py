@@ -1163,40 +1163,63 @@ class Storage:
     # ---------------------------------------------------------------- work items
 
     def commit_work_item(self, item: WorkItem) -> bool:
-        """Idempotent under `work_item_id` (identical retry is a no-op, mismatched content
-        under the same `work_item_id` is a `ConflictError`). A *different* `work_item_id`
-        reusing the same `(run_id, task_key)` — the actual "unique logical task key" the
-        ticket describes — is rejected by the table's own UNIQUE constraint, which is left
-        to raise `sqlite3.IntegrityError` rather than being silently swallowed by an
-        `INSERT OR IGNORE`, which would have hidden a genuine double-scheduling bug."""
-        data = item.model_dump_json()
-        digest = _hash_of(data)
-        return _commit_idempotent(
-            self.conn,
-            table="work_items",
-            pk_col="work_item_id",
-            pk_value=item.work_item_id,
-            compare_col="content_hash",
-            compare_value=digest,
-            insert_sql="""
-                INSERT INTO work_items
-                    (work_item_id, run_id, task_key, kind, state, attempt, content_hash,
-                     data, committed_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            params=(
-                item.work_item_id,
-                item.run_id,
-                item.task_key,
-                item.kind,
-                item.state.value,
-                item.attempt,
-                digest,
-                data,
-                _now(),
-                _now(),
-            ),
-        )
+        """Commit one item with the same conflict checks as the bounded bulk path."""
+        return self.commit_work_items((item,))[0]
+
+    def commit_work_items(self, items: Iterable[WorkItem]) -> list[bool]:
+        """Atomically commit a bounded batch of work items.
+
+        Each result is True for a new row and False for an identical retry. Reusing a
+        work_item_id with changed content is a ConflictError. Reusing a logical
+        (run_id, task_key) under another ID still raises SQLite's unique-key error.
+        Callers must cap batch size so recovery and the writer lock stay bounded.
+        """
+        results: list[bool] = []
+        now = _now()
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            for item in items:
+                data = item.model_dump_json()
+                digest = _hash_of(data)
+                existing = self.conn.execute(
+                    "SELECT content_hash FROM work_items WHERE work_item_id = ?",
+                    (item.work_item_id,),
+                ).fetchone()
+                if existing is not None:
+                    if existing[0] != digest:
+                        raise ConflictError(
+                            "work_items[(work_item_id="
+                            f"{item.work_item_id!r})] already committed with different "
+                            f"content_hash: existing={existing[0]!r} new={digest!r}"
+                        )
+                    results.append(False)
+                    continue
+                self.conn.execute(
+                    """
+                    INSERT INTO work_items
+                        (work_item_id, run_id, task_key, kind, state, attempt, content_hash,
+                         data, committed_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item.work_item_id,
+                        item.run_id,
+                        item.task_key,
+                        item.kind,
+                        item.state.value,
+                        item.attempt,
+                        digest,
+                        data,
+                        now,
+                        now,
+                    ),
+                )
+                results.append(True)
+            self.conn.execute("COMMIT")
+            return results
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
 
     def transition_work_item(
         self,

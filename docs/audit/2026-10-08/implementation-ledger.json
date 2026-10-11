@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22: Advanced scale, load, and modality workflows",
+  "current_item": "G22: Bounded in-memory work queue",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Deferred.** Distributed workers, a scalable work queue, open-loop/ramping load profiles, multimodal evaluators, and a dashboard are product extensions. Ordinary concurrency and RPS quotas already exist.",
+      "detail": "**Partial.** G22.1 batches run work-item persistence in bounded, atomic SQLite transactions; a local 1,000-row storage microbenchmark measured 0.602 s one-at-a-time versus 0.022 s in 500-row batches. In-memory queue paging, distributed workers, open-loop/ramping load, multimodal evaluators, and a dashboard remain pending.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -851,12 +851,28 @@
       "pushed": false,
       "subrequirements": [
         {
-          "name": "distributed workers",
+          "name": "bounded, idempotent batches for durable run work-item creation",
+          "status": "delivered",
+          "verification": [
+            "35 repository tests and 83 repository/engine/CLI integration tests passed",
+            "File-backed subprocess-kill recovery test: 1 passed; no partial rows survived an open-batch process termination",
+            "Expanded regression batch: 91 passed; one existing example-plan Git-identity assertion failed once in the combined run and passed when rerun alone",
+            "Ruff and Mypy for 168 source files passed",
+            "File-backed Windows 11 / Python 3.12.10 microbenchmark: 1,000 rows in 0.602 s with one transaction per row vs 0.022 s in batches of 500; isolated storage result, not an end-to-end capacity claim"
+          ],
+          "review": "implementation/G22.1-work-item-batches-review.md",
+          "implementation": "implementation/G22.1-work-item-batches.md",
+          "commit": null,
+          "pushed": false
+        },
+        {
+          "name": "bounded in-memory work queue",
           "status": "pending"
         },
         {
-          "name": "scalable work queue",
-          "status": "pending"
+          "name": "distributed workers",
+          "status": "pending",
+          "architecture_decision": "Workers connect through a coordinator API and do not share a mounted SQLite workspace."
         },
         {
           "name": "open-loop and ramping load profiles",
