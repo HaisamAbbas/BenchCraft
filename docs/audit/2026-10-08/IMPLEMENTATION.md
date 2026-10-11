@@ -17,9 +17,9 @@ Each item follows the same sequence:
 4. Resolve actionable review findings and verify the resulting change.
 5. Commit, push without force, and verify the remote commit before beginning the next item.
 
-The full scope remains active, including G22's distributed workers, scalable work queue,
-open-loop/ramping load, multimodal evaluation, and dashboard. Those are separate concrete
-deliverables within G22, not waived items. No existing deferred label is treated as
+G22.1-G22.4 now cover batched work persistence, bounded queue paging, coordinator-backed
+distributed workers, and open-loop/ramping load profiles. Multimodal evaluation and the
+dashboard remain active deliverables within G22. No existing deferred label is treated as
 authorization to omit the feature.
 
 The implementation order follows the report's remediation sequence. F14 is a small

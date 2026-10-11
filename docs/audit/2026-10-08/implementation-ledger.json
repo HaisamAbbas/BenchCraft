@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22: Open-loop and ramping load profiles",
+  "current_item": "G22: Multimodal evaluators",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 batches durable work-item creation, G22.2 pages scheduler work and recovery scans with bounded caches and retry buffers, and G22.3 adds authenticated workers that pull application invocations from a coordinator API without sharing its SQLite workspace. The coordinator retains run state and persistence. G22.3 supports reset mode `none`; cross-host throughput and failure rates remain unmeasured. A local 1,000-row storage microbenchmark measured 0.602 s one-at-a-time versus 0.022 s in 500-row batches; end-to-end capacity remains unmeasured and cases remain in memory. Open-loop/ramping load, multimodal evaluators, and a dashboard remain pending.",
+      "detail": "**Partial.** G22.1 batches run-work persistence, G22.2 bounds scheduler paging, G22.3 adds coordinator-backed workers without shared SQLite, and G22.4 adds bounded closed-loop, fixed open-loop, and ramp-up load profiles with runner-handoff lag reports. Distributed cross-host throughput remains unmeasured; multimodal evaluators and the dashboard are still pending.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -900,7 +900,19 @@
         },
         {
           "name": "open-loop and ramping load profiles",
-          "status": "pending"
+          "status": "delivered",
+          "verification": [
+            "Stable focused profile, plan, CLI, engine recovery/concurrency, and report batch: 28 passed",
+            "Windows-target Mypy passed for 173 source files; Ruff on src/tests and git diff --check passed",
+            "Fixed-rate and integrated-linear-ramp schedules, CLI/dry-run overrides, cache rejection, and legacy frozen-plan hashes verified",
+            "Warmup barrier, retry exclusion, bounded concurrency back-pressure, pause clock, runner-handoff lag report, and rendered Markdown verified",
+            "An earlier combined batch reported 72 passed and four failures while files changed concurrently; three application Git-identity failures were caused by the changing worktree, and the legacy-report rendering issue was fixed; all four exact tests passed in the stable rerun",
+            "Remote worker queue latency, TLS deployment, cross-host throughput, and application-observed start time remain unmeasured"
+          ],
+          "review": "implementation/G22.4-open-loop-ramping-review.md",
+          "implementation": "implementation/G22.4-open-loop-ramping.md",
+          "commit": "325780b7f39481422c3bceb60c80ee15c7ec875d",
+          "pushed": true
         },
         {
           "name": "multimodal evaluators",
