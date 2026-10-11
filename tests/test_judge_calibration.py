@@ -16,6 +16,7 @@ import asyncio
 import json
 import random
 import string
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+from aibench.cli import score as score_cli
 from aibench.cli.main import app
 from aibench.core.models import (
     BenchmarkCase,
@@ -37,6 +39,7 @@ from aibench.core.models import (
     ReferenceAnswer,
     RunManifest,
 )
+from aibench.core.plans import BudgetLimits, PluginEnvironmentRef
 from aibench.evaluators.protocol import (
     EvaluationOutcome,
     EvaluationView,
@@ -44,6 +47,7 @@ from aibench.evaluators.protocol import (
     EvaluatorContext,
 )
 from aibench.registry import EvaluatorRegistry
+from aibench.security.policy import ExecutionPolicy, plugin_denials
 from aibench.services.calibration import CalibrationError, load_calibration_set, run_calibration
 from aibench.services.scoring import BindingScorer
 from aibench.storage.artifacts import ArtifactStore
@@ -194,6 +198,43 @@ class CalibrationModelJudge(Evaluator):
         return EvaluationOutcome.ok("boolean", view.get("case.input") == "question")
 
 
+def _write_live_calibration_set(
+    root: Path, *, reviewed: bool = True, metric: str = "test.calibration_model"
+) -> Path:
+    root.mkdir()
+    (root / "set.json").write_text(
+        json.dumps(
+            {
+                "schema": "aibench.judge-calibration/1",
+                "version": "cli-model-v1",
+                "review": (
+                    {"status": "reviewed", "reviewer": "test reviewer"}
+                    if reviewed
+                    else {"status": "unreviewed"}
+                ),
+                "not_measured": [
+                    {"evaluator": "test.calibration_model@1", "reason": "not measured yet"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "cases.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "cli-model-case",
+                "category": "correct",
+                "metric": metric,
+                "input": "question",
+                "label": "acceptable",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return root
+
+
 def test_model_calibration_requires_review_opt_in_and_a_bounded_repeat_count(
     tmp_path: Path,
 ) -> None:
@@ -246,6 +287,520 @@ def test_model_calibration_requires_review_opt_in_and_a_bounded_repeat_count(
     assert report["usage"]["unknown_cost_evaluations"] == 2
 
 
+def test_live_calibration_requires_review_and_plugin_environment_policy_before_loading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration", reviewed=False)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(ExecutionPolicy().model_dump_json(), encoding="utf-8")
+    loads = 0
+
+    def fake_registry(*args: Any) -> EvaluatorRegistry:
+        nonlocal loads
+        loads += 1
+        return EvaluatorRegistry.with_native()
+
+    monkeypatch.setattr(score_cli, "_registry", fake_registry)
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            sys.executable,
+        ],
+    )
+    assert result.exit_code == 2
+    assert "review.status='reviewed'" in result.output
+    assert loads == 0
+
+
+def test_live_calibration_rejects_an_unapproved_plugin_environment_before_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration")
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(ExecutionPolicy().model_dump_json(), encoding="utf-8")
+    loads = 0
+
+    def fake_registry(*args: Any) -> EvaluatorRegistry:
+        nonlocal loads
+        loads += 1
+        return EvaluatorRegistry.with_native()
+
+    monkeypatch.setattr(score_cli, "_registry", fake_registry)
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            sys.executable,
+            "--json",
+        ],
+    )
+    assert result.exit_code == 4
+    error = json.loads(result.output)
+    assert error["schema"] == "aibench.cli-error/1"
+    assert error["exit_code"] == 4
+    assert "plugin environment" in error["details"][0] and "not allowed" in error["details"][0]
+    assert loads == 0
+
+
+def test_live_calibration_applies_the_policy_evaluator_call_ceiling_before_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration")
+    plugin_python = str(Path(sys.executable).absolute())
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        ExecutionPolicy(
+            allowed_plugin_environments=(plugin_python,),
+            ceilings=BudgetLimits(max_evaluator_calls=1),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    loads = 0
+
+    def fake_registry(*args: Any) -> EvaluatorRegistry:
+        nonlocal loads
+        loads += 1
+        return EvaluatorRegistry.with_native()
+
+    monkeypatch.setattr(score_cli, "_registry", fake_registry)
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            sys.executable,
+            "--repetitions",
+            "2",
+        ],
+    )
+    assert result.exit_code == 4
+    assert "policy ceiling max_evaluator_calls=1" in result.output
+    assert loads == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("max_judge_tokens", 10), ("max_cost_usd", 0.15), ("max_wall_seconds", 5)],
+)
+def test_live_calibration_refuses_policy_ceilings_it_cannot_enforce_before_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: float,
+) -> None:
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration")
+    plugin_python = str(Path(sys.executable).absolute())
+    limits: dict[str, Any] = {field: value}
+    if field == "max_cost_usd":
+        limits["estimated_cost_per_application_call_usd"] = 0.1
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        ExecutionPolicy(
+            allowed_plugin_environments=(plugin_python,),
+            ceilings=BudgetLimits.model_validate(limits),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    loads = 0
+
+    def fake_registry(*args: Any) -> EvaluatorRegistry:
+        nonlocal loads
+        loads += 1
+        return EvaluatorRegistry.with_native()
+
+    monkeypatch.setattr(score_cli, "_registry", fake_registry)
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            sys.executable,
+        ],
+    )
+    assert result.exit_code == 4
+    assert f"cannot enforce policy ceiling {field}=" in result.output
+    assert loads == 0
+
+
+def test_live_calibration_applies_policy_data_roots_before_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration")
+    plugin_python = str(Path(sys.executable).absolute())
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        ExecutionPolicy(
+            allowed_plugin_environments=(plugin_python,),
+            data_roots=(str(tmp_path / "approved-data"),),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    loads = 0
+
+    def fake_registry(*args: Any) -> EvaluatorRegistry:
+        nonlocal loads
+        loads += 1
+        return EvaluatorRegistry.with_native()
+
+    monkeypatch.setattr(score_cli, "_registry", fake_registry)
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            sys.executable,
+        ],
+    )
+    assert result.exit_code == 4
+    assert "outside the policy's data_roots" in result.output
+    assert loads == 0
+
+
+@pytest.mark.parametrize("filename", ["set.json", "cases.jsonl"])
+def test_live_calibration_rejects_a_file_resolving_outside_data_roots_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str
+) -> None:
+    data_root = tmp_path / "approved-data"
+    data_root.mkdir()
+    calibration_set = _write_live_calibration_set(data_root / "calibration")
+    plugin_python = str(Path(sys.executable).absolute())
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        ExecutionPolicy(
+            allowed_plugin_environments=(plugin_python,),
+            data_roots=(str(data_root),),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    original_resolve = Path.resolve
+    outside_file = tmp_path / "outside" / filename
+
+    def resolve_with_external_case(path: Path, *args: Any, **kwargs: Any) -> Path:
+        if path == calibration_set / filename:
+            return outside_file
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve_with_external_case)
+    loads = 0
+
+    def fake_registry(*args: Any) -> EvaluatorRegistry:
+        nonlocal loads
+        loads += 1
+        return EvaluatorRegistry.with_native()
+
+    monkeypatch.setattr(score_cli, "_registry", fake_registry)
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            sys.executable,
+        ],
+    )
+    assert result.exit_code == 4
+    assert f"{filename} resolves outside the policy's data_roots" in result.output
+    assert loads == 0
+
+
+def test_plugin_policy_preserves_a_virtualenv_interpreter_symlink(tmp_path: Path) -> None:
+    link = tmp_path / "venv-python"
+    try:
+        link.symlink_to(Path(sys.executable))
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create interpreter symlink on this host: {exc}")
+
+    policy = ExecutionPolicy(allowed_plugin_environments=(str(link),)).resolved_against(tmp_path)
+    assert policy.allowed_plugin_environments == (str(link),)
+    assert plugin_denials(policy, [PluginEnvironmentRef(python=str(link))], tmp_path) == []
+
+
+def test_live_calibration_checks_evaluator_policy_and_runs_fake_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration")
+    plugin_python = str(Path(sys.executable).resolve())
+    registry = EvaluatorRegistry.with_native()
+    registry.register(CalibrationModelJudge)
+    CalibrationModelJudge.calls = 0
+    monkeypatch.setattr(score_cli, "_registry", lambda *args: registry)
+    policy_path = tmp_path / "policy.json"
+    out = tmp_path / "report.json"
+    policy_path.write_text(
+        ExecutionPolicy(
+            allowed_evaluators=("test.calibration_model",),
+            allow_model_evaluators=True,
+            allowed_plugin_environments=(plugin_python,),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            plugin_python,
+            "--repetitions",
+            "2",
+            "--max-model-evaluations",
+            "2",
+            "--timeout",
+            "5",
+            "--out",
+            str(out),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["mode"] == "live"
+    assert report["usage"]["model_evaluations"] == 2
+    assert report["usage"]["reported_cost"] is None
+    assert report["not_measured"] == []
+    assert CalibrationModelJudge.calls == 2
+
+
+def test_live_calibration_runs_a_model_judge_in_the_isolated_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.test_worker_evaluator import _registry as worker_registry
+
+    plugin_root = tmp_path / "site"
+    registry = worker_registry(tmp_path)
+    manifest = registry.resolve("vendor.probe")[0]
+    registry._external[(manifest.evaluator_id, manifest.version)] = manifest.model_copy(
+        update={"uses_models": True}
+    )
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration", metric="vendor.probe")
+    plugin_python = str(Path(sys.executable).absolute())
+    monkeypatch.setattr(score_cli, "_registry", lambda *args: registry)
+    policy_path = tmp_path / "policy.json"
+    out = tmp_path / "worker-report.json"
+    policy_path.write_text(
+        ExecutionPolicy(
+            allowed_evaluators=("vendor.probe",),
+            allow_model_evaluators=True,
+            allowed_plugin_environments=(plugin_python,),
+            allowed_plugin_paths=(str(plugin_root),),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            plugin_python,
+            "--plugin-path",
+            str(plugin_root),
+            "--repetitions",
+            "1",
+            "--max-model-evaluations",
+            "1",
+            "--timeout",
+            "15",
+            "--out",
+            str(out),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["mode"] == "live"
+    assert report["cases"][0]["decision"] == "pass"
+    assert report["usage"]["model_evaluations"] == 1
+    assert report["usage"]["unknown_cost_evaluations"] == 1
+
+
+class DeniedCalibrationModelJudge(CalibrationModelJudge):
+    calls = 0
+    manifest = CalibrationModelJudge.manifest.model_copy(
+        update={"evaluator_id": "test.calibration_denied"}
+    )
+
+    async def evaluate(self, view: EvaluationView, ctx: EvaluatorContext) -> EvaluationOutcome:
+        del view, ctx
+        type(self).calls += 1
+        return EvaluationOutcome.ok("boolean", True)
+
+
+def test_live_calibration_evaluates_the_same_case_snapshot_checked_by_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration")
+    plugin_python = str(Path(sys.executable).absolute())
+    registry = EvaluatorRegistry.with_native()
+    registry.register(CalibrationModelJudge)
+    registry.register(DeniedCalibrationModelJudge)
+    CalibrationModelJudge.calls = 0
+    DeniedCalibrationModelJudge.calls = 0
+
+    def fake_registry(*args: Any) -> EvaluatorRegistry:
+        # Simulate an approved plugin worker changing the set on disk during manifest load.
+        (calibration_set / "cases.jsonl").write_text(
+            json.dumps(
+                {
+                    "id": "changed-case",
+                    "category": "correct",
+                    "metric": "test.calibration_denied",
+                    "input": "question",
+                    "label": "acceptable",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return registry
+
+    monkeypatch.setattr(score_cli, "_registry", fake_registry)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        ExecutionPolicy(
+            allowed_evaluators=("test.calibration_model",),
+            allow_model_evaluators=True,
+            allowed_plugin_environments=(plugin_python,),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            plugin_python,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert CalibrationModelJudge.calls == 2
+    assert DeniedCalibrationModelJudge.calls == 0
+
+
+def test_live_calibration_denied_model_policy_makes_no_evaluation_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calibration_set = _write_live_calibration_set(tmp_path / "calibration")
+    plugin_python = str(Path(sys.executable).resolve())
+    registry = EvaluatorRegistry.with_native()
+    registry.register(CalibrationModelJudge)
+    CalibrationModelJudge.calls = 0
+    monkeypatch.setattr(score_cli, "_registry", lambda *args: registry)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        ExecutionPolicy(allowed_plugin_environments=(plugin_python,)).model_dump_json(),
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(calibration_set),
+            "--live",
+            "--policy",
+            str(policy_path),
+            "--plugin-env",
+            plugin_python,
+        ],
+    )
+    assert result.exit_code == 4
+    assert "model-backed evaluators" in result.output
+    assert CalibrationModelJudge.calls == 0
+
+
+def test_offline_calibration_passes_the_requested_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_calibrate(
+        set_dir: Path,
+        registry: EvaluatorRegistry | None = None,
+        *,
+        repetitions: int = 2,
+        timeout_seconds: float = 600.0,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        del set_dir, registry, repetitions, kwargs
+        captured["timeout_seconds"] = timeout_seconds
+        return {"timeout_seconds": timeout_seconds}
+
+    monkeypatch.setattr(score_cli, "run_calibration", fake_calibrate)
+    result = CliRunner().invoke(
+        app,
+        [
+            "evaluators",
+            "calibrate",
+            "--set",
+            str(tmp_path / "unused"),
+            "--timeout",
+            "7",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["timeout_seconds"] == 7
+    payload = json.loads(result.output)
+    assert payload["timeout_seconds"] == 7
+    assert payload["_cli"]["exit_code"] == 0
+
+
 def test_model_calibration_missing_required_evidence_never_calls_the_judge(tmp_path: Path) -> None:
     (tmp_path / "set.json").write_text(
         json.dumps(
@@ -253,6 +808,12 @@ def test_model_calibration_missing_required_evidence_never_calls_the_judge(tmp_p
                 "schema": "aibench.judge-calibration/1",
                 "version": "missing-evidence-v1",
                 "review": {"status": "reviewed", "reviewer": "test reviewer"},
+                "not_measured": [
+                    {
+                        "evaluator": "test.calibration_model@1",
+                        "reason": "no evidence-ready cases",
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -280,6 +841,12 @@ def test_model_calibration_missing_required_evidence_never_calls_the_judge(tmp_p
     assert report["usage"]["model_evaluations"] == 0
     assert report["usage"]["model_evaluations_planned"] == 2
     assert report["cases"][0]["repetitions"][0]["reason"] == "missing:case.input"
+    assert report["not_measured"] == [
+        {
+            "evaluator": "test.calibration_model@1",
+            "reason": "no evidence-ready cases",
+        }
+    ]
 
 
 def test_calibration_loader_rejects_duplicate_and_oversized_sets(tmp_path: Path) -> None:

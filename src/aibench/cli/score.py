@@ -19,9 +19,17 @@ from aibench.cli.output import Console
 from aibench.config.resolve import load_mapping_file
 from aibench.core.errors import AibenchError
 from aibench.core.models import MetricBinding
+from aibench.core.plans import PluginEnvironmentRef
+from aibench.engine.compile import load_policy
 from aibench.registry import BindingValidationError, EvaluatorRegistry
 from aibench.registry.discovery import discover_plugins, load_manifests
 from aibench.reporting.aggregation import MetricSummary
+from aibench.security.policy import evaluator_denials, plugin_denials
+from aibench.services.calibration import (
+    CalibrationError,
+    load_calibration_set,
+    run_calibration,
+)
 from aibench.services.scoring import score_recorded_run
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.db import Database, Workspace
@@ -39,9 +47,20 @@ _TRUST_OPTION = typer.Option(
 )
 
 
-def _fail(message: str, code: int = 2) -> typer.Exit:
+def _fail(
+    message: str,
+    code: int = 2,
+    *,
+    details: list[str] | None = None,
+    json_output: bool = False,
+) -> typer.Exit:
     return error_exit(
-        message, exit_code=code, json_output=False, console=console, err_console=err_console
+        message,
+        exit_code=code,
+        json_output=json_output,
+        console=console,
+        err_console=err_console,
+        details=details,
     )
 
 
@@ -69,6 +88,21 @@ _PLUGIN_STARTUP_TIMEOUT_OPTION = typer.Option(
     max=3_600.0,
     help="Bound for plugin discovery and worker startup in seconds.",
 )
+_CALIBRATION_POLICY_OPTION = typer.Option(
+    None,
+    "--policy",
+    help="Execution policy approving the plugin, secrets and model evaluator (required with --live).",
+)
+
+
+def _plugin_secret_map(items: list[str] | None) -> dict[str, str]:
+    secrets: dict[str, str] = {}
+    for item in items or []:
+        name, sep, ref = item.partition("=")
+        if not sep or not name or ":" not in ref:
+            raise AibenchError(f"--plugin-secret must look like NAME=source:name, got {item!r}")
+        secrets[name] = ref
+    return secrets
 
 
 def _registry(
@@ -83,12 +117,7 @@ def _registry(
     if custom is not None:
         registry.load_local_file(custom, trusted=trusted)
     if plugin_env is not None:
-        secrets: dict[str, str] = {}
-        for item in plugin_secrets or []:
-            name, sep, ref = item.partition("=")
-            if not sep or not name or ":" not in ref:
-                raise AibenchError(f"--plugin-secret must look like NAME=source:name, got {item!r}")
-            secrets[name] = ref
+        secrets = _plugin_secret_map(plugin_secrets)
         loads = registry.load_plugin_environment(
             plugin_env,
             secret_env=secrets,
@@ -304,23 +333,175 @@ def calibrate(
     repetitions: int = typer.Option(
         2, "--repetitions", min=1, max=100, help="Evaluator runs per case (default: 2)."
     ),
+    live: bool = typer.Option(
+        False,
+        "--live",
+        help="Run worker-backed model judges; requires reviewed labels, --policy and --plugin-env.",
+    ),
+    policy: Path | None = _CALIBRATION_POLICY_OPTION,
+    plugin_env: Path | None = _PLUGIN_ENV_OPTION,
+    plugin_secret: list[str] = _PLUGIN_SECRET_OPTION,
+    plugin_path: list[Path] = _PLUGIN_PATH_OPTION,
+    plugin_startup_timeout: float = _PLUGIN_STARTUP_TIMEOUT_OPTION,
+    timeout_seconds: float = typer.Option(
+        600.0,
+        "--timeout",
+        min=1.0,
+        max=3_600.0,
+        help="Per-evaluation timeout in seconds (default: 600).",
+    ),
+    max_model_evaluations: int = typer.Option(
+        100,
+        "--max-model-evaluations",
+        min=1,
+        max=10_000,
+        help="Maximum case × repeat model-evaluator invocations; provider calls may be higher.",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
-    """Measure native evaluators against labelled cases, with configurable repeat stability."""
-    from aibench.services.calibration import CalibrationError, run_calibration
+    """Measure native or explicitly authorized live judges against labelled cases."""
     from aibench.services.reports import write_text_atomic
 
     try:
-        report = run_calibration(set_dir, repetitions=repetitions)
-    except (CalibrationError, BindingValidationError) as exc:
-        raise _fail(str(exc)) from exc
+        if not live and (plugin_env is not None or plugin_secret or plugin_path):
+            raise CalibrationError("plugin options require --live for calibration")
+        if live:
+            if policy is None:
+                raise CalibrationError("--live requires --policy")
+            if plugin_env is None:
+                raise CalibrationError("--live requires --plugin-env")
+
+            loaded_policy = load_policy(policy)
+            policy_denials: list[str] = []
+            calibration_inputs: dict[str, Path] = {}
+            for filename in ("set.json", "cases.jsonl"):
+                source = set_dir / filename
+                try:
+                    resolved_source = source.resolve()
+                except (OSError, RuntimeError) as exc:
+                    policy_denials.append(f"cannot resolve calibration input {source}: {exc}")
+                    continue
+                calibration_inputs[filename] = resolved_source
+                if loaded_policy.data_roots and not any(
+                    resolved_source.is_relative_to(Path(root)) for root in loaded_policy.data_roots
+                ):
+                    policy_denials.append(
+                        f"calibration input {source} resolves outside the policy's data_roots"
+                    )
+            # This workflow has no application phase, and only evaluator invocation counts
+            # can be preflighted. Refuse policy ceilings that need runtime token, cost or
+            # whole-command accounting rather than silently running beyond their limits.
+            for field in ("max_judge_tokens", "max_cost_usd", "max_wall_seconds"):
+                ceiling = getattr(loaded_policy.ceilings, field)
+                if ceiling is not None:
+                    policy_denials.append(
+                        f"live calibration cannot enforce policy ceiling {field}={ceiling}"
+                    )
+            if policy_denials:
+                raise _fail(
+                    "live calibration refused by policy",
+                    4,
+                    details=policy_denials,
+                    json_output=json_output,
+                )
+
+            meta, cases = load_calibration_set(
+                set_dir,
+                metadata_path=calibration_inputs["set.json"],
+                cases_path=calibration_inputs["cases.jsonl"],
+            )
+            if not cases:
+                raise CalibrationError(f"{set_dir}/cases.jsonl: calibration set has no cases")
+            review = meta.get("review", {})
+            if (
+                review.get("status") != "reviewed"
+                or not isinstance(review.get("reviewer"), str)
+                or not review["reviewer"].strip()
+            ):
+                raise CalibrationError(
+                    "--live requires review.status='reviewed' and a named review.reviewer"
+                )
+
+            policy_call_ceiling = loaded_policy.ceilings.max_evaluator_calls
+            planned_evaluator_calls = len(cases) * repetitions
+            if policy_call_ceiling is not None and planned_evaluator_calls > policy_call_ceiling:
+                policy_denials.append(
+                    f"calibration requests {planned_evaluator_calls} evaluator calls; "
+                    f"policy ceiling max_evaluator_calls={policy_call_ceiling}"
+                )
+            if policy_denials:
+                raise _fail(
+                    "live calibration refused by policy",
+                    4,
+                    details=policy_denials,
+                    json_output=json_output,
+                )
+            secrets = _plugin_secret_map(plugin_secret)
+            environment = PluginEnvironmentRef(
+                # Match load_plugin_environment: the venv interpreter may be a symlink,
+                # and following it would check/authorize the base Python instead.
+                python=str(plugin_env.absolute()),
+                paths=tuple(str(path.resolve()) for path in plugin_path),
+                secret_env=secrets,
+                startup_timeout_seconds=plugin_startup_timeout,
+            )
+            policy_denials.extend(plugin_denials(loaded_policy, [environment], Path.cwd()))
+            if policy_denials:
+                raise _fail(
+                    "live calibration refused by policy",
+                    4,
+                    details=policy_denials,
+                    json_output=json_output,
+                )
+
+            registry = _registry(
+                None,
+                False,
+                plugin_env,
+                plugin_secret,
+                plugin_path,
+                plugin_startup_timeout,
+            )
+            resolved = [
+                registry.resolve_binding(MetricBinding(metric=case.metric, params=case.params))
+                for case in cases
+            ]
+            model_judges = [metric for metric in resolved if metric.manifest.uses_models]
+            if not model_judges:
+                raise CalibrationError(
+                    "--live requires at least one model-backed evaluator in the set"
+                )
+            denials = evaluator_denials(loaded_policy, (metric.manifest for metric in resolved))
+            if denials:
+                raise _fail(
+                    "live calibration refused by policy",
+                    4,
+                    details=denials,
+                    json_output=json_output,
+                )
+            report = run_calibration(
+                set_dir,
+                registry,
+                calibration_data=(meta, cases),
+                repetitions=repetitions,
+                timeout_seconds=timeout_seconds,
+                allow_models=True,
+                max_model_evaluations=max_model_evaluations,
+            )
+        else:
+            report = run_calibration(
+                set_dir, repetitions=repetitions, timeout_seconds=timeout_seconds
+            )
+    except (AibenchError, BindingValidationError, PydanticValidationError, OSError) as exc:
+        raise _fail(str(exc), json_output=json_output) from exc
     if out is not None:
         write_text_atomic(out, json.dumps(report, indent=2) + "\n")
     if json_output:
         console.print_json(data=report)
         return
     console.print(
-        f"calibration set {escape(str(report['set']))}; labels: {escape(report['label_review'])}; "
+        f"calibration set {escape(str(report['set']))}; mode: {report['mode']}; "
+        f"labels: {escape(report['label_review'])}; "
         f"repetitions: {report['repetitions']}"
     )
     for binding, data in report["bindings"].items():
@@ -344,4 +525,13 @@ def calibrate(
         subject = item.get("evaluator") or item.get("measure")
         console.print(
             f"[yellow]not measured[/yellow] {escape(str(subject))}: {escape(item['reason'])}"
+        )
+    if report["mode"] == "live":
+        usage = report["usage"]
+        calls = "unknown" if usage["reported_calls"] is None else str(usage["reported_calls"])
+        cost = "unknown" if usage["reported_cost"] is None else f"{usage['reported_cost']:.6f}"
+        console.print(
+            f"model evaluator invocations {usage['model_evaluations']}/"
+            f"{usage['model_evaluations_planned']}; reported provider calls {calls}; "
+            f"reported cost {cost}; unknown-cost evaluations {usage['unknown_cost_evaluations']}"
         )

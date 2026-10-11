@@ -91,9 +91,17 @@ class ExecutionPolicy(FrozenModel):
         def absolute(paths: tuple[str, ...]) -> tuple[str, ...]:
             return tuple(str((base / p).resolve()) for p in paths)
 
+        def absolute_interpreters(paths: tuple[str, ...]) -> tuple[str, ...]:
+            # Keep the interpreter entrypoint itself. Path.resolve() follows venv Python
+            # symlinks to the base interpreter, which is not the environment the worker
+            # executes and would make policy checks disagree with worker startup.
+            return tuple(os.path.abspath(base / p) for p in paths)
+
         return self.model_copy(
             update={
-                "allowed_plugin_environments": absolute(self.allowed_plugin_environments),
+                "allowed_plugin_environments": absolute_interpreters(
+                    self.allowed_plugin_environments
+                ),
                 "allowed_plugin_paths": absolute(self.allowed_plugin_paths),
                 "inspection_roots": absolute(self.inspection_roots),
                 "data_roots": absolute(self.data_roots),

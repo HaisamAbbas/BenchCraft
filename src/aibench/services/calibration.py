@@ -71,10 +71,17 @@ class CalibrationCase:
         return f"{self.metric} {json.dumps(self.params, sort_keys=True)}"
 
 
-def load_calibration_set(root: Path) -> tuple[dict[str, Any], list[CalibrationCase]]:
+def load_calibration_set(
+    root: Path,
+    *,
+    metadata_path: Path | None = None,
+    cases_path: Path | None = None,
+) -> tuple[dict[str, Any], list[CalibrationCase]]:
+    metadata_file = metadata_path or root / "set.json"
+    cases_file = cases_path or root / "cases.jsonl"
     try:
-        meta = json.loads((root / "set.json").read_text(encoding="utf-8"))
-        lines = (root / "cases.jsonl").read_text(encoding="utf-8").splitlines()
+        meta = json.loads(metadata_file.read_text(encoding="utf-8"))
+        lines = cases_file.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CalibrationError(f"cannot read calibration set {root}: {exc}") from exc
     if not isinstance(meta, dict):
@@ -377,6 +384,7 @@ def run_calibration(
     root: Path,
     registry: EvaluatorRegistry | None = None,
     *,
+    calibration_data: tuple[dict[str, Any], list[CalibrationCase]] | None = None,
     repetitions: int = 2,
     timeout_seconds: float = 600.0,
     allow_models: bool = False,
@@ -389,7 +397,10 @@ def run_calibration(
         raise CalibrationError("timeout_seconds must be greater than 0 and at most 3600")
     if not 1 <= max_model_evaluations <= 10_000:
         raise CalibrationError("max_model_evaluations must be between 1 and 10000")
-    meta, cases = load_calibration_set(root)
+    # Live callers can pass the exact evidence snapshot they preflighted against policy.
+    # Re-reading after plugin discovery would permit worker startup code to replace the set
+    # between authorization and evaluation.
+    meta, cases = calibration_data if calibration_data is not None else load_calibration_set(root)
     if not cases:
         raise CalibrationError(f"{root}/cases.jsonl: calibration set has no cases")
     registry = registry or EvaluatorRegistry.with_native()
@@ -413,7 +424,9 @@ def run_calibration(
         raise CalibrationError("model evaluators require explicit live authorization")
     review = meta.get("review", {})
     if model_evaluations and (
-        review.get("status") != "reviewed" or not review.get("reviewer", "").strip()
+        review.get("status") != "reviewed"
+        or not isinstance(review.get("reviewer"), str)
+        or not review["reviewer"].strip()
     ):
         raise CalibrationError(
             "live judge calibration requires review.status='reviewed' and a named review.reviewer"
@@ -474,10 +487,15 @@ def run_calibration(
             ],
         }
     reviewed = review.get("status", "unreviewed")
+    measured_case_ids = {
+        row["id"]
+        for row in rows
+        if row["uses_models"] and any(repeat["evaluated"] for repeat in row["repetitions"])
+    }
     measured_model_evaluators = {
         (metric.manifest.evaluator_id, metric.manifest.version)
-        for metric in resolved
-        if metric.manifest.uses_models
+        for case, metric in zip(cases, resolved, strict=True)
+        if metric.manifest.uses_models and case.case_id in measured_case_ids
     }
     remaining_not_measured = [
         item
@@ -487,6 +505,7 @@ def run_calibration(
     return {
         "schema": "aibench.judge-calibration-report/2",
         "set": meta.get("version"),
+        "mode": "live" if allow_models and model_evaluations else "offline",
         "label_review": reviewed,
         "reviewer": review.get("reviewer"),
         "label_note": review.get("notes", ""),
