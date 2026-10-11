@@ -220,10 +220,24 @@ def test_a_failed_turn_blocks_the_rest_of_its_episode(world: tuple[Path, Any]) -
     assert server.calls["/agent"] == 3  # the blocked turn was never sent
 
 
-def test_an_interrupted_episode_is_not_continued_on_resume(world: tuple[Path, Any]) -> None:
+def test_an_interrupted_episode_is_not_continued_on_resume(
+    world: tuple[Path, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tests.engine_support import Harness
 
     project, server = world
+    entered_agent = threading.Event()
+    release_agent = threading.Event()
+    original_do_post = server.RequestHandlerClass.do_POST
+
+    def gate_first_agent_response(handler: Any) -> None:
+        if handler.path == "/agent" and not entered_agent.is_set():
+            entered_agent.set()
+            if not release_agent.wait(timeout=30):
+                raise AssertionError("test did not release the first agent response")
+        original_do_post(handler)
+
+    monkeypatch.setattr(server.RequestHandlerClass, "do_POST", gate_first_agent_response)
     policy = ExecutionPolicy.model_validate_json((project / "policy.json").read_text())
     h = Harness(project / "h")
     run_id = h.create(project / "episodes.plan.json", policy=policy.resolved_against(project))
@@ -231,9 +245,10 @@ def test_an_interrupted_episode_is_not_continued_on_resume(world: tuple[Path, An
     async def interrupt_after_first_turn(ctl: RunController, harness: Any) -> None:
         import asyncio
 
-        while server.calls["/agent"] < 1:
-            await asyncio.sleep(0.01)
+        assert await asyncio.to_thread(entered_agent.wait, 10)
         ctl.request("interrupt")
+        await asyncio.sleep(0.05)
+        release_agent.set()
 
     assert h.execute(run_id, during=interrupt_after_first_turn).state is RunState.INTERRUPTED
     assert h.execute(run_id).state is RunState.COMPLETED

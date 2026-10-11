@@ -124,7 +124,8 @@ def test_reopening_a_session_says_its_plugin_needs_the_matching_core(
         )
         capsys.readouterr()
         _with_project_plugins(ctl, h.root)
-        said = " ".join(capsys.readouterr().err.split())
+        captured = capsys.readouterr()
+        said = " ".join(f"{captured.out}\n{captured.err}".split())
         assert "loaded this project's plugins into the session" in said
         assert (
             f"the plan cannot run: plugin paired: its environment has BenchCraft 0.1.0rc24, "

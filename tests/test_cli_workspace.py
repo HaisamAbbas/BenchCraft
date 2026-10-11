@@ -30,6 +30,60 @@ def _old(path: Path) -> None:
     os.utime(path, (old, old))
 
 
+def test_windows_handle_identity_accepts_complete_legacy_stat_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+    from types import SimpleNamespace
+
+    from aibench.storage import _windows_handles
+
+    expected = SimpleNamespace(st_dev=17, st_ino=0x123456789A)
+    info = _windows_handles.HandleInfo(0, True, 0, 1, 18, 0x123456789B)
+
+    def legacy_information(handle: int, result: ctypes.c_void_p) -> int:
+        del handle
+        legacy = ctypes.cast(
+            result, ctypes.POINTER(_windows_handles._ByHandleFileInformation)
+        ).contents
+        legacy.VolumeSerialNumber = expected.st_dev
+        legacy.FileIndexHigh = expected.st_ino >> 32
+        legacy.FileIndexLow = expected.st_ino & 0xFFFFFFFF
+        return 1
+
+    monkeypatch.setattr(
+        _windows_handles, "_legacy_handle_information_api", lambda: legacy_information
+    )
+    assert _windows_handles.identity_matches_stat(12, info, expected)
+
+
+def test_windows_handle_identity_never_mixes_identity_formats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+    from types import SimpleNamespace
+
+    from aibench.storage import _windows_handles
+
+    expected = SimpleNamespace(st_dev=17, st_ino=0x123456789A)
+    info = _windows_handles.HandleInfo(0, True, 0, 1, expected.st_dev, expected.st_ino + 1)
+
+    def legacy_information(handle: int, result: ctypes.c_void_p) -> int:
+        del handle
+        legacy = ctypes.cast(
+            result, ctypes.POINTER(_windows_handles._ByHandleFileInformation)
+        ).contents
+        legacy.VolumeSerialNumber = expected.st_dev + 1
+        legacy.FileIndexHigh = expected.st_ino >> 32
+        legacy.FileIndexLow = expected.st_ino & 0xFFFFFFFF
+        return 1
+
+    monkeypatch.setattr(
+        _windows_handles, "_legacy_handle_information_api", lambda: legacy_information
+    )
+    assert not _windows_handles.identity_matches_stat(12, info, expected)
+
+
 def test_workspace_gc_previews_then_removes_only_stale_orphans(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()

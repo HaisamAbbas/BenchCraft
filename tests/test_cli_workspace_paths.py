@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -487,6 +488,41 @@ def test_windows_sidecar_handle_cannot_escape_the_workspace(
 
     with pytest.raises(ValidationError, match="database sidecar outside the workspace"):
         workspace_paths._refresh_windows_sqlite_handles(workspace, pins)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires POSIX open-file descriptor paths")
+def test_workspace_migrate_paths_accepts_verified_duplicate_database_descriptors(
+    tmp_path: Path,
+) -> None:
+    descriptor_directory = next(
+        (path for path in (Path("/proc/self/fd"), Path("/dev/fd")) if path.is_dir()),
+        None,
+    )
+    if descriptor_directory is None:
+        pytest.skip("process descriptor paths are unavailable")
+    project = tmp_path / "project"
+    workspace = Workspace.at(project)
+    Database.open_workspace(workspace).close()
+    pins = _validate_workspace_paths(project, workspace)
+    descriptors = [os.open(workspace.db_path, os.O_RDONLY) for _ in range(2)]
+    try:
+        snapshot = workspace_paths._OpenHandleSnapshot(descriptor_directory, set())
+        workspace_paths._pin_open_database_descriptors(workspace, pins, snapshot)
+        assert pins.database_descriptor == min(descriptors)
+    finally:
+        for descriptor in descriptors:
+            os.close(descriptor)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="uses Darwin's F_GETPATH descriptor API")
+def test_darwin_workspace_descriptor_target_uses_fcntl_path(tmp_path: Path) -> None:
+    target = tmp_path / "database"
+    target.write_bytes(b"pinned")
+    descriptor = os.open(target, os.O_RDONLY)
+    try:
+        assert workspace_paths._descriptor_target(Path("/dev/fd"), descriptor) == str(target)
+    finally:
+        os.close(descriptor)
 
 
 def test_workspace_migrate_paths_preview_scans_one_read_snapshot(

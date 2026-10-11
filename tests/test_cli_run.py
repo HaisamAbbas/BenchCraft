@@ -704,7 +704,7 @@ def test_interrupted_run_resumes_through_the_cli_and_rescoring_never_invokes(
     )
 
     async def during(ctl: RunController, harness: Harness) -> None:
-        await harness.wait_for_invocations(1)
+        await harness.wait_for_attempts(1)
         ctl.interrupt()
 
     run_id = h.create(plan)

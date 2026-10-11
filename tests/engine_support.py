@@ -40,6 +40,12 @@ if text.startswith("crash"):
     sys.exit(3)
 with log.open("a") as f:
     f.write(json.dumps({"case": case, "start": start, "end": time.time()}) + "\n")
+after_log = os.environ.get("APP_AFTER_LOG_ONCE")
+if after_log and not pathlib.Path(after_log).exists():
+    pathlib.Path(after_log).write_text("logged")
+    release = pathlib.Path(after_log + ".release")
+    while not release.exists():
+        time.sleep(0.01)  # let crash-recovery tests kill the dispatcher after a durable result
 print(json.dumps({"output": "yes"}))
 """
 
@@ -171,6 +177,18 @@ class Harness:
             if asyncio.get_running_loop().time() > deadline:
                 raise AssertionError(f"only {self.count()} invocations after {timeout}s")
             await asyncio.sleep(0.02)
+
+    async def wait_for_attempts(self, n: int, timeout: float = 30.0) -> None:
+        """Wait until the instrumented application has begun ``n`` invocations."""
+        attempts = self.log.with_suffix(".attempts")
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            started = len(attempts.read_text(encoding="utf-8").split()) if attempts.exists() else 0
+            if started >= n:
+                return
+            if asyncio.get_running_loop().time() > deadline:
+                raise AssertionError(f"only {started} application attempts after {timeout}s")
+            await asyncio.sleep(0.01)
 
 
 def max_overlap(invocations: list[dict[str, Any]]) -> int:

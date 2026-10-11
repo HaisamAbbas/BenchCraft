@@ -8,6 +8,7 @@ import posixpath
 import re
 import sqlite3
 import stat
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -285,10 +286,11 @@ def _refresh_sqlite_sidecar_descriptors(workspace: Workspace, pins: _WorkspacePi
         descriptor = int(name)
         descriptor_path = directory / name
         try:
-            target = os.readlink(descriptor_path)
+            target = _descriptor_target(directory, descriptor)
+            opened = descriptor_path.stat()
         except OSError:
             continue
-        deleted = target.endswith(" (deleted)")
+        deleted = target.endswith(" (deleted)") or opened.st_nlink == 0
         cleaned_target = target.removesuffix(" (deleted)")
         basename = Path(cleaned_target).name
         sidecar = expected.get(basename)
@@ -305,7 +307,6 @@ def _refresh_sqlite_sidecar_descriptors(workspace: Workspace, pins: _WorkspacePi
         if deleted:
             continue
         try:
-            opened = descriptor_path.stat()
             current = sidecar.lstat()
         except OSError as exc:
             raise ValidationError(
@@ -447,6 +448,26 @@ def _descriptor_snapshot() -> _OpenHandleSnapshot:
     raise ValidationError("cannot verify SQLite file identity: open descriptors are not enumerable")
 
 
+def _descriptor_target(directory: Path, descriptor: int) -> str:
+    """Resolve a process descriptor to its opened path on supported POSIX platforms.
+
+    Darwin exposes descriptor entries under ``/dev/fd`` but does not implement
+    ``readlink`` for them. Its ``F_GETPATH`` command provides the same identity path.
+    """
+    if sys.platform == "darwin":
+        import fcntl
+
+        command = getattr(fcntl, "F_GETPATH", None)
+        if command is None:
+            raise OSError("Darwin does not expose F_GETPATH for descriptor verification")
+        raw = fcntl.fcntl(descriptor, command, b"\0" * 1024)
+        path = raw.split(b"\0", 1)[0]
+        if not path:
+            raise OSError("Darwin returned an empty path for an open descriptor")
+        return os.fsdecode(path)
+    return os.readlink(directory / str(descriptor))
+
+
 def _pin_open_database_descriptors(
     workspace: Workspace,
     pins: _WorkspacePins,
@@ -478,11 +499,11 @@ def _pin_open_database_descriptors(
         descriptor = int(name)
         descriptor_path = directory / name
         try:
-            target = os.readlink(descriptor_path)
+            target = _descriptor_target(directory, descriptor)
             metadata = descriptor_path.stat()
         except OSError:
             continue
-        deleted = target.endswith(" (deleted)")
+        deleted = target.endswith(" (deleted)") or metadata.st_nlink == 0
         cleaned_target = target.removesuffix(" (deleted)")
         basename = Path(cleaned_target).name
         if basename not in expected_names:
@@ -512,10 +533,14 @@ def _pin_open_database_descriptors(
                 pins.sidecars[sidecar] = metadata
             elif (metadata.st_dev, metadata.st_ino) != (pinned.st_dev, pinned.st_ino):
                 raise ValidationError(f"SQLite opened a different database sidecar: {basename}")
-    if len(main_descriptors) != 1:
+    if not main_descriptors:
         raise ValidationError("could not uniquely identify SQLite's opened workspace database")
     pins.descriptor_directory = directory
-    pins.database_descriptor = main_descriptors[0]
+    # Several descriptors can refer to the same SQLite database (for example, an
+    # inherited or duplicated handle). Every candidate was checked against the pinned
+    # path and inode above, so pin a deterministic one while continuing to inspect all
+    # descriptors for replacement or escape attempts.
+    pins.database_descriptor = min(main_descriptors)
     pins.sidecar_descriptors.update(sidecar_descriptors)
 
 

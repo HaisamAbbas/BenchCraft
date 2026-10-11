@@ -216,9 +216,8 @@ def _open_project_workspace_directory(
                 ):
                     raise ValidationError("workspace directory changed while it was being opened")
                 workspace_metadata = _require_workspace_directory(workspace_path)
-                if (info.volume_id, info.file_id) != (
-                    workspace_metadata.st_dev,
-                    workspace_metadata.st_ino,
+                if not _windows_handles.identity_matches_stat(
+                    workspace_handle, info, workspace_metadata
                 ):
                     raise ValidationError("workspace directory changed while it was being opened")
                 return _PinnedWorkspaceDirectory(
@@ -732,8 +731,9 @@ def _scan_windows_usage_directory(
     if (
         _is_unsafe(current_path)
         or not stat.S_ISDIR(current_path.st_mode)
-        or current_path.st_dev != pinned_info.volume_id
-        or current_path.st_ino != pinned_info.file_id
+        or not _windows_handles.identity_matches_stat(
+            directory_handle, pinned_info, current_path
+        )
     ):
         raise ValidationError("workspace directory changed during usage scan")
 

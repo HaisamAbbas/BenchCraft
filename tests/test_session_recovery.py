@@ -68,18 +68,38 @@ def _start_then_kill(h: SessionHarness, ctl: SessionController, action_id: str) 
     child = subprocess.Popen(
         [sys.executable, str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
+    marker: str | None = None
     try:
         line = child.stdout.readline() if child.stdout else ""
         assert line.startswith("started"), (line, child.stderr.read() if child.stderr else "")
         run_id, state = line.split()[1:3]
         assert state == "done"
+        application = json.loads((h.root / "app.json").read_text(encoding="utf-8"))
+        marker = application["transport"]["env"].get("APP_AFTER_LOG_ONCE")
         deadline = time.monotonic() + 30
-        while h.count() < 1 and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert h.count() >= 1, "the application was never invoked"
+        if marker:
+            while not Path(marker).exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert Path(marker).exists(), "the application did not record its invocation"
+        else:
+            attempts = h.log.with_suffix(".attempts")
+            while (
+                (not attempts.exists() or not attempts.read_text(encoding="utf-8").split())
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            assert attempts.exists() and attempts.read_text(encoding="utf-8").split(), (
+                "the application was never invoked"
+            )
     finally:
         child.kill()
         child.wait(timeout=30)
+        if marker:
+            Path(marker + ".release").touch()
+    if marker:
+        # The test-only app gate is after its durable invocation record and before the
+        # response, so no subsequent task can have been dispatched at the kill point.
+        assert h.count() >= 1, "the application did not record the gated invocation"
     return run_id
 
 
@@ -98,6 +118,7 @@ def test_reopening_after_a_kill_shows_the_real_state_and_restarts_nothing(tmp_pa
         slow,
         objectives=("catch wrong answers",),
         environment_digest="session-recovery-test-runtime-v1",
+        application_env={"APP_AFTER_LOG_ONCE": str(tmp_path / "first-invocation-logged")},
     )
     session_id = ctl.session_id
     run_id = _start_then_kill(h, ctl, "act-start")

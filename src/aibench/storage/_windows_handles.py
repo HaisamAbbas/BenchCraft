@@ -91,6 +91,21 @@ class _FileIdInfo(ctypes.Structure):
     _fields_ = [("VolumeSerialNumber", ctypes.c_ulonglong), ("FileId", ctypes.c_ubyte * 16)]
 
 
+class _ByHandleFileInformation(ctypes.Structure):
+    _fields_ = [
+        ("FileAttributes", wintypes.DWORD),
+        ("CreationTime", wintypes.FILETIME),
+        ("LastAccessTime", wintypes.FILETIME),
+        ("LastWriteTime", wintypes.FILETIME),
+        ("VolumeSerialNumber", wintypes.DWORD),
+        ("FileSizeHigh", wintypes.DWORD),
+        ("FileSizeLow", wintypes.DWORD),
+        ("NumberOfLinks", wintypes.DWORD),
+        ("FileIndexHigh", wintypes.DWORD),
+        ("FileIndexLow", wintypes.DWORD),
+    ]
+
+
 class _FileIdExtdDirectoryInfo(ctypes.Structure):
     _fields_ = [
         ("NextEntryOffset", wintypes.DWORD),
@@ -240,8 +255,7 @@ def open_directory(path: Path, expected: os.stat_result, *, writable: bool = Fal
         if (
             not info.is_directory
             or info.attributes & FILE_ATTRIBUTE_REPARSE_POINT
-            or info.volume_id != expected.st_dev
-            or info.file_id != expected.st_ino
+            or not identity_matches_stat(handle, info, expected)
         ):
             raise OSError("workspace directory changed while it was being opened")
         return int(handle)
@@ -336,6 +350,37 @@ def handle_info(handle: int) -> HandleInfo:
         link_count=int(standard.NumberOfLinks),
         volume_id=int(identity.VolumeSerialNumber),
         file_id=file_id,
+    )
+
+
+@cache
+def _legacy_handle_information_api() -> Any:
+    get_info = ctypes.WinDLL("kernel32", use_last_error=True).GetFileInformationByHandle
+    get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ByHandleFileInformation)]
+    get_info.restype = wintypes.BOOL
+    return get_info
+
+
+def identity_matches_stat(
+    handle: int, info: HandleInfo, expected: os.stat_result
+) -> bool:
+    """Compare a native file ID to ``stat`` using one complete identity format.
+
+    Windows Python versions/filesystems may populate ``st_ino`` from either the
+    128-bit FILE_ID_INFO API or the older 64-bit file-index API. Never combine the
+    volume from one representation with the file ID from the other.
+    """
+    if (info.volume_id, info.file_id) == (expected.st_dev, expected.st_ino):
+        return True
+    legacy = _ByHandleFileInformation()
+    if not _legacy_handle_information_api()(
+        wintypes.HANDLE(handle), ctypes.byref(legacy)
+    ):
+        raise _raise_last_error("could not identify workspace entry handle")
+    file_index = (int(legacy.FileIndexHigh) << 32) | int(legacy.FileIndexLow)
+    return (int(legacy.VolumeSerialNumber), file_index) == (
+        expected.st_dev,
+        expected.st_ino,
     )
 
 
