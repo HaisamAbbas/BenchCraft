@@ -23,6 +23,7 @@ from aibench.storage.workspace_backup import (
     restore_workspace_backup,
 )
 from aibench.storage.workspace_integrity import check_workspace
+from aibench.storage.workspace_paths import migrate_workspace_paths
 from aibench.storage.workspace_retention import (
     load_project_retention_policy,
     measure_workspace_usage,
@@ -199,6 +200,42 @@ def usage(
     )
     for name, values in result["categories"].items():
         console.print(f"  {safe(name)}: {values['files']} file(s), {values['bytes']} bytes")
+
+
+@app.command("migrate-paths")
+def migrate_paths(
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Update workspace-rooted paths. Without this option, only preview changes.",
+    ),
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Rebase workspace and project paths after moving the project directory."""
+    try:
+        result = migrate_workspace_paths(workspace or Path.cwd(), apply=apply)
+    except (AibenchError, OSError, sqlite3.Error, ValueError) as exc:
+        raise _fail(f"could not migrate workspace paths: {exc}", json_output=json_output) from exc
+    if json_output:
+        console.print_json(data=result)
+        return
+    if result["changed_if_applied"] == 0:
+        console.print(f"workspace paths are current: {safe(result['project_root'])}")
+        return
+    if apply:
+        console.print(
+            f"updated {result['records_updated']} record(s) for "
+            f"{safe(result['project_root'])}; preserved "
+            f"{result['external_paths_preserved']} external path reference(s)."
+        )
+    else:
+        console.print(
+            f"would update {result['changed_if_applied']} record(s) for "
+            f"{safe(result['project_root'])}; preserved "
+            f"{result['external_paths_preserved']} external path reference(s). "
+            "Use --apply to migrate them."
+        )
 
 
 @app.command("retention")
