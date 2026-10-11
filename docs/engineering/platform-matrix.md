@@ -1,28 +1,30 @@
 # Platform and compatibility matrix
 
-## Current source candidate: `0.1.0rc34` (2026-10-11)
+## Current CI-tested source: `0.1.0rc34` at `af918898` (2026-10-11)
 
 The CI workflow is configured to run the core checks and release-wheel journey on
 Windows, Ubuntu Linux, and macOS with Python 3.11 and 3.12. The DeepEval and Ragas
-real-package adapter jobs run on all three operating systems with Python 3.12. This
-matrix configuration is new; hosted results are pending and must be checked in GitHub
-Actions before describing Linux or macOS as validated.
+real-package adapter jobs run on all three operating systems with Python 3.12. Hosted run
+[38145775882](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38145775882) passed all
+18 jobs on source commit `af918898e8a7d14bff2b861c6b3140d3185844d9`.
 
-| Area | Configured CI matrix | Observed locally for the current source |
+| Area | Configured CI matrix | Observed results for the current source |
 |---|---|---|
-| Core checks | Windows, Ubuntu Linux, macOS; Python 3.11 and 3.12 | Windows 11, Python 3.12.10; targeted calibration/policy/worker batch passed (55 passed, 1 skipped) |
-| DeepEval and Ragas adapters | Windows, Ubuntu Linux, macOS; Python 3.12, real pinned packages and deterministic judge | The rc34 G20 batch used local fake evaluators through a worker, not these framework-specific contracts. Earlier pinned-package results below are historical rc1 evidence; current matrix results are pending |
-| Release wheel, quickstart, and acceptance journey | Windows, Ubuntu Linux, macOS; Python 3.11 and 3.12 | Windows 11, Python 3.12.10: fresh rc34 build/install, quickstart, and 100-case acceptance passed 17/17; hosted matrix rerun is pending |
+| Core checks | Windows, Ubuntu Linux, macOS; Python 3.11 and 3.12 | Hosted: all six jobs passed. Ubuntu: 1,745 passed / 187 skipped per Python version; Windows: 1,742 / 190; macOS: 1,743 / 189. Local Windows 11, Python 3.12.10 targeted regressions passed. |
+| DeepEval and Ragas adapters | Windows, Ubuntu Linux, macOS; Python 3.12, real pinned packages and deterministic judge | All six hosted contract jobs passed (both adapters on each OS). No live judge model was called. |
+| Release wheel, quickstart, and acceptance journey | Windows, Ubuntu Linux, macOS; Python 3.11 and 3.12 | All six hosted clean-wheel release checks passed. Windows 11, Python 3.12.10 local rc34 build/install and release journey also passed 17/17. |
 | Live hosted model providers | Not part of CI | Not exercised; no provider call was made |
 
-CI is triggered by pushes and pull requests. The current results remain unobserved until
-the workflow run for this source revision completes. Runner labels such as `macos-latest`
-follow GitHub-hosted runner images and do not promise a specific patch-level OS release.
+CI is triggered by pushes and pull requests. Runner labels such as `macos-latest` follow
+GitHub-hosted runner images and do not promise a specific patch-level OS release. Passing CI
+does not establish behavior on every distribution or hardware configuration, live-provider
+behavior, or release authorization.
 
 ## Historical evidence: release `0.1.0rc1`
 
 The following sections preserve the platform and package evidence recorded for the older
-rc1 artifact. They are not verification of the current rc34 source candidate.
+rc1 artifact. Their "not exercised" entries describe that historical artifact only; the current
+rc34 source results are listed above.
 
 "Supported" is what the release declares. "Exercised" is what has actually run, and
 where. Anything not exercised is a claim that nobody has checked yet, and is labelled
@@ -59,7 +61,7 @@ that way.
 
 | Transport | Exercised | Not exercised |
 |---|---|---|
-| `cli`, `http` | Windows 11, Python 3.12 and 3.11 (see Release 0.1.0rc1) | Linux/macOS (CI configured, no result observed) |
+| `cli`, `http` | Windows 11, Python 3.12 and 3.11 (see Release 0.1.0rc1) | Not part of the rc1 evidence; the current source passed native hosted core checks on Linux and macOS (run 38145775882 above). |
 | `python` (callable in a fresh interpreter) | Windows 11, Python 3.12: end to end through `aibench app smoke`, timeout kill, exception capture, reset callable (`tests/test_runner_transports.py`) | Other interpreters as the application's environment |
 | `openai_compatible` | Windows 11, against the local stub `examples/apps/openai_stub.py`: request shape, bearer secret redaction, usage, tool-call requests, streamed response accumulation, TTFT/inter-delta metrics and completion integrity | Any live hosted endpoint |
 | `container` | Docker Engine 29.7.2 via Docker Desktop (linux/amd64 VM) on Windows 11, image `python@sha256:2f17fc04...06a9`: non-root uid 65534, read-only root and mount, tmpfs `/tmp`, no network, timeout removal, missing-image refusal | Linux or macOS hosts, rootless engines, Podman, Windows containers |
@@ -77,15 +79,15 @@ bound `<3.13` stays until 3.13 is actually exercised; it is not a known incompat
 Widen `requires-python` and this table together.
 
 For this historical rc1 snapshot, CI was configured on Python 3.11 and 3.12, on
-`ubuntu-latest` and `windows-latest`; no hosted result was recorded then. The current
-three-OS matrix and its pending results are described at the top of this document.
+`ubuntu-latest` and `windows-latest`; no hosted result was recorded then. Current hosted
+three-OS results are recorded at the top of this document.
 
 ## Runner process-tree cleanup (Prompt 03)
 
 | Platform | Mechanism | Exercised |
 |---|---|---|
 | Windows | Job Object with `KILL_ON_JOB_CLOSE` (`src/aibench/runners/process_tree.py`) | Yes: Windows 11, Python 3.12.10, `tests/test_cli_runner.py` tree-cleanup tests |
-| Linux / macOS | New session + `killpg(SIGKILL)` | Not locally in the rc1 evidence. Linux CI had no observed result at the time; macOS was not configured then. See the current matrix above for newly configured coverage; results still need observation. |
+| Linux / macOS | New session + `killpg(SIGKILL)` | Not locally in the rc1 evidence. The current source passed the hosted core matrix on both platforms (run 38145775882 above). |
 
 Known containment gaps: a Windows descendant spawned in the instant between process creation
 and job assignment, and a POSIX descendant that calls `setsid()` itself. See ADR 0002.

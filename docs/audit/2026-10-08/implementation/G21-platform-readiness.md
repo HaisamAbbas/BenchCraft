@@ -6,7 +6,7 @@ CI now covers GitHub-hosted Windows, Ubuntu Linux, and macOS runners. Core and c
 release checks cover Python 3.11 and 3.12; DeepEval and Ragas contract jobs use Python 3.12.
 Static typing targets the Windows APIs used by the application on every runner, while tests
 execute natively on each operating system. CI upgrades setuptools past the current runner-image
-advisory.
+advisory. The final hosted run for source commit `af918898` passed all 18 jobs.
 
 The first hosted run exposed stale platform assumptions in path handling, SQLite restore
 publication, CLI output assertions, plugin isolation, and session-recovery fixtures. The changes
@@ -19,23 +19,23 @@ their purpose is to test resumption rather than working-tree changes.
 
 - `ruff check src tests` passed.
 - `mypy --platform win32 src` passed for 168 source files.
-- 160 affected tests passed and 18 platform-specific tests were skipped on Windows 11 / Python
-  3.12.10.
-- The staged-database-entry replacement regression is POSIX-only and will execute on the hosted
-  macOS job; Windows skips it by design.
+- The focused workspace, workspace-integrity and quickstart regression batch passed: 95 passed,
+  22 skipped on Windows 11 / Python 3.12.10.
 - The independent read-only review found no findings.
 
 ## Hosted verification
 
-The matrix-enablement commit is `7c57963e` and the initial CI corrections are `dbfdb952`; both
-were pushed to `fix/plugin-core-match` as Haisam Abbas. Hosted run
-[38134340939](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38134340939) completed with
-all 9 release checks and plugin jobs passing, but its six full core platform/version test jobs
-failed. Those failures exposed the additional issues corrected in this batch. The current changes
-must be pushed and the resulting full matrix must pass before G21 can be marked complete.
+[Hosted run 38145775882](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38145775882)
+completed successfully on `af918898e8a7d14bff2b861c6b3140d3185844d9`: all 18 of 18 jobs passed.
+The six full suites passed on Windows, Ubuntu and macOS with Python 3.11 and 3.12 (1,742–1,745
+passed and 187–190 skipped per platform/version, with platform-specific skips). All six clean-wheel
+release checks passed across the same OS/Python matrix. All six real-package DeepEval and Ragas
+contract jobs passed across the three operating systems on Python 3.12. Earlier runs exposed
+SQLite descriptor/sidecar races and a fractional-latency claim-check regression; the final run
+includes the fixes and their regression coverage.
 
 ## Scope boundary
 
 No live model provider was called, no external pilot was run, and no release was authorized or
-published. This work establishes platform checks and records observed results; it does not make an
-external release decision.
+published. The passing matrix is platform and packaging evidence for this source commit, not an
+external release decision or evidence of live-provider behavior.

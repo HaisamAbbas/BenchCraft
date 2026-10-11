@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G21: Platform and release confidence",
+  "current_item": "G22: Advanced scale, load, and modality workflows",
   "items": [
     {
       "id": "F01",
@@ -826,13 +826,17 @@
       "id": "G21",
       "priority": "P2",
       "title": "Platform and release confidence",
-      "detail": "**Partial.** Windows/Linux CI is configured; macOS CI is absent, current cross-platform results were not observed, and published support/readiness documents still center on older candidates.",
+      "detail": "**Delivered.** Hosted run 38145775882 passed all 18 jobs on source commit af918898e8a7d14bff2b861c6b3140d3185844d9: six full suites and six clean-wheel release checks on Windows/Linux/macOS with Python 3.11/3.12, plus six real-package DeepEval/Ragas contract jobs on all three OSes with Python 3.12. No live provider, external pilot, or release authorization is implied.",
       "kind": "feature",
-      "status": "pending",
-      "verification": [],
-      "review": null,
-      "commit": null,
-      "pushed": false
+      "status": "delivered",
+      "verification": [
+        "Hosted Actions run 38145775882 on af918898e8a7d14bff2b861c6b3140d3185844d9 passed all 18 jobs: six platform/version pytest suites, six clean-wheel release checks, and six real-package DeepEval/Ragas contract jobs; see implementation/G21-platform-readiness.md",
+        "Core suites: Ubuntu 1,745 passed / 187 skipped per Python version; Windows 1,742 / 190; macOS 1,743 / 189",
+        "Local Ruff, Mypy for 168 source files, and focused workspace/integrity/quickstart regressions passed; independent review found no code findings"
+      ],
+      "review": "implementation/G21-platform-readiness-review.md",
+      "commit": "af918898e8a7d14bff2b861c6b3140d3185844d9",
+      "pushed": true
     },
     {
       "id": "G22",
