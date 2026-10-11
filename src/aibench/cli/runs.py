@@ -405,7 +405,7 @@ def run_events(
                 sink_lock.release()
             storage.db.close()
             raise error_exit(
-                f"could not open event log {target}: {exc}",
+                f"could not open event log: {exc} (path: {target})",
                 exit_code=2,
                 json_output=False,
                 console=console,

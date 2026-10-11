@@ -167,7 +167,7 @@ def _preflight_event_log(
             pass
     except (OSError, ValueError) as exc:
         log_lock.release()
-        raise _fail(f"could not open event log {target}: {exc}", EXIT_INVALID) from exc
+        raise _fail(f"could not open event log: {exc} (path: {target})", EXIT_INVALID) from exc
     return log_lock
 
 
