@@ -1,21 +1,21 @@
 # Support and limitations
 
-This covers what aibench 0.1.0rc1 (the MVP release candidate) supports, what has actually
+This describes the current `aibench 0.1.0rc34` source candidate, what has actually
 been tested, and what isn't available yet. The release decision and its open items are in
 `docs/engineering/release-readiness.md`. The authoritative design is `docs/spec/implementation-plan.md`, and
 per-prompt evidence is in `docs/engineering/reports/`.
 
 ## Platforms
 
-| | Supported | Tested |
+| | Declared/configured | Observed |
 |---|---|---|
-| Python | 3.11, 3.12 | Full suite on 3.12.10 (Prompt 12); clean wheel install, quickstart and 100-case acceptance on 3.12.10 and 3.11.16 (Prompt 13) |
-| OS | Windows, Linux, macOS | Windows 11. Linux is configured in CI (`ubuntu-latest`), but no result has been observed. macOS is not run anywhere |
-| Terminal chat | Any terminal prompt_toolkit supports | Windows ConPTY (automated tests, including resizing) |
+| Python | 3.11, 3.12 in CI | Windows 11, Python 3.12.10; earlier Windows release checks used 3.11.16 and 3.12.10. Current hosted matrix results are pending |
+| OS | Windows, Linux (`ubuntu-latest`), macOS (`macos-latest`) in CI for core, plugin, and release checks | Windows 11 only. Linux and macOS runners are configured, but their current results have not yet been observed |
+| Terminal chat | Any terminal prompt_toolkit supports | Windows ConPTY (earlier automated regression tests, including resizing); current hosted matrix is pending |
 | Model providers | OpenAI-compatible endpoints | Scripted and local test providers only. No live model has been exercised |
 
-Details are in `docs/engineering/platform-matrix.md`. `aibench doctor` warns on a platform
-outside the tested matrix.
+Details and the current CI scope are in `docs/engineering/platform-matrix.md`.
+`aibench doctor` warns on a platform outside the tested matrix.
 
 ## Optional evaluators
 

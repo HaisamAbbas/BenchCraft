@@ -1,6 +1,28 @@
-# Release readiness — aibench 0.1.0rc1
+# Release readiness
 
-Date: 2026-09-24
+## Current source snapshot — `aibench 0.1.0rc34` (2026-10-11)
+
+**Status: not cleared for release.** The current source has configured CI coverage for
+Windows, Linux, and macOS, including the core suite, real-package DeepEval and Ragas
+adapter jobs, and clean-wheel release checks. Core and release checks use Python 3.11
+and 3.12; plugin jobs use Python 3.12. These runners were added in G21. Their results
+for this source revision are pending and are not yet evidence that Linux or macOS passed.
+
+The current local platform observation remains Windows 11 with Python 3.12.10. A clean
+rc34 wheel build/install, quickstart, and release journey passed all 17 checks locally;
+the separate [G20 live-calibration and policy/worker regression batch](../audit/2026-10-08/implementation/G20-live-calibration-review.md)
+passed 55 tests with one platform-dependent symlink test skipped. The 100-case acceptance
+run completed 200/200 application/evaluator calls, recorded the eight intentionally
+injected quality failures, and verified zero application calls while stopped and during
+rescore. The paid-provider path was exercised only with a local fake judge. Hosted CI
+results remain pending; no hosted model/provider call or external pilot was run, and no
+release was authorized or published. Review the hosted G21 results and release artifacts
+before making a release decision.
+
+The detailed compatibility boundary is in [`platform-matrix.md`](platform-matrix.md).
+
+## Historical local readiness record — `aibench 0.1.0rc1` (2026-09-24)
+
 Decision: **Local technical candidate ready for MVP review on Windows; not cleared for a broad external release.**
 
 The package artifacts are local in [`evidence/13/dist/`](evidence/13/dist/), with SHA-256 values in [`evidence/13/SHA256SUMS`](evidence/13/SHA256SUMS). The core wheel's installed quickstart and 100-case acceptance workflow passed in clean Python 3.11 and 3.12 environments on Windows. The optional DeepEval adapter's installed-wheel contract tests passed with the pinned real package and a deterministic local judge.

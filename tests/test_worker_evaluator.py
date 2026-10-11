@@ -308,7 +308,8 @@ def test_worker_raw_payload_shows_isolation_and_one_worker_per_binding(
     assert raws[0]["pid"] == raws[1]["pid"] != os.getpid()  # same worker for the binding
     assert [r["calls"] for r in raws] == [1, 2] and raws[0]["instances"] == 1
     assert raws[0]["leak"] is None  # harness environment is not inherited
-    assert raws[0]["home"] == raws[0]["cwd"] != os.getcwd()  # private HOME and workdir
+    assert Path(raws[0]["home"]).resolve() == Path(raws[0]["cwd"]).resolve()
+    assert Path(raws[0]["cwd"]).resolve() != Path.cwd().resolve()  # private HOME and workdir
 
 
 def test_stdout_noise_from_plugin_code_cannot_corrupt_the_protocol(tmp_path: Path) -> None:

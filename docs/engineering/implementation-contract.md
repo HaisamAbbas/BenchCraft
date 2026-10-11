@@ -100,7 +100,8 @@ environment manager already exists.
   specific directory, set `AIBENCH_TEST_TMPDIR=<that directory>` first — see
   `tests/conftest.py` for the temp-directory selection this enables)
 - Lint: `.venv/Scripts/python -m ruff check src tests`
-- Type check: `.venv/Scripts/python -m mypy src`
+- Type check: `.venv/Scripts/python -m mypy --platform win32 src` (Windows API bindings are
+  the static target; native platform behavior is covered by the CI test matrix)
 - CLI smoke: `.venv/Scripts/python -m aibench --help` (equivalently `aibench --help` once
   installed on PATH)
 - Package build: `.venv/Scripts/python -m build` (produces `dist/*.whl` and `dist/*.tar.gz`)

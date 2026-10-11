@@ -191,11 +191,17 @@ def quickstart(checker: Checker, py: Path, work: Path, tag: str) -> None:
     step.checks["shows support-004 evidence"] = "support-004" in markdown.stdout
 
     before = attempts(project)
-    step, _ = checker.run(
+    step, rescore = checker.run(
         f"{tag}: rescore",
         [*aibench, "evaluate", run_id, "--plan", "plan.json", "--json"],
         cwd=project,
         env=env,
+        expected_exit=3,
+    )
+    rescore_data = json.loads(rescore.stdout) if rescore.stdout.strip().startswith("{") else {}
+    step.checks["incomplete stored executions are reported"] = (
+        rescore_data.get("outcome", {}).get("complete") is False
+        and rescore_data.get("outcome", {}).get("unhealthy_work", {}).get("unavailable", 0) > 0
     )
     step.checks["no application call"] = attempts(project) == before
 
@@ -236,6 +242,9 @@ def acceptance(checker: Checker, py: Path, out: Path, tag: str) -> None:
     step.checks["reliability 1.0"] = summary.get("reliability", {}).get("value") == 1.0
     step.checks["rescore made 0 application calls"] = (
         summary.get("rescore", {}).get("application_calls_during_rescore") == 0
+    )
+    step.checks["rescore completes from stored outputs"] = (
+        summary.get("rescore", {}).get("exit_code") == 0
     )
     step.checks["nothing called while stopped"] = (
         summary.get("interruption", {}).get("calls_while_stopped") == 0

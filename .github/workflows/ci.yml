@@ -20,7 +20,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Update installer
-        run: python -m pip install --upgrade "pip>=26.2.1,<27"
+        run: python -m pip install --upgrade "pip>=26.2.1,<27" "setuptools>=83.0.0"
 
       - name: Install project with dev dependencies
         run: python -m pip install -e ".[dev]"
@@ -40,7 +40,9 @@ jobs:
         run: python -m ruff check src tests plugins
 
       - name: Type check (mypy)
-        run: python -m mypy src
+        # The repository contains Windows-only APIs whose stdlib types do not exist on POSIX.
+        # Check the primary Windows target on every runner; the full test suite runs natively.
+        run: python -m mypy --platform win32 src
 
       - name: Tests (pytest)
         run: python -m pytest -q
@@ -68,7 +70,7 @@ jobs:
           python-version: "3.12"
 
       - name: Update installer
-        run: python -m pip install --upgrade "pip>=26.2.1,<27"
+        run: python -m pip install --upgrade "pip>=26.2.1,<27" "setuptools>=83.0.0"
 
       - name: Install core with dev dependencies
         run: python -m pip install -e ".[dev]"
@@ -119,7 +121,7 @@ jobs:
           python-version: "3.12"
 
       - name: Update installer
-        run: python -m pip install --upgrade "pip>=26.2.1,<27"
+        run: python -m pip install --upgrade "pip>=26.2.1,<27" "setuptools>=83.0.0"
 
       - name: Install core with dev dependencies
         run: python -m pip install -e ".[dev]"
