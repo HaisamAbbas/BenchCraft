@@ -46,6 +46,7 @@ import sysconfig
 import threading
 import time
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -103,8 +104,9 @@ from aibench.registry import (
     worker_python_identity,
 )
 from aibench.registry.discovery import environment_paths
-from aibench.runners import LoadedApplication, create_runner, reset_hook
+from aibench.runners import BaseRunner, LoadedApplication, create_runner, reset_hook
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
+from aibench.services.distributed import CoordinatorRunner
 from aibench.services.scoring import (
     ScoringReport,
     declared_dependency_identity,
@@ -665,6 +667,7 @@ def create_run(
     parent_run_id: str | None = None,
     experiment_context: dict[str, Any] | None = None,
     environ: dict[str, str] | None = None,
+    distributed_workers: dict[str, Any] | None = None,
 ) -> str:
     spec = compiled.application.spec
     application_identity = application_code_identity(
@@ -708,6 +711,29 @@ def create_run(
         isinstance(run_seed, bool) or not isinstance(run_seed, int) or not 0 <= run_seed < 2**31
     ):
         raise RunError("run_seed must be an integer between 0 and 2^31-1")
+    if distributed_workers is not None:
+        token_env = distributed_workers.get("token_env")
+        if (
+            not isinstance(token_env, str)
+            or not token_env
+            or any(
+                not (character.isascii() and (character.isalnum() or character == "_"))
+                for character in token_env
+            )
+        ):
+            raise RunError("distributed worker token_env must be an environment variable name")
+        if type(distributed_workers.get("workers")) is not int or not (
+            1 <= distributed_workers["workers"] <= 64
+        ):
+            raise RunError("distributed worker count must be between 1 and 64")
+        if type(distributed_workers.get("listen_port")) is not int or not (
+            0 <= distributed_workers["listen_port"] <= 65535
+        ):
+            raise RunError("distributed worker listener port must be between 0 and 65535")
+        if type(distributed_workers.get("startup_timeout_seconds")) not in (int, float) or not (
+            1 <= distributed_workers["startup_timeout_seconds"] <= 3600
+        ):
+            raise RunError("distributed worker startup timeout must be between 1 and 3600 seconds")
     existing_run = storage.get_run(run_id)
     if existing_run is not None:
         expected_app_hash = content_hash(spec.model_dump(mode="json"))
@@ -726,6 +752,7 @@ def create_run(
             or (run_seed is not None and existing_run.manifest.seed != run_seed)
             or existing_run.manifest.parent_run_id != parent_run_id
             or parameters.get("experiment_context") != experiment_context
+            or parameters.get("distributed_workers") != distributed_workers
         ):
             raise RunError(f"run id {run_id!r} already belongs to different frozen content")
         _ensure_run_work_items(compiled, storage, run_id)
@@ -834,6 +861,11 @@ def create_run(
                 "mode": reset_mode(spec, world is not None),
             },
             "test_world": world_params,
+            **(
+                {"distributed_workers": distributed_workers}
+                if distributed_workers is not None
+                else {}
+            ),
             "metric_profiles": profiles,
             **(
                 {"experiment_context": experiment_context} if experiment_context is not None else {}
@@ -1398,6 +1430,7 @@ async def execute_run(
     artifacts: ArtifactStore,
     controller: RunController | None = None,
     environ: dict[str, str] | None = None,
+    on_worker_ready: Callable[[dict[str, Any]], None] | None = None,
 ) -> RunOutcome:
     record = storage.get_run(run_id)
     if record is None:
@@ -1439,7 +1472,14 @@ async def execute_run(
     ended = False
     try:
         outcome = await _execute_leased(
-            run_id, record.manifest, storage, artifacts, controller, environ, owner
+            run_id,
+            record.manifest,
+            storage,
+            artifacts,
+            controller,
+            environ,
+            owner,
+            on_worker_ready,
         )
         ended = True
         return outcome
@@ -1468,6 +1508,7 @@ async def _execute_leased(
     controller: RunController | None,
     environ: dict[str, str] | None,
     owner: str,
+    on_worker_ready: Callable[[dict[str, Any]], None] | None = None,
 ) -> RunOutcome:
     controller = controller or RunController()
     control = storage.get_run_control_state(run_id)
@@ -1529,13 +1570,56 @@ async def _execute_leased(
     control = storage.get_run_control_state(run_id)
     if control is not None and control.desired_state == "cancelled":
         controller.cancel()
-    runner = None
+    runner: BaseRunner | None = None
     if pending_exec and not controller.cancelled:
-        runner = create_runner(
-            LoadedApplication(spec=spec, base_dir=Path(params["application_base_dir"])),
-            trusted_local=policy.allow_trusted_local,
-            environ=environ if environ is not None else dict(os.environ),
-        )
+        distributed_options = params.get("distributed_workers")
+        if distributed_options is not None:
+            if not isinstance(distributed_options, Mapping):
+                raise RunError("the run's distributed worker configuration is invalid")
+            distributed_options = deep_unfreeze(distributed_options)
+            if not isinstance(distributed_options, dict):
+                raise RunError("the run's distributed worker configuration is invalid")
+            reset = params.get("reset") or {"mode": "none"}
+            if reset.get("mode") != "none":
+                raise RunError(
+                    "coordinator API v1 cannot run this application because the frozen plan "
+                    "requires per-case or per-episode reset; reset support must preserve each "
+                    "reset-and-invoke pair on the same worker"
+                )
+            token_env = distributed_options.get("token_env")
+            token = (environ if environ is not None else os.environ).get(str(token_env), "")
+            if not token:
+                raise RunError(f"coordinator token environment variable {token_env!r} is not set")
+            if f"env:{token_env}" not in policy.allowed_secret_refs:
+                raise PolicyDenied(
+                    [
+                        (
+                            f"coordinator token env:{token_env} is not an approved secret; "
+                            "add it to allowed_secret_refs"
+                        )
+                    ]
+                )
+            runner = CoordinatorRunner(
+                spec,
+                run_id=run_id,
+                options={
+                    **distributed_options,
+                    "trust_local_app": policy.allow_trusted_local,
+                },
+                token=token,
+                cancel=controller.abort_event,
+                stop_startup=lambda: controller.stopping,
+                on_ready=on_worker_ready,
+                event_sink=lambda event_type, payload: storage.append_run_event(
+                    run_id, event_type, payload
+                ),
+            )
+        else:
+            runner = create_runner(
+                LoadedApplication(spec=spec, base_dir=Path(params["application_base_dir"])),
+                trusted_local=policy.allow_trusted_local,
+                environ=environ if environ is not None else dict(os.environ),
+            )
     world_id, seed = _frozen_world_seed(storage, artifacts, manifest)
     reset = params.get("reset") or {"mode": "none"}
     world = params.get("test_world") or {}

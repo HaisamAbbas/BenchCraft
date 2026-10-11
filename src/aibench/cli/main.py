@@ -33,6 +33,7 @@ from aibench.cli import runs as runs_cli
 from aibench.cli import score as score_cli
 from aibench.cli import sessions as sessions_cli
 from aibench.cli import traces as traces_cli
+from aibench.cli import worker as worker_cli
 from aibench.cli import workspace as workspace_cli
 from aibench.cli.errors import error_document, error_exit
 from aibench.cli.global_options import (
@@ -56,6 +57,7 @@ app.add_typer(runs_cli.app, name="runs")
 app.add_typer(sessions_cli.app, name="sessions")
 app.add_typer(traces_cli.app, name="traces")
 app.add_typer(workspace_cli.app, name="workspace")
+app.add_typer(worker_cli.app, name="worker")
 app.add_typer(connect_cli.app, name="connect")
 app.add_typer(config_cli.app, name="config")
 app.add_typer(cache_cli.app, name="cache")

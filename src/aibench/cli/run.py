@@ -21,11 +21,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import signal
 import socket
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 import typer
 from rich.markup import escape
@@ -41,9 +45,12 @@ from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.core.hashes import content_hash
 from aibench.core.models import (
+    CliTransport,
+    ContainerTransport,
     EffectState,
     ExecutionResult,
     ExecutionStatus,
+    PythonTransport,
     WorkItem,
     WorkItemState,
 )
@@ -58,6 +65,7 @@ from aibench.engine.compile import (
     load_policy,
 )
 from aibench.engine.engine import RunController, RunOutcome, RunState, parse_work_item_key
+from aibench.security.endpoints import is_loopback
 from aibench.services.reports import build_report
 from aibench.services.runs import (
     EXIT_DENIED,
@@ -72,6 +80,7 @@ from aibench.services.runs import (
     lease_state,
     outcome_json,
     request_run_control,
+    reset_mode,
     run_exit_code,
     run_status,
 )
@@ -204,13 +213,228 @@ def _interrupted_before_dispatch(run_id: str | None, *, json_output: bool = Fals
     )
 
 
-async def _execute(run_id: str, storage: Storage, artifacts: ArtifactStore) -> RunOutcome:
+def _worker_ready(details: dict[str, Any]) -> None:
+    url = details.get("url")
+    token_env = details.get("token_env")
+    if isinstance(url, str) and isinstance(token_env, str):
+        args = [
+            "aibench",
+            "worker",
+            "connect",
+            "--coordinator",
+            url,
+            "--app-config",
+            "APP_CONFIG_PATH_ON_WORKER",
+            "--token-env",
+            token_env,
+        ]
+        if details.get("trust_local_app"):
+            args.append("--trust-local-app")
+        command = subprocess.list2cmdline(args) if os.name == "nt" else shlex.join(args)
+        err_console.print(
+            "[bold]Coordinator API is ready.[/bold] Replace APP_CONFIG_PATH_ON_WORKER with "
+            "the application config path on each worker host, then run:\n  " + escape(command)
+        )
+
+
+def _distributed_options(
+    *,
+    workers: int | None,
+    listen_host: str,
+    listen_port: int,
+    advertise_url: str | None,
+    tls_cert: Path | None,
+    tls_key: Path | None,
+    token_env: str,
+    startup_timeout_seconds: int,
+    compiled: CompiledRun,
+    detach: bool,
+    json_output: bool,
+) -> dict[str, Any] | None:
+    changed_without_workers = (
+        listen_host != "127.0.0.1"
+        or listen_port != 8765
+        or advertise_url is not None
+        or tls_cert is not None
+        or tls_key is not None
+        or token_env != "AIBENCH_WORKER_TOKEN"
+        or startup_timeout_seconds != 300
+    )
+    if workers is None:
+        if changed_without_workers:
+            raise _fail(
+                "coordinator options require --workers N",
+                EXIT_INVALID,
+                json_output=json_output,
+            )
+        return None
+    if detach:
+        raise _fail(
+            "--detach cannot be combined with distributed workers; keep the coordinator in the "
+            "foreground so its connection details and worker availability stay visible",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if not token_env or any(
+        not (character.isascii() and (character.isalnum() or character == "_"))
+        for character in token_env
+    ):
+        raise _fail(
+            "--worker-token-env must be an environment variable name",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    token = os.environ.get(token_env, "")
+    if not token:
+        raise _fail(
+            f"worker API token environment variable {token_env!r} is not set",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if (
+        not token.isascii()
+        or len(token) < 32
+        or len(token) > 4096
+        or any(ord(character) < 33 or ord(character) > 126 for character in token)
+    ):
+        raise _fail(
+            "worker API token must be 32 to 4096 visible ASCII characters",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if f"env:{token_env}" not in compiled.policy.allowed_secret_refs:
+        raise _fail(
+            f"worker API token env:{token_env} is not approved; add it to policy "
+            "allowed_secret_refs",
+            EXIT_DENIED,
+            json_output=json_output,
+        )
+    if not listen_host:
+        raise _fail("--worker-host cannot be empty", EXIT_INVALID, json_output=json_output)
+    if bool(tls_cert) != bool(tls_key):
+        raise _fail(
+            "provide both --worker-tls-cert and --worker-tls-key",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if tls_cert is not None and (not tls_cert.is_file() or not tls_key or not tls_key.is_file()):
+        raise _fail(
+            "coordinator TLS certificate and key must be readable files",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    try:
+        parts = urlsplit(advertise_url) if advertise_url else None
+        if parts is not None:
+            _ = parts.port
+    except ValueError as exc:
+        raise _fail(
+            f"invalid --worker-advertise-url: {exc}", EXIT_INVALID, json_output=json_output
+        ) from exc
+    if parts is not None and (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or parts.query
+        or parts.fragment
+        or parts.path not in ("", "/")
+    ):
+        raise _fail(
+            "--worker-advertise-url must be an http(s) origin without credentials, path, "
+            "query, or fragment",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if parts is not None and parts.scheme == "https" and tls_cert is None:
+        raise _fail(
+            "an HTTPS --worker-advertise-url requires coordinator TLS certificate and key",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if parts is not None and tls_cert is not None and parts.scheme != "https":
+        raise _fail(
+            "an HTTP --worker-advertise-url cannot be used with a TLS-enabled coordinator",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if parts is not None and parts.scheme == "http" and not is_loopback(parts.hostname or ""):
+        raise _fail(
+            "worker API bearer tokens require HTTPS on non-loopback coordinator URLs",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if not is_loopback(listen_host):
+        if tls_cert is None:
+            raise _fail(
+                "a non-loopback coordinator listener requires TLS; provide --worker-tls-cert "
+                "and --worker-tls-key",
+                EXIT_INVALID,
+                json_output=json_output,
+            )
+        if parts is None or parts.scheme != "https":
+            raise _fail(
+                "a non-loopback coordinator listener requires an HTTPS "
+                "--worker-advertise-url reachable by worker hosts",
+                EXIT_INVALID,
+                json_output=json_output,
+            )
+    spec = compiled.application.spec
+    if reset_mode(spec, compiled.world is not None) != "none":
+        raise _fail(
+            "coordinator API v1 does not yet support plans that reset per case or per episode",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if isinstance(spec.transport, CliTransport | PythonTransport) and not (
+        spec.revision or spec.environment_digest
+    ):
+        raise _fail(
+            "distributed CLI/Python applications require an owner-declared revision or "
+            "environment_digest so worker hosts can be provisioned against a stable app identity",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    if not (
+        spec.revision
+        or spec.environment_digest
+        or (isinstance(spec.transport, ContainerTransport) and not spec.transport.mounts)
+    ):
+        raise _fail(
+            "distributed application execution requires revision or environment_digest; a "
+            "container pinned by digest without host mounts is also supported",
+            EXIT_INVALID,
+            json_output=json_output,
+        )
+    return {
+        "listen_host": listen_host,
+        "listen_port": listen_port,
+        "advertise_url": advertise_url,
+        "tls_cert": str(tls_cert.expanduser().resolve()) if tls_cert else None,
+        "tls_key": str(tls_key.expanduser().resolve()) if tls_key else None,
+        "token_env": token_env,
+        "startup_timeout_seconds": startup_timeout_seconds,
+        "workers": workers,
+    }
+
+
+async def _execute(
+    run_id: str,
+    storage: Storage,
+    artifacts: ArtifactStore,
+    *,
+    on_worker_ready: Callable[[dict[str, Any]], None] | None = None,
+) -> RunOutcome:
     controller = RunController()
     previous = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, lambda *_: controller.request("interrupt"))
     try:
         return await execute_run(
-            run_id, storage=storage, artifacts=artifacts, controller=controller
+            run_id,
+            storage=storage,
+            artifacts=artifacts,
+            controller=controller,
+            on_worker_ready=on_worker_ready,
         )
     finally:
         signal.signal(signal.SIGINT, previous)
@@ -284,13 +508,18 @@ def _print_outcome(run_id: str, outcome: RunOutcome) -> None:
         console.print(f"  resume with: aibench resume {run_id}")
 
 
-def _run_preview(compiled: CompiledRun, *, run_seed: int | None) -> dict[str, object]:
+def _run_preview(
+    compiled: CompiledRun,
+    *,
+    run_seed: int | None,
+    distributed_workers: dict[str, Any] | None = None,
+) -> dict[str, object]:
     """Describe the exact compiled inputs and selected work without persisting a run."""
     plan = compiled.plan
     measurements = len(compiled.cases) * plan.repetitions
     warmups = len(compiled.cases) * plan.warmup_repetitions
     executions = measurements + warmups
-    return {
+    preview: dict[str, object] = {
         "schema": "aibench.run-preview/1",
         "status": "dry_run",
         "will_dispatch": False,
@@ -335,6 +564,14 @@ def _run_preview(compiled: CompiledRun, *, run_seed: int | None) -> dict[str, ob
             ],
         },
     }
+    if distributed_workers is not None:
+        preview["distributed_workers"] = {
+            "count": distributed_workers["workers"],
+            "coordinator_host": distributed_workers["listen_host"],
+            "coordinator_port": distributed_workers["listen_port"],
+            "startup_timeout_seconds": distributed_workers["startup_timeout_seconds"],
+        }
+    return preview
 
 
 def _launch_detached(
@@ -659,6 +896,40 @@ def run_plan(
     detach: bool = typer.Option(
         False, "--detach", help="Run in a separate supervised process and write output to its log."
     ),
+    workers: int | None = typer.Option(
+        None,
+        "--workers",
+        min=1,
+        max=64,
+        help="Use the coordinator API and wait for this many application-only workers.",
+    ),
+    worker_host: str = typer.Option(
+        "127.0.0.1", "--worker-host", help="Coordinator API bind host (non-loopback requires TLS)."
+    ),
+    worker_port: int = typer.Option(
+        8765, "--worker-port", min=0, max=65535, help="Coordinator API port; 0 selects a free port."
+    ),
+    worker_advertise_url: str | None = typer.Option(
+        None, "--worker-advertise-url", help="Coordinator URL reachable from worker hosts."
+    ),
+    worker_tls_cert: Path | None = typer.Option(  # noqa: B008
+        None, "--worker-tls-cert", help="TLS certificate for the coordinator API."
+    ),
+    worker_tls_key: Path | None = typer.Option(  # noqa: B008
+        None, "--worker-tls-key", help="Private key for the coordinator API certificate."
+    ),
+    worker_token_env: str = typer.Option(
+        "AIBENCH_WORKER_TOKEN",
+        "--worker-token-env",
+        help="Environment variable with the API token.",
+    ),
+    worker_startup_timeout_seconds: int = typer.Option(
+        300,
+        "--worker-startup-timeout-seconds",
+        min=1,
+        max=3600,
+        help="Wait this long for the requested workers to register before dispatch.",
+    ),
     log_file: Path | None = typer.Option(  # noqa: B008
         None,
         "--log-file",
@@ -753,6 +1024,19 @@ def run_plan(
         raise _report_problems(exc, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(None, json_output=json_output) from exc
+    distributed_workers = _distributed_options(
+        workers=workers,
+        listen_host=worker_host,
+        listen_port=worker_port,
+        advertise_url=worker_advertise_url,
+        tls_cert=worker_tls_cert,
+        tls_key=worker_tls_key,
+        token_env=worker_token_env,
+        startup_timeout_seconds=worker_startup_timeout_seconds,
+        compiled=compiled,
+        detach=detach,
+        json_output=json_output,
+    )
     if suite_record is not None and compiled.dataset.content_hash != (
         suite_record.dataset_content_hash
     ):
@@ -763,7 +1047,10 @@ def run_plan(
             json_output=json_output,
         )
     if dry_run:
-        _print_run_preview(_run_preview(compiled, run_seed=run_seed), json_output=json_output)
+        _print_run_preview(
+            _run_preview(compiled, run_seed=run_seed, distributed_workers=distributed_workers),
+            json_output=json_output,
+        )
         return
     event_log_lock = _preflight_event_log(workspace, log_file)
     try:
@@ -781,6 +1068,7 @@ def run_plan(
             artifacts=artifacts,
             granted_by=granted,
             run_seed=run_seed,
+            distributed_workers=distributed_workers,
         )
         if not json_output and not quiet:
             console.print(
@@ -818,7 +1106,14 @@ def run_plan(
                 log_lock=event_log_lock,
             )
             try:
-                outcome = asyncio.run(_execute(run_id, storage, artifacts))
+                outcome = asyncio.run(
+                    _execute(
+                        run_id,
+                        storage,
+                        artifacts,
+                        on_worker_ready=_worker_ready if distributed_workers else None,
+                    )
+                )
             finally:
                 stream.close()
             code = _finish(run_id, outcome, storage, artifacts, json_output, quiet=quiet)
@@ -887,6 +1182,12 @@ def resume(
             record = storage.get_run(run_id)
             if record is None:
                 raise RunError(f"no run committed with run_id={run_id!r}")
+            distributed = record.manifest.parameters.get("distributed_workers") is not None
+            if distributed and detach:
+                raise RunError(
+                    "--detach cannot resume a distributed coordinator; keep it in the foreground "
+                    "to expose its worker connection details"
+                )
             if record.status not in RESUMABLE_STATES:
                 raise RunError(
                     f"run {run_id} is {record.status}; only interrupted or unfinished runs resume"
@@ -964,7 +1265,14 @@ def resume(
                     log_lock=event_log_lock,
                 )
                 try:
-                    outcome = asyncio.run(_execute(run_id, storage, artifacts))
+                    outcome = asyncio.run(
+                        _execute(
+                            run_id,
+                            storage,
+                            artifacts,
+                            on_worker_ready=_worker_ready if distributed else None,
+                        )
+                    )
                 finally:
                     stream.close()
                 code = _finish(run_id, outcome, storage, artifacts, json_output, quiet=quiet)
