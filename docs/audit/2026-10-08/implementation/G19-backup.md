@@ -18,6 +18,12 @@ the atomic directory move. Restore extracts into a private staging directory and
 restores use owner-only file and directory permissions. Windows pins directory handles,
 temporarily marks the validated database read-only, and uses a no-replacement directory rename.
 
+On Windows the restore staging directory uses a short `.ar-.../w` path beneath the project root.
+This keeps the same-volume atomic publication while leaving room for long content-addressed
+artifact names under deeply nested projects. Repair's verified preview uses the system temporary
+directory so it does not add another deep project-root component before restore begins. A
+regression exercises repair with an 80-character path component.
+
 The format is bounded to one million entries, 1 TiB of uncompressed files, a 256 MiB ZIP
 central directory, a 64 MiB manifest, and 250,000 aggregate path components. Restore copies
 the opened archive into a bounded private temporary snapshot, verifies the source did not

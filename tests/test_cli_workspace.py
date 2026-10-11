@@ -1374,8 +1374,10 @@ def test_workspace_repair_previews_then_recovers_and_retains_previous_workspace(
     )
     assert backup.exit_code == 0, backup.output
 
-    project = tmp_path / "project"
-    project.mkdir()
+    # The extra directory depth makes repair's nested verification paths exceed the
+    # traditional Windows MAX_PATH limit unless its preview uses a short temp root.
+    project = tmp_path / ("p" * 80) / "project"
+    project.mkdir(parents=True)
     previous_workspace = Workspace.at(project)
     previous_database = Database.open_workspace(previous_workspace)
     previous_database.close()
@@ -1891,6 +1893,7 @@ def test_workspace_restore_preserves_real_directory_replaced_after_publish(
     assert displaced is not None
     assert not displaced.exists() or not any(displaced.iterdir())
     assert not list(selected.glob(".aibench-restore-*"))
+    assert not list(selected.glob(".ar-*"))
 
 
 def test_workspace_restore_preflights_zip_entry_count_before_materializing_central_directory(
@@ -2115,7 +2118,9 @@ def test_workspace_restore_pins_database_against_windows_path_replacement(
     def connect_while_pinned(database_path: object, *args: object, **kwargs: object):
         nonlocal blocked
         path = Path(database_path) if isinstance(database_path, (str, Path)) else None
-        if path is not None and path.name == "aibench.db" and ".aibench-restore-" in str(path):
+        if path is not None and path.name == "aibench.db" and (
+            ".aibench-restore-" in str(path) or ".ar-" in str(path)
+        ):
             with pytest.raises(OSError):
                 path.unlink()
             blocked = True
@@ -2523,7 +2528,7 @@ def test_windows_restore_rejects_stage_replacement_before_open(
 
     def replace_before_open(path: Path, **kwargs: object) -> int:
         nonlocal marker
-        if path.name.startswith(".aibench-restore-"):
+        if path.name.startswith((".aibench-restore-", ".ar-")):
             path.rename(displaced)
             path.mkdir()
             marker = path / "unrelated.txt"
@@ -2639,6 +2644,7 @@ def test_windows_restore_cleanup_keeps_the_pinned_stage_path(
     assert "force restore cleanup" in json.loads(result.stdout)["message"]
     assert not moved.exists()
     assert not list(selected.glob(".aibench-restore-*"))
+    assert not list(selected.glob(".ar-*"))
 
 
 def test_project_root_resolution_rejects_a_symlink_swap(

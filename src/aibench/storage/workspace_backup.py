@@ -164,7 +164,9 @@ def restore_workspace_backup(
                 payload: Path | None = None
                 try:
                     if os.name == "nt":
-                        stage = Path(tempfile.mkdtemp(prefix=".aibench-restore-", dir=root))
+                        # Keep Windows staging paths short; the project root can already be
+                        # deeply nested, and every artifact adds a 64-character digest.
+                        stage = Path(tempfile.mkdtemp(prefix=".ar-", dir=root))
                         created_stage = stage.lstat()
                         if _is_link(created_stage) or not stat.S_ISDIR(created_stage.st_mode):
                             raise ValidationError("restore staging path is not a real directory")
@@ -187,7 +189,7 @@ def restore_workspace_backup(
                             os.close(stage_fd)
                             stage_fd = None
                             raise
-                        payload = stage / "workspace"
+                        payload = stage / "w"
                         payload.mkdir(mode=0o700)
                         payload_fd = _open_windows_directory_fd(payload, desired_access=0x10080)
                     else:
@@ -265,7 +267,7 @@ def restore_workspace_backup(
                             database_sha256,
                         )
                     if os.name == "nt":
-                        _verify_windows_pinned_payload(stage, payload_fd)
+                        _verify_windows_pinned_payload(payload, payload_fd)
                         for descriptor in reversed(extraction_fds):
                             os.close(descriptor)
                         extraction_fds.clear()
@@ -376,7 +378,10 @@ def _repair_workspace_from_backup_pinned(
     if _is_inside(archive.resolve(strict=True), workspace_path):
         raise ValidationError("repair backup must be outside the .aibench workspace")
 
-    with tempfile.TemporaryDirectory(prefix=".aibench-repair-", dir=root) as temporary:
+    # Keep the verification tree in the system temp directory. Repair staging under a deep
+    # project root can push artifact paths past Windows' legacy MAX_PATH limit before the
+    # restore helper gets a chance to publish them.
+    with tempfile.TemporaryDirectory(prefix=".aibench-repair-") as temporary:
         temporary_root = Path(temporary)
         private_archive = temporary_root / "verified-backup.zip"
         _snapshot_repair_archive(archive, private_archive)
@@ -1348,11 +1353,11 @@ def _verify_pinned_payload(stage_fd: int | None, payload_fd: int | None) -> None
         raise ValidationError("restore staging directory changed before publication")
 
 
-def _verify_windows_pinned_payload(stage: Path, payload_fd: int | None) -> None:
+def _verify_windows_pinned_payload(payload: Path, payload_fd: int | None) -> None:
     if payload_fd is None:
         raise ValidationError("restore staging directory handle is unavailable")
     try:
-        current = (stage / "workspace").lstat()
+        current = payload.lstat()
     except FileNotFoundError as exc:
         raise ValidationError("restore staging directory changed before publication") from exc
     pinned = os.fstat(payload_fd)
