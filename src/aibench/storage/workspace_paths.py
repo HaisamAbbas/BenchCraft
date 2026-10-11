@@ -40,6 +40,7 @@ class _WorkspacePins:
     write_transaction_active: bool = False
     descriptor_directory: Path | None = None
     database_descriptor: int | None = None
+    descriptor_baseline: dict[int, tuple[str, int, int]] = field(default_factory=dict)
     sidecar_descriptors: dict[Path, int] = field(default_factory=dict)
     windows_handle_baseline: set[int] = field(default_factory=set)
     windows_handle_snapshot_initialized: bool = False
@@ -51,6 +52,7 @@ class _WorkspacePins:
 class _OpenHandleSnapshot:
     descriptor_directory: Path | None
     handles: set[int]
+    identities: dict[int, tuple[str, int, int]] = field(default_factory=dict)
 
 
 def migrate_workspace_paths(project_root: Path, *, apply: bool = False) -> dict[str, Any]:
@@ -290,6 +292,9 @@ def _refresh_sqlite_sidecar_descriptors(workspace: Workspace, pins: _WorkspacePi
             opened = descriptor_path.stat()
         except OSError:
             continue
+        identity = (target, opened.st_dev, opened.st_ino)
+        if pins.descriptor_baseline.get(descriptor) == identity:
+            continue
         deleted = target.endswith(" (deleted)") or opened.st_nlink == 0
         cleaned_target = target.removesuffix(" (deleted)")
         basename = Path(cleaned_target).name
@@ -444,7 +449,15 @@ def _descriptor_snapshot() -> _OpenHandleSnapshot:
             descriptors = {int(name) for name in os.listdir(candidate) if name.isdigit()}
         except OSError:
             continue
-        return _OpenHandleSnapshot(candidate, descriptors)
+        identities = {}
+        for descriptor in descriptors:
+            try:
+                target = _descriptor_target(candidate, descriptor)
+                metadata = (candidate / str(descriptor)).stat()
+            except OSError:
+                continue
+            identities[descriptor] = (target, metadata.st_dev, metadata.st_ino)
+        return _OpenHandleSnapshot(candidate, descriptors, identities)
     raise ValidationError("cannot verify SQLite file identity: open descriptors are not enumerable")
 
 
@@ -477,7 +490,6 @@ def _pin_open_database_descriptors(
         _pin_open_windows_database_handles(workspace, pins, snapshot.handles)
         return
     directory = snapshot.descriptor_directory
-    before = snapshot.handles
     opened = set(os.listdir(directory))
     main_descriptors: list[int] = []
     sidecar_descriptors: dict[Path, int] = {}
@@ -494,7 +506,7 @@ def _pin_open_database_descriptors(
         ),
     }
     for name in opened:
-        if not name.isdigit() or int(name) in before:
+        if not name.isdigit():
             continue
         descriptor = int(name)
         descriptor_path = directory / name
@@ -502,6 +514,11 @@ def _pin_open_database_descriptors(
             target = _descriptor_target(directory, descriptor)
             metadata = descriptor_path.stat()
         except OSError:
+            continue
+        identity = (target, metadata.st_dev, metadata.st_ino)
+        # A descriptor number can be re-used after the snapshot. Skip only descriptors
+        # whose target and file identity stayed unchanged across SQLite's open.
+        if snapshot.identities.get(descriptor) == identity:
             continue
         deleted = target.endswith(" (deleted)") or metadata.st_nlink == 0
         cleaned_target = target.removesuffix(" (deleted)")
@@ -536,6 +553,7 @@ def _pin_open_database_descriptors(
     if not main_descriptors:
         raise ValidationError("could not uniquely identify SQLite's opened workspace database")
     pins.descriptor_directory = directory
+    pins.descriptor_baseline = snapshot.identities
     # Several descriptors can refer to the same SQLite database (for example, an
     # inherited or duplicated handle). Every candidate was checked against the pinned
     # path and inode above, so pin a deterministic one while continuing to inspect all

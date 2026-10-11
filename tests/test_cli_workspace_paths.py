@@ -504,9 +504,16 @@ def test_workspace_migrate_paths_accepts_verified_duplicate_database_descriptors
     workspace = Workspace.at(project)
     Database.open_workspace(workspace).close()
     pins = _validate_workspace_paths(project, workspace)
+    reserved_path = tmp_path / "descriptor-number-reserved-before-open"
+    reserved_path.write_text("old descriptor target", encoding="utf-8")
+    reserved = os.open(reserved_path, os.O_RDONLY)
+    snapshot = workspace_paths._descriptor_snapshot()
+    os.close(reserved)
     descriptors = [os.open(workspace.db_path, os.O_RDONLY) for _ in range(2)]
     try:
-        snapshot = workspace_paths._OpenHandleSnapshot(descriptor_directory, set())
+        assert descriptors[0] in snapshot.handles
+        assert snapshot.identities[descriptors[0]][0] == str(reserved_path)
+        assert snapshot.descriptor_directory == descriptor_directory
         workspace_paths._pin_open_database_descriptors(workspace, pins, snapshot)
         assert pins.database_descriptor == min(descriptors)
     finally:
