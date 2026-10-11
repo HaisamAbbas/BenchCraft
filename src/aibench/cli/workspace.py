@@ -23,6 +23,11 @@ from aibench.storage.workspace_backup import (
     restore_workspace_backup,
 )
 from aibench.storage.workspace_integrity import check_workspace
+from aibench.storage.workspace_retention import (
+    load_project_retention_policy,
+    measure_workspace_usage,
+    save_project_retention_policy,
+)
 from aibench.tui.render import safe
 
 app = typer.Typer(help="Inspect and safely maintain workspace storage.")
@@ -45,10 +50,10 @@ def _fail(message: str, *, json_output: bool) -> typer.Exit:
 
 @app.command("gc")
 def garbage_collect(
-    grace_seconds: float = typer.Option(
-        DEFAULT_GC_GRACE_SECONDS,
+    grace_seconds: float | None = typer.Option(
+        None,
         "--grace-seconds",
-        help="Keep unreferenced files newer than this many seconds.",
+        help="Override the workspace retention grace period for this preview or collection.",
     ),
     apply: bool = typer.Option(
         False,
@@ -59,37 +64,30 @@ def garbage_collect(
     json_output: bool = _JSON,
 ) -> None:
     """Preview or remove stale, unreferenced content-addressed artifacts."""
-    if apply and grace_seconds < DEFAULT_GC_GRACE_SECONDS:
+    try:
+        retained_grace_seconds, policy_configured, metadata, metadata_dir = (
+            load_project_retention_policy(workspace or Path.cwd())
+        )
+    except AibenchError as exc:
+        raise _fail(str(exc), json_output=json_output) from exc
+    effective_grace_seconds = retained_grace_seconds if grace_seconds is None else grace_seconds
+    if effective_grace_seconds < 0:
+        raise _fail(
+            "garbage-collection grace period must be finite and non-negative",
+            json_output=json_output,
+        )
+    if apply and effective_grace_seconds < DEFAULT_GC_GRACE_SECONDS:
         raise _fail(
             "applied garbage collection requires a grace period of at least "
             f"{DEFAULT_GC_GRACE_SECONDS:g} seconds",
             json_output=json_output,
         )
-
-    try:
-        project_root = (workspace or Path.cwd()).resolve()
-    except (OSError, RuntimeError) as exc:
-        raise _fail(f"could not resolve project root: {exc}", json_output=json_output) from exc
-    metadata_dir = project_root / ".aibench"
-    try:
-        metadata = metadata_dir.lstat()
-    except FileNotFoundError:
-        raise _fail(f"no aibench workspace at {project_root}", json_output=json_output)
-    except OSError as exc:
+    if apply and policy_configured and effective_grace_seconds < retained_grace_seconds:
         raise _fail(
-            f"could not inspect workspace directory: {exc}", json_output=json_output
-        ) from exc
-    reparse_attribute = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-    if (
-        stat.S_ISLNK(metadata.st_mode)
-        or getattr(metadata, "st_file_attributes", 0) & reparse_attribute
-    ):
-        raise _fail(
-            "workspace .aibench directory must not be a link or reparse point",
+            "applied garbage collection cannot use a grace period shorter than the "
+            "workspace retention policy",
             json_output=json_output,
         )
-    if not stat.S_ISDIR(metadata.st_mode):
-        raise _fail("workspace .aibench path must be a directory", json_output=json_output)
 
     ws = Workspace(root=metadata_dir)
     try:
@@ -136,7 +134,7 @@ def garbage_collect(
     try:
         report = ArtifactStore(ws.artifacts_dir, create=False).garbage_collect(
             referenced,
-            grace_seconds=grace_seconds,
+            grace_seconds=effective_grace_seconds,
             dry_run=not apply,
             expected_parent_metadata=metadata,
         )
@@ -149,7 +147,8 @@ def garbage_collect(
     removed = [_workspace_relative(ws, path) for path in report.removed_paths]
     payload: dict[str, Any] = {
         "mode": "applied" if apply else "dry_run",
-        "grace_seconds": grace_seconds,
+        "grace_seconds": effective_grace_seconds,
+        "retention_policy_configured": policy_configured,
         "scanned_files": report.scanned_files,
         "kept_referenced": report.kept_referenced,
         "kept_within_grace": report.kept_within_grace,
@@ -179,6 +178,66 @@ def garbage_collect(
         console.print(f"  {safe(path)}")
     if len(candidates) > _MAX_PATHS:
         console.print(f"  ... {len(candidates) - _MAX_PATHS} more path(s) omitted")
+
+
+@app.command("usage")
+def usage(
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Show read-only workspace file and byte usage by storage area."""
+    try:
+        result = measure_workspace_usage(workspace or Path.cwd())
+    except (AibenchError, OSError, ValueError) as exc:
+        raise _fail(f"could not measure workspace usage: {exc}", json_output=json_output) from exc
+    if json_output:
+        console.print_json(data=result)
+        return
+    console.print(
+        f"workspace usage: {result['files']} file(s), {result['bytes']} bytes "
+        f"({result['skipped_unsafe']} unsafe path(s) skipped)"
+    )
+    for name, values in result["categories"].items():
+        console.print(f"  {safe(name)}: {values['files']} file(s), {values['bytes']} bytes")
+
+
+@app.command("retention")
+def retention(
+    grace_seconds: float | None = typer.Option(
+        None,
+        "--grace-seconds",
+        help="Persist the minimum age for orphan artifact collection (at least one hour).",
+    ),
+    workspace: Path | None = _WORKSPACE,
+    json_output: bool = _JSON,
+) -> None:
+    """Show or set the workspace's orphan artifact retention period."""
+    try:
+        if grace_seconds is None:
+            value, configured, _, metadata_dir = load_project_retention_policy(
+                workspace or Path.cwd()
+            )
+            result: dict[str, Any] = {
+                "artifact_orphan_grace_seconds": value,
+                "configured": configured,
+                "source": "workspace" if configured else "default",
+                "path": str(metadata_dir / "retention.json"),
+            }
+        else:
+            result, _ = save_project_retention_policy(workspace or Path.cwd(), grace_seconds)
+            result["configured"] = True
+            result["source"] = "workspace"
+    except (AibenchError, OSError, ValueError) as exc:
+        raise _fail(
+            f"could not manage workspace retention policy: {exc}", json_output=json_output
+        ) from exc
+    if json_output:
+        console.print_json(data=result)
+        return
+    console.print(
+        f"orphan artifact retention: {result['artifact_orphan_grace_seconds']:g} seconds "
+        f"({result['source']})"
+    )
 
 
 @app.command("backup")

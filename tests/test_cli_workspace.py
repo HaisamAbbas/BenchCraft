@@ -7,7 +7,10 @@ import os
 import shutil
 import sqlite3
 import stat
+import subprocess
+import sys
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -425,6 +428,771 @@ def test_workspace_gc_negative_grace_keeps_json_error_contract(tmp_path: Path) -
     assert json.loads(result.stdout)["status"] == "error"
 
 
+def test_windows_extended_path_prefix_preserves_extended_and_unc_paths() -> None:
+    from aibench.storage._windows_handles import _extended_path
+
+    assert _extended_path(r"D:\BenchCraft") == r"\\?\D:\BenchCraft"
+    assert _extended_path(r"\\server\share\BenchCraft") == (r"\\?\UNC\server\share\BenchCraft")
+    assert _extended_path(r"\\?\D:\BenchCraft") == r"\\?\D:\BenchCraft"
+    assert _extended_path(r"\\?\UNC\server\share\BenchCraft") == (
+        r"\\?\UNC\server\share\BenchCraft"
+    )
+
+
+def test_workspace_retention_setting_is_persisted_and_controls_gc_default(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    store = ArtifactStore(workspace.artifacts_dir)
+    orphan = store.write_bytes(b"kept by policy", mime_type="text/plain")
+    _old(Path(orphan.uri))
+
+    saved = cli.invoke(
+        app,
+        [
+            "workspace",
+            "retention",
+            "--workspace",
+            str(project),
+            "--grace-seconds",
+            "86400",
+            "--json",
+        ],
+    )
+    assert saved.exit_code == 0, saved.output
+    assert json.loads(saved.stdout)["artifact_orphan_grace_seconds"] == 86400
+    policy = workspace.root / "retention.json"
+    assert json.loads(policy.read_text(encoding="utf-8")) == {
+        "schema_version": 1,
+        "artifact_orphan_grace_seconds": 86400.0,
+    }
+
+    shown = cli.invoke(app, ["workspace", "retention", "--workspace", str(project), "--json"])
+    assert shown.exit_code == 0, shown.output
+    assert json.loads(shown.stdout)["configured"] is True
+
+    preview = cli.invoke(app, ["workspace", "gc", "--workspace", str(project), "--json"])
+    assert preview.exit_code == 0, preview.output
+    assert json.loads(preview.stdout)["grace_seconds"] == 86400
+    assert json.loads(preview.stdout)["candidate_count"] == 0
+    assert Path(orphan.uri).is_file()
+
+    undercut = cli.invoke(
+        app,
+        [
+            "workspace",
+            "gc",
+            "--workspace",
+            str(project),
+            "--grace-seconds",
+            "3600",
+            "--apply",
+            "--json",
+        ],
+    )
+    assert undercut.exit_code == 2, undercut.output
+    assert "shorter than the workspace retention policy" in json.loads(undercut.stdout)["message"]
+    assert Path(orphan.uri).is_file()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory fsync behavior")
+def test_workspace_retention_save_fsyncs_directory_after_atomic_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import workspace_retention
+
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    Database.open_workspace(workspace).close()
+    events: list[str] = []
+    real_fsync = os.fsync
+    real_replace = os.replace
+
+    def observe_fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            events.append("directory_fsync")
+        real_fsync(descriptor)
+
+    def observe_replace(*args: object, **kwargs: object) -> None:
+        real_replace(*args, **kwargs)
+        events.append("publish")
+
+    monkeypatch.setattr(workspace_retention.os, "fsync", observe_fsync)
+    monkeypatch.setattr(workspace_retention.os, "replace", observe_replace)
+
+    workspace_retention.save_retention_policy(workspace.root, 86400)
+
+    assert events[-2:] == ["publish", "directory_fsync"]
+
+
+def test_gc_refuses_a_workspace_swap_between_preflight_and_policy_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import aibench.storage.workspace_retention as retention_module
+
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    save_retention = cli.invoke(
+        app,
+        [
+            "workspace",
+            "retention",
+            "--workspace",
+            str(project),
+            "--grace-seconds",
+            "86400",
+            "--json",
+        ],
+    )
+    assert save_retention.exit_code == 0, save_retention.output
+    orphan = ArtifactStore(workspace.artifacts_dir).write_bytes(
+        b"protected", mime_type="text/plain"
+    )
+    _old(Path(orphan.uri))
+
+    moved = workspace.root.with_name(".aibench-original")
+    replacement = workspace.root.with_name(".aibench-replacement")
+    swapped = False
+
+    def swap_workspace_directory() -> None:
+        workspace.root.rename(moved)
+        workspace.root.mkdir()
+        (workspace.root / "retention.json").write_text(
+            json.dumps({"schema_version": 1, "artifact_orphan_grace_seconds": 3600}),
+            encoding="utf-8",
+        )
+
+    def restore_workspace_directory() -> None:
+        workspace.root.rename(replacement)
+        moved.rename(workspace.root)
+
+    if os.name == "nt":
+        from aibench.storage import _windows_handles
+
+        real_open_relative = _windows_handles.open_relative
+
+        def swap_then_open(directory_handle: int, name: str, **kwargs: object):
+            nonlocal swapped
+            if name == ".aibench" and not swapped:
+                swapped = True
+                swap_workspace_directory()
+                try:
+                    return real_open_relative(directory_handle, name, **kwargs)
+                finally:
+                    restore_workspace_directory()
+            return real_open_relative(directory_handle, name, **kwargs)
+
+        monkeypatch.setattr(_windows_handles, "open_relative", swap_then_open)
+    else:
+        real_open = os.open
+
+        def swap_then_open(path: str | os.PathLike[str], *args: object, **kwargs: object):
+            nonlocal swapped
+            if path == ".aibench" and not swapped:
+                swapped = True
+                swap_workspace_directory()
+                try:
+                    return real_open(path, *args, **kwargs)
+                finally:
+                    restore_workspace_directory()
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(retention_module.os, "open", swap_then_open)
+
+    result = cli.invoke(
+        app,
+        ["workspace", "gc", "--workspace", str(project), "--apply", "--json"],
+    )
+
+    assert swapped
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+    assert Path(orphan.uri).is_file()
+
+
+def test_workspace_retention_show_uses_default_without_writing(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    database = Database.open_workspace(Workspace.at(project))
+    database.close()
+    policy = project / ".aibench" / "retention.json"
+
+    result = cli.invoke(app, ["workspace", "retention", "--workspace", str(project), "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["artifact_orphan_grace_seconds"] == 3600
+    assert payload["configured"] is False
+    assert not policy.exists()
+    assert not list(policy.parent.glob(".retention.*.tmp"))
+
+    invalid = cli.invoke(
+        app,
+        [
+            "workspace",
+            "retention",
+            "--workspace",
+            str(project),
+            "--grace-seconds",
+            "-1",
+            "--json",
+        ],
+    )
+    assert invalid.exit_code == 2, invalid.output
+    assert json.loads(invalid.stdout)["status"] == "error"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-relative retention policy I/O")
+def test_retention_policy_read_stays_bound_to_the_open_workspace_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import _windows_handles
+    from aibench.storage.workspace_retention import load_retention_policy
+
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    Database.open_workspace(workspace).close()
+    policy = workspace.root / "retention.json"
+    policy.write_text(
+        json.dumps({"schema_version": 1, "artifact_orphan_grace_seconds": 86400}),
+        encoding="utf-8",
+    )
+    moved = workspace.root.with_name(".aibench-original")
+    replacement = workspace.root.with_name(".aibench-replacement")
+    real_open_relative = _windows_handles.open_relative
+    swapped = False
+
+    def swap_before_policy_open(directory_handle: int, name: str, **kwargs: object):
+        nonlocal swapped
+        if name == "retention.json" and not swapped:
+            swapped = True
+            workspace.root.rename(moved)
+            workspace.root.mkdir()
+            (workspace.root / "retention.json").write_text(
+                json.dumps({"schema_version": 1, "artifact_orphan_grace_seconds": 3600}),
+                encoding="utf-8",
+            )
+            return real_open_relative(directory_handle, name, **kwargs)
+        return real_open_relative(directory_handle, name, **kwargs)
+
+    monkeypatch.setattr(_windows_handles, "open_relative", swap_before_policy_open)
+
+    value, persisted = load_retention_policy(workspace.root)
+    workspace.root.rename(replacement)
+    moved.rename(workspace.root)
+
+    assert swapped
+    assert persisted is True
+    assert value == 86400
+    assert (
+        json.loads((replacement / "retention.json").read_text(encoding="utf-8"))[
+            "artifact_orphan_grace_seconds"
+        ]
+        == 3600
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-relative retention policy I/O")
+def test_retention_policy_write_publishes_through_the_pinned_workspace_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import _windows_handles
+    from aibench.storage.workspace_retention import load_retention_policy, save_retention_policy
+
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    Database.open_workspace(workspace).close()
+    policy = workspace.root / "retention.json"
+    policy.write_text(
+        json.dumps({"schema_version": 1, "artifact_orphan_grace_seconds": 7200}),
+        encoding="utf-8",
+    )
+    real_rename_relative = _windows_handles.rename_relative
+    published = False
+
+    def observe_pinned_publish(
+        file_handle: int, parent_handle: int, name: str, *, replace: bool
+    ) -> None:
+        nonlocal published
+        if name == "retention.json" and not published:
+            assert (
+                _windows_handles.handle_info(parent_handle).file_id == workspace.root.stat().st_ino
+            )
+            published = True
+        real_rename_relative(file_handle, parent_handle, name, replace=replace)
+
+    monkeypatch.setattr(_windows_handles, "rename_relative", observe_pinned_publish)
+
+    saved = save_retention_policy(workspace.root, 86400)
+    original_value, persisted = load_retention_policy(workspace.root)
+
+    assert published
+    assert saved["artifact_orphan_grace_seconds"] == 86400
+    assert persisted is True
+    assert original_value == 86400
+
+
+def test_workspace_retention_refuses_malformed_or_linked_policy(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    policy = workspace.root / "retention.json"
+    policy.write_text('{"schema_version":1,"artifact_orphan_grace_seconds":NaN}', encoding="utf-8")
+
+    malformed = cli.invoke(app, ["workspace", "retention", "--workspace", str(project), "--json"])
+    assert malformed.exit_code == 2, malformed.output
+    assert json.loads(malformed.stdout)["status"] == "error"
+
+    outside = tmp_path / "outside.json"
+    outside.write_text(
+        '{"schema_version":1,"artifact_orphan_grace_seconds":3600}', encoding="utf-8"
+    )
+    policy.unlink()
+    try:
+        policy.symlink_to(outside)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"file symlinks are unavailable: {exc}")
+
+    linked = cli.invoke(app, ["workspace", "retention", "--workspace", str(project), "--json"])
+    assert linked.exit_code == 2, linked.output
+    assert json.loads(linked.stdout)["status"] == "error"
+
+    policy.unlink()
+    policy.write_text(
+        '{"schema_version":1,"artifact_orphan_grace_seconds":86400,'
+        '"artifact_orphan_grace_seconds":3600}',
+        encoding="utf-8",
+    )
+    duplicate = cli.invoke(app, ["workspace", "retention", "--workspace", str(project), "--json"])
+    assert duplicate.exit_code == 2, duplicate.output
+    assert json.loads(duplicate.stdout)["status"] == "error"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are unavailable")
+def test_workspace_retention_fifo_policy_fails_without_blocking(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    Database.open_workspace(workspace).close()
+    os.mkfifo(workspace.root / "retention.json")
+
+    program = """\
+import sys
+from pathlib import Path
+from aibench.core.errors import ValidationError
+from aibench.storage.workspace_retention import load_retention_policy
+try:
+    load_retention_policy(Path(sys.argv[1]))
+except ValidationError:
+    raise SystemExit(0)
+raise SystemExit(1)
+"""
+    check = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            program,
+            str(workspace.root),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=3,
+    )
+
+    assert check.returncode == 0, check.stderr
+
+
+def test_workspace_usage_opens_workspace_relative_to_pinned_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    Database.open_workspace(workspace).close()
+    (workspace.root / "inside.txt").write_text("inside", encoding="utf-8")
+    external = tmp_path / "external"
+    external.mkdir()
+    external_workspace = Workspace.at(external)
+    Database.open_workspace(external_workspace).close()
+    (external_workspace.root / "sensitive.txt").write_text("outside", encoding="utf-8")
+
+    moved_project = tmp_path / "project-original"
+    swapped = False
+
+    def swap_project_path() -> None:
+        project.rename(moved_project)
+        try:
+            external.rename(project)
+        except BaseException:
+            moved_project.rename(project)
+            raise
+
+    def restore_project_path() -> None:
+        project.rename(external)
+        moved_project.rename(project)
+
+    if os.name == "nt":
+        from aibench.storage import _windows_handles
+
+        real_open_relative = _windows_handles.open_relative
+        pinned_workspace_id: int | None = None
+
+        def swap_before_workspace_open(directory_handle: int, name: str, **kwargs: object):
+            nonlocal pinned_workspace_id, swapped
+            if name == ".aibench" and not swapped:
+                swapped = True
+                assert (
+                    _windows_handles.handle_info(directory_handle).file_id == project.stat().st_ino
+                )
+                swap_project_path()
+                workspace_handle = real_open_relative(directory_handle, name, **kwargs)
+                assert workspace_handle is not None
+                pinned_workspace_id = _windows_handles.handle_info(workspace_handle).file_id
+                assert pinned_workspace_id == (moved_project / ".aibench").stat().st_ino
+                return workspace_handle
+            return real_open_relative(directory_handle, name, **kwargs)
+
+        monkeypatch.setattr(_windows_handles, "open_relative", swap_before_workspace_open)
+    else:
+        import aibench.storage.workspace_retention as retention_module
+
+        real_open = os.open
+
+        def swap_before_workspace_open(
+            path: str | os.PathLike[str], *args: object, **kwargs: object
+        ):
+            nonlocal swapped
+            if path == ".aibench" and not swapped:
+                swapped = True
+                swap_project_path()
+                try:
+                    return real_open(path, *args, **kwargs)
+                finally:
+                    restore_project_path()
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(retention_module.os, "open", swap_before_workspace_open)
+
+    try:
+        result = cli.invoke(app, ["workspace", "usage", "--workspace", str(project), "--json"])
+    finally:
+        if os.name == "nt" and moved_project.exists():
+            restore_project_path()
+
+    assert swapped, result.output
+    if os.name == "nt":
+        assert pinned_workspace_id == workspace.root.stat().st_ino
+        assert result.exit_code == 2, result.output
+        assert json.loads(result.stdout)["status"] == "error"
+        assert (external_workspace.root / "sensitive.txt").read_text(encoding="utf-8") == "outside"
+        return
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["categories"]["other"] == {"files": 1, "bytes": len("inside")}
+    assert not moved_project.exists()
+    assert (external_workspace.root / "sensitive.txt").read_text(encoding="utf-8") == "outside"
+
+
+def test_workspace_retention_setting_stays_with_pinned_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    Database.open_workspace(workspace).close()
+    original_policy = workspace.root / "retention.json"
+    original_policy.write_text(
+        json.dumps({"schema_version": 1, "artifact_orphan_grace_seconds": 7200}),
+        encoding="utf-8",
+    )
+    external = tmp_path / "external"
+    external.mkdir()
+    external_workspace = Workspace.at(external)
+    Database.open_workspace(external_workspace).close()
+    external_policy = external_workspace.root / "retention.json"
+    external_policy.write_text(
+        json.dumps({"schema_version": 1, "artifact_orphan_grace_seconds": 3600}),
+        encoding="utf-8",
+    )
+    moved_project = tmp_path / "project-original"
+    swapped = False
+
+    def swap_project_path() -> None:
+        project.rename(moved_project)
+        external.rename(project)
+
+    def restore_project_path() -> None:
+        project.rename(external)
+        moved_project.rename(project)
+
+    if os.name == "nt":
+        from aibench.storage import _windows_handles
+
+        real_open_relative = _windows_handles.open_relative
+
+        def swap_before_workspace_open(directory_handle: int, name: str, **kwargs: object):
+            nonlocal swapped
+            if name == ".aibench" and not swapped:
+                swapped = True
+                swap_project_path()
+            return real_open_relative(directory_handle, name, **kwargs)
+
+        monkeypatch.setattr(_windows_handles, "open_relative", swap_before_workspace_open)
+    else:
+        import aibench.storage.workspace_retention as retention_module
+
+        real_open = os.open
+
+        def swap_before_workspace_open(
+            path: str | os.PathLike[str], *args: object, **kwargs: object
+        ):
+            nonlocal swapped
+            if path == ".aibench" and not swapped:
+                swapped = True
+                swap_project_path()
+                try:
+                    return real_open(path, *args, **kwargs)
+                finally:
+                    restore_project_path()
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(retention_module.os, "open", swap_before_workspace_open)
+
+    try:
+        result = cli.invoke(
+            app,
+            [
+                "workspace",
+                "retention",
+                "--workspace",
+                str(project),
+                "--grace-seconds",
+                "86400",
+                "--json",
+            ],
+        )
+    finally:
+        if os.name == "nt" and moved_project.exists():
+            restore_project_path()
+
+    assert swapped, result.output
+    if os.name == "nt":
+        assert result.exit_code == 2, result.output
+        assert json.loads(result.stdout)["status"] == "error"
+        assert (
+            json.loads(original_policy.read_text(encoding="utf-8"))["artifact_orphan_grace_seconds"]
+            == 7200
+        )
+    else:
+        assert result.exit_code == 0, result.output
+        assert (
+            json.loads(original_policy.read_text(encoding="utf-8"))["artifact_orphan_grace_seconds"]
+            == 86400
+        )
+    assert (
+        json.loads(external_policy.read_text(encoding="utf-8"))["artifact_orphan_grace_seconds"]
+        == 3600
+    )
+
+
+@pytest.mark.parametrize(
+    "policy_text",
+    [
+        '{"schema_version":1,"artifact_orphan_grace_seconds":' + ("9" * 400) + "}",
+        "[" * 3000 + "0" + "]" * 3000,
+    ],
+    ids=["oversized-number", "deeply-nested-json"],
+)
+def test_workspace_retention_pathological_json_uses_cli_error_envelope(
+    tmp_path: Path, policy_text: str
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    (workspace.root / "retention.json").write_text(policy_text, encoding="utf-8")
+
+    result = cli.invoke(app, ["workspace", "retention", "--workspace", str(project), "--json"])
+
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout)["status"] == "error"
+
+
+def test_workspace_usage_rejects_directory_replacement_during_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    target = workspace.root / "sessions" / "session-001"
+    target.mkdir(parents=True)
+    (target / "plan.json").write_text("original", encoding="utf-8")
+    moved = target.with_name("session-001-original")
+    replacement = target.with_name("session-001-replacement")
+    swapped = False
+    if os.name == "nt":
+        from aibench.storage import _windows_handles
+
+        real_iter_directory = _windows_handles.iter_directory
+
+        def replace_directory(handle: int):
+            nonlocal swapped
+            if not swapped and _windows_handles.handle_info(handle).file_id == target.stat().st_ino:
+                swapped = True
+                target.rename(moved)
+                target.mkdir()
+                (target / "external-data.bin").write_bytes(b"outside")
+            yield from real_iter_directory(handle)
+
+        monkeypatch.setattr(_windows_handles, "iter_directory", replace_directory)
+    else:
+        import aibench.storage.workspace_retention as retention_module
+
+        real_scandir = os.scandir
+        expected_target = target.stat()
+
+        @contextmanager
+        def replace_directory(path: str | os.PathLike[str] | int):
+            nonlocal swapped
+            if (
+                not swapped
+                and isinstance(path, int)
+                and (os.fstat(path).st_dev, os.fstat(path).st_ino)
+                == (expected_target.st_dev, expected_target.st_ino)
+            ):
+                swapped = True
+                target.rename(moved)
+                target.mkdir()
+                (target / "external-data.bin").write_bytes(b"outside")
+                try:
+                    with real_scandir(path) as entries:
+                        yield entries
+                finally:
+                    target.rename(replacement)
+                    moved.rename(target)
+                return
+            with real_scandir(path) as entries:
+                yield entries
+
+        monkeypatch.setattr(retention_module.os, "scandir", replace_directory)
+
+    result = cli.invoke(app, ["workspace", "usage", "--workspace", str(project), "--json"])
+
+    assert swapped, result.output
+    if os.name == "nt":
+        assert result.exit_code == 2, result.output
+        assert json.loads(result.stdout)["status"] == "error"
+        assert (target / "external-data.bin").is_file()
+    else:
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["categories"]["sessions"] == {"files": 1, "bytes": len("original")}
+        assert not (target / "external-data.bin").exists()
+        assert replacement.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-relative directory enumeration")
+def test_workspace_usage_enumerates_the_pinned_windows_directory_after_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.storage import _windows_handles
+
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    target = workspace.root / "sessions" / "session-001"
+    target.mkdir(parents=True)
+    (target / "plan.json").write_text("original", encoding="utf-8")
+    moved = target.with_name("session-001-original")
+    replacement = target.with_name("session-001-replacement")
+    real_iter_directory = _windows_handles.iter_directory
+    swapped = False
+
+    def swap_and_restore(handle: int):
+        nonlocal swapped
+        if _windows_handles.handle_info(handle).file_id == target.stat().st_ino:
+            swapped = True
+            target.rename(moved)
+            target.mkdir()
+            (target / "external-data.bin").write_bytes(b"outside")
+            try:
+                yield from real_iter_directory(handle)
+            finally:
+                target.rename(replacement)
+                moved.rename(target)
+            return
+        yield from real_iter_directory(handle)
+
+    monkeypatch.setattr(_windows_handles, "iter_directory", swap_and_restore)
+
+    result = cli.invoke(app, ["workspace", "usage", "--workspace", str(project), "--json"])
+
+    assert swapped
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["categories"]["sessions"] == {"files": 1, "bytes": len("original")}
+    assert not (target / "external-data.bin").exists()
+    assert replacement.exists()
+
+
+def test_workspace_usage_is_read_only_and_breaks_down_storage_areas(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = Workspace.at(project)
+    database = Database.open_workspace(workspace)
+    database.close()
+    artifact = workspace.artifacts_dir / "ab" / ("ab" + "c" * 62)
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"artifact")
+    session_file = workspace.root / "sessions" / "session-001" / "plan.json"
+    session_file.parent.mkdir(parents=True)
+    session_file.write_bytes(b"plan-data")
+    log = workspace.root / "logs" / "run.log"
+    log.parent.mkdir()
+    log.write_bytes(b"log")
+    unsafe = workspace.root / "external-link"
+    has_unsafe_link = True
+    try:
+        unsafe.symlink_to(tmp_path, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        has_unsafe_link = False
+    before = sorted(
+        path.relative_to(workspace.root).as_posix() for path in workspace.root.rglob("*")
+    )
+
+    result = cli.invoke(app, ["workspace", "usage", "--workspace", str(project), "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["read_only"] is True
+    assert payload["categories"]["artifacts"] == {"files": 1, "bytes": len(b"artifact")}
+    assert payload["categories"]["sessions"] == {"files": 1, "bytes": len(b"plan-data")}
+    assert payload["categories"]["logs"] == {"files": 1, "bytes": len(b"log")}
+    assert payload["categories"]["database"]["files"] >= 1
+    assert payload["skipped_unsafe"] == (1 if has_unsafe_link else 0)
+    after = sorted(
+        path.relative_to(workspace.root).as_posix() for path in workspace.root.rglob("*")
+    )
+    assert before == after
+
+
 def test_workspace_gc_human_output_reports_only_successful_removals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -474,6 +1242,11 @@ def test_workspace_backup_restores_database_artifacts_and_auxiliary_files(
     log = source_workspace.root / "logs" / "run-a.log"
     log.parent.mkdir()
     log.write_text("durable event log\n", encoding="utf-8")
+    retention_policy = source_workspace.root / "retention.json"
+    retention_policy.write_text(
+        json.dumps({"schema_version": 1, "artifact_orphan_grace_seconds": 86400}) + "\n",
+        encoding="utf-8",
+    )
 
     archive = tmp_path / "workspace.zip"
     backup = cli.invoke(
@@ -505,6 +1278,12 @@ def test_workspace_backup_restores_database_artifacts_and_auxiliary_files(
         assert stat.S_IMODE(restored_workspace.db_path.stat().st_mode) == 0o600
     assert (restored_workspace.root / "logs" / "run-a.log").read_text(encoding="utf-8") == (
         "durable event log\n"
+    )
+    assert (
+        json.loads((restored_workspace.root / "retention.json").read_text(encoding="utf-8"))[
+            "artifact_orphan_grace_seconds"
+        ]
+        == 86400
     )
     restored_database = Database.open_workspace(restored_workspace)
     try:
