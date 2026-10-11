@@ -210,18 +210,35 @@ def restore_workspace_backup(
                         for record in manifest["files"]
                         if record["path"] == "workspace/aibench.db"
                     )
-                    (
-                        artifact_count,
-                        database_fd,
-                        database_identity,
-                        database_size,
-                        database_sha256,
-                    ) = _relocate_and_verify_database(
-                        payload,
-                        target,
-                        expected_size=database_record["size_bytes"],
-                        expected_sha256=database_record["sha256"],
-                    )
+                    if sys.platform == "darwin":
+                        if payload_fd is None:
+                            raise ValidationError("restore staging directory handle is unavailable")
+                        (
+                            artifact_count,
+                            database_fd,
+                            database_identity,
+                            database_size,
+                            database_sha256,
+                        ) = _relocate_and_verify_database_in_pinned_directory(
+                            payload_fd,
+                            target,
+                            project_root=root,
+                            expected_size=database_record["size_bytes"],
+                            expected_sha256=database_record["sha256"],
+                        )
+                    else:
+                        (
+                            artifact_count,
+                            database_fd,
+                            database_identity,
+                            database_size,
+                            database_sha256,
+                        ) = _relocate_and_verify_database(
+                            payload,
+                            target,
+                            expected_size=database_record["size_bytes"],
+                            expected_sha256=database_record["sha256"],
+                        )
                     _verify_project_root(root, root_identity)
                     if (
                         database_identity is None
@@ -237,8 +254,11 @@ def restore_workspace_backup(
                             database_sha256,
                         )
                     else:
-                        _verify_pinned_database_digest(
-                            payload / "aibench.db",
+                        if payload_fd is None:
+                            raise ValidationError("restored database could not be pinned")
+                        _verify_pinned_database_digest_at(
+                            payload_fd,
+                            "aibench.db",
                             database_fd,
                             database_identity,
                             database_size,
@@ -266,12 +286,24 @@ def restore_workspace_backup(
                     )
                     published = True
                     _verify_project_root(root, root_identity)
-                    _verify_database_path_digest(
-                        target / "aibench.db",
-                        database_identity,
-                        database_size,
-                        database_sha256,
-                    )
+                    if os.name == "nt":
+                        _verify_database_path_digest(
+                            target / "aibench.db",
+                            database_identity,
+                            database_size,
+                            database_sha256,
+                        )
+                    else:
+                        if payload_fd is None or database_fd is None:
+                            raise ValidationError("restored database could not be pinned")
+                        _verify_pinned_database_digest_at(
+                            payload_fd,
+                            "aibench.db",
+                            database_fd,
+                            database_identity,
+                            database_size,
+                            database_sha256,
+                        )
                 finally:
                     if database_fd is not None and not published:
                         os.close(database_fd)
@@ -1082,17 +1114,192 @@ def _verify_pinned_database_file(path: Path, descriptor: int) -> None:
 def _directory_fd_path(descriptor: int | None) -> Path:
     if descriptor is None or os.name == "nt":
         raise ValidationError("directory-relative restore is unavailable on this platform")
-    candidates = (Path("/proc/self/fd"), Path("/dev/fd"))
-    base = next((candidate for candidate in candidates if candidate.is_dir()), None)
-    if base is None:
-        raise ValidationError("cannot anchor restore staging to the project directory")
-    return base / str(descriptor)
+    proc_fds = Path("/proc/self/fd")
+    if proc_fds.is_dir():
+        return proc_fds / str(descriptor)
+    if sys.platform == "darwin":
+        # macOS exposes descriptors in /dev/fd, but those entries cannot be used as
+        # directory prefixes. F_GETPATH returns the path for the already-pinned handle;
+        # security-sensitive traversal and publication still use dir_fd operations.
+        import fcntl
+
+        raw_path = fcntl.fcntl(descriptor, getattr(fcntl, "F_GETPATH", 50), b"\0" * 1024)
+        path = os.fsdecode(raw_path.split(b"\0", 1)[0])
+        if not path or not Path(path).is_absolute():
+            raise ValidationError("cannot resolve the pinned restore directory")
+        return Path(path)
+    dev_fds = Path("/dev/fd")
+    if dev_fds.is_dir():
+        return dev_fds / str(descriptor)
+    raise ValidationError("cannot anchor restore staging to the project directory")
+
+
+def _relocate_and_verify_database_in_pinned_directory(
+    payload_fd: int,
+    final_workspace: Path,
+    *,
+    project_root: Path,
+    expected_size: int,
+    expected_sha256: str,
+) -> tuple[int, int, tuple[int, int], int, str]:
+    """Relocate SQLite paths in private staging, then replace the payload DB via dirfd.
+
+    macOS has no path syntax for traversing children of an open directory descriptor, and
+    SQLite's VFS expands relative paths before opening the database. Copy the DB to a
+    process-private directory for SQLite work, read artifact objects through the pinned
+    payload handle, then atomically install the rewritten database with ``renameat``.
+    """
+    private_source = _open_pinned_database_at(payload_fd, "aibench.db")
+    try:
+        _verify_database_manifest(private_source, expected_size, expected_sha256)
+        try:
+            with tempfile.TemporaryDirectory(prefix="aibench-restore-db-") as private_directory:
+                private_root = Path(private_directory).resolve()
+                project = project_root.resolve()
+                if _is_inside(private_root, project) or _is_inside(project, private_root):
+                    raise ValidationError(
+                        "private database staging must be outside the project directory"
+                    )
+                private_database = private_root / "aibench.db"
+                _copy_descriptor_to_new_file(private_source, private_database)
+                artifact_count, relocated_fd, _, size, digest = _relocate_and_verify_database(
+                    private_root,
+                    final_workspace,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                    database_path=private_database,
+                    artifact_directory_fd=payload_fd,
+                )
+                if relocated_fd is None:
+                    raise ValidationError("restored database could not be pinned")
+                try:
+                    staged_name = f".aibench-restore-db-{secrets.token_hex(8)}"
+                    staged_fd = os.open(
+                        staged_name,
+                        os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                        0o600,
+                        dir_fd=payload_fd,
+                    )
+                    try:
+                        _copy_descriptor_to_open_file(relocated_fd, staged_fd)
+                        os.chmod(staged_fd, 0o400)
+                        staged_identity = (os.fstat(staged_fd).st_dev, os.fstat(staged_fd).st_ino)
+                        if _hash_descriptor(staged_fd) != (size, digest):
+                            raise ValidationError("restored database changed before publication")
+                        os.replace(
+                            staged_name,
+                            "aibench.db",
+                            src_dir_fd=payload_fd,
+                            dst_dir_fd=payload_fd,
+                        )
+                        with suppress(OSError):
+                            os.fsync(payload_fd)
+                    except BaseException:
+                        with suppress(OSError):
+                            os.unlink(staged_name, dir_fd=payload_fd)
+                        raise
+                    finally:
+                        os.close(staged_fd)
+
+                    installed_fd = _open_pinned_database_at(payload_fd, "aibench.db")
+                    try:
+                        if (os.fstat(installed_fd).st_dev, os.fstat(installed_fd).st_ino) != staged_identity:
+                            raise ValidationError("restored database changed before publication")
+                        identity = staged_identity
+                        _verify_pinned_database_digest_at(
+                            payload_fd, "aibench.db", installed_fd, identity, size, digest
+                        )
+                    except BaseException:
+                        os.close(installed_fd)
+                        raise
+                    return artifact_count, installed_fd, identity, size, digest
+                finally:
+                    os.close(relocated_fd)
+        except OSError as exc:
+            raise ValidationError(f"could not prepare pinned database restore: {exc}") from exc
+    finally:
+        os.close(private_source)
+
+
+def _copy_descriptor_to_new_file(source_fd: int, destination: Path) -> None:
+    with destination.open("xb") as output:
+        _copy_descriptor_to_open_file(source_fd, output.fileno())
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def _copy_descriptor_to_open_file(source_fd: int, destination_fd: int) -> None:
+    position = os.lseek(source_fd, 0, os.SEEK_CUR)
+    try:
+        os.lseek(source_fd, 0, os.SEEK_SET)
+        while block := os.read(source_fd, 1024 * 1024):
+            view = memoryview(block)
+            while view:
+                written = os.write(destination_fd, view)
+                if written <= 0:
+                    raise OSError("could not write restored database")
+                view = view[written:]
+        os.fsync(destination_fd)
+    finally:
+        os.lseek(source_fd, position, os.SEEK_SET)
+
+
+def _open_pinned_database_at(directory_fd: int, name: str) -> int:
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_fd,
+        )
+        current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        pinned = os.fstat(descriptor)
+    except OSError as exc:
+        if descriptor is not None:
+            os.close(descriptor)
+        raise ValidationError("restored database changed while it was being opened") from exc
+    if (
+        _is_link(current)
+        or not stat.S_ISREG(current.st_mode)
+        or not stat.S_ISREG(pinned.st_mode)
+        or current.st_nlink != 1
+        or pinned.st_nlink != 1
+        or (current.st_dev, current.st_ino) != (pinned.st_dev, pinned.st_ino)
+    ):
+        os.close(descriptor)
+        raise ValidationError("restored database changed while it was being opened")
+    assert descriptor is not None
+    return descriptor
+
+
+def _verify_pinned_database_digest_at(
+    directory_fd: int,
+    name: str,
+    descriptor: int,
+    expected_identity: tuple[int, int],
+    expected_size: int,
+    expected_sha256: str,
+) -> None:
+    try:
+        current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise ValidationError("restored database changed before publication") from exc
+    pinned = os.fstat(descriptor)
+    if (
+        _is_link(current)
+        or not stat.S_ISREG(current.st_mode)
+        or current.st_nlink != 1
+        or (current.st_dev, current.st_ino) != (pinned.st_dev, pinned.st_ino)
+        or (pinned.st_dev, pinned.st_ino) != expected_identity
+    ):
+        raise ValidationError("restored database changed before publication")
+    if _hash_descriptor(descriptor) != (expected_size, expected_sha256):
+        raise ValidationError("restored database changed before publication")
 
 
 def _create_pinned_restore_stage(root_fd: int | None) -> tuple[str, int, int, Path]:
     if root_fd is None:
         raise ValidationError("project directory handle is unavailable")
-    directory_path = _directory_fd_path(root_fd)
     stage_name: str | None = None
     for _attempt in range(100):
         candidate = f".aibench-restore-{secrets.token_hex(8)}"
@@ -1116,9 +1323,13 @@ def _create_pinned_restore_stage(root_fd: int | None) -> tuple[str, int, int, Pa
     except BaseException:
         if payload_fd is not None:
             os.close(payload_fd)
-        if stage_fd is not None:
+            payload_fd = None
+        if stage_fd is not None and stage_name is not None:
+            _remove_pinned_restore_stage(root_fd, stage_fd, stage_name)
             os.close(stage_fd)
-        shutil.rmtree(directory_path / stage_name, ignore_errors=True)
+        elif stage_name is not None:
+            with suppress(OSError):
+                os.rmdir(stage_name, dir_fd=root_fd)
         raise
 
 
@@ -1155,8 +1366,7 @@ def _verify_windows_pinned_payload(stage: Path, payload_fd: int | None) -> None:
 
 def _remove_pinned_restore_stage(root_fd: int, stage_fd: int, stage_name: str) -> None:
     try:
-        stage_path = _directory_fd_path(stage_fd)
-        for name in os.listdir(stage_path):
+        for name in os.listdir(stage_fd):
             try:
                 info = os.stat(name, dir_fd=stage_fd, follow_symlinks=False)
                 if stat.S_ISDIR(info.st_mode) and not _is_link(info):
@@ -1226,8 +1436,7 @@ def _mark_windows_directory_handle_for_delete(descriptor: int) -> None:
 
 
 def _clear_directory_fd(descriptor: int) -> None:
-    directory_path = _directory_fd_path(descriptor)
-    for name in os.listdir(directory_path):
+    for name in os.listdir(descriptor):
         try:
             info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             if stat.S_ISDIR(info.st_mode) and not _is_link(info):
@@ -1714,6 +1923,8 @@ def _read_and_validate_archive(
         raise ValidationError("backup archive has no valid manifest")
     try:
         raw_manifest = zipped.read(manifest_info)
+        if raw_manifest.lstrip()[:1] != b"{":
+            raise ValidationError("backup format is unsupported")
         manifest = json.loads(raw_manifest)
     except (
         OSError,
@@ -1943,8 +2154,12 @@ def _relocate_and_verify_database(
     *,
     expected_size: int,
     expected_sha256: str,
+    database_path: Path | None = None,
+    artifact_directory_fd: int | None = None,
 ) -> tuple[int, int | None, tuple[int, int], int, str]:
-    database_path = _regular_file(payload / "aibench.db", "restored workspace database")
+    database_path = _regular_file(
+        database_path or (payload / "aibench.db"), "restored workspace database"
+    )
     database_descriptor = _open_pinned_database_file(database_path)
     database_fd: int | None = database_descriptor
     connection: sqlite3.Connection | None = None
@@ -2047,7 +2262,15 @@ def _relocate_and_verify_database(
                     hex_digest = match.group(1)
                     path = payload / "artifacts" / hex_digest[:2] / hex_digest
                     if digest not in verified:
-                        _verify_file_digest(path, size_bytes, hex_digest)
+                        if artifact_directory_fd is None:
+                            _verify_file_digest(path, size_bytes, hex_digest)
+                        else:
+                            _verify_file_digest_at(
+                                artifact_directory_fd,
+                                ("artifacts", hex_digest[:2], hex_digest),
+                                size_bytes,
+                                hex_digest,
+                            )
                         verified[digest] = size_bytes
                     elif verified[digest] != size_bytes:
                         raise ValidationError(
@@ -2264,6 +2487,51 @@ def _verify_file_digest(path: Path, expected_size: int, expected_hex: str) -> No
     size, digest = _hash_file(path)
     if size != expected_size or digest != expected_hex:
         raise ValidationError(f"backup artifact failed its digest check: {path.name}")
+
+
+def _verify_file_digest_at(
+    directory_fd: int,
+    components: tuple[str, ...],
+    expected_size: int,
+    expected_hex: str,
+) -> None:
+    current_fd = os.dup(directory_fd)
+    descriptor: int | None = None
+    try:
+        for component in components[:-1]:
+            child_fd = os.open(
+                component,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=current_fd,
+            )
+            os.close(current_fd)
+            current_fd = child_fd
+        name = components[-1]
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=current_fd,
+        )
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_size != expected_size
+        ):
+            raise ValidationError(f"backup is missing a valid artifact object: {name}")
+        size, digest = _hash_descriptor(descriptor)
+        if size != expected_size or digest != expected_hex:
+            raise ValidationError(f"backup artifact failed its digest check: {name}")
+    except OSError as exc:
+        raise ValidationError(
+            f"backup is missing a valid artifact object: {components[-1]}"
+        ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(current_fd)
 
 
 def _publish_directory(

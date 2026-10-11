@@ -287,8 +287,12 @@ def test_a_user_benchmarks_an_app_from_the_first_message_to_evidence_in_the_cli(
     assert references and not any(json.dumps(ref)[1:-1] in sent for ref in references)
 
     # Stored facts, read back through headless commands (the same services, E2E-07).
-    [session] = _aibench("sessions", "list", "--json", cwd=project)
-    [run] = _aibench("runs", "list", "--workspace", ".", "--json", cwd=project)
+    sessions_payload = _aibench("sessions", "list", "--json", cwd=project)
+    sessions = sessions_payload.get("data", sessions_payload)
+    [session] = sessions
+    runs_payload = _aibench("runs", "list", "--workspace", ".", "--json", cwd=project)
+    runs = runs_payload.get("data", runs_payload)
+    [run] = runs
     run_id = run["run_id"]
     report = _aibench(
         "report", run_id, "--workspace", ".", "--format", "json", "--out", "-", cwd=project

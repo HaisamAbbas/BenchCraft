@@ -38,7 +38,7 @@ STATUS_OBJECT_PATH_NOT_FOUND = 0xC000003A
 ERROR_NO_MORE_FILES = 18
 FILE_BASIC_INFO_CLASS = 0
 FILE_STANDARD_INFO_CLASS = 1
-FILE_ID_BOTH_DIRECTORY_INFO_CLASS = 10
+FILE_ID_EXTD_DIRECTORY_INFO_CLASS = 19
 FILE_ID_INFO_CLASS = 18
 FILE_DISPOSITION_INFO_CLASS = 4
 _ENUM_BUFFER_SIZE = 64 * 1024
@@ -91,7 +91,7 @@ class _FileIdInfo(ctypes.Structure):
     _fields_ = [("VolumeSerialNumber", ctypes.c_ulonglong), ("FileId", ctypes.c_ubyte * 16)]
 
 
-class _FileIdBothDirectoryInfo(ctypes.Structure):
+class _FileIdExtdDirectoryInfo(ctypes.Structure):
     _fields_ = [
         ("NextEntryOffset", wintypes.DWORD),
         ("FileIndex", wintypes.DWORD),
@@ -104,9 +104,8 @@ class _FileIdBothDirectoryInfo(ctypes.Structure):
         ("FileAttributes", wintypes.DWORD),
         ("FileNameLength", wintypes.DWORD),
         ("EaSize", wintypes.DWORD),
-        ("ShortNameLength", ctypes.c_byte),
-        ("ShortName", wintypes.WCHAR * 12),
-        ("FileId", ctypes.c_longlong),
+        ("ReparsePointTag", wintypes.DWORD),
+        ("FileId", ctypes.c_ubyte * 16),
         ("FileName", wintypes.WCHAR * 1),
     ]
 
@@ -329,7 +328,7 @@ def handle_info(handle: int) -> HandleInfo:
             handle, information_class, ctypes.byref(structure), ctypes.sizeof(structure)
         ):
             raise _raise_last_error("could not inspect workspace entry handle")
-    file_id = int.from_bytes(bytes(identity.FileId[:8]), "little")
+    file_id = int.from_bytes(bytes(identity.FileId), "little")
     return HandleInfo(
         attributes=int(basic.FileAttributes),
         is_directory=bool(standard.Directory),
@@ -346,7 +345,7 @@ def iter_directory(handle: int) -> Iterator[DirectoryEntry]:
     while True:
         if not get_info(
             handle,
-            FILE_ID_BOTH_DIRECTORY_INFO_CLASS,
+            FILE_ID_EXTD_DIRECTORY_INFO_CLASS,
             buffer,
             _ENUM_BUFFER_SIZE,
         ):
@@ -358,12 +357,12 @@ def iter_directory(handle: int) -> Iterator[DirectoryEntry]:
         while True:
             info = ctypes.cast(
                 ctypes.addressof(buffer) + offset,
-                ctypes.POINTER(_FileIdBothDirectoryInfo),
+                ctypes.POINTER(_FileIdExtdDirectoryInfo),
             ).contents
             if info.FileNameLength % 2:
                 raise OSError("Windows returned a malformed directory entry")
             name_address = (
-                ctypes.addressof(buffer) + offset + _FileIdBothDirectoryInfo.FileName.offset
+                ctypes.addressof(buffer) + offset + _FileIdExtdDirectoryInfo.FileName.offset
             )
             name = ctypes.wstring_at(name_address, info.FileNameLength // 2)
             if name not in {".", ".."}:
@@ -371,13 +370,13 @@ def iter_directory(handle: int) -> Iterator[DirectoryEntry]:
                     name=name,
                     attributes=int(info.FileAttributes),
                     size=max(0, int(info.EndOfFile)),
-                    file_id=int(info.FileId) & 0xFFFFFFFFFFFFFFFF,
+                    file_id=int.from_bytes(bytes(info.FileId), "little"),
                 )
             next_offset = int(info.NextEntryOffset)
             if not next_offset:
                 break
             if (
-                next_offset < _FileIdBothDirectoryInfo.FileName.offset
+                next_offset < _FileIdExtdDirectoryInfo.FileName.offset
                 or offset + next_offset >= _ENUM_BUFFER_SIZE
             ):
                 raise OSError("Windows returned invalid directory entry offsets")

@@ -97,6 +97,10 @@ def _perform_path_migration(
         descriptors_before = _descriptor_snapshot()
         database = Database.open_readonly(workspace.db_path)
         try:
+            # sqlite3 can defer opening the main database until its first btree access.
+            # Force that open before comparing the process's handles with the pinned
+            # workspace file, then begin the read snapshot only after the identity check.
+            database.connection.execute("PRAGMA page_count").fetchone()
             _pin_open_database_descriptors(workspace, pins, descriptors_before)
             pins.database_open = True
             connection = database.connection
@@ -417,6 +421,7 @@ def _open_readwrite(path: Path, workspace: Workspace, pins: _WorkspacePins) -> D
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA page_count").fetchone()
         database = Database(connection)
         pins.database_open = True
         _pin_open_database_descriptors(workspace, pins, descriptors_before)

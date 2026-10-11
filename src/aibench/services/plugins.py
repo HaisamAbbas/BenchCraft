@@ -436,7 +436,11 @@ def install(plan: InstallPlan, progress: Callable[[str], None]) -> dict[str, Any
 
     registry = EvaluatorRegistry.with_native()
     loads = registry.load_plugin_environment(plan.python)
-    errors = [load.error for load in loads if load.error]
+    errors = [
+        load.error
+        for load in loads
+        if load.error and load.plugin.name == plan.plugin.name
+    ]
     if errors:
         raise PluginInstallError(f"the plugin environment does not load: {errors[0]}")
     found = sorted(

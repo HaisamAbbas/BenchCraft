@@ -113,7 +113,7 @@ def test_workspace_gc_refuses_a_symlinked_metadata_directory(tmp_path: Path) -> 
     assert result.exit_code == 2, result.output
     payload = json.loads(result.stdout)
     assert payload["status"] == "error"
-    assert "must not be a link" in payload["message"]
+    assert "link" in payload["message"]
     assert Path(orphan.uri).is_file()
 
 
@@ -1895,8 +1895,8 @@ def test_workspace_restore_uses_private_archive_snapshot_after_preflight(
     data_offset = info.header_offset + 30 + name_length + extra_length
     original_preflight = workspace_backup._preflight_zip_archive
 
-    def mutate_original_after_snapshot(snapshot: object) -> None:
-        original_preflight(snapshot)
+    def mutate_original_after_snapshot(snapshot: object, **kwargs: object) -> None:
+        original_preflight(snapshot, **kwargs)
         changed = bytearray(archive.read_bytes())
         changed[data_offset] ^= 0xFF
         archive.write_bytes(changed)
@@ -1928,7 +1928,7 @@ def test_workspace_restore_normalizes_deeply_nested_manifest_json(tmp_path: Path
     )
 
     assert result.exit_code == 2, result.output
-    assert "manifest is malformed" in json.loads(result.stdout)["message"]
+    assert "backup format is unsupported" in json.loads(result.stdout)["message"]
     assert not (selected / ".aibench").exists()
 
 
@@ -1961,7 +1961,7 @@ def test_workspace_restore_detects_database_replacement_before_sqlite_use(
 
     def replace_before_connect(database_path: object, *args: object, **kwargs: object):
         path = Path(database_path) if isinstance(database_path, (str, Path)) else None
-        if path is not None and path.name == "aibench.db" and ".aibench-restore-" in str(path):
+        if path is not None and path.name == "aibench.db":
             path.unlink()
             os.link(external_database, path)
         return real_connect(database_path, *args, **kwargs)
@@ -2267,6 +2267,159 @@ def test_workspace_restore_rejects_non_text_catalog_digest_without_traceback(
             expected_size=expected_size,
             expected_sha256=expected_sha256,
         )
+
+
+def test_pinned_database_relocation_ignores_a_replaced_payload_path(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("pinned working directories use POSIX file descriptors")
+    from aibench.storage import workspace_backup
+
+    workspace = _workspace_payload_with_artifact(tmp_path)
+    payload_fd = os.open(workspace.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    outside = tmp_path / "outside"
+    shutil.copytree(workspace.root, outside)
+    outside_database = outside / "aibench.db"
+    outside_before = workspace_backup._hash_file(outside_database)
+    outside_mode = stat.S_IMODE(outside_database.stat().st_mode)
+    expected_size, expected_sha256 = workspace_backup._hash_file(workspace.db_path)
+    displaced = tmp_path / "displaced-payload"
+    database_fd: int | None = None
+    workspace.root.rename(displaced)
+    workspace.root.symlink_to(outside, target_is_directory=True)
+    try:
+        count, database_fd, identity, size, digest = (
+            workspace_backup._relocate_and_verify_database_in_pinned_directory(
+                payload_fd,
+                tmp_path / "restored" / ".aibench",
+                project_root=tmp_path,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+        )
+
+        assert count == 1
+        assert identity == (os.fstat(database_fd).st_dev, os.fstat(database_fd).st_ino)
+        assert size == os.fstat(database_fd).st_size
+        assert digest != expected_sha256  # relocation rewrites the catalog's artifact URI
+        assert workspace_backup._hash_file(outside_database) == outside_before
+        assert stat.S_IMODE(outside_database.stat().st_mode) == outside_mode
+        connection = sqlite3.connect(displaced / "aibench.db")
+        (uri,) = connection.execute("SELECT uri FROM artifacts").fetchone()
+        connection.close()
+        assert uri.startswith(str(tmp_path / "restored" / ".aibench"))
+    finally:
+        if database_fd is not None:
+            os.chmod(database_fd, 0o600)
+            os.close(database_fd)
+        os.close(payload_fd)
+        workspace.root.unlink()
+        displaced.rename(workspace.root)
+
+
+def test_pinned_database_relocation_rejects_staged_entry_swap_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("pinned working directories use POSIX file descriptors")
+    from aibench.storage import workspace_backup
+
+    workspace = _workspace_payload_with_artifact(tmp_path)
+    payload_fd = os.open(workspace.root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    outside_database = tmp_path / "outside.db"
+    shutil.copyfile(workspace.db_path, outside_database)
+    outside_before = workspace_backup._hash_file(outside_database)
+    original_database = tmp_path / "original.db"
+    shutil.copyfile(workspace.db_path, original_database)
+    expected_size, expected_sha256 = workspace_backup._hash_file(workspace.db_path)
+    real_replace = os.replace
+    swapped = False
+
+    def replace_staged_entry(src: object, dst: object, *args: object, **kwargs: object) -> None:
+        nonlocal swapped
+        if (
+            isinstance(src, str)
+            and src.startswith(".aibench-restore-db-")
+            and dst == "aibench.db"
+            and kwargs.get("src_dir_fd") == payload_fd
+            and kwargs.get("dst_dir_fd") == payload_fd
+        ):
+            os.unlink(src, dir_fd=payload_fd)
+            os.symlink(outside_database, src, dir_fd=payload_fd)
+            swapped = True
+        real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(workspace_backup.os, "replace", replace_staged_entry)
+    try:
+        with pytest.raises(ValidationError, match="changed while it was being opened"):
+            workspace_backup._relocate_and_verify_database_in_pinned_directory(
+                payload_fd,
+                tmp_path / "restored" / ".aibench",
+                project_root=tmp_path,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+
+        assert swapped
+        assert outside_database.is_file()
+        assert workspace_backup._hash_file(outside_database) == outside_before
+    finally:
+        os.close(payload_fd)
+        restored_database = workspace.root / "aibench.db"
+        if restored_database.is_symlink():
+            restored_database.unlink()
+        shutil.copyfile(original_database, restored_database)
+
+
+def test_workspace_restore_rejects_payload_path_swap_without_touching_outside_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX restore stages are pinned with directory descriptors")
+    from aibench.storage import workspace_backup
+
+    source = tmp_path / "source"
+    source.mkdir()
+    workspace = Workspace.at(source)
+    database = Database.open_workspace(workspace)
+    storage = Storage(database)
+    artifacts = ArtifactStore(workspace.artifacts_dir)
+    reference = artifacts.write_bytes(b"restore race", mime_type="text/plain")
+    commit_verified_artifact(artifacts, storage, reference)
+    database.close()
+    archive = tmp_path / "workspace.zip"
+    workspace_backup.create_workspace_backup(source, archive)
+
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    outside = tmp_path / "outside-copy"
+    outside_database = outside / "aibench.db"
+    outside_before: tuple[int, str] | None = None
+    outside_mode: int | None = None
+    displaced: Path | None = None
+    real_extract = workspace_backup._extract_verified_files
+
+    def replace_payload_after_extraction(*args: object, **kwargs: object) -> None:
+        nonlocal outside_before, outside_mode, displaced
+        payload = args[3]
+        assert isinstance(payload, Path)
+        real_extract(*args, **kwargs)
+        pinned_path = payload.resolve(strict=True)
+        shutil.copytree(pinned_path, outside)
+        outside_before = workspace_backup._hash_file(outside_database)
+        outside_mode = stat.S_IMODE(outside_database.stat().st_mode)
+        displaced = pinned_path.with_name("workspace-displaced")
+        pinned_path.rename(displaced)
+        pinned_path.symlink_to(outside, target_is_directory=True)
+
+    monkeypatch.setattr(workspace_backup, "_extract_verified_files", replace_payload_after_extraction)
+    with pytest.raises(ValidationError, match="restore staging directory changed"):
+        workspace_backup.restore_workspace_backup(archive, selected)
+
+    assert outside_before is not None and outside_mode is not None
+    assert workspace_backup._hash_file(outside_database) == outside_before
+    assert stat.S_IMODE(outside_database.stat().st_mode) == outside_mode
+    assert not (selected / ".aibench").exists()
+    assert displaced is not None and not displaced.exists()
 
 
 def test_windows_restore_pins_project_ancestors(tmp_path: Path) -> None:

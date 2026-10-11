@@ -474,9 +474,12 @@ def import_dataset(
                         PydanticValidationError,
                         TypeError,
                         ValueError,
-                        RecursionError,
                     ) as exc:
                         raise DatasetImportError(f"record {record_number}: {exc}") from exc
+                    except RecursionError as exc:
+                        raise DatasetImportError(
+                            f"record {record_number}: JSON record is nested too deeply to import"
+                        ) from exc
                     try:
                         encoded_line = line.encode("utf-8")
                     except UnicodeEncodeError as exc:

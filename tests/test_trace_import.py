@@ -142,9 +142,11 @@ def test_malformed_nested_trace_shape_is_a_json_input_error(traced: tuple[Path, 
     )
     assert result.exit_code == 2, result.output
     assert json.loads(result.stdout) == {
+        "schema": "aibench.cli-error/1",
         "status": "error",
         "message": "resourceSpans[0] entries must be objects",
         "exit_code": 2,
+        "_cli": {"schema": "aibench.cli-output/1", "exit_code": 2},
     }
     assert "Traceback" not in result.output
 

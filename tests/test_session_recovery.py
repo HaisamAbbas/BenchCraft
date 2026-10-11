@@ -94,7 +94,11 @@ def test_reopening_after_a_kill_shows_the_real_state_and_restarts_nothing(tmp_pa
     """10-G1."""
     h = SessionHarness(tmp_path)
     slow = {c: "slow 0.7" for c in "abcd"}
-    ctl = h.open_session(slow, objectives=("catch wrong answers",))
+    ctl = h.open_session(
+        slow,
+        objectives=("catch wrong answers",),
+        environment_digest="session-recovery-test-runtime-v1",
+    )
     session_id = ctl.session_id
     run_id = _start_then_kill(h, ctl, "act-start")
     invoked = h.count()
@@ -115,7 +119,7 @@ def test_reopening_after_a_kill_shows_the_real_state_and_restarts_nothing(tmp_pa
 
     async def resume() -> None:
         action = await reopened.control_run(ActionKind.RESUME_RUN, action_id="act-resume")
-        assert action.state is ActionState.DONE
+        assert action.state is ActionState.DONE, action.reason
         outcome = await reopened.wait_for_run(run_id)
         assert outcome is not None and outcome.state.value == "completed"
         assert outcome.counts["execution"] == {"succeeded": 4}
@@ -138,7 +142,14 @@ def test_a_killed_effectful_run_leaves_unknown_effect_work_for_the_user(tmp_path
     # (a full suite with other work running) sometimes killed only after the case had
     # finished, leaving nothing in flight to report; 3 s leaves room for a slow kill.
     data = h.dataset({c: "slow 3" for c in "abc"})
-    config = json.loads((h.root / h.cli_app(effects="reversible")).read_text())
+    config = json.loads(
+        (
+            h.root
+            / h.cli_app(
+                effects="reversible", environment_digest="session-recovery-test-runtime-v1"
+            )
+        ).read_text()
+    )
     assert config["effects"] == "reversible"
     ctl = SessionController.create(
         storage=storage,

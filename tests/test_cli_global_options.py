@@ -249,7 +249,7 @@ def test_non_interactive_plugin_install_requires_explicit_yes(
 
 
 def test_root_help_lists_global_scripting_and_selection_options() -> None:
-    result = cli.invoke(app, ["--help"])
+    result = CliRunner(env={"COLUMNS": "140", "NO_COLOR": "1"}).invoke(app, ["--help"])
     assert result.exit_code == 0
     for option in ("--config", "--json", "--non-interactive", "--policy"):
         assert option in result.output

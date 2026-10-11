@@ -21,6 +21,7 @@ POLICY_VERSION = 1
 MAX_POLICY_BYTES = 16 * 1024
 MAX_USAGE_ENTRIES = 1_000_000
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_SUPPORTS_DIR_FD_OPEN = os.open in os.supports_dir_fd
 
 
 def retention_policy_path(workspace_root: Path) -> Path:
@@ -559,7 +560,7 @@ def measure_workspace_usage(project_root: Path) -> dict[str, Any]:
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor_scan = (
         os.name != "nt"
-        and os.open in os.supports_dir_fd
+        and _SUPPORTS_DIR_FD_OPEN
         and hasattr(os, "O_DIRECTORY")
         and hasattr(os, "O_NOFOLLOW")
     )

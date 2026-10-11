@@ -89,7 +89,11 @@ def test_reopening_a_session_says_its_plugin_needs_the_matching_core(
     venv = tmp_path / "plugin-env"
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True)
     python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    [site, *_] = environment_site_paths(python)
+    site = next(
+        path
+        for path in environment_site_paths(python)
+        if path.is_relative_to(venv.resolve())
+    )
     _dist(site, "aibench", "0.1.0rc24")  # the old core pip left in place
     _dist(
         site,
@@ -100,7 +104,7 @@ def test_reopening_a_session_says_its_plugin_needs_the_matching_core(
     (site / f"{PLUGIN}.py").write_text(NEWER_ADAPTER, encoding="utf-8")
     # The environment imports aibench from this checkout and its dependencies from ours.
     host_site = next(p for p in sys.path if p.endswith("site-packages"))
-    paths = [str(SRC), host_site]
+    paths = [str(SRC), str(site), host_site]
 
     h = SessionHarness(tmp_path / "project")
     ctl = h.open_session(
