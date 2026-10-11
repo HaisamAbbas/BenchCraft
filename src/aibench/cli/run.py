@@ -32,6 +32,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import typer
+from pydantic import ValidationError
 from rich.markup import escape
 
 from aibench.cli.errors import error_exit
@@ -53,6 +54,12 @@ from aibench.core.models import (
     PythonTransport,
     WorkItem,
     WorkItemState,
+)
+from aibench.core.plans import (
+    ClosedLoopLoadProfile,
+    LoadProfile,
+    OpenLoopLoadProfile,
+    RampLoadProfile,
 )
 from aibench.datasets.suites import DatasetSuiteRecord, resolve_dataset_suite
 from aibench.engine.compile import (
@@ -574,6 +581,39 @@ def _run_preview(
     return preview
 
 
+def _load_profile_override(
+    *,
+    closed_loop: bool,
+    open_loop_rps: float | None,
+    ramp_start_rps: float | None,
+    ramp_end_rps: float | None,
+    ramp_duration_seconds: float | None,
+) -> LoadProfile | None:
+    """Build a direct CLI load-profile override and reject partial ramp options."""
+    ramp_values = (ramp_start_rps, ramp_end_rps, ramp_duration_seconds)
+    ramp_selected = any(value is not None for value in ramp_values)
+    selected_modes = int(closed_loop) + int(open_loop_rps is not None) + int(ramp_selected)
+    if selected_modes > 1:
+        raise ValueError("choose only one of --closed-loop, --open-loop-rps or ramp options")
+    if ramp_selected and not all(value is not None for value in ramp_values):
+        raise ValueError(
+            "--ramp-start-rps, --ramp-end-rps and --ramp-duration-seconds must be provided together"
+        )
+    if closed_loop:
+        return ClosedLoopLoadProfile()
+    if open_loop_rps is not None:
+        return OpenLoopLoadProfile(requests_per_second=open_loop_rps)
+    if ramp_selected:
+        assert ramp_start_rps is not None and ramp_end_rps is not None
+        assert ramp_duration_seconds is not None
+        return RampLoadProfile(
+            start_requests_per_second=ramp_start_rps,
+            end_requests_per_second=ramp_end_rps,
+            ramp_duration_seconds=ramp_duration_seconds,
+        )
+    return None
+
+
 def _launch_detached(
     run_id: str,
     project_root: Path,
@@ -825,6 +865,35 @@ def run_plan(
         max=64,
         help="Override concurrent application calls.",
     ),
+    closed_loop: bool = typer.Option(
+        False,
+        "--closed-loop",
+        help="Override the plan and dispatch work as application slots become free.",
+    ),
+    open_loop_rps: float | None = typer.Option(
+        None,
+        "--open-loop-rps",
+        min=0.001,
+        max=10_000,
+        help="Offer measured first attempts at a fixed requests-per-second rate.",
+    ),
+    ramp_start_rps: float | None = typer.Option(
+        None,
+        "--ramp-start-rps",
+        min=0.001,
+        max=10_000,
+        help="Starting rate for a ramp profile; provide all three ramp options.",
+    ),
+    ramp_end_rps: float | None = typer.Option(
+        None, "--ramp-end-rps", min=0.001, max=10_000, help="Final rate for a ramp profile."
+    ),
+    ramp_duration_seconds: float | None = typer.Option(
+        None,
+        "--ramp-duration-seconds",
+        min=0.000001,
+        max=86_400,
+        help="Ramp duration; after this duration the final rate is held.",
+    ),
     evaluation_concurrency: int | None = typer.Option(
         None,
         "--evaluation-concurrency",
@@ -993,6 +1062,13 @@ def run_plan(
             raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
 
     try:
+        load_profile = _load_profile_override(
+            closed_loop=closed_loop,
+            open_loop_rps=open_loop_rps,
+            ramp_start_rps=ramp_start_rps,
+            ramp_end_rps=ramp_end_rps,
+            ramp_duration_seconds=ramp_duration_seconds,
+        )
         compiled = compile_plan(
             plan,
             policy=load_policy(policy),
@@ -1005,6 +1081,7 @@ def run_plan(
                 repetitions=repetitions,
                 warmup_repetitions=warmup_repetitions,
                 application_concurrency=application_concurrency,
+                load_profile=load_profile,
                 evaluation_concurrency=evaluation_concurrency,
                 max_attempts=max_attempts,
                 evaluation_timeout_seconds=evaluation_timeout_seconds,
@@ -1022,6 +1099,8 @@ def run_plan(
         )
     except AibenchError as exc:
         raise _report_problems(exc, json_output=json_output) from exc
+    except (ValidationError, ValueError) as exc:
+        raise _fail(str(exc), EXIT_INVALID, json_output=json_output) from exc
     except KeyboardInterrupt as exc:
         raise _interrupted_before_dispatch(None, json_output=json_output) from exc
     distributed_workers = _distributed_options(

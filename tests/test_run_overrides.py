@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from aibench.core.plans import BudgetLimits, ExecutablePlan
+from aibench.core.plans import BudgetLimits, ExecutablePlan, OpenLoopLoadProfile
 from aibench.engine.compile import (
     PlanInvalid,
     PolicyDenied,
@@ -84,6 +84,12 @@ def test_direct_overrides_update_plan_and_respect_plan_validation() -> None:
     assert updated.budgets.max_cost_usd == 1.5
     assert updated.budgets.estimated_cost_per_application_call_usd == 0.25
     assert updated.cache.executions is True and updated.cache.evaluations is False
+
+    profiled = apply_run_plan_overrides(
+        plan,
+        RunPlanOverrides(load_profile=OpenLoopLoadProfile(requests_per_second=12.5)),
+    )
+    assert profiled.load_profile == OpenLoopLoadProfile(requests_per_second=12.5)
 
     with pytest.raises(PlanInvalid, match="max_cost_usd needs"):
         apply_run_plan_overrides(plan, RunPlanOverrides(max_cost_usd=1))

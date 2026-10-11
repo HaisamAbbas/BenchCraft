@@ -138,6 +138,54 @@ def test_run_dry_run_shows_exact_overridden_scope_and_dispatch_matches_it(
         storage.db.close()
 
 
+def test_run_dry_run_freezes_direct_load_profile_override(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    plan = h.plan(
+        dataset=h.dataset({"case-a": "hi"}),
+        application=h.cli_app(),
+    )
+    base = [
+        "run",
+        "--plan",
+        str(plan),
+        "--workspace",
+        str(h.workspace.root.parent),
+        "--trust-local-app",
+        "--dry-run",
+        "--json",
+    ]
+    fixed = cli.invoke(app, [*base, "--open-loop-rps", "6"])
+    assert fixed.exit_code == 0, fixed.output
+    assert _json(fixed.stdout)["frozen"]["effective_plan"]["load_profile"] == {
+        "mode": "open_loop",
+        "requests_per_second": 6.0,
+    }
+
+    ramp = cli.invoke(
+        app,
+        [
+            *base,
+            "--ramp-start-rps",
+            "1",
+            "--ramp-end-rps",
+            "9",
+            "--ramp-duration-seconds",
+            "30",
+        ],
+    )
+    assert ramp.exit_code == 0, ramp.output
+    assert _json(ramp.stdout)["frozen"]["effective_plan"]["load_profile"] == {
+        "mode": "ramp",
+        "start_requests_per_second": 1.0,
+        "end_requests_per_second": 9.0,
+        "ramp_duration_seconds": 30.0,
+    }
+
+    invalid = cli.invoke(app, [*base, "--closed-loop", "--open-loop-rps", "6"])
+    assert invalid.exit_code == 2, invalid.output
+    assert h.count() == 0 and not h.workspace.db_path.exists()
+
+
 def test_run_rejects_non_finite_wall_budget_before_preview_or_dispatch(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     plan = h.plan(

@@ -215,6 +215,20 @@
       "title": "CaseSelection",
       "type": "object"
     },
+    "ClosedLoopLoadProfile": {
+      "additionalProperties": false,
+      "description": "Dispatch the next request when an application concurrency slot becomes free.",
+      "properties": {
+        "mode": {
+          "const": "closed_loop",
+          "default": "closed_loop",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "ClosedLoopLoadProfile",
+      "type": "object"
+    },
     "ConcurrencyLimits": {
       "additionalProperties": false,
       "properties": {
@@ -317,6 +331,29 @@
         "metric"
       ],
       "title": "MetricBinding",
+      "type": "object"
+    },
+    "OpenLoopLoadProfile": {
+      "additionalProperties": false,
+      "description": "Offer measured first attempts at a fixed target arrival rate.",
+      "properties": {
+        "mode": {
+          "const": "open_loop",
+          "default": "open_loop",
+          "title": "Mode",
+          "type": "string"
+        },
+        "requests_per_second": {
+          "maximum": 10000,
+          "minimum": 0.001,
+          "title": "Requests Per Second",
+          "type": "number"
+        }
+      },
+      "required": [
+        "requests_per_second"
+      ],
+      "title": "OpenLoopLoadProfile",
       "type": "object"
     },
     "PluginEnvironmentRef": {
@@ -426,6 +463,43 @@
         "applies_to"
       ],
       "title": "Quota",
+      "type": "object"
+    },
+    "RampLoadProfile": {
+      "additionalProperties": false,
+      "description": "Linearly ramp offered arrival rate up, then keep the final rate.",
+      "properties": {
+        "end_requests_per_second": {
+          "maximum": 10000,
+          "minimum": 0.001,
+          "title": "End Requests Per Second",
+          "type": "number"
+        },
+        "mode": {
+          "const": "ramp",
+          "default": "ramp",
+          "title": "Mode",
+          "type": "string"
+        },
+        "ramp_duration_seconds": {
+          "exclusiveMinimum": 0,
+          "maximum": 86400,
+          "title": "Ramp Duration Seconds",
+          "type": "number"
+        },
+        "start_requests_per_second": {
+          "maximum": 10000,
+          "minimum": 0.001,
+          "title": "Start Requests Per Second",
+          "type": "number"
+        }
+      },
+      "required": [
+        "start_requests_per_second",
+        "end_requests_per_second",
+        "ramp_duration_seconds"
+      ],
+      "title": "RampLoadProfile",
       "type": "object"
     },
     "ReleaseGate": {
@@ -552,6 +626,28 @@
       "title": "Gates",
       "type": "array"
     },
+    "load_profile": {
+      "discriminator": {
+        "mapping": {
+          "closed_loop": "#/$defs/ClosedLoopLoadProfile",
+          "open_loop": "#/$defs/OpenLoopLoadProfile",
+          "ramp": "#/$defs/RampLoadProfile"
+        },
+        "propertyName": "mode"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ClosedLoopLoadProfile"
+        },
+        {
+          "$ref": "#/$defs/OpenLoopLoadProfile"
+        },
+        {
+          "$ref": "#/$defs/RampLoadProfile"
+        }
+      ],
+      "title": "Load Profile"
+    },
     "metrics": {
       "default": [],
       "items": {
@@ -559,6 +655,13 @@
       },
       "title": "Metrics",
       "type": "array"
+    },
+    "model_evaluation_timeout_seconds": {
+      "default": 600.0,
+      "exclusiveMinimum": 0,
+      "maximum": 3600,
+      "title": "Model Evaluation Timeout Seconds",
+      "type": "number"
     },
     "plan_id": {
       "maxLength": 200,
@@ -613,6 +716,13 @@
       ],
       "default": null,
       "title": "Test World"
+    },
+    "warmup_repetitions": {
+      "default": 0,
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Warmup Repetitions",
+      "type": "integer"
     }
   },
   "required": [

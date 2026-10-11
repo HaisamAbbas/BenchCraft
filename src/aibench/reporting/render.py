@@ -111,6 +111,25 @@ def _throughput_text(summary: dict[str, Any]) -> str:
     )
 
 
+def _offered_load_text(summary: dict[str, Any]) -> str:
+    if not summary.get("enabled"):
+        return "closed loop; requests dispatch when an application slot is free"
+    config = summary.get("configuration") or {}
+    if summary.get("mode") == "open_loop":
+        target = f"fixed {_number(config.get('requests_per_second'), ' requests/s')}"
+    else:
+        target = (
+            f"ramp {_number(config.get('start_requests_per_second'), ' requests/s')} to "
+            f"{_number(config.get('end_requests_per_second'), ' requests/s')} over "
+            f"{_number(config.get('ramp_duration_seconds'), ' s')}, then hold"
+        )
+    lag = summary.get("dispatch_lag_ms") or {}
+    return (
+        f"{target}; {summary.get('observed_dispatches', 0)} first-attempt dispatch(es), "
+        f"coordinator lag p95 {_number(lag.get('p95_ms'), ' ms')}"
+    )
+
+
 def _retry_inclusive_text(summary: dict[str, Any]) -> str:
     if not summary.get("phase_attribution_complete", True):
         return "unavailable (recovered dispatch phase is unknown)"
@@ -404,6 +423,9 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         ("Imported traces", _traces_text(report.get("traces"))),
         ("Cache", _cache_text(report.get("cache"))),
     ]
+    offered_load = latency.get("offered_load")
+    if isinstance(offered_load, dict):
+        application.append(("Offered load", _offered_load_text(offered_load)))
     if latency["streaming"].get("requests"):
         application.append(("Streaming performance", _streaming_text(latency["streaming"])))
     if latency["warmup_streaming"].get("requests"):

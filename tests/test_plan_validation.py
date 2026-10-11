@@ -56,6 +56,7 @@ def test_zero_warmup_preserves_legacy_frozen_plan_bytes() -> None:
     plan = _plan()
     expected = plan.model_dump(mode="json")
     expected.pop("warmup_repetitions")
+    expected.pop("load_profile")
     expected_bytes = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
 
     frozen, _ = freeze_plan(plan)

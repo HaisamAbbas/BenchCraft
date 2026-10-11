@@ -1,6 +1,6 @@
 # Direct run controls and dry-run
 
-`aibench run` accepts common scalar controls without editing the plan file. The CLI applies
+`aibench run` accepts common run controls without editing the plan file. The CLI applies
 them to a copy of the plan, validates the full effective plan, and freezes that exact plan
 into the run. Policy checks still run after overrides, so CLI values cannot bypass the
 workspace's execution policy.
@@ -15,6 +15,9 @@ aibench run --plan benchmark.plan.json --max-cost-usd 2.00 `
   --estimated-cost-per-app-call-usd 0.002
 aibench run --plan benchmark.plan.json --no-cache-executions --cache-evaluations
 aibench run --plan benchmark.plan.json --run-seed 1729
+aibench run --plan benchmark.plan.json --open-loop-rps 20
+aibench run --plan benchmark.plan.json --ramp-start-rps 2 `
+  --ramp-end-rps 40 --ramp-duration-seconds 60
 ```
 
 `--limit` and `--sample-size` are mutually exclusive. Both operate after the plan's case IDs
@@ -45,3 +48,16 @@ until execution begins.
 Reports include p99 and dispersion, throughput, retry-inclusive elapsed latency, and separate
 warmup measurements. Their exact denominators and completeness rules are in
 [performance measurements](performance-measurements.md).
+
+The plan's `load_profile` defaults to `{"mode":"closed_loop"}`: a measured request starts
+when an application-concurrency slot is free. Set
+`{"mode":"open_loop","requests_per_second":20}` for a fixed offered rate, or use
+`{"mode":"ramp","start_requests_per_second":2,"end_requests_per_second":40,"ramp_duration_seconds":60}`
+to increase the rate linearly and then hold 40 requests per second. The direct CLI flags shown
+above override the plan; use `--closed-loop` to restore closed-loop dispatch for one run.
+Ramp options must be supplied together and cannot be combined with fixed-rate or closed-loop
+options. Open-loop and ramp profiles reject execution caching because a cache hit is not a
+fresh application request. The engine keeps its configured concurrency and bounded work queue;
+when those limits cannot keep up, later arrivals wait and the report records their dispatch
+lag. Warmups finish before the profile clock starts, and retries keep their normal retry
+backoff without consuming arrival slots.

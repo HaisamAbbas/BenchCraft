@@ -15,7 +15,7 @@ Like all core modules, this imports only pydantic and the standard library.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
@@ -41,6 +41,42 @@ class RetryPolicy(FrozenModel):
 class ConcurrencyLimits(FrozenModel):
     application: int = Field(default=1, ge=1, le=64)
     evaluation: int = Field(default=1, ge=1, le=64)
+
+
+class ClosedLoopLoadProfile(FrozenModel):
+    """Dispatch the next request when an application concurrency slot becomes free."""
+
+    mode: Literal["closed_loop"] = "closed_loop"
+
+
+class OpenLoopLoadProfile(FrozenModel):
+    """Offer measured first attempts at a fixed target arrival rate."""
+
+    mode: Literal["open_loop"] = "open_loop"
+    requests_per_second: float = Field(ge=0.001, le=10_000, allow_inf_nan=False, strict=True)
+
+
+class RampLoadProfile(FrozenModel):
+    """Linearly ramp offered arrival rate up, then keep the final rate."""
+
+    mode: Literal["ramp"] = "ramp"
+    start_requests_per_second: float = Field(
+        ge=0.001, le=10_000, allow_inf_nan=False, strict=True
+    )
+    end_requests_per_second: float = Field(ge=0.001, le=10_000, allow_inf_nan=False, strict=True)
+    ramp_duration_seconds: float = Field(gt=0, le=86_400, allow_inf_nan=False, strict=True)
+
+    @model_validator(mode="after")
+    def _rate_increases(self) -> RampLoadProfile:
+        if self.end_requests_per_second <= self.start_requests_per_second:
+            raise ValueError("ramp end_requests_per_second must exceed its starting rate")
+        return self
+
+
+LoadProfile = Annotated[
+    ClosedLoopLoadProfile | OpenLoopLoadProfile | RampLoadProfile,
+    Field(discriminator="mode"),
+]
 
 
 class BudgetLimits(FrozenModel):
@@ -168,6 +204,7 @@ class ExecutablePlan(FrozenModel):
     warmup_repetitions: int = Field(default=0, ge=0, le=100)
     selection: CaseSelection = Field(default_factory=CaseSelection)
     concurrency: ConcurrencyLimits = Field(default_factory=ConcurrencyLimits)
+    load_profile: LoadProfile = Field(default_factory=ClosedLoopLoadProfile)
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
     budgets: BudgetLimits = Field(default_factory=BudgetLimits)
     evaluation_timeout_seconds: float = Field(default=60.0, gt=0, le=3600)
@@ -194,6 +231,8 @@ class ExecutablePlan(FrozenModel):
         names = [q.name for q in self.quotas]
         if len(set(names)) != len(names):
             raise ValueError("quotas contain duplicate names")
+        if self.load_profile.mode != "closed_loop" and self.cache.executions:
+            raise ValueError("open-loop load profiles cannot use the execution cache")
         for gate in self.gates:
             if gate.binding >= len(self.metrics):
                 raise ValueError(

@@ -42,7 +42,7 @@ from aibench.core.models import (
     ResetPolicy,
     deep_unfreeze,
 )
-from aibench.core.plans import CasePredicate, ExecutablePlan
+from aibench.core.plans import CasePredicate, ExecutablePlan, LoadProfile
 from aibench.datasets.ingest import ingest_dataset
 from aibench.engine.cache import code_identity_problem
 from aibench.evaluators.protocol import EvaluationView, case_field
@@ -129,6 +129,7 @@ class RunPlanOverrides:
     repetitions: int | None = None
     warmup_repetitions: int | None = None
     application_concurrency: int | None = None
+    load_profile: LoadProfile | None = None
     evaluation_concurrency: int | None = None
     max_attempts: int | None = None
     evaluation_timeout_seconds: float | None = None
@@ -214,6 +215,8 @@ def freeze_plan(plan: ExecutablePlan) -> tuple[bytes, str]:
     frozen = plan.model_dump(mode="json")
     if frozen.get("warmup_repetitions") == 0:
         frozen.pop("warmup_repetitions")
+    if frozen.get("load_profile") == {"mode": "closed_loop"}:
+        frozen.pop("load_profile")
     data = json.dumps(frozen, sort_keys=True, separators=(",", ":"))
     raw = data.encode("utf-8")
     return raw, bytes_hash(raw)
@@ -780,6 +783,8 @@ def apply_run_plan_overrides(plan: ExecutablePlan, overrides: RunPlanOverrides) 
     concurrency = data["concurrency"]
     if overrides.application_concurrency is not None:
         concurrency["application"] = overrides.application_concurrency
+    if overrides.load_profile is not None:
+        data["load_profile"] = overrides.load_profile.model_dump(mode="json")
     if overrides.evaluation_concurrency is not None:
         concurrency["evaluation"] = overrides.evaluation_concurrency
     if overrides.max_attempts is not None:

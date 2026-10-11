@@ -53,6 +53,7 @@ from aibench.core.models import (
 from aibench.core.plans import ExecutablePlan
 from aibench.engine import cache
 from aibench.engine.budget import BudgetLedger
+from aibench.engine.load_profile import arrival_offset_seconds
 from aibench.engine.quota import QuotaGate
 from aibench.engine.retry import (
     backoff_delay,
@@ -223,6 +224,8 @@ class _Item:
     attempt: int
     binding_hash: str | None = None
     warmup: bool = False
+    arrival_ordinal: int | None = None
+    arrival_offset_seconds: float | None = None
 
 
 class ResetFailed(Exception):
@@ -297,6 +300,10 @@ class RunEngine:
     _stop_reason: str | None = None
     _last_heartbeat: float = field(default_factory=time.monotonic)
     _last_control_sequence: int = 0
+    _next_arrival_ordinal: int = 0
+    _profile_started_at: float | None = None
+    _profile_pause_started_at: float | None = None
+    _profile_paused_seconds: float = 0.0
     # Start the reported wall time with the budget ledger, before resume identity and
     # runner setup, so replayed session time matches what hard wall limits consumed.
     _session_started: float = field(default_factory=time.monotonic)
@@ -309,6 +316,18 @@ class RunEngine:
 
     def _item(self, work_item: WorkItem) -> _Item:
         case_id, repetition, binding_key = parse_work_item_key(work_item.task_key, work_item.kind)
+        arrival_ordinal: int | None = None
+        arrival_offset: float | None = None
+        profile = self.plan.load_profile
+        if (
+            work_item.kind == "execution"
+            and not work_item.warmup
+            and work_item.attempt == 0
+            and profile.mode != "closed_loop"
+        ):
+            arrival_ordinal = self._next_arrival_ordinal
+            arrival_offset = arrival_offset_seconds(profile, arrival_ordinal)
+            self._next_arrival_ordinal += 1
         return _Item(
             work_item.task_key,
             work_item.kind,
@@ -317,6 +336,8 @@ class RunEngine:
             work_item.attempt,
             self._binding_by_key.get(binding_key) if binding_key else None,
             work_item.warmup,
+            arrival_ordinal,
+            arrival_offset,
         )
 
     def _execution_task_keys(self, *, warmup: bool) -> Iterator[str]:
@@ -571,6 +592,7 @@ class RunEngine:
         ctl = self.controller
         while True:
             self._keep_lease()
+            self._update_profile_pause_clock()
             self._throttled = False
             if ctl.cancelled:
                 self._drain_delayed()  # waiting retries are cancelled, not stranded
@@ -604,6 +626,9 @@ class RunEngine:
             if self._delayed and not stopping:
                 await ctl.wait_for_change(self._next_wait())
                 continue
+            if self._profile_arrival_wait() is not None and not stopping:
+                await ctl.wait_for_change(self._next_wait())
+                continue
             if self._settle_undispatchable(stopping):
                 continue  # newly unblocked evaluations to record
             if ctl.interrupting and not ctl.cancelled:
@@ -621,9 +646,54 @@ class RunEngine:
         return RunState.PAUSING if ctl.paused else RunState.RUNNING
 
     def _next_wait(self) -> float:
-        if not self._delayed:
-            return _POLL_SECONDS
-        return max(0.0, min(_POLL_SECONDS, self._delayed[0][0] - time.monotonic()))
+        waits = [_POLL_SECONDS]
+        if self._delayed:
+            waits.append(max(0.0, self._delayed[0][0] - time.monotonic()))
+        profile_wait = self._profile_arrival_wait()
+        if profile_wait is not None:
+            waits.append(profile_wait)
+        return min(waits)
+
+    def _update_profile_pause_clock(self) -> None:
+        if self._profile_started_at is None:
+            return
+        now = time.monotonic()
+        if self.controller.paused:
+            if self._profile_pause_started_at is None:
+                self._profile_pause_started_at = now
+        elif self._profile_pause_started_at is not None:
+            self._profile_paused_seconds += now - self._profile_pause_started_at
+            self._profile_pause_started_at = None
+
+    def _start_profile_clock(self) -> None:
+        if self._profile_started_at is None:
+            self._profile_started_at = time.monotonic()
+
+    def _profile_elapsed(self, now: float | None = None) -> float:
+        if self._profile_started_at is None:
+            return 0.0
+        current = time.monotonic() if now is None else now
+        if self._profile_pause_started_at is not None:
+            current = min(current, self._profile_pause_started_at)
+        return max(0.0, current - self._profile_started_at - self._profile_paused_seconds)
+
+    def _profile_arrival_wait(self) -> float | None:
+        """Time until a queued measured first attempt's scheduled arrival."""
+        if (
+            self.plan.load_profile.mode == "closed_loop"
+            or self._profile_started_at is None
+            or self.controller.paused
+            or self.controller.stopping
+            or self._stop_reason is not None
+            or self._running("execution") >= self.plan.concurrency.application
+            or self._warmups_pending()
+            or not self._exec_queue
+        ):
+            return None
+        item = self._exec_queue[0]
+        if item.attempt != 0 or item.arrival_offset_seconds is None:
+            return None
+        return max(0.0, item.arrival_offset_seconds - self._profile_elapsed())
 
     def _drain_delayed(self) -> None:
         while self._delayed:
@@ -669,6 +739,17 @@ class RunEngine:
                 queue = self._exec_queue
             if not queue:
                 return
+            if queue is self._exec_queue and self.plan.load_profile.mode != "closed_loop":
+                # The profile starts after the warmup barrier and does not wait for
+                # application completion, retry backoff, quotas, or evaluator progress.
+                self._start_profile_clock()
+                head = queue[0]
+                if (
+                    head.attempt == 0
+                    and head.arrival_offset_seconds is not None
+                    and head.arrival_offset_seconds > self._profile_elapsed()
+                ):
+                    return
             if len(self._delayed) + len(self._in_flight) >= _WORK_QUEUE_PAGE_SIZE:
                 return
             if self._stop_reason is not None:
@@ -689,13 +770,32 @@ class RunEngine:
             item = queue.popleft()
             item.attempt += 1
             if not self._transition(
-                item, {WorkItemState.PENDING}, WorkItemState.RUNNING, attempt=item.attempt
+                item,
+                {WorkItemState.PENDING},
+                WorkItemState.RUNNING,
+                attempt=item.attempt,
             ):
                 self.ledger.settle_application(dispatched=False, cost=None)
                 continue
             task = asyncio.ensure_future(self._reset_then_invoke(item))
             self._in_flight[task] = item
             self._start(task, gates)
+
+    def _arrival_dispatch_details(self, item: _Item) -> dict[str, Any] | None:
+        if (
+            item.attempt != 1
+            or item.arrival_ordinal is None
+            or item.arrival_offset_seconds is None
+        ):
+            return None
+        elapsed = self._profile_elapsed()
+        return {
+            "offered_load_arrival": True,
+            "arrival_ordinal": item.arrival_ordinal,
+            "scheduled_arrival_offset_seconds": round(item.arrival_offset_seconds, 9),
+            "dispatch_active_seconds": round(elapsed, 9),
+            "dispatch_lag_seconds": round(max(0.0, elapsed - item.arrival_offset_seconds), 9),
+        }
 
     def _is_first_turn(self, item: _Item) -> bool:
         return self._episodes[self._episode_of[item.case_id]][0] == item.case_id
@@ -817,6 +917,7 @@ class RunEngine:
                 raise ResetFailed(report.detail, cancelled=True)
             if report.status not in ("reset", "not_needed"):
                 raise ResetFailed(report.detail)
+        self._record_profile_arrival(item)
         return await invoke_and_record(
             self.runner,
             self.cases[item.case_id],
@@ -828,6 +929,12 @@ class RunEngine:
             warmup=is_warmup,
             cancel=self.controller.abort_event,
         )
+
+    def _record_profile_arrival(self, item: _Item) -> None:
+        """Record just before handing a fresh measured request to its runner."""
+        details = self._arrival_dispatch_details(item)
+        if details is not None:
+            self._event("load_profile_dispatch", task_key=item.task_key, **details)
 
     async def _dispatch_evaluations(self, stopping: bool) -> None:
         if stopping and not self.controller.cancelled:

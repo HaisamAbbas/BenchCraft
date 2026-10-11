@@ -31,6 +31,7 @@ What a report states, and on which basis:
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections import Counter, defaultdict
 from collections.abc import Sequence
@@ -49,7 +50,7 @@ from aibench.core.models import (
     WorkItemState,
     deep_unfreeze,
 )
-from aibench.core.plans import ExecutablePlan, ReleaseGate
+from aibench.core.plans import ExecutablePlan, LoadProfile, ReleaseGate
 from aibench.engine.engine import parse_work_item_key, was_dispatched, work_counts
 from aibench.reporting.aggregation import MetricSummary, reason_code, summarize
 from aibench.reporting.render import render
@@ -97,6 +98,67 @@ def percentile(values: list[float], p: float) -> float | None:
     """Nearest-rank percentile: the smallest value with at least p% of values at or below
     it. No interpolation, so the result is always an observed value."""
     return nearest_rank(values, p)
+
+
+def _offered_load_summary(
+    profile: LoadProfile | None,
+    events: list[dict[str, Any]],
+    planned_measurements: int | None,
+) -> dict[str, Any] | None:
+    if profile is None:
+        return None
+    dispatches = [
+        event["payload"]
+        for event in events
+        if event["event_type"] == "load_profile_dispatch"
+    ]
+    result: dict[str, Any] = {
+        "mode": profile.mode,
+        "configuration": profile.model_dump(mode="json"),
+        "scope": "first measured attempts only; warmups and retries are not rate scheduled",
+        "planned_first_attempts": planned_measurements,
+        "observed_dispatches": len(dispatches),
+        "unobserved_planned_dispatches": (
+            None
+            if planned_measurements is None
+            else max(0, planned_measurements - len(dispatches))
+        ),
+        "dispatch_lag_definition": (
+            "time between scheduled arrival and handing a measured request to its runner; "
+            "includes application reset time, but excludes downstream worker queueing, network "
+            "delay, and application-observed start latency"
+        ),
+    }
+    if profile.mode == "closed_loop":
+        result["enabled"] = False
+        result["dispatch_lag_ms"] = None
+        return result
+
+    lag_ms = [
+        max(0.0, float(payload["dispatch_lag_seconds"])) * 1000
+        for payload in dispatches
+        if isinstance(payload.get("dispatch_lag_seconds"), (int, float))
+        and math.isfinite(float(payload["dispatch_lag_seconds"]))
+    ]
+    result["enabled"] = True
+    result["sessions_with_dispatches"] = _offered_load_session_count(events)
+    result["dispatch_lag_ms"] = {
+        **summarize_latency(lag_ms),
+        "late_dispatches": sum(value > 0 for value in lag_ms),
+        "definition": "nearest-rank summaries of non-negative coordinator dispatch lag",
+    }
+    return result
+
+
+def _offered_load_session_count(events: list[dict[str, Any]]) -> int:
+    session = -1
+    sessions: set[int] = set()
+    for event in events:
+        if event["event_type"] == "run_session_started":
+            session += 1
+        elif event["event_type"] == "load_profile_dispatch":
+            sessions.add(max(session, 0))
+    return len(sessions)
 
 
 # --------------------------------------------------------------------------- profiles
@@ -282,6 +344,7 @@ def _application_section(
     planned_warmups: int | None,
     work_items: list[WorkItem],
     concurrency: int | None,
+    load_profile: LoadProfile | None,
     events: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[ExecutionResult]]:
     attempts = storage.list_execution_attempts(run_id)
@@ -386,6 +449,9 @@ def _application_section(
                 warmup=False,
                 uncommitted_dispatches=sum(not item.warmup for item in recovered_items),
                 phase_attribution_incomplete=bool(unclassified_uncommitted),
+            ),
+            "offered_load": _offered_load_summary(
+                load_profile, events, planned_measurements
             ),
             "warmup_throughput": phase_throughput(
                 dispatched,
@@ -676,6 +742,7 @@ def build_report(
         planned_warmups,
         items,
         plan.concurrency.application if plan else None,
+        plan.load_profile if plan else None,
         events,
     )
     application["state"] = _state_section(params, events)
@@ -843,6 +910,7 @@ def build_report(
             "seed": manifest.seed,
             "repetitions": plan.repetitions if plan else None,
             "warmup_repetitions": plan.warmup_repetitions if plan else 0,
+            "load_profile": plan.load_profile.model_dump(mode="json") if plan else None,
             "environment": deep_unfreeze(manifest.environment) or {},
             "approved_by": approval.granted_by if approval else None,
         },
