@@ -8,9 +8,10 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 ## Metrics
 
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
-recorded data can feed (40, with the head-to-head judge below). Not here: image, audio
-and voice metrics (including agent responsiveness, a voice-latency metric) and the MCP
-metrics. JSON correctness
+recorded data can feed (40, with the head-to-head judge below). DeepEval's upstream image,
+audio, voice, and MCP metric families are not wired into this adapter. The separate
+`deepeval.vision_g_eval` evaluator provides bounded image-first scoring for text answers.
+JSON correctness
 is covered by `native.json_schema`: upstream's score is the same pass/fail schema check, with
 the judge only writing the explanation. Each is an
 evaluator `deepeval.<name>@1`, scores 0 to 1 with higher better (DeepEval normalizes bias,
@@ -39,6 +40,35 @@ toxicity and the other safety metrics that way), and is decided by the plan's ru
 | `pattern_match` | answer | `pattern` |
 | `g_eval` | what `evaluation_params` names (default: question, answer) | judge, `name`, `criteria` or `evaluation_steps`; optional `rubric`, `repeats` (1 to 9, default 3: the median of that many judge scores; scores more than 0.3 apart are reported as unstable) |
 | `dag` | what its nodes' `evaluation_params` name; beyond question and answer, only fields the plan's `evaluation_params` lists | judge, `dag`; optional `name`, `evaluation_params` |
+
+### Image-first vision scoring
+
+`deepeval.vision_g_eval` scores a recorded text answer using the image supplied to the
+application, its task prompt, and the reviewed reference answer. The image is carried inside
+`input`; the reference remains judge-only:
+
+```json
+{"case_id":"receipt-01","input":{"prompt":"What is the total?","image":{"mime_type":"image/png","data_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"}},"reference":{"answer":"$18.42"}}
+```
+
+The image must be base64-encoded PNG, JPEG, or WebP, no larger than 4 MiB after decoding.
+The MIME type and file signature must agree. Remote URLs, local file paths, audio, video, and
+image-valued application outputs are not supported. This avoids fetching untrusted case URLs
+or reading arbitrary files in the evaluator.
+
+Bind the evaluator with a rubric and an OpenAI-compatible vision model:
+
+```json
+{"metric":"deepeval.vision_g_eval","params":{"criteria":"Score whether the answer gives the total shown on the receipt.","judge":{"kind":"openai_compatible","base_url":"https://api.example/v1","model":"vision-model","api_key_env":"AIBENCH_VISION_KEY"}}}
+```
+
+Use the existing plugin-environment `secret_env` mechanism for the key and allow the evaluator,
+model judges, and plugin interpreter in the project's policy. A call sends the image, task
+prompt, reference answer, and recorded output to that endpoint. The adapter does not follow
+redirects, limits judge replies to 1 MiB, reports provider token counts when present, and
+leaves cost unknown unless the provider reports it (no price is guessed). Only a returned
+finite 0–1 score with a non-empty reason is accepted; the harness applies the frozen decision
+rule. Scores remain judge-dependent.
 
 **DAG: a decision tree as JSON.** The judge walks the tree; the verdict it lands on gives the
 score (0 to 10, reported as 0 to 1) or hands over to a G-Eval for the grade. A starting node
@@ -158,7 +188,7 @@ message content out) takes the case's input as the agent's task and the recorded
 `plan_quality` and `plan_adherence` are not applicable (`no_plan_in_trace`) when the judge
 finds no plan in the trace: DeepEval would score that 1, which is no evidence of a good plan.
 
-Not included: metrics that need data aibench does not record: images, audio, MCP servers.
+Not included: DeepEval's native multimodal and audio metrics, voice metrics, and MCP metrics.
 DAG and arena metrics need objects a plan cannot declare.
 
 ## Judges
