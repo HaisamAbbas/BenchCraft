@@ -353,12 +353,20 @@ def _print_remote_worker_instructions(
         flush=True,
     )
     print(
+        "From a BenchCraft checkout at the coordinator's exact version, copy the app config "
+        "into the checkout root, keeping its filename, and run the worker command there.",
+        flush=True,
+    )
+    print(
         "On each worker host, start the local synthetic app fixture: "
-        f"uv run python examples/apps/rate_limited_app.py --port {_APP_FIXTURE_PORT} "
+        f"uv run --locked python examples/apps/rate_limited_app.py --port {_APP_FIXTURE_PORT} "
         f"--rate {rate} --burst {burst} --delay {delay}",
         flush=True,
     )
     worker_args = [
+        "uv",
+        "run",
+        "--locked",
         "python",
         "-m",
         "aibench",
@@ -367,7 +375,7 @@ def _print_remote_worker_instructions(
         "--coordinator",
         coordinator_url,
         "--app-config",
-        "worker-app.json",
+        app_config.name,
         "--capacity",
         str(capacity),
         "--token-env",

@@ -162,7 +162,7 @@ def test_remote_worker_instructions_use_custom_token_environment_variable(
     module = _load_measurement_module()
     module._print_remote_worker_instructions(
         coordinator_url="https://bench.example:8765",
-        app_config=tmp_path / "worker-app.json",
+        app_config=tmp_path / "worker app-config.json",
         worker_count=2,
         capacity=2,
         rate=100,
@@ -174,6 +174,10 @@ def test_remote_worker_instructions_use_custom_token_environment_variable(
     instructions = capsys.readouterr().out
     assert "--token-env BENCHCRAFT_TEST_WORKER_TOKEN" in instructions
     assert "--ca-bundle '/etc/ssl/Bench Craft/benchcraft-ca.pem'" in instructions
+    assert "BenchCraft checkout at the coordinator's exact version" in instructions
+    assert "uv run --locked python -m aibench worker connect" in instructions
+    assert "--app-config 'worker app-config.json'" in instructions
+    assert "keeping its filename" in instructions
     assert "at least 2; POSIX shell" in instructions
     assert "stop each worker with Ctrl+C" in instructions
     assert "workers retry when the coordinator is unavailable" in instructions
