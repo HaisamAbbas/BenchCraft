@@ -25,6 +25,10 @@ live cross-provider calibration, cross-host performance evidence, and broader mo
 remain explicit limitations. No existing deferred label is treated as authorization to omit a
 feature selected by the user.
 
+G22.17 extends the dashboard with opt-in remote binding that requires TLS 1.2 or newer and a
+random bearer token sourced from an environment variable. The loopback-only default remains
+unchanged; no separate-host reachability or browser-automation evidence is claimed.
+
 G22.8 extends `deepeval.vision_g_eval` to score a recorded generated image beside the case
 image, task, and reviewed answer. Both images use the strict inline PNG/JPEG/WebP contract;
 remote paths and URLs remain rejected.
