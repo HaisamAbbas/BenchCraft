@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22.14 follow-on: DeepEval upstream multimodal audio metrics",
+  "current_item": "G22.15 follow-on: recorded speaker attribution and diarization",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.13 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. G22.13 adds pinned DeepEval MCP-Use, MCP Task Completion, and multi-turn MCP-Use scoring over a frozen server inventory and recorded successful MCP tool events. Explicit typed MCP events count by default; untyped events require an MCP-only opt-in, and episode scoring fails closed on missing or malformed telemetry. No live MCP server or provider was contacted. Resource and prompt execution events remain unsupported because stored events do not distinguish them. Diarization, upstream multimodal audio metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.14 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. G22.13 adds pinned DeepEval MCP-Use, MCP Task Completion, and multi-turn MCP-Use scoring over a frozen server inventory and recorded successful MCP tool events. Explicit typed MCP events count by default; untyped events require an MCP-only opt-in, and episode scoring fails closed on missing or malformed telemetry. No live MCP server or provider was contacted. Resource and prompt execution events remain unsupported because stored events do not distinguish them. G22.14 adds bounded, text-only provider-transcription accuracy over stored episodes using pinned DeepEval 4.2.5 G-Eval. Every turn needs a provider transcript; each transcript is capped at 16,000 characters and total text at 1 MiB. It does not submit audio, calculate word error rate, or implement barge-in joining. The dedicated upstream beta class is absent from the pinned package, so upstream multimodal audio metrics remain unsupported. Diarization, remote dashboard access, and in-memory compilation/case maps remain open.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -1074,6 +1074,20 @@
           "review": "implementation/G22.13-upstream-mcp-metrics-review.md",
           "implementation": "implementation/G22.13-upstream-mcp-metrics.md",
           "commit": "b558d4314939de96483602516efe49f1e89c53c5",
+          "pushed": true
+        },
+        {
+          "name": "bounded recorded provider-transcription accuracy",
+          "status": "delivered",
+          "verification": [
+            "Scoped transcript, voice, and affected DeepEval manifest/version run: 14 passed in 248.84 seconds; final pinned two-exchange evaluator rerun: 1 passed in 2.95 seconds",
+            "Ruff check and formatting passed; Mypy passed for transcription_accuracy.py and voice.py; git diff --check passed",
+            "Local deterministic judge verified multi-turn scoring, complete-transcript fail-closed behavior, empty ASR marker, input bounds, and shared-judge call accounting; no live provider or audio endpoint was contacted",
+            "The broad DeepEval suite was interrupted and is not claimed as passing; the final scoped selection covered all changed manifests, voice integration/validation, and the transcript evaluator"
+          ],
+          "review": "implementation/G22.14-transcription-accuracy-review.md",
+          "implementation": "implementation/G22.14-transcription-accuracy.md",
+          "commit": "94275aa6aa01dd510cff43b597ee9887fde7938b",
           "pushed": true
         }
       ]
