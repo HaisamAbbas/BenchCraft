@@ -42,6 +42,8 @@ from aibench.core.errors import AibenchError, ConflictError
 from aibench.core.models import (
     Decision,
     ExecutionStatus,
+    UsageEvent,
+    UsageRole,
     WorkItemState,
     deep_unfreeze,
     utcnow,
@@ -673,7 +675,171 @@ class SessionController:
                 action_refs=action_refs,
             )
         )
+        self.record_planner_usage_for_turn(turn)
         return turn
+
+    def record_planner_usage_for_turn(self, turn: ConversationTurn) -> None:
+        """Attribute assistant usage by the originating user turn, not reply completion.
+
+        Replies can finish out of order while a run is completing. Each assistant turn is
+        therefore a separate immutable event, assigned to the next successful run-start
+        boundary by source-turn sequence. Re-scanning is safe: event IDs are deterministic,
+        and a late reply can still be assigned to the correct run without rewriting history.
+        """
+        turns = self.store.turns(self.session_id)
+        turn_by_id = {candidate.turn_id: candidate for candidate in turns}
+        replied_to = {
+            candidate.replies_to
+            for candidate in turns
+            if candidate.role == "assistant" and candidate.replies_to is not None
+        }
+        unresolved_messages = [
+            candidate
+            for candidate in turns
+            if candidate.role == "user"
+            and candidate.kind == "message"
+            and candidate.turn_id not in replied_to
+        ]
+        actions = [
+            action
+            for action in self.store.list_actions(self.session_id)
+            if action.kind is ActionKind.START_RUN
+            and action.state is ActionState.DONE
+            and action.run_id is not None
+        ]
+
+        boundaries: list[tuple[int, ActionRequest]] = []
+        for action in actions:
+            source_turn = turn_by_id.get(action.source_turn_id or "")
+            if source_turn is None:
+                # Typed commands may record their action refs on the command turn instead
+                # of putting a source_turn_id on the action request.
+                source_turn = next(
+                    (
+                        candidate
+                        for candidate in turns
+                        if action.action_id in candidate.action_refs and candidate.role == "user"
+                    ),
+                    None,
+                )
+            if source_turn is not None and source_turn.role == "user":
+                boundaries.append((source_turn.sequence, action))
+        boundaries.sort(
+            key=lambda boundary: (boundary[0], boundary[1].created_at, boundary[1].action_id)
+        )
+
+        # A run with no assistant-model call still needs a durable zero-call marker so its
+        # report can distinguish an observed CLI-only run from a legacy unattributed one.
+        for start_sequence, action in boundaries:
+            assert action.run_id is not None
+            if any(message.sequence <= start_sequence for message in unresolved_messages):
+                # An earlier conversation can still produce a start action. Wait for its
+                # reply before freezing this run's planner accounting as zero calls.
+                continue
+            marker_key = f"{self.session_id}\0{action.run_id}\0empty"
+            marker_id = f"planner:{hashlib.sha256(marker_key.encode()).hexdigest()}"
+            self.storage.commit_usage_event(
+                UsageEvent(
+                    usage_event_id=marker_id,
+                    run_id=action.run_id,
+                    role=UsageRole.PLANNER,
+                    tokens={"prompt_tokens": 0, "completion_tokens": 0},
+                    calls=0,
+                    calls_without_tokens=0,
+                    cost=None,
+                    recorded_at=action.created_at,
+                )
+            )
+
+        attempts: list[tuple[ConversationTurn, str, dict[str, Any], datetime]] = []
+        for assistant_turn in turns:
+            if assistant_turn.role != "assistant" or not assistant_turn.replies_to:
+                continue
+            source_turn = turn_by_id.get(assistant_turn.replies_to)
+            outcome = deep_unfreeze(assistant_turn.outcome) or {}
+            reported = outcome.get("usage") if isinstance(outcome, dict) else None
+            if source_turn is not None and isinstance(reported, dict):
+                attempts.append(
+                    (source_turn, assistant_turn.turn_id, reported, assistant_turn.created_at)
+                )
+            extra_attempts = outcome.get("planner_usage_attempts", [])
+            if source_turn is not None and isinstance(extra_attempts, list):
+                for extra in extra_attempts:
+                    if not isinstance(extra, dict):
+                        continue
+                    attempt_id = extra.get("attempt_id")
+                    extra_usage = extra.get("usage")
+                    recorded_at = extra.get("recorded_at")
+                    if not isinstance(attempt_id, str) or not isinstance(extra_usage, dict):
+                        continue
+                    if not isinstance(recorded_at, str):
+                        continue
+                    try:
+                        extra_recorded_at = datetime.fromisoformat(recorded_at)
+                    except ValueError:
+                        continue
+                    attempts.append(
+                        (source_turn, attempt_id, extra_usage, extra_recorded_at)
+                    )
+
+        for source_turn, attempt_id, reported, recorded_at in attempts:
+            if source_turn.role != "user":
+                continue
+            if any(message.sequence < source_turn.sequence for message in unresolved_messages):
+                # Do not freeze a later turn's attribution while an earlier message could
+                # still become a run-start boundary.
+                continue
+            target = next(
+                (boundary for boundary in boundaries if boundary[0] >= source_turn.sequence), None
+            )
+            if target is None:
+                # No successful run has claimed this planner turn yet. A later start will
+                # re-scan stored replies and assign it to that run.
+                continue
+            start_sequence, action = target
+            if any(
+                source_turn.sequence < message.sequence <= start_sequence
+                for message in unresolved_messages
+            ):
+                # A later unresolved message in this interval may become an earlier
+                # successful run boundary, changing which run owns this planner attempt.
+                continue
+            previous_sequence = max(
+                (sequence for sequence, _ in boundaries if sequence < start_sequence),
+                default=0,
+            )
+            if source_turn.sequence <= previous_sequence or action.run_id is None:
+                continue
+            calls_value = reported.get("model_calls")
+            if type(calls_value) is not int or calls_value < 0 or calls_value == 0:
+                continue
+            calls_without_usage = reported.get("calls_without_usage", 0)
+            if type(calls_without_usage) is not int or calls_without_usage < 0:
+                calls_without_usage = 0
+            prompt_tokens = reported.get("prompt_tokens", 0)
+            completion_tokens = reported.get("completion_tokens", 0)
+            if type(prompt_tokens) is not int or prompt_tokens < 0:
+                prompt_tokens = 0
+            if type(completion_tokens) is not int or completion_tokens < 0:
+                completion_tokens = 0
+            event_key = hashlib.sha256(
+                f"{self.session_id}\0{action.run_id}\0planner\0{attempt_id}".encode()
+            ).hexdigest()
+            self.storage.commit_usage_event(
+                UsageEvent(
+                    usage_event_id=f"planner:{event_key}",
+                    run_id=action.run_id,
+                    role=UsageRole.PLANNER,
+                    tokens={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                    },
+                    calls=calls_value,
+                    calls_without_tokens=calls_without_usage,
+                    cost=None,
+                    recorded_at=recorded_at,
+                )
+            )
 
     def delete(self) -> dict[str, Any]:
         """Delete this conversation (§14). Refused while one of its runs is active. The

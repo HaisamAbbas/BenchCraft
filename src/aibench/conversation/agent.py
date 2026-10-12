@@ -1058,6 +1058,7 @@ class TurnOutcome:
     offer: dict[str, Any] | None = None
     active_run: dict[str, Any] | None = None
     usage: dict[str, Any] = field(default_factory=dict)
+    planner_usage_attempts: list[dict[str, Any]] = field(default_factory=list)
     stopped: str | None = None
     status_line: str = ""
     # 11-T2: each number in the reply and the query result it came from; numbers found in
@@ -2447,6 +2448,7 @@ class ConversationAgent:
             raise ConflictError(f"message id {message_id!r} was already used for another message")
         stored = store.reply_to(user_turn.turn_id)
         if stored is not None and stored.outcome is not None:
+            self.controller.record_planner_usage_for_turn(stored)
             replay = TurnOutcome.from_dict(deep_unfreeze(stored.outcome))
             replay.replayed = True
             return replay  # a redelivered message: nothing runs again
@@ -2565,10 +2567,18 @@ class ConversationAgent:
             try:
                 # The provider blocks on the network; the run engine keeps running meanwhile.
                 reply = await self._complete(turn, messages, tools)
+            except asyncio.CancelledError:
+                # Cancelling to_thread does not guarantee the provider request stopped.
+                # Preserve the attempted call as unknown usage before the turn is finalized.
+                usage["calls_without_usage"] += 1
+                raise
             except Exception as exc:  # noqa: BLE001 - a provider failure ends the turn, never the session
+                # The provider may have received and processed the request before failing.
+                # Count it as a call with unreported usage instead of implying zero tokens.
+                usage["calls_without_usage"] += 1
                 outcome.stopped = f"assistant model failed: {type(exc).__name__}: {exc}"[:500]
                 return
-            if reply.prompt_tokens is None and reply.completion_tokens is None:
+            if reply.prompt_tokens is None or reply.completion_tokens is None:
                 usage["calls_without_usage"] += 1
             usage["prompt_tokens"] += reply.prompt_tokens or 0
             usage["completion_tokens"] += reply.completion_tokens or 0
@@ -2648,20 +2658,32 @@ class ConversationAgent:
         if outcome.stopped and not outcome.text:
             outcome.text = f"The assistant stopped before finishing: {outcome.stopped}."
         outcome.status_line = _status_line(outcome, session.revision)
-        reply, _ = controller.store.append_turn(
-            ConversationTurn(
-                turn_id=outcome.turn_id,
-                session_id=controller.session_id,
-                sequence=1,
-                role="assistant",
-                kind="reply",
-                content=outcome.text,
-                replies_to=turn.user_turn.turn_id,
-                decision_refs=tuple(turn.decision_refs),
-                action_refs=tuple(turn.action_refs),
-                outcome=outcome.as_dict(),
-            )
+        candidate_reply = ConversationTurn(
+            turn_id=outcome.turn_id,
+            session_id=controller.session_id,
+            sequence=1,
+            role="assistant",
+            kind="reply",
+            content=outcome.text,
+            replies_to=turn.user_turn.turn_id,
+            decision_refs=tuple(turn.decision_refs),
+            action_refs=tuple(turn.action_refs),
+            outcome=outcome.as_dict(),
         )
+        reply, inserted = controller.store.append_turn(candidate_reply)
+        if not inserted and reply.turn_id != outcome.turn_id:
+            # Concurrent delivery can invoke the provider twice before either assistant
+            # reply is persisted. The losing reply is not added to conversation history,
+            # but its provider usage still belongs in the benchmark's planner accounting.
+            # Keep it on the winning turn so a later run boundary can reconcile it after
+            # any earlier, still-running conversation turn resolves.
+            reply = controller.store.append_planner_usage_attempt(
+                turn.user_turn.turn_id,
+                attempt_id=outcome.turn_id,
+                usage=outcome.usage,
+                recorded_at=candidate_reply.created_at,
+            )
+        controller.record_planner_usage_for_turn(reply)
         if reply.turn_id != outcome.turn_id:  # a concurrent delivery replied first
             replay = TurnOutcome.from_dict(deep_unfreeze(reply.outcome))
             replay.replayed = True

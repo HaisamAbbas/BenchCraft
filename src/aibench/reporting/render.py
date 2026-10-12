@@ -164,7 +164,20 @@ def _usd(block: dict[str, Any]) -> str:
     if accounting == "no_calls":
         return "no calls"
     if accounting == "not_attributed":
-        return "not attributed to runs"
+        missing = ", ".join(block.get("unknown_components", [])) or "some usage"
+        known = block.get("known_cost_usd")
+        if known is not None and block.get("calls_with_known_cost", 0) > 0:
+            return (
+                f"at least USD {known:.6g} observed; {missing} cost is not attributed to runs"
+            )
+        return f"not attributed to runs ({missing})"
+    if block.get("unquantified_usage_events"):
+        known = block.get("known_cost_usd", 0.0)
+        observed = f"at least USD {known:.6g} observed; " if known > 0 else ""
+        return (
+            f"unknown: {observed}"
+            f"{block['unquantified_usage_events']} usage event(s) have no reported call count"
+        )
     known = block["known_cost_usd"]
     counted = fraction(block["calls_with_known_cost"], block["calls"])
     if block.get("total_cost_usd") is not None:
@@ -468,6 +481,7 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         ("Application", _usd(cost["application"])),
         (f"Evaluator (scoring pass {cost['evaluator_scoring_id']})", _usd(cost["evaluator"])),
         ("Planner", _usd(cost["planner"])),
+        ("Whole workflow", _usd(cost["workflow"])),
     ]
     evidence = []
     for item in report["evidence"]["items"][:EVIDENCE_LIMIT]:

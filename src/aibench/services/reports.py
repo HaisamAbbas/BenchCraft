@@ -21,7 +21,8 @@ What a report states, and on which basis:
   throughput. Retry-inclusive lifecycle latency and warmup samples are separate summaries;
   failed and timed-out attempts are counted separately.
 - **Cost** is observed spend plus how complete the accounting is. A total is given only
-  when every call reported its cost; otherwise the known amount is a lower bound.
+  when every call reported its cost; otherwise the known amount is a lower bound. Planner
+  calls attributed from sessions contribute their reported tokens, but no dollar estimate.
 - **Gates** are the plan's predeclared release gates, decided only for a finished run.
 - **Evidence** lists non-passing cases with sanitized, truncated excerpts and references.
   Raw evaluator outputs and traces stay in the artifact store; the report names them by
@@ -46,6 +47,7 @@ from aibench.core.models import (
     EvaluatorManifest,
     ExecutionResult,
     ExecutionStatus,
+    UsageRole,
     WorkItem,
     WorkItemState,
     deep_unfreeze,
@@ -329,11 +331,132 @@ def _cost_block(
         # A total exists only when calls were made and every one reported its cost.
         "total_cost_usd": round(known, 6) if calls and unknown == 0 else None,
         "accounting": completeness,
+        "unquantified_usage_events": 0,
     }
     if tokens is not None:
         block["reported_tokens"] = tokens
         block["calls_with_unknown_tokens"] = unknown_tokens
     return block
+
+
+def _combine_cost_blocks(blocks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Combine committed evaluator-pass usage without dropping retries or rescoring spend."""
+    calls = sum(int(block.get("calls") or 0) for block in blocks)
+    unknown = sum(int(block.get("calls_with_unknown_cost") or 0) for block in blocks)
+    known = sum(float(block.get("known_cost_usd") or 0.0) for block in blocks)
+    combined = _cost_block(
+        calls,
+        known,
+        unknown,
+        tokens=sum(int(block.get("reported_tokens") or 0) for block in blocks),
+        unknown_tokens=sum(int(block.get("calls_with_unknown_tokens") or 0) for block in blocks),
+    )
+    combined["unquantified_usage_events"] = sum(
+        int(block.get("unquantified_usage_events") or 0) for block in blocks
+    )
+    if combined["unquantified_usage_events"]:
+        combined["accounting"] = "unknown"
+        combined["total_cost_usd"] = None
+    return combined
+
+
+def _planner_cost(storage: Storage, run_id: str, *, granted_by: str | None) -> dict[str, Any]:
+    events = [
+        event for event in storage.list_usage_events(run_id) if event.role is UsageRole.PLANNER
+    ]
+    if not events:
+        if granted_by and granted_by.startswith("session "):
+            return {
+                "accounting": "not_attributed",
+                "note": "legacy session run has no durable planner-usage event",
+            }
+        return _cost_block(0, 0.0, 0, tokens=0)
+
+    calls = sum(max(0, event.calls) for event in events if event.calls is not None)
+    known = 0.0
+    unknown = 0
+    tokens = 0
+    unknown_tokens = 0
+    unquantified_usage_events = 0
+    for event in events:
+        if event.calls is None:
+            unquantified_usage_events += 1
+            if event.cost is not None and math.isfinite(event.cost):
+                known += float(event.cost)
+            reported_tokens = deep_unfreeze(event.tokens)
+            if isinstance(reported_tokens, dict):
+                tokens += sum(
+                    value for value in reported_tokens.values() if type(value) is int and value >= 0
+                )
+            continue
+        event_calls = max(0, event.calls)
+        if event.cost is None or not math.isfinite(event.cost):
+            unknown += event_calls
+        else:
+            known += float(event.cost)
+        reported_tokens = deep_unfreeze(event.tokens)
+        if isinstance(reported_tokens, dict):
+            tokens += sum(
+                value for value in reported_tokens.values() if type(value) is int and value >= 0
+            )
+            unknown_tokens += (
+                event.calls_without_tokens
+                if event.calls_without_tokens is not None
+                else (event_calls if not reported_tokens else 0)
+            )
+        else:
+            unknown_tokens += (
+                event.calls_without_tokens
+                if event.calls_without_tokens is not None
+                else event_calls
+            )
+    block = _cost_block(calls, known, unknown, tokens=tokens, unknown_tokens=unknown_tokens)
+    block["unquantified_usage_events"] = unquantified_usage_events
+    if unquantified_usage_events:
+        block["accounting"] = "unknown"
+        block["total_cost_usd"] = None
+    return block
+
+
+def _workflow_cost(roles: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    calls = sum(int(block.get("calls") or 0) for block in roles.values())
+    unquantified_usage_events = sum(
+        int(block.get("unquantified_usage_events") or 0) for block in roles.values()
+    )
+    unknown_cost_calls = sum(
+        int(block.get("calls_with_unknown_cost") or 0) for block in roles.values()
+    )
+    known = sum(float(block.get("known_cost_usd") or 0.0) for block in roles.values())
+    unknown_components = sorted(
+        name for name, block in roles.items() if block.get("accounting") == "not_attributed"
+    )
+    if unknown_components:
+        accounting = "not_attributed"
+    elif unquantified_usage_events:
+        accounting = "unknown"
+    elif calls == 0:
+        accounting = "no_calls"
+    elif unknown_cost_calls == 0:
+        accounting = "complete"
+    elif unknown_cost_calls == calls:
+        accounting = "unknown"
+    else:
+        accounting = "partial"
+    return {
+        "calls": calls,
+        "calls_with_known_cost": calls - unknown_cost_calls,
+        "calls_with_unknown_cost": unknown_cost_calls,
+        "known_cost_usd": round(known, 6),
+        "total_cost_usd": round(known, 6)
+        if calls
+        and not unknown_cost_calls
+        and not unknown_components
+        and not unquantified_usage_events
+        else None,
+        "accounting": accounting,
+        "unknown_components": unknown_components,
+        "unquantified_usage_events": unquantified_usage_events,
+    }
 
 
 def _application_section(
@@ -880,6 +1003,19 @@ def build_report(
     primary_pass = next((p for p in passes if p["scoring_id"] == primary), None)
     counts = work_counts(storage, run_id)
     approval = storage.get_approval(f"{run_id}:approval")
+    evaluator_cost = primary_pass["evaluator_cost"] if primary_pass else _cost_block(0, 0.0, 0)
+    planner_cost = _planner_cost(
+        storage,
+        run_id,
+        granted_by=approval.granted_by if approval else None,
+    )
+    workflow_cost = _workflow_cost(
+        {
+            "application": application["cost"],
+            "evaluator": _combine_cost_blocks([scoring["evaluator_cost"] for scoring in passes]),
+            "planner": planner_cost,
+        }
+    )
     report = {
         "schema": REPORT_SCHEMA,
         "generated_at": datetime.now(UTC).isoformat(),
@@ -931,16 +1067,12 @@ def build_report(
         "gates": gates,
         "cost": {
             "application": application["cost"],
-            "evaluator": (
-                primary_pass["evaluator_cost"] if primary_pass else _cost_block(0, 0.0, 0)
-            ),
+            "evaluator": evaluator_cost,
             "evaluator_scoring_id": primary,
-            "planner": {
-                "accounting": "not_attributed",
-                "note": "planning and conversation usage is recorded per session (/budget), "
-                "not per run",
-            },
-            "note": "observed spend only; estimates are never added to observed totals",
+            "planner": planner_cost,
+            "workflow": workflow_cost,
+            "note": "observed spend only; estimates are never added to observed totals; planner "
+            "dollars remain unknown unless the planner provider reports a price",
         },
         "evidence": {
             "content": "included" if include_content else "withheld",
@@ -1117,7 +1249,20 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
         "warmup_streaming_performance": app["latency"]["warmup_streaming"],
         "cost": {
             role: {
-                k: block.get(k) for k in ("calls", "known_cost_usd", "total_cost_usd", "accounting")
+                k: block.get(k)
+                for k in (
+                    "calls",
+                    "known_cost_usd",
+                    "total_cost_usd",
+                    "accounting",
+                    "calls_with_known_cost",
+                    "calls_with_unknown_cost",
+                    "reported_tokens",
+                    "calls_with_unknown_tokens",
+                    "unquantified_usage_events",
+                    "unknown_components",
+                    "note",
+                )
             }
             for role, block in report["cost"].items()
             if isinstance(block, dict)

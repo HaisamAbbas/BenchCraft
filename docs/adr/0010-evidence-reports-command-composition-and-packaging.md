@@ -31,7 +31,11 @@ Before this prompt, `run_report` was a JSON summary that reloaded evaluator plug
 - **Cost.**
   - Application cost comes from dispatched attempts. Evaluator cost comes from the pass's committed attempts, retries included.
   - `total_cost_usd` is given only when every call reported a cost. Otherwise the report shows the known amount, labelled a lower bound, with an `accounting` value of `partial` or `unknown`.
-  - Planner and conversation usage is per session and is labelled "not attributed to runs".
+  - At the time of this decision, planner and conversation usage was per session and not
+    attributed to runs. The later G23 implementation supersedes this for new session-run
+    starts: reported planner calls/tokens are stored with the next run by source-turn order,
+    while dollar pricing remains unknown and legacy runs without a stored usage event remain
+    not attributed. Session `/budget` continues to show session-level usage.
 - **Evidence and raw artifacts.**
   - Evidence lists non-passing items (application failures, and failed, indeterminate or errored results) with sanitized excerpts: outputs and reasons are truncated to 300 characters, retrieved context to 3 items of 200 characters. It also carries evidence references.
   - Raw evaluator outputs stay in the artifact store (restricted). The report carries only their ID, digest, size and redaction class, and a test confirms their content never appears in it.

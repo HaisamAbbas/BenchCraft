@@ -216,7 +216,7 @@ dataclass fields before storing a case.
 | Dashboard or web app | Not planned for the MVP. Reports are static files |
 | Website crawling or browser automation | Not supported; the configured JSON HTTP API runner is not a browser or generic URL evaluator |
 | Release gates in conversation drafts | Gates are authored in plan files. A session's draft can't declare them yet |
-| Planning and conversation cost per run | Tracked per session (`/budget`), not attributed to a run's report |
+| Planning and conversation cost per run | New session-run starts attach planner calls and reported tokens to run reports; planner dollar prices remain unknown, and legacy runs without stored attribution are labelled not attributed. `/budget` remains a session-level view |
 | Source-code inspection beyond Python and JS/TS | Other languages, dynamic imports and plugins loaded by name are not seen |
 | Distributed workers, detached runs | Not available. A run stops dispatching when its terminal exits and resumes on request |
 | Session export | Not available. Sessions can be deleted (`aibench sessions delete`), and deletion keeps run records |

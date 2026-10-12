@@ -25,6 +25,8 @@ from aibench.core.models import (
     EvaluationResult,
     ExecutionStatus,
     MetricValue,
+    UsageEvent,
+    UsageRole,
     WorkItem,
 )
 from aibench.engine.compile import compile_plan
@@ -869,6 +871,10 @@ def test_a_rescoring_pass_is_reported_separately_and_is_not_run_spend(tmp_path: 
     assert metric["profile"]["source"] == "frozen_with_run"
     assert metric["profile"]["params"] == {"case_sensitive": False}
     assert metric["summary"]["selected"] == 4  # every recorded execution, incl. the crash
+    assert report["cost"]["evaluator"] == engine["evaluator_cost"]
+    assert report["cost"]["workflow"]["calls"] == report["cost"]["application"]["calls"] + sum(
+        scoring["evaluator_cost"]["calls"] for scoring in report["scoring_passes"]
+    )
     # the engine pass is unchanged, and so are the run's own budget counters (06-T2 fix)
     assert engine == project.report(run_id)["scoring_passes"][0]
     storage, artifacts = project.storage()
@@ -877,6 +883,56 @@ def test_a_rescoring_pass_is_reported_separately_and_is_not_run_spend(tmp_path: 
     finally:
         storage.db.close()
     assert budget_after["evaluator"] == budget_before["evaluator"]
+
+
+def test_unknown_planner_call_count_keeps_workflow_accounting_unknown(tmp_path: Path) -> None:
+    project = Project(tmp_path, MIXED)
+    run_id = project.run()
+    storage, artifacts = project.storage()
+    try:
+        storage.commit_usage_event(
+            UsageEvent(
+                usage_event_id="planner-count-unknown",
+                run_id=run_id,
+                role=UsageRole.PLANNER,
+                calls=None,
+                cost=0.125,
+            )
+        )
+        report = build_report(storage, artifacts, run_id)
+    finally:
+        storage.db.close()
+    assert report["cost"]["planner"]["calls"] == 0
+    assert report["cost"]["planner"]["unquantified_usage_events"] == 1
+    assert report["cost"]["planner"]["accounting"] == "unknown"
+    assert report["cost"]["workflow"]["unquantified_usage_events"] == 1
+    assert report["cost"]["workflow"]["accounting"] == "unknown"
+    assert report["cost"]["workflow"]["total_cost_usd"] is None
+    assert report["cost"]["workflow"]["known_cost_usd"] >= 0.125
+    assert report_facts(report)["cost"]["planner"]["unquantified_usage_events"] == 1
+    markdown = render(report, "markdown")
+    assert "at least USD 0.125 observed" in markdown
+    assert "1 usage event(s) have no reported call count" in markdown
+
+
+def test_legacy_workflow_render_shows_known_spend_and_missing_planner_cost(tmp_path: Path) -> None:
+    project = Project(tmp_path, MIXED)
+    run_id = project.run()
+    report = project.report(run_id)
+    report["cost"]["workflow"] = {
+        "calls": 5,
+        "calls_with_known_cost": 2,
+        "calls_with_unknown_cost": 3,
+        "known_cost_usd": 0.125,
+        "total_cost_usd": None,
+        "accounting": "not_attributed",
+        "unknown_components": ["planner"],
+        "unquantified_usage_events": 0,
+    }
+    markdown = render(report, "markdown")
+    assert "Whole workflow" in markdown
+    assert "at least USD 0.125 observed" in markdown
+    assert "planner cost is not attributed to runs" in markdown
 
 
 def test_runs_without_frozen_profiles_derive_them_and_say_so(tmp_path: Path) -> None:

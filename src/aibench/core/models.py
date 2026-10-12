@@ -1397,9 +1397,21 @@ class UsageEvent(FrozenModel):
     role: UsageRole
     provider: str | None = None
     tokens: FrozenValue = None
-    calls: int | None = None
+    calls: int | None = Field(default=None, ge=0, strict=True)
+    # Counts calls whose prompt or completion token usage was not fully reported.
+    calls_without_tokens: int | None = Field(default=None, ge=0, strict=True)
     cost: float | None = None
     recorded_at: datetime = Field(default_factory=utcnow)
+
+    @model_validator(mode="after")
+    def _tokenless_calls_within_reported_calls(self) -> UsageEvent:
+        if (
+            self.calls is not None
+            and self.calls_without_tokens is not None
+            and self.calls_without_tokens > self.calls
+        ):
+            raise ValueError("calls_without_tokens cannot exceed calls")
+        return self
 
 
 class Approval(FrozenModel):

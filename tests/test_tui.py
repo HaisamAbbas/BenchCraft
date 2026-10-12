@@ -114,6 +114,8 @@ def test_slash_commands_use_real_session_services_and_cover_the_contract(tmp_pat
         assert budget.kind == "budget" and budget.data["run_id"] == run_id
         assert report.kind == "report" and report.data["run_id"] == run_id
         assert report.data["segments"][0]["field"] == "group_id"
+        assert report.data["cost"]["planner"]["accounting"] == "no_calls"
+        assert report.data["cost"]["workflow"]["total_cost_usd"] is None
         assert sessions.kind == "sessions" and sessions.data["sessions"]
 
         # Explicit cancellation returns before the slow application call is done.

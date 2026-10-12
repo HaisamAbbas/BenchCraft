@@ -15,9 +15,13 @@ import json
 import threading
 from pathlib import Path
 
+import pytest
+
 from aibench.conversation.agent import TOOL_NAMES, ConversationAgent, TurnLimits
-from aibench.core.sessions import ActionKind, ActionState, PlanPatch
+from aibench.core.sessions import ActionKind, ActionState, ConversationTurn, PlanPatch
 from aibench.planning.planner import ModelReply
+from aibench.reporting.render import render
+from aibench.services.reports import report_facts
 from aibench.services.traces import import_traces
 from tests.session_support import (
     ScriptedProvider,
@@ -90,6 +94,251 @@ def test_dialogue_changes_the_sample_explains_a_metric_and_starts_a_real_run(
     turns = ctl.store.turns(ctl.session_id)
     assert [t.role for t in turns] == ["user", "assistant"] * 4
     assert turns[3].decision_refs == (f"{ctl.session_id}:d3",)
+    run_id = record.manifest.run_id
+    planner_events = [
+        event for event in ctl.storage.list_usage_events(run_id) if event.role.value == "planner"
+    ]
+    assert sum(event.calls or 0 for event in planner_events) == 9
+    assert sum(event.calls_without_tokens or 0 for event in planner_events) == 0
+    assert sum(event.tokens["prompt_tokens"] for event in planner_events) == 90
+    assert sum(event.tokens["completion_tokens"] for event in planner_events) == 45
+    planner_event_count = len(planner_events)
+    ctl.record_planner_usage_for_turn(turns[-1])  # duplicate closeout is idempotent
+    assert (
+        len(
+            [
+                event
+                for event in ctl.storage.list_usage_events(run_id)
+                if event.role.value == "planner"
+            ]
+        )
+        == planner_event_count
+    )
+    report = ctl.report(run_id)
+    assert report["cost"]["planner"]["calls"] == 9
+    assert report["cost"]["planner"]["reported_tokens"] == 135
+    assert report["cost"]["planner"]["total_cost_usd"] is None
+    assert report["cost"]["workflow"]["calls"] == 13
+    assert report["cost"]["workflow"]["accounting"] == "partial"
+    assert report["cost"]["workflow"]["total_cost_usd"] is None
+    assert report_facts(report)["cost"]["planner"]["reported_tokens"] == 135
+    assert "Whole workflow" in render(report, "markdown")
+    ctl.storage.db.close()
+
+
+def test_planner_usage_keeps_unreported_token_calls_unknown(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+    ctl.mark_presented(1)
+
+    def start_without_usage(messages: list[dict[str, object]]) -> ModelReply:
+        reply = start_step("Run it")(messages)
+        return ModelReply(text=reply.text, tool_calls=reply.tool_calls)
+
+    provider = ScriptedProvider([start_without_usage, ModelReply(text="Started.")])
+    agent = ConversationAgent(ctl, provider)
+
+    async def scenario() -> str:
+        outcome = await agent.handle_message("Run it.")
+        action = outcome.actions[0]
+        assert action["state"] == "done"
+        await ctl.wait_for_run(action["run_id"])
+        return action["run_id"]
+
+    run_id = asyncio.run(scenario())
+    events = [
+        event for event in ctl.storage.list_usage_events(run_id) if event.role.value == "planner"
+    ]
+    assert sum(event.calls or 0 for event in events) == 2
+    assert sum(event.calls_without_tokens or 0 for event in events) == 2
+    report = ctl.report(run_id)
+    assert report["cost"]["planner"]["reported_tokens"] == 0
+    assert report["cost"]["planner"]["calls_with_unknown_tokens"] == 2
+    assert report["cost"]["planner"]["accounting"] == "unknown"
+    ctl.storage.db.close()
+
+
+@pytest.mark.parametrize(
+    ("prompt_tokens", "completion_tokens"),
+    [(10, None), (None, 5)],
+    ids=["prompt-only", "completion-only"],
+)
+def test_planner_usage_marks_partial_token_counters_unknown(
+    tmp_path: Path, prompt_tokens: int | None, completion_tokens: int | None
+) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+    ctl.mark_presented(1)
+
+    def start_with_partial_usage(messages: list[dict[str, object]]) -> ModelReply:
+        reply = start_step("Run it")(messages)
+        return ModelReply(
+            text=reply.text,
+            tool_calls=reply.tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+    agent = ConversationAgent(
+        ctl, ScriptedProvider([start_with_partial_usage, say("Started.")])
+    )
+
+    async def scenario() -> str:
+        result = await agent.handle_message("Run it.")
+        run_id = result.actions[0]["run_id"]
+        await ctl.wait_for_run(run_id)
+        return run_id
+
+    run_id = asyncio.run(scenario())
+    events = [
+        event for event in ctl.storage.list_usage_events(run_id) if event.role.value == "planner"
+    ]
+    assert sum(event.calls or 0 for event in events) == 2
+    assert sum(event.calls_without_tokens or 0 for event in events) == 1
+    report = ctl.report(run_id)["cost"]["planner"]
+    assert report["calls_with_unknown_tokens"] == 1
+    assert report["reported_tokens"] == (prompt_tokens or 0) + (completion_tokens or 0) + 15
+    ctl.storage.db.close()
+
+
+def test_failed_planner_provider_call_is_counted_as_usage_unknown(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+    ctl.mark_presented(1)
+
+    def fail_provider_call(_messages: list[dict[str, object]]) -> ModelReply:
+        raise RuntimeError("provider disconnected after request")
+
+    provider = ScriptedProvider([fail_provider_call])
+    agent = ConversationAgent(ctl, provider)
+
+    async def scenario() -> str:
+        failed = await agent.handle_message("Explain the metric.")
+        assert failed.usage["model_calls"] == 1
+        assert failed.usage["calls_without_usage"] == 1
+        provider.add(start_step("Run the benchmark"), say("Started."))
+        started = await agent.handle_message("Run the benchmark.")
+        run_id = started.actions[0]["run_id"]
+        await ctl.wait_for_run(run_id)
+        return run_id
+
+    run_id = asyncio.run(scenario())
+    report = ctl.report(run_id)
+    assert report["cost"]["planner"]["calls"] == 3
+    assert report["cost"]["planner"]["calls_with_unknown_tokens"] == 1
+    assert report["cost"]["planner"]["accounting"] == "unknown"
+    ctl.storage.db.close()
+
+
+def test_late_assistant_reply_is_attributed_by_its_source_turn(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+    ctl.mark_presented(1)
+
+    def user_turn(turn_id: str, message_id: str):
+        return ctl.store.append_turn(
+            ConversationTurn(
+                turn_id=turn_id,
+                session_id=ctl.session_id,
+                sequence=1,
+                role="user",
+                kind="message",
+                content=message_id,
+                message_id=message_id,
+            )
+        )[0]
+
+    async def scenario() -> tuple[str, str]:
+        first_start_turn = user_turn("turn-first-start", "first-start")
+        first = await ctl.start_run(
+            action_id="act-first-run",
+            expected_revision=1,
+            source_turn_id=first_start_turn.turn_id,
+        )
+        assert first.state is ActionState.DONE and first.run_id
+        first_reply, _ = ctl.store.append_turn(
+            first_start_turn.model_copy(
+                update={
+                    "turn_id": "turn-first-reply",
+                    "sequence": 1,
+                    "role": "assistant",
+                    "kind": "reply",
+                    "message_id": None,
+                    "replies_to": first_start_turn.turn_id,
+                    "action_refs": (first.action_id,),
+                    "outcome": {
+                        "usage": {"model_calls": 1, "prompt_tokens": 10, "completion_tokens": 5}
+                    },
+                }
+            )
+        )
+        ctl.record_planner_usage_for_turn(first_reply)
+        await ctl.wait_for_run(first.run_id)
+
+        between = user_turn("turn-between", "between")
+        second_start_turn = user_turn("turn-second-start", "second-start")
+        second = await ctl.start_run(
+            action_id="act-second-run",
+            expected_revision=1,
+            source_turn_id=second_start_turn.turn_id,
+        )
+        assert second.state is ActionState.DONE and second.run_id
+        second_reply, _ = ctl.store.append_turn(
+            second_start_turn.model_copy(
+                update={
+                    "turn_id": "turn-second-reply",
+                    "sequence": 1,
+                    "role": "assistant",
+                    "kind": "reply",
+                    "message_id": None,
+                    "replies_to": second_start_turn.turn_id,
+                    "action_refs": (second.action_id,),
+                    "outcome": {
+                        "usage": {"model_calls": 2, "prompt_tokens": 20, "completion_tokens": 10}
+                    },
+                }
+            )
+        )
+        ctl.record_planner_usage_for_turn(second_reply)
+        assert not [
+            event
+            for event in ctl.storage.list_usage_events(second.run_id)
+            if event.role.value == "planner"
+        ]
+
+        # The reply to an intervening user message arrives after the newer run-start reply.
+        late_reply, _ = ctl.store.append_turn(
+            between.model_copy(
+                update={
+                    "turn_id": "turn-late-reply",
+                    "sequence": 1,
+                    "role": "assistant",
+                    "kind": "reply",
+                    "message_id": None,
+                    "replies_to": between.turn_id,
+                    "outcome": {
+                        "usage": {"model_calls": 3, "prompt_tokens": 30, "completion_tokens": 15}
+                    },
+                }
+            )
+        )
+        ctl.record_planner_usage_for_turn(late_reply)
+        await ctl.wait_for_run(second.run_id)
+        return first.run_id, second.run_id
+
+    first_run, second_run = asyncio.run(scenario())
+    first_calls = sum(
+        event.calls or 0
+        for event in ctl.storage.list_usage_events(first_run)
+        if event.role.value == "planner"
+    )
+    second_calls = sum(
+        event.calls or 0
+        for event in ctl.storage.list_usage_events(second_run)
+        if event.role.value == "planner"
+    )
+    assert first_calls == 1
+    assert second_calls == 5
     ctl.storage.db.close()
 
 
@@ -211,6 +460,279 @@ def test_redelivery_and_retried_turns_cannot_start_a_second_run(tmp_path: Path) 
     asyncio.run(scenario())
     assert len(h.runs()) == 3  # first, the crashed turn's, the typed one — never duplicates
     assert h.count() == 12
+    ctl.storage.db.close()
+
+
+def test_concurrent_duplicate_delivery_accounts_for_losing_provider_usage(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+    ctl.mark_presented(1)
+    message, _ = ctl.store.append_turn(
+        ConversationTurn(
+            turn_id="turn-concurrent-run",
+            session_id=ctl.session_id,
+            sequence=1,
+            role="user",
+            kind="message",
+            content="Explain exact match.",
+            message_id="concurrent-run",
+        )
+    )
+    both_at_provider = threading.Barrier(2)
+
+    def start_together(messages: list[dict[str, object]]) -> ModelReply:
+        both_at_provider.wait(timeout=5)
+        return say("Exact match checks the answer against its reference.")
+
+    provider = ScriptedProvider([start_together, start_together])
+    agent = ConversationAgent(ctl, provider)
+
+    async def scenario() -> tuple[str, list[object]]:
+        action = await ctl.start_run(
+            action_id="concurrent-run-boundary",
+            expected_revision=1,
+            source_turn_id=message.turn_id,
+        )
+        results = await asyncio.gather(
+            agent.handle_message("Explain exact match.", message_id="concurrent-run"),
+            agent.handle_message("Explain exact match.", message_id="concurrent-run"),
+        )
+        assert sum(result.replayed for result in results) == 1
+        assert len(provider.calls) == 2
+        await ctl.wait_for_run(action.run_id)
+        events = [
+            event
+            for event in ctl.storage.list_usage_events(action.run_id)
+            if event.role.value == "planner"
+        ]
+        return action.run_id, events
+
+    run_id, events = asyncio.run(scenario())
+    assert sum(event.calls or 0 for event in events) == 2
+    assert sum(event.tokens["prompt_tokens"] for event in events) == 20
+    assert sum(event.tokens["completion_tokens"] for event in events) == 10
+    assert ctl.report(run_id)["cost"]["planner"]["calls"] == 2
+    assert len([turn for turn in ctl.store.turns(ctl.session_id) if turn.role == "assistant"]) == 1
+    stored_reply = ctl.store.reply_to(message.turn_id)
+    assert stored_reply is not None
+    attempt = stored_reply.outcome["planner_usage_attempts"][0]
+    with pytest.raises(TypeError):
+        attempt["usage"]["model_calls"] = 99
+    ctl.storage.db.close()
+
+
+def test_losing_provider_usage_survives_pending_earlier_turn(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+    ctl.mark_presented(1)
+    earlier_started = threading.Event()
+    release_earlier = threading.Event()
+    duplicate_barrier = threading.Barrier(2)
+
+    class ConcurrentProvider:
+        name = "scripted"
+        model = "scripted-1"
+
+        def __init__(self) -> None:
+            self.calls: list[list[dict[str, object]]] = []
+
+        def complete(
+            self, messages: list[dict[str, object]], tools: list[dict[str, object]]
+        ) -> ModelReply:
+            self.calls.append(messages)
+            message = str(messages[-1]["content"])
+            if "earlier pending" in message:
+                earlier_started.set()
+                assert release_earlier.wait(timeout=10)
+                return say("I received the earlier question.")
+            duplicate_barrier.wait(timeout=5)
+            return say("Exact match checks the answer against its reference.")
+
+    provider = ConcurrentProvider()
+    agent = ConversationAgent(ctl, provider)
+
+    async def scenario() -> tuple[str, list[object]]:
+        earlier_task = asyncio.create_task(
+            agent.handle_message("An earlier pending question.", message_id="earlier")
+        )
+        assert await asyncio.to_thread(earlier_started.wait, 5)
+        results = await asyncio.gather(
+            agent.handle_message("Explain exact match.", message_id="later-duplicate"),
+            agent.handle_message("Explain exact match.", message_id="later-duplicate"),
+        )
+        assert sum(result.replayed for result in results) == 1
+        assert len(provider.calls) == 3
+        release_earlier.set()
+        await earlier_task
+        later_turn = next(
+            turn
+            for turn in ctl.store.turns(ctl.session_id)
+            if turn.role == "user" and turn.message_id == "later-duplicate"
+        )
+        action = await ctl.start_run(
+            action_id="later-run-boundary",
+            expected_revision=1,
+            source_turn_id=later_turn.turn_id,
+        )
+        ctl.record_planner_usage_for_turn(later_turn)
+        await ctl.wait_for_run(action.run_id)
+        events = [
+            event
+            for event in ctl.storage.list_usage_events(action.run_id)
+            if event.role.value == "planner"
+        ]
+        return action.run_id, events
+
+    run_id, events = asyncio.run(scenario())
+    assert sum(event.calls or 0 for event in events) == 3
+    assert sum(event.tokens["prompt_tokens"] for event in events) == 30
+    assert sum(event.tokens["completion_tokens"] for event in events) == 15
+    assert ctl.report(run_id)["cost"]["planner"]["calls"] == 3
+    ctl.storage.db.close()
+
+
+def test_planner_usage_waits_for_intervening_run_boundary(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+    source, _ = ctl.store.append_turn(
+        ConversationTurn(
+            turn_id="turn-source-usage",
+            session_id=ctl.session_id,
+            sequence=1,
+            role="user",
+            kind="message",
+            content="Please start after my answer.",
+            message_id="source-usage",
+        )
+    )
+    source_reply, _ = ctl.store.append_turn(
+        ConversationTurn(
+            turn_id="turn-source-reply",
+            session_id=ctl.session_id,
+            sequence=1,
+            role="assistant",
+            kind="reply",
+            content="Ready.",
+            replies_to=source.turn_id,
+            outcome={"usage": {"model_calls": 1, "prompt_tokens": 10, "completion_tokens": 5}},
+        )
+    )
+    intervening, _ = ctl.store.append_turn(
+        ConversationTurn(
+            turn_id="turn-intervening",
+            session_id=ctl.session_id,
+            sequence=1,
+            role="user",
+            kind="message",
+            content="An intervening unresolved message.",
+            message_id="intervening",
+        )
+    )
+    later, _ = ctl.store.append_turn(
+        ConversationTurn(
+            turn_id="turn-later-command",
+            session_id=ctl.session_id,
+            sequence=1,
+            role="user",
+            kind="command",
+            content="/run",
+            message_id="later-command",
+        )
+    )
+
+    async def scenario() -> tuple[str, str]:
+        later_action = await ctl.start_run(
+            action_id="later-boundary",
+            expected_revision=1,
+            source_turn_id=later.turn_id,
+        )
+        ctl.record_planner_usage_for_turn(source_reply)
+        assert not [
+            event
+            for event in ctl.storage.list_usage_events(later_action.run_id)
+            if (event.calls or 0) > 0
+        ]
+        await ctl.wait_for_run(later_action.run_id)
+
+        ctl.store.append_turn(
+            ConversationTurn(
+                turn_id="turn-intervening-reply",
+                session_id=ctl.session_id,
+                sequence=1,
+                role="assistant",
+                kind="reply",
+                content="Understood.",
+                replies_to=intervening.turn_id,
+                outcome={},
+            )
+        )
+        earlier_action = await ctl.start_run(
+            action_id="intervening-boundary",
+            expected_revision=1,
+            source_turn_id=intervening.turn_id,
+        )
+        ctl.record_planner_usage_for_turn(source_reply)
+        await ctl.wait_for_run(earlier_action.run_id)
+        return later_action.run_id, earlier_action.run_id
+
+    later_run, earlier_run = asyncio.run(scenario())
+    assert sum(
+        event.calls or 0 for event in ctl.storage.list_usage_events(later_run)
+    ) == 0
+    earlier_events = ctl.storage.list_usage_events(earlier_run)
+    assert sum(event.calls or 0 for event in earlier_events) == 1
+    assert sum(event.tokens["prompt_tokens"] for event in earlier_events) == 10
+    assert sum(event.tokens["completion_tokens"] for event in earlier_events) == 5
+    ctl.storage.db.close()
+
+
+def test_cancelled_provider_call_is_recorded_as_usage_unknown(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(FOUR, objectives=("catch wrong answers",))
+    started, release = threading.Event(), threading.Event()
+
+    class BlockingProvider:
+        name = "scripted"
+        model = "scripted-1"
+
+        def complete(
+            self, messages: list[dict[str, object]], tools: list[dict[str, object]]
+        ) -> ModelReply:
+            started.set()
+            assert release.wait(timeout=10)
+            return say("This reply arrives after cancellation.")
+
+    agent = ConversationAgent(ctl, BlockingProvider())
+
+    async def scenario() -> tuple[str, list[object]]:
+        task = asyncio.create_task(agent.handle_message("Explain exact match."))
+        assert await asyncio.to_thread(started.wait, 5)
+        user_turn = next(turn for turn in ctl.store.turns(ctl.session_id) if turn.role == "user")
+        action = await ctl.start_run(
+            action_id="cancelled-call-boundary",
+            expected_revision=1,
+            source_turn_id=user_turn.turn_id,
+        )
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("the conversation call should propagate cancellation")
+        release.set()
+        await ctl.wait_for_run(action.run_id)
+        events = [
+            event
+            for event in ctl.storage.list_usage_events(action.run_id)
+            if event.role.value == "planner"
+        ]
+        return action.run_id, events
+
+    run_id, events = asyncio.run(scenario())
+    assert sum(event.calls or 0 for event in events) == 1
+    assert sum(event.calls_without_tokens or 0 for event in events) == 1
+    assert ctl.report(run_id)["cost"]["planner"]["accounting"] == "unknown"
     ctl.storage.db.close()
 
 

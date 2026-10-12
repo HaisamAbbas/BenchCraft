@@ -13,10 +13,11 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Any
 
 from aibench.core.errors import ConflictError
-from aibench.core.models import utcnow
+from aibench.core.models import deep_freeze, deep_unfreeze, utcnow
 from aibench.core.sessions import (
     ActionRequest,
     ActionState,
@@ -335,6 +336,52 @@ class SessionStore:
             "SELECT data FROM conversation_turns WHERE replies_to = ?", (turn_id,)
         ).fetchone()
         return ConversationTurn.model_validate_json(row["data"]) if row else None
+
+    def append_planner_usage_attempt(
+        self,
+        replies_to: str,
+        *,
+        attempt_id: str,
+        usage: dict[str, Any],
+        recorded_at: datetime,
+    ) -> ConversationTurn:
+        """Durably attach a concurrent losing provider attempt to the stored reply.
+
+        Conversation history still has one assistant reply per user delivery, but usage
+        from every provider attempt must survive until a run boundary can attribute it.
+        """
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT turn_id, data FROM conversation_turns WHERE replies_to = ?",
+                (replies_to,),
+            ).fetchone()
+            if row is None:
+                raise ConflictError("cannot attach planner usage before a reply is stored")
+            reply = ConversationTurn.model_validate_json(row["data"])
+            outcome = deep_unfreeze(reply.outcome) or {}
+            if not isinstance(outcome, dict):
+                outcome = {}
+            attempts = outcome.get("planner_usage_attempts")
+            if not isinstance(attempts, list):
+                attempts = []
+            if not any(
+                isinstance(item, dict) and item.get("attempt_id") == attempt_id
+                for item in attempts
+            ):
+                attempts.append(
+                    {
+                        "attempt_id": attempt_id,
+                        "usage": usage,
+                        "recorded_at": recorded_at.isoformat(),
+                    }
+                )
+            outcome["planner_usage_attempts"] = attempts
+            updated = reply.model_copy(update={"outcome": deep_freeze(outcome)})
+            conn.execute(
+                "UPDATE conversation_turns SET data = ? WHERE turn_id = ?",
+                (updated.model_dump_json(), row["turn_id"]),
+            )
+        return updated
 
     def turns(self, session_id: str, *, last: int | None = None) -> list[ConversationTurn]:
         rows = self.conn.execute(

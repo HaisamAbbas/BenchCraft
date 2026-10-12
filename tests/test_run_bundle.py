@@ -30,7 +30,7 @@ from aibench.core.models import (
 from aibench.core.plans import ExecutablePlan
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.db import Database, Workspace
-from aibench.storage.repositories import Storage
+from aibench.storage.repositories import Storage, _hash_of
 from aibench.storage.run_bundle import export_run_bundle, import_run_bundle
 
 runner = CliRunner()
@@ -273,6 +273,51 @@ def test_run_bundle_detects_tampered_artifact_before_database_import(tmp_path: P
             changed.writestr(member.filename, payload)
 
     with pytest.raises(ValidationError, match="integrity check"):
+        import_run_bundle(tampered, destination)
+    assert not Workspace.at(destination).root.exists()
+
+
+@pytest.mark.parametrize(("calls", "calls_without_tokens"), [(-1, 0), (1, 2)])
+def test_run_bundle_rejects_impossible_usage_event_counts(
+    tmp_path: Path, calls: int, calls_without_tokens: int
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    _seed_terminal_run(source)
+    bundle = tmp_path / "run.zip"
+    export_run_bundle(source, "portable-run", bundle)
+    tampered = tmp_path / "tampered.zip"
+
+    def add_invalid_usage(data: dict[str, Any]) -> None:
+        tables = data["tables"]
+        assert isinstance(tables, dict)
+        event = {
+            "usage_event_id": "planner-invalid-count",
+            "run_id": "portable-run",
+            "role": "planner",
+            "provider": None,
+            "tokens": {},
+            "calls": calls,
+            "calls_without_tokens": calls_without_tokens,
+            "cost": None,
+        }
+        raw = json.dumps(event, sort_keys=True, separators=(",", ":"))
+        tables["usage_events"].append(
+            {
+                "usage_event_id": event["usage_event_id"],
+                "run_id": event["run_id"],
+                "role": event["role"],
+                "provider": event["provider"],
+                "cost": event["cost"],
+                "content_hash": _hash_of(raw),
+                "data": raw,
+            }
+        )
+
+    _rewrite_bundle_data(bundle, tampered, add_invalid_usage)
+    with pytest.raises(ValidationError, match="usage_events data is invalid"):
         import_run_bundle(tampered, destination)
     assert not Workspace.at(destination).root.exists()
 
