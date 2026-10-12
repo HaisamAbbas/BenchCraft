@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22: Dashboard",
+  "current_item": "G22 closeout: external performance validation remains",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 batches run-work persistence, G22.2 bounds scheduler paging, G22.3 adds coordinator-backed workers without shared SQLite, and G22.4 adds bounded closed-loop, fixed open-loop, and ramp-up load profiles with runner-handoff lag reports. Distributed cross-host throughput remains unmeasured; G22.5 delivers bounded image-first vision scoring and the dashboard remains pending.",
+      "detail": "**Partial.** G22.1 through G22.6 are implemented and locally verified. G22.3 cross-host throughput/failure-rate measurement and G22.5 cross-provider semantic calibration remain unmeasured; the dashboard is loopback-only and excludes answer text. Compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -934,7 +934,22 @@
         },
         {
           "name": "dashboard",
-          "status": "pending"
+          "status": "delivered",
+          "implementation": "implementation/G22.6-dashboard.md",
+          "verification": [
+            "12 local HTTP integration tests passed for stored reads, comparisons, query-only SQLite, data omission, origin checks, work-size bounds (including legacy results and trace observations), snapshot consistency across preflight/report reads, inactivity and absolute request deadlines, bounded large/chunked write-body rejection under normal and overloaded conditions, JSON overload errors, percent-encoded colon run IDs, safe error logging, method refusal and CLI help",
+            "25 report regressions and 19 run-history/comparison regressions passed",
+            "Ruff src/tests passed; Mypy passed for 175 source files; changed Python files formatted; embedded JavaScript passed Node syntax check",
+            "Independent final review reported no remaining findings",
+            "Report and comparison reuse existing services; remote authentication and very-large-run performance remain unsupported/unmeasured"
+          ],
+          "review": "implementation/G22.6-dashboard-review.md",
+          "commit": "d122670a27432bbaf755adffa8449d93418f18db",
+          "additional_commits": [
+            "198cbd87084916be20dc05a20803c6b9020a9012",
+            "48514b83108176c052cc92a3c60f08fb5c6bc2c9"
+          ],
+          "pushed": true
         }
       ]
     }
