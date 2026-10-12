@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22.12 follow-on: upstream multimodal and MCP evaluator metrics",
+  "current_item": "G22.13 follow-on: upstream MCP evaluator metrics",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.11 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. Diarization, DeepEval upstream multimodal image/audio and MCP metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.12 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. Diarization, upstream multimodal audio and MCP metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -1042,6 +1042,21 @@
           "review": "implementation/G22.11-voice-metrics-review.md",
           "implementation": "implementation/G22.11-voice-metrics.md",
           "commit": "944a34b245f14cbec8d9aa33ce178e07ae8c4593",
+          "pushed": true
+        },
+        {
+          "name": "DeepEval upstream image metric family",
+          "status": "delivered",
+          "verification": [
+            "Five pinned upstream image metrics score generated images through a bounded inline PNG/JPEG/WebP contract and an OpenAI-compatible vision judge",
+            "Final combined image-metric, worker-usage, and report regression batch: 25 passed",
+            "Ruff check passed; selected changed files passed Ruff formatting; Mypy passed for seven affected source modules; git diff --check passed",
+            "Independent review resolved retry token-completeness loss and mixed legacy/new usage aggregation; final review reported no actionable findings",
+            "No live provider request was made; full image decode and decoded-pixel bounds remain documented limits"
+          ],
+          "review": "implementation/G22.12-upstream-image-metrics-review.md",
+          "implementation": "implementation/G22.12-upstream-image-metrics.md",
+          "commit": "4ece2f80abedc67acb63c36596955a2c1883b8e3",
           "pushed": true
         }
       ]
