@@ -68,6 +68,13 @@ timeouts do not bound plugin environment startup; that has its separate
 or `live`. A model judge is removed from `not_measured` only if at least one evidence-ready
 case reached its `evaluate` method; skipped cases do not count as a measurement.
 
+Vision cases may use a shared `pair_id` to compare providers on identical reviewed examples.
+Each distinct binding and repetition consumes one model-evaluation allowance. Reports include
+decision agreement, score deltas, undecided observations, and bounded disagreement details.
+These are descriptive measurements; they do not prove provider equivalence. Pairing is limited
+to `deepeval.vision_g_eval` and eight bindings per pair. The fixture test suite exercises report
+calculation without calling a live provider.
+
 The tests use local fake evaluators, including a real isolated worker process, and do not
 contact a paid provider. The repository's current `benchmarks/judges/v1` labels remain
 unreviewed, so that set is correctly refused by live mode until a human reviews it.

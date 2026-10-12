@@ -19,9 +19,10 @@ Each item follows the same sequence:
 
 G22.1-G22.4 cover batched work persistence, bounded queue paging, coordinator-backed
 distributed workers, and open-loop/ramping load profiles. G22.5 adds image-first vision
-scoring with bounded inline image input; G22.6 adds a local read-only dashboard over shared
-stored-result services. Cross-host performance evidence and broader modality support remain
-explicit limitations. No existing deferred label is treated as authorization to omit a
+scoring with bounded inline image input and paired reviewed-case calibration across judge
+bindings; G22.6 adds a local read-only dashboard over shared stored-result services. Approved
+live cross-provider calibration, cross-host performance evidence, and broader modality support
+remain explicit limitations. No existing deferred label is treated as authorization to omit a
 feature selected by the user.
 
 The implementation order follows the report's remediation sequence. F14 is a small

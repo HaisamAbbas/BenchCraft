@@ -789,7 +789,7 @@
       "id": "G20",
       "priority": "P2",
       "title": "Judge repeat/calibration workflow",
-      "detail": "**Delivered.** G20.1 adds configurable repeat observations, complete case evidence and usage accounting. G20.2 adds policy-gated live model-judge calibration with reviewed labels, isolated plugin workers, data-root and evaluator-call checks, bounded invocations/timeouts, and usage reporting; unsupported policy ceilings fail closed. F12 was already delivered.",
+      "detail": "**Delivered.** G20.1 adds configurable repeat observations, complete case evidence and usage accounting. G20.2 adds policy-gated live model-judge calibration with reviewed labels, isolated plugin workers, data-root and evaluator-call checks, bounded invocations/timeouts, and usage reporting; unsupported policy ceilings fail closed. Calibration report v3 adds paired, same-sample image-judge comparison with bounded decision and score-difference reporting; no real provider equivalence is claimed. F12 was already delivered.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.6 are implemented and locally verified. G22.3 now has reproducible one-host subprocess measurements, but cross-host throughput/failure-rate measurement and G22.5 cross-provider semantic calibration remain unmeasured; the dashboard is loopback-only and excludes answer text. Compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.6 are implemented and locally verified. G22.3 now has reproducible one-host subprocess measurements, but cross-host throughput/failure-rate measurement and approved live cross-provider semantic calibration remain unmeasured. G22.5 now reports paired image-judge agreement and score deltas on identical reviewed samples, without claiming equivalence. The dashboard is loopback-only and excludes answer text. Compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -931,9 +931,14 @@
             "Verified image signature and size checks, URL/path refusal, insecure endpoint refusal, declared-field projection, secret forwarding, provider-error call accounting, token usage, and frozen-rule enforcement",
             "Ruff check and formatting passed for changed source and test files; Mypy passed for the new evaluator",
             "The first combined adapter run reported 46 passed and two failures in new-test setup/contract assertions; the exact failures were fixed and the final five-test focused/discovery batch passed",
-            "No live provider call was made; semantic calibration across providers remains unmeasured"
+            "No live provider call was made; paired-comparison calculations use deterministic local fixtures and approved live provider calibration remains unmeasured",
+            "Paired calibration/score CLI batch: 36 passed, 1 skipped; seven new tests cover identity alias rejection, same-sample validation, score/decision comparisons, CLI summary, and bounded matrix size",
+            "Ruff check/format and Mypy passed for changed Python files; final independent paired-calibration review found no actionable issues"
           ],
           "review": "implementation/G22.5-image-vision-review.md",
+          "paired_calibration_review": "implementation/G22.5-paired-calibration-review.md",
+          "paired_calibration_commit": "3c988535",
+          "paired_calibration_pushed": true,
           "commit": "2dccecad29bf09543345dc302301c35763b4db58",
           "additional_commits": [
             "5a10fdbe2f0d02ade4c5ae7e1ff6b31790989c39"
