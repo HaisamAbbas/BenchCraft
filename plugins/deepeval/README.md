@@ -9,9 +9,9 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
 recorded data can feed (40, with the head-to-head judge below). DeepEval's upstream image,
-audio, voice, and MCP metric families are not wired into this adapter. The separate
-`deepeval.vision_g_eval` evaluator provides bounded image-first scoring for text answers and
-generated images.
+audio, voice, and MCP metric families are not wired into this adapter. Separate
+`deepeval.vision_g_eval` and `deepeval.audio_g_eval` evaluators provide bounded image-backed
+and audio-backed task scoring for text or generated media outputs.
 JSON correctness
 is covered by `native.json_schema`: upstream's score is the same pass/fail schema check, with
 the judge only writing the explanation. Each is an
@@ -73,6 +73,44 @@ redirects, limits judge replies to 1 MiB, reports provider token counts when pre
 leaves cost unknown unless the provider reports it (no price is guessed). Only a returned
 finite 0–1 score with a non-empty reason is accepted; the harness applies the frozen decision
 rule. Scores remain judge-dependent.
+
+### Bounded audio task scoring
+
+`deepeval.audio_g_eval` scores a recorded text or audio output against one inline audio input,
+the task prompt, and its reviewed reference answer. Case audio lives inside `input`; a generated
+audio output uses the same object shape:
+
+```json
+{"case_id":"greeting-01","input":{"prompt":"What does the speaker say?","audio":{"mime_type":"audio/wav","data_base64":"UklGR..."}},"reference":{"answer":"Hello there."}}
+```
+
+Only base64 PCM/IEEE-float WAV (`audio/wav`) and MPEG Layer III MP3 (`audio/mpeg`) are
+accepted, up to 4 MiB each after decoding. The parser checks RIFF chunk bounds, WAV rate and
+alignment fields, data-frame alignment, and a complete MP3 frame. Configure the application
+output selector to return exactly `{"mime_type":"audio/wav","data_base64":"..."}` or
+`audio/mpeg`; a bounded text answer is also accepted. URLs, paths, extra object fields, other
+media formats, and malformed or oversized payloads are not applicable and stop before the
+judge call. Dataset JSONL lines are capped at 1,000,000 bytes, including base64 and JSON
+overhead, so case audio loaded through JSONL must stay below roughly 750 KB decoded. HTTP
+application request and response limits default to 1 MiB; raise `transport.max_request_bytes`
+or `transport.max_response_bytes` when needed. For example, 4 MiB generated audio needs about
+5.34 MiB of base64 before its JSON wrapper, so set `max_response_bytes` to at least 8,388,608.
+The evaluator sends labeled `input_audio` parts to the configured
+[Chat Completions endpoint](https://platform.openai.com/docs/api-reference/chat/create); the
+selected provider/model must support audio input. Audio, prompt, reference answer, and output
+are sent to that endpoint. The evaluator does not score timestamps, diarization, interruptions,
+or multi-turn voice interaction, and it does not wire DeepEval's upstream voice metrics.
+
+Bind it with a rubric and an audio-capable OpenAI-compatible judge:
+
+```json
+{"metric":"deepeval.audio_g_eval","params":{"criteria":"Score whether the output faithfully conveys the greeting, including the words and language.","judge":{"kind":"openai_compatible","base_url":"https://api.example/v1","model":"audio-model","api_key_env":"AIBENCH_AUDIO_KEY"}}}
+```
+
+Pass the key using the plugin-environment `secret_env` mechanism and allow the evaluator,
+judge model, and plugin interpreter in policy. The evaluator does not follow redirects,
+limits judge replies to 1 MiB, records provider token usage when present, and leaves cost
+unknown unless the provider reports it.
 
 **DAG: a decision tree as JSON.** The judge walks the tree; the verdict it lands on gives the
 score (0 to 10, reported as 0 to 1) or hands over to a G-Eval for the grade. A starting node
@@ -192,7 +230,7 @@ message content out) takes the case's input as the agent's task and the recorded
 `plan_quality` and `plan_adherence` are not applicable (`no_plan_in_trace`) when the judge
 finds no plan in the trace: DeepEval would score that 1, which is no evidence of a good plan.
 
-Not included: DeepEval's native multimodal and audio metrics, voice metrics, and MCP metrics.
+Not included: DeepEval's native multimodal and audio metrics, timestamped voice metrics, and MCP metrics.
 DAG and arena metrics need objects a plan cannot declare.
 
 ## Judges

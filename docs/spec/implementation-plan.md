@@ -34,7 +34,7 @@ This differentiation is a hypothesis to validate with users, not an established 
 
 ### Explicit first-version boundaries
 
-The harness–user conversation is multi-turn from MVP. Separately, support evaluation of single-turn text applications and recorded tool activity first. Design extension points for conversations, coding environments, audio, and multimodal inputs, but do not claim support until their execution and evidence contracts exist. The image-first `deepeval.vision_g_eval` contract accepts bounded inline PNG, JPEG, or WebP case images and recorded text or image outputs against a reviewed reference in an isolated evaluator worker. This does not imply support for audio, video, or DeepEval's upstream multimodal metrics. A general schema is cheap; trustworthy general evaluation is not.
+The harness–user conversation is multi-turn from MVP. Separately, support evaluation of single-turn text applications and recorded tool activity first. Design extension points for conversations, coding environments, audio, and multimodal inputs, but do not claim support until their execution and evidence contracts exist. The image-first `deepeval.vision_g_eval` contract accepts bounded inline PNG, JPEG, or WebP case images and recorded text or image outputs against a reviewed reference in an isolated evaluator worker. The audio-backed `deepeval.audio_g_eval` contract accepts bounded inline WAV or MP3 case audio and recorded text or audio outputs. Neither contract implies support for video, timestamped voice interactions, or DeepEval's upstream multimodal metrics. A general schema is cheap; trustworthy general evaluation is not.
 
 ## 2. Core concepts
 

@@ -52,9 +52,10 @@ OpenAI-compatible endpoint (such as GLM on Z.ai) works without code. Metrics, fi
 and judges are described in `plugins/deepeval/README.md`. Multi-turn conversational metrics
 are also available.
 DeepEval's native multimodal, audio, voice, and MCP metric families are not included.
-The DeepEval plugin does include the narrower `deepeval.vision_g_eval` path for text or image
-outputs on image-backed cases with bounded inline PNG, JPEG, or WebP data; see
-[the plugin guide](../plugins/deepeval/README.md#image-first-vision-scoring).
+The DeepEval plugin includes narrower `deepeval.vision_g_eval` and
+`deepeval.audio_g_eval` paths for text or generated-media outputs on image-backed or
+audio-backed cases with bounded inline data; see the [vision](../plugins/deepeval/README.md#image-first-vision-scoring)
+and [audio](../plugins/deepeval/README.md#bounded-audio-task-scoring) contracts.
 
 **Ragas faithfulness** (`ragas.faithfulness@1`, pinned to `ragas==0.4.3`) is the
 independent second ecosystem used by the Phase 2 comparison workflow. Install it separately:
