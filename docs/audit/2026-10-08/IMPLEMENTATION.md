@@ -25,6 +25,10 @@ live cross-provider calibration, cross-host performance evidence, and broader mo
 remain explicit limitations. No existing deferred label is treated as authorization to omit a
 feature selected by the user.
 
+G22.8 extends `deepeval.vision_g_eval` to score a recorded generated image beside the case
+image, task, and reviewed answer. Both images use the strict inline PNG/JPEG/WebP contract;
+remote paths and URLs remain rejected.
+
 G23 adds source-turn planner usage attribution and combined workflow cost accounting. Reports
 retain separate application, primary evaluator-pass, and planner views while the workflow total
 includes every evaluator scoring pass. Planner dollar pricing and total-cost budget enforcement

@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22 follow-on: extend image-first vision evaluation to generated image outputs",
+  "current_item": "G22 follow-on: bounded audio input and output evaluation",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.6 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. Approved live cross-provider semantic calibration also remains unmeasured. G22.5 reports paired image-judge agreement and score deltas on identical reviewed samples, without claiming equivalence. The dashboard is loopback-only and excludes answer text. Compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.8 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; paired reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. Audio, video, DeepEval upstream multimodal metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -981,6 +981,20 @@
           "review": "implementation/G22.7-remote-worker-probe-review.md",
           "implementation": "implementation/G22.7-remote-worker-probe.md",
           "commit": "cb37c574bf887329cc6bd142d67acdd47adb7056",
+          "pushed": true
+        },
+        {
+          "name": "bounded inline generated-image vision evaluation",
+          "status": "delivered",
+          "verification": [
+            "Combined vision, calibration, DeepEval adapter, and metric regression batch: 75 passed, 1 skipped",
+            "Ruff check and format passed for evaluator, version, and tests; Mypy passed for the vision evaluator; git diff --check passed",
+            "HTTPRunner integration returned a generated image through JSON output selection, durable execution storage, and isolated vision scoring; malformed/remote outputs stop before judge calls",
+            "Independent review found no remaining functional or security findings; its version identity and closeout findings were resolved; see implementation/G22.8-generated-image-outputs-review.md"
+          ],
+          "review": "implementation/G22.8-generated-image-outputs-review.md",
+          "implementation": "implementation/G22.8-generated-image-outputs.md",
+          "commit": "58a027bee706d034aff4d7738910b3753875aa7e",
           "pushed": true
         }
       ]
