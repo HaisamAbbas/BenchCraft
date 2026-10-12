@@ -1,6 +1,15 @@
 # Platform and compatibility matrix
 
-## Current CI-tested source: `0.1.0rc34` at `af918898` (2026-10-11)
+## Current candidate: `0.1.0rc35` (2026-10-13)
+
+The source candidate is not published. The latest hosted workflow,
+[38301696360](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38301696360), tests
+commit `64ea5c5d097435805941d0daa5b908d30d289eed`, which contains the current source fixes.
+At the last status check, the run had no final conclusion and some jobs were still queued or
+running. Treat the rc34 results below as the last fully verified platform matrix; they do not
+establish rc35 compatibility.
+
+## Last fully CI-verified source: `0.1.0rc34` at `af918898` (2026-10-11)
 
 The CI workflow is configured to run the core checks and release-wheel journey on
 Windows, Ubuntu Linux, and macOS with Python 3.11 and 3.12. The DeepEval and Ragas
@@ -8,7 +17,7 @@ real-package adapter jobs run on all three operating systems with Python 3.12. H
 [38145775882](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38145775882) passed all
 18 jobs on source commit `af918898e8a7d14bff2b861c6b3140d3185844d9`.
 
-| Area | Configured CI matrix | Observed results for the current source |
+| Area | Configured CI matrix | Observed results for rc34 |
 |---|---|---|
 | Core checks | Windows, Ubuntu Linux, macOS; Python 3.11 and 3.12 | Hosted: all six jobs passed. Ubuntu: 1,745 passed / 187 skipped per Python version; Windows: 1,742 / 190; macOS: 1,743 / 189. Local Windows 11, Python 3.12.10 targeted regressions passed. |
 | DeepEval and Ragas adapters | Windows, Ubuntu Linux, macOS; Python 3.12, real pinned packages and deterministic judge | All six hosted contract jobs passed (both adapters on each OS). No live judge model was called. |
@@ -23,8 +32,8 @@ behavior, or release authorization.
 ## Historical evidence: release `0.1.0rc1`
 
 The following sections preserve the platform and package evidence recorded for the older
-rc1 artifact. Their "not exercised" entries describe that historical artifact only; the current
-rc34 source results are listed above.
+rc1 artifact. Their "not exercised" entries describe that historical artifact only. The last
+fully verified rc34 source results are listed above.
 
 "Supported" is what the release declares. "Exercised" is what has actually run, and
 where. Anything not exercised is a claim that nobody has checked yet, and is labelled

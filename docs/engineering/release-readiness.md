@@ -1,6 +1,21 @@
 # Release readiness
 
-## Current source snapshot — `aibench 0.1.0rc34` (2026-10-11)
+## Current source candidate — `aibench 0.1.0rc35` (2026-10-13)
+
+**Status: hosted validation pending; release not authorized.** This unpublished candidate
+includes the synchronous DeepEval transport-accounting fix and CLI output tests that tolerate
+Rich-wrapped text. Their focused regressions passed locally: three transport-accounting tests,
+one CLI binding test, and two calibration path tests. The latest hosted workflow,
+[38301696360](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38301696360), has no
+final conclusion in the last status check; its 18 jobs were queued or still running. The
+last fully verified platform matrix below is for rc34 and does not establish rc35 readiness.
+
+No cross-host distributed-worker measurement or approved live-provider calibration has been
+completed. These G22 evidence gates remain open. See the [current platform matrix](platform-matrix.md)
+and the [G22 implementation record](../audit/2026-10-08/REPORT.md) before making a release
+decision.
+
+## Last fully verified source snapshot — `aibench 0.1.0rc34` (2026-10-11)
 
 **Status: platform gate passed; release not authorized.** Hosted run
 [38145775882](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38145775882) passed all
@@ -11,7 +26,7 @@ Platform/version core-suite totals are recorded in the [platform matrix](platfor
 This validates the tested runners and package journey; it does not authorize a release or
 establish live-provider or external-pilot behavior.
 
-The current local platform observation is Windows 11 with Python 3.12.10. A clean
+At that source snapshot, the local platform observation was Windows 11 with Python 3.12.10. A clean
 rc34 wheel build/install, quickstart, and release journey passed all 17 checks locally;
 the separate [G20 live-calibration and policy/worker regression batch](../audit/2026-10-08/implementation/G20-live-calibration-review.md)
 passed 55 tests with one platform-dependent symlink test skipped. The 100-case acceptance
