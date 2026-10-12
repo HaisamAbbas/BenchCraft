@@ -249,6 +249,37 @@ def _print_summary(summary: MetricSummary) -> None:
         console.print(f"  reasons: {escape(json.dumps(summary.reasons))}")
 
 
+def _print_paired_calibration(report: dict[str, Any]) -> None:
+    paired = report.get("paired_comparisons", {})
+    if not paired.get("group_count"):
+        return
+    console.print(
+        f"paired image-judge calibration: {paired['paired_group_count']}/"
+        f"{paired['group_count']} groups paired; "
+        f"{paired['unpaired_group_count']} unpaired (descriptive only)"
+    )
+    for comparison in paired.get("pairs", []):
+        agreement = comparison["decision_agreement"]
+        agreement_text = (
+            "n/a"
+            if agreement["value"] is None
+            else f"{agreement['numerator']}/{agreement['denominator']}"
+        )
+        score_delta = comparison["scores"]["mean_delta_b_minus_a"]
+        delta_text = "n/a" if score_delta is None else f"{score_delta:+.4f}"
+        console.print(
+            f"  {escape(comparison['binding_a'])} vs {escape(comparison['binding_b'])}: "
+            f"decision agreement {agreement_text}; mean score delta (B - A) {delta_text}; "
+            f"undecided {comparison['undecided_observations']}"
+        )
+        for disagreement in comparison["disagreements"]:
+            console.print(
+                f"    disagrees on {escape(disagreement['pair_id'])} "
+                f"repeat {disagreement['repetition']} ({disagreement['label']}): "
+                f"{disagreement['decision_a']} vs {disagreement['decision_b']}"
+            )
+
+
 def score(
     run_id: str = typer.Argument(..., help="Run whose recorded outputs to score."),
     metrics: Path = typer.Option(..., "--metrics", help="JSON/YAML file with a 'metrics' list."),  # noqa: B008
@@ -521,6 +552,7 @@ def calibrate(
                 f"  disagrees on {escape(d['id'])} ({escape(d['category'])}): labelled "
                 f"{d['label']}, decisions {', '.join(d['decisions'])}"
             )
+    _print_paired_calibration(report)
     for item in report["not_measured"]:
         subject = item.get("evaluator") or item.get("measure")
         console.print(

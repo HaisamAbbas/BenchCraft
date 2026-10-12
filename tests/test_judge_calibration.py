@@ -96,7 +96,7 @@ def test_calibrate_command_reports_unmeasured_judges(tmp_path: Path) -> None:
     assert "not measured deepeval.faithfulness@1" in text
     stored = json.loads(out.read_text(encoding="utf-8"))
     assert stored["set"] == "judge-calibration-v1"
-    assert stored["schema"] == "aibench.judge-calibration-report/2"
+    assert stored["schema"] == "aibench.judge-calibration-report/3"
 
 
 def test_calibration_repetitions_are_configurable_and_count_observations() -> None:

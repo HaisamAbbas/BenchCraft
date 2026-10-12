@@ -23,14 +23,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
 from pydantic import ValidationError
 
 from aibench.core.errors import AibenchError
+from aibench.core.hashes import content_hash
 from aibench.core.models import (
     BenchmarkCase,
     Decision,
@@ -45,6 +48,9 @@ from aibench.services.scoring import decide
 
 CALIBRATION_SCHEMA = "aibench.judge-calibration/1"
 MAX_CALIBRATION_CASES = 1_000
+MAX_PAIRED_VARIANTS = 8
+MAX_PAIRED_BINDING_COMPARISONS = 512
+MAX_PAIR_ID_LENGTH = 256
 
 
 class CalibrationError(AibenchError):
@@ -66,6 +72,7 @@ class CalibrationCase:
     metadata: dict[str, Any]
     expectations: dict[str, Any]
     label: str  # "acceptable" | "unacceptable"
+    pair_id: str | None = None
 
     def binding_key(self) -> str:
         return f"{self.metric} {json.dumps(self.params, sort_keys=True)}"
@@ -123,6 +130,7 @@ def load_calibration_set(
             category = raw["category"]
             metric = raw["metric"]
             params = raw.get("params", {})
+            pair_id = raw.get("pair_id")
             raw_reference = raw.get("reference")
             if not all(isinstance(value, str) and value for value in (case_id, category, metric)):
                 raise TypeError("id, category and metric must be non-empty strings")
@@ -133,6 +141,14 @@ def load_calibration_set(
             seen_ids.add(case_id)
             if not isinstance(params, dict):
                 raise TypeError("params must be an object")
+            if "pair_id" in raw and (
+                not isinstance(pair_id, str)
+                or not pair_id.strip()
+                or len(pair_id) > MAX_PAIR_ID_LENGTH
+            ):
+                raise TypeError(
+                    f"pair_id must be non-empty text of at most {MAX_PAIR_ID_LENGTH} characters"
+                )
             if raw_reference is None:
                 reference = None
             elif isinstance(raw_reference, str):
@@ -171,6 +187,7 @@ def load_calibration_set(
                     metadata=metadata,
                     expectations=expectations,
                     label=raw["label"],
+                    pair_id=pair_id,
                 )
             )
             _evaluation_view(cases[-1])
@@ -178,7 +195,105 @@ def load_calibration_set(
             raise CalibrationError(f"{root}/cases.jsonl:{number}: missing {exc}") from exc
         except (TypeError, ValidationError) as exc:
             raise CalibrationError(f"{root}/cases.jsonl:{number}: {exc}") from exc
+    _validate_pair_groups(cases, root=root)
     return meta, cases
+
+
+def _pair_identity(case: CalibrationCase) -> str:
+    judge_neutral_params = {key: value for key, value in case.params.items() if key != "judge"}
+    return content_hash(
+        {
+            "category": case.category,
+            "metric": case.metric,
+            "params": judge_neutral_params,
+            "input": case.input,
+            "has_input": case.has_input,
+            "reference": case.reference.model_dump(mode="json") if case.reference else None,
+            "output": case.output,
+            "retrieved_context": case.retrieved_context,
+            "tool_events": case.tool_events,
+            "metadata": case.metadata,
+            "expectations": case.expectations,
+            "label": case.label,
+        }
+    )
+
+
+def _vision_judge_identity(judge: dict[str, Any]) -> tuple[str, str]:
+    endpoint = judge["base_url"]
+    model = judge["model"]
+    try:
+        normalized = httpx.URL(endpoint.rstrip("/"))
+    except (httpx.InvalidURL, UnicodeError, ValueError):
+        normalized_endpoint = endpoint.rstrip("/")
+    else:
+        if normalized.port == (443 if normalized.scheme == "https" else 80):
+            normalized = normalized.copy_with(port=None)
+        normalized_endpoint = str(normalized)
+    return normalized_endpoint, model.strip()
+
+
+def _validate_pair_groups(cases: list[CalibrationCase], *, root: Path) -> None:
+    groups: dict[str, list[CalibrationCase]] = defaultdict(list)
+    comparison_keys: set[tuple[str, str]] = set()
+    for case in cases:
+        if case.pair_id is not None:
+            groups[case.pair_id].append(case)
+    for pair_id, group in groups.items():
+        if any(case.metric != "deepeval.vision_g_eval" for case in group):
+            raise CalibrationError(
+                f"{root}/cases.jsonl: pair_id {pair_id!r} is only supported for "
+                "deepeval.vision_g_eval"
+            )
+        variants: dict[str, CalibrationCase] = {}
+        provider_identities: set[tuple[str, str]] = set()
+        for case in group:
+            judge = case.params.get("judge")
+            if not isinstance(judge, dict):
+                raise CalibrationError(
+                    f"{root}/cases.jsonl: pair_id {pair_id!r} requires a vision judge config"
+                )
+            endpoint, model = judge.get("base_url"), judge.get("model")
+            if (
+                not isinstance(endpoint, str)
+                or not endpoint
+                or not isinstance(model, str)
+                or not model
+            ):
+                raise CalibrationError(
+                    f"{root}/cases.jsonl: pair_id {pair_id!r} requires a judge endpoint and model"
+                )
+            key = case.binding_key()
+            if key in variants:
+                raise CalibrationError(
+                    f"{root}/cases.jsonl: pair_id {pair_id!r} repeats the same vision binding"
+                )
+            variants[key] = case
+            provider_identities.add(_vision_judge_identity(judge))
+        if len(variants) > MAX_PAIRED_VARIANTS:
+            raise CalibrationError(
+                f"{root}/cases.jsonl: pair_id {pair_id!r} exceeds the "
+                f"{MAX_PAIRED_VARIANTS}-binding comparison limit"
+            )
+        if len(provider_identities) != len(variants):
+            raise CalibrationError(
+                f"{root}/cases.jsonl: pair_id {pair_id!r} repeats a judge endpoint/model identity"
+            )
+        bindings = sorted(variants)
+        for left_index, binding_a in enumerate(bindings):
+            for binding_b in bindings[left_index + 1 :]:
+                comparison_keys.add((binding_a, binding_b))
+                if len(comparison_keys) > MAX_PAIRED_BINDING_COMPARISONS:
+                    raise CalibrationError(
+                        f"{root}/cases.jsonl: paired comparisons exceed the "
+                        f"{MAX_PAIRED_BINDING_COMPARISONS}-binding-pair report limit"
+                    )
+        identities = {_pair_identity(case) for case in group}
+        if len(identities) != 1:
+            raise CalibrationError(
+                f"{root}/cases.jsonl: pair_id {pair_id!r} variants must use the same image, "
+                "prompt, reference, output, label, and evaluator parameters"
+            )
 
 
 def _evaluation_view(case: CalibrationCase) -> EvaluationView:
@@ -233,6 +348,7 @@ async def _decide(
             return {
                 "decision": Decision.NOT_EVALUATED.value,
                 "reason": f"{state}:{requirement.path}",
+                "score": None,
                 "usage": [],
                 "evaluated": False,
             }
@@ -243,6 +359,7 @@ async def _decide(
             "decision": Decision.NOT_EVALUATED.value,
             "reason": type(exc).__name__,
             "error_type": type(exc).__name__,
+            "score": None,
             "usage": [],
             "evaluated": False,
         }
@@ -273,6 +390,7 @@ async def _decide(
             "decision": Decision.NOT_EVALUATED.value,
             "reason": error_type or "evaluation failed",
             "error_type": error_type,
+            "score": None,
             "usage": _usage_rows(ctx.usage),
             "evaluated": evaluated,
         }
@@ -281,10 +399,26 @@ async def _decide(
     except (AttributeError, TypeError, ValueError):
         decision = Decision.NOT_EVALUATED
         error_type = "InvalidOutcome"
+    raw_score = outcome.value.value if outcome.value is not None else None
+    score = None
+    if (
+        outcome.value is not None
+        and outcome.value.kind == "scalar"
+        and isinstance(raw_score, (int, float))
+        and not isinstance(raw_score, bool)
+    ):
+        try:
+            finite_score = float(raw_score)
+        except (OverflowError, ValueError):
+            pass
+        else:
+            if math.isfinite(finite_score):
+                score = finite_score
     return {
         "decision": decision.value,
         "reason": outcome.reason,
         "error_type": error_type,
+        "score": score,
         "usage": _usage_rows(ctx.usage),
         "evaluated": evaluated,
     }
@@ -317,6 +451,121 @@ def _measure(rows: list[dict[str, Any]]) -> dict[str, Any]:
             sum(1 for r in rows if r["stable"]) if has_repeats else 0,
             len(rows) if has_repeats else 0,
         ),
+    }
+
+
+def _paired_comparisons(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    groups: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for row in rows:
+        pair_id = row.get("pair_id")
+        if pair_id is not None:
+            groups[pair_id][row["binding"]] = row
+
+    pair_stats: dict[tuple[str, str], dict[str, Any]] = {}
+    unpaired = []
+    for pair_id, variants in sorted(groups.items()):
+        bindings = sorted(variants)
+        if len(bindings) < 2:
+            unpaired.append(pair_id)
+            continue
+        for left_index, binding_a in enumerate(bindings):
+            for binding_b in bindings[left_index + 1 :]:
+                stat = pair_stats.setdefault(
+                    (binding_a, binding_b),
+                    {
+                        "paired_cases": 0,
+                        "paired_observations": 0,
+                        "decided_observations": 0,
+                        "matching_decisions": 0,
+                        "score_observations": 0,
+                        "score_a_total": 0.0,
+                        "score_b_total": 0.0,
+                        "score_delta_total": 0.0,
+                        "score_delta_absolute_total": 0.0,
+                        "disagreements": [],
+                        "disagreements_omitted": 0,
+                    },
+                )
+                row_a = variants[binding_a]
+                row_b = variants[binding_b]
+                stat["paired_cases"] += 1
+                for repeat_a, repeat_b in zip(
+                    row_a["repetitions"], row_b["repetitions"], strict=True
+                ):
+                    stat["paired_observations"] += 1
+                    decision_a, decision_b = repeat_a["decision"], repeat_b["decision"]
+                    decided = {Decision.PASS.value, Decision.FAIL.value}
+                    if decision_a in decided and decision_b in decided:
+                        stat["decided_observations"] += 1
+                        if decision_a == decision_b:
+                            stat["matching_decisions"] += 1
+                        else:
+                            disagreement = {
+                                "pair_id": pair_id,
+                                "repetition": repeat_a["index"],
+                                "label": row_a["label"],
+                                "decision_a": decision_a,
+                                "decision_b": decision_b,
+                            }
+                            if len(stat["disagreements"]) < 100:
+                                stat["disagreements"].append(disagreement)
+                            else:
+                                stat["disagreements_omitted"] += 1
+                    score_a, score_b = repeat_a.get("score"), repeat_b.get("score")
+                    if score_a is not None and score_b is not None:
+                        delta = score_b - score_a
+                        stat["score_observations"] += 1
+                        stat["score_a_total"] += score_a
+                        stat["score_b_total"] += score_b
+                        stat["score_delta_total"] += delta
+                        stat["score_delta_absolute_total"] += abs(delta)
+
+    comparisons = []
+    for (binding_a, binding_b), stat in sorted(pair_stats.items()):
+        score_count = stat["score_observations"]
+        decision_count = stat["decided_observations"]
+        comparisons.append(
+            {
+                "binding_a": binding_a,
+                "binding_b": binding_b,
+                "paired_cases": stat["paired_cases"],
+                "paired_observations": stat["paired_observations"],
+                "decision_agreement": {
+                    "value": round(stat["matching_decisions"] / decision_count, 4)
+                    if decision_count
+                    else None,
+                    "numerator": stat["matching_decisions"],
+                    "denominator": decision_count,
+                },
+                "undecided_observations": stat["paired_observations"] - decision_count,
+                "scores": {
+                    "observations": score_count,
+                    "mean_a": round(stat["score_a_total"] / score_count, 4)
+                    if score_count
+                    else None,
+                    "mean_b": round(stat["score_b_total"] / score_count, 4)
+                    if score_count
+                    else None,
+                    "mean_delta_b_minus_a": round(stat["score_delta_total"] / score_count, 4)
+                    if score_count
+                    else None,
+                    "mean_absolute_delta": round(
+                        stat["score_delta_absolute_total"] / score_count, 4
+                    )
+                    if score_count
+                    else None,
+                },
+                "disagreements": stat["disagreements"],
+                "disagreements_omitted": stat["disagreements_omitted"],
+            }
+        )
+    return {
+        "group_count": len(groups),
+        "paired_group_count": len(groups) - len(unpaired),
+        "unpaired_group_count": len(unpaired),
+        "unpaired_pair_ids": unpaired[:100],
+        "unpaired_pair_ids_omitted": max(0, len(unpaired) - 100),
+        "pairs": comparisons,
     }
 
 
@@ -403,6 +652,7 @@ def run_calibration(
     meta, cases = calibration_data if calibration_data is not None else load_calibration_set(root)
     if not cases:
         raise CalibrationError(f"{root}/cases.jsonl: calibration set has no cases")
+    _validate_pair_groups(cases, root=root)
     registry = registry or EvaluatorRegistry.with_native()
     resolved = [
         registry.resolve_binding(MetricBinding(metric=c.metric, params=c.params)) for c in cases
@@ -452,6 +702,7 @@ def run_calibration(
             results.append(
                 {
                     "id": case.case_id,
+                    "pair_id": case.pair_id,
                     "binding": case.binding_key(),
                     "category": case.category,
                     "label": case.label,
@@ -503,7 +754,7 @@ def run_calibration(
         if not _measured_evaluator_reference(item.get("evaluator"), measured_model_evaluators)
     ]
     return {
-        "schema": "aibench.judge-calibration-report/2",
+        "schema": "aibench.judge-calibration-report/3",
         "set": meta.get("version"),
         "mode": "live" if allow_models and model_evaluations else "offline",
         "label_review": reviewed,
@@ -513,5 +764,6 @@ def run_calibration(
         "bindings": bindings,
         "not_measured": remaining_not_measured,
         "cases": rows,
+        "paired_comparisons": _paired_comparisons(rows),
         "usage": _usage_summary(rows),
     }
