@@ -98,9 +98,10 @@ def test_a_new_user_plans_runs_and_discusses_the_quickstart_in_conversation(
                 "Hypothesis, based on support-004 only: the answer is the shipping passage, "
                 "so retrieval likely picked the wrong passage."
             ),
-            # 5. an invented statistic is flagged, never presented as verified
+            # 5. an invented statistic is flagged, never presented as verified. This
+            # percentage cannot collide with an unrelated ratio in the stored report.
             call("get_report"),
-            say("About 42% of all failures are retrieval problems."),
+            say("About 99.73% of all failures are retrieval problems."),
             # 6. export at the user's request
             call("export_report", user_quote="export the report as html", formats=["html"]),
             say("Exported the report."),
@@ -154,8 +155,8 @@ def test_a_new_user_plans_runs_and_discusses_the_quickstart_in_conversation(
         evidence = [e for e in seen if "executions" in e]  # get_case_evidence results
         assert evidence and all("output" not in x for e in evidence for x in e["executions"])
 
-        assert invented.unverified_numbers == ["42%"]
-        assert "not found in any result queried this turn: 42%" in invented.status_line
+        assert invented.unverified_numbers == ["99.73%"]
+        assert "not found in any result queried this turn: 99.73%" in invented.status_line
 
         [export] = exported.exports
         path = Path(export["paths"]["html"])
