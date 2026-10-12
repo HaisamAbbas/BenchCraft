@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22 closeout: remote probe delivered; cross-host evidence pending",
+  "current_item": "G22 follow-on: extend image-first vision evaluation to generated image outputs",
   "items": [
     {
       "id": "F01",
@@ -984,6 +984,23 @@
           "pushed": true
         }
       ]
+    },
+    {
+      "id": "G23",
+      "priority": "P2",
+      "title": "Whole-workflow cost attribution",
+      "detail": "**Delivered.** Session-run reports attribute planner usage to source user turns and show separate application, primary evaluator-pass, planner, and whole-workflow accounting. Workflow totals include all committed evaluator scoring passes, including rescoring. Partial and unknown usage, cancellation, concurrent duplicate attempts, and legacy unattributed planner usage remain explicit. Planner dollars remain unknown without provider pricing and no combined workflow budget is enforced.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Affected conversation, reports, TUI, storage repository, and run-bundle batch: 149 passed; after the final nested-immutability hardening, the two focused duplicate/deferred-attribution regressions passed",
+        "Ruff passed for changed source and test files; Mypy passed for six changed source modules; git diff --check passed",
+        "Independent review-agent final review found no remaining actionable findings; see implementation/G23-whole-workflow-cost-review.md"
+      ],
+      "review": "implementation/G23-whole-workflow-cost-review.md",
+      "implementation": "implementation/G23-whole-workflow-cost.md",
+      "commit": "73ee930ee6ed6d27a7daf9b31908e85678f047ec",
+      "pushed": true
     }
   ]
 }

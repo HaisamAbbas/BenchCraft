@@ -25,6 +25,12 @@ live cross-provider calibration, cross-host performance evidence, and broader mo
 remain explicit limitations. No existing deferred label is treated as authorization to omit a
 feature selected by the user.
 
+G23 adds source-turn planner usage attribution and combined workflow cost accounting. Reports
+retain separate application, primary evaluator-pass, and planner views while the workflow total
+includes every evaluator scoring pass. Planner dollar pricing and total-cost budget enforcement
+remain unsupported; partial, canceled, concurrent duplicate, and legacy usage states stay
+visible rather than being counted as complete.
+
 The implementation order follows the report's remediation sequence. F14 is a small
 prerequisite to obtain a clean type-check baseline; F03 and F05 then protect input
 isolation and fidelity before scoring, budgets, identities, and CLI features are extended.
