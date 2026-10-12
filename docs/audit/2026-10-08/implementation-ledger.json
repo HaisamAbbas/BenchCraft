@@ -975,13 +975,18 @@
             "Preflight bounds each configured worker pool to capacity + 4 connections and keeps the requested aggregate at or below the coordinator's 128-connection limit; reports disclose when extra registered workers exceed that budget",
             "Worker app config is created exclusively at a new path and contains no coordinator token; the printed worker command reads the token from the selected environment variable",
             "The report marks host separation as operator-selected and unverified; cross-host evidence remains pending until a separate host is available",
-            "27 focused distributed measurement and worker tests passed, including two real CLI worker processes and coordinator shutdown with an active long poll",
-            "Ruff check and formatting, Mypy for the coordinator service and measurement script, CSV/JSON validation, and git diff --check passed"
+            "Ruff check and formatting, Mypy for the coordinator service and measurement script, CSV/JSON validation, and git diff --check passed",
+            "27 focused distributed measurement and worker tests passed after the setup follow-up, including the two-process integration and a space-containing custom app-config filename in generated instructions",
+            "Worker and fixture instructions run through uv run --locked from the matching checkout; uv run --locked python -m aibench worker connect --help exited successfully; Ruff, Mypy for the measurement script, formatting, and git diff --check passed",
+            "Operator guide documents a separate-host VM recommendation, coordinator TLS ingress, worker HTTPS egress, local fixture port, and the host-separation evidence limitation"
           ],
           "review": "implementation/G22.7-remote-worker-probe-review.md",
           "implementation": "implementation/G22.7-remote-worker-probe.md",
           "commit": "cb37c574bf887329cc6bd142d67acdd47adb7056",
-          "pushed": true
+          "pushed": true,
+          "additional_commits": [
+            "6c60a80d2e5978f78887f948ee6d01e23b06e21b"
+          ]
         },
         {
           "name": "bounded inline generated-image vision evaluation",
