@@ -34,7 +34,7 @@ inline WAV/MP3 case. It validates supported WAV/MP3 framing before the isolated 
 labeled `input_audio` parts to the explicitly configured judge. Built-in dataset rows are
 hard-capped at 1,000,000 bytes, so imported case audio has a lower practical limit than the
 per-audio evaluator cap; HTTP transport limits can be raised in application configuration.
-Timestamped voice-interaction and diarization metrics are not included.
+The G22.9 single-request audio task evaluator does not score turn timing or diarization.
 
 G22.10 adds `deepeval.video_frames_g_eval` for text or supplied sampled-frame output. Case input
 uses 2 to 8 strictly ordered timestamps and inline PNG/JPEG/WebP images, capped at 512 KiB per
@@ -43,6 +43,8 @@ reference text. Generated output allows 1 MiB per frame and 4 MiB per sequence. 
 and timestamp labels are retained in the judge request; the configured HTTP response limit
 can be raised to carry maximum generated output. This scores only supplied samples; it does not
 decode raw video containers or score motion between samples.
+
+G22.11 adds seven local DeepEval voice metrics over stored, timestamped conversation turns. Inputs are inline bounded PCM WAV; the host rejects episode evidence over 50 turns or 7 MiB before worker dispatch. Responsiveness only reflects missing assistant audio in this stored format; the adapter does not capture live calls, measure live latency, detect reprompts, or score diarization. DeepEval upstream multimodal image/audio and MCP metric families remain unsupported. See [G22.11 implementation](implementation/G22.11-voice-metrics.md).
 
 G23 adds source-turn planner usage attribution and combined workflow cost accounting. Reports
 retain separate application, primary evaluator-pass, and planner views while the workflow total
