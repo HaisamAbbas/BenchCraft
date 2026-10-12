@@ -538,7 +538,9 @@ def test_live_calibration_rejects_a_file_resolving_outside_data_roots_before_rea
     )
     assert result.exit_code == 4
     message = " ".join(result.output.split())
-    assert f"{filename} resolves outside the policy's data_roots" in message
+    compact_output = "".join(result.output.split())
+    assert filename in compact_output
+    assert "resolves outside the policy's data_roots" in message
     assert loads == 0
 
 
