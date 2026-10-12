@@ -55,6 +55,7 @@ _CLAIM_WAIT_SECONDS = 20.0
 _COMPLETED_MEMORY = 4096
 _MAX_WORKERS = 64
 _MAX_CONCURRENCY = 64
+MAX_ACTIVE_API_CONNECTIONS = 128
 
 
 @dataclass
@@ -370,14 +371,17 @@ class CoordinatorRunner(BaseRunner):
         )
 
     async def _close(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
-        for connection in tuple(self._connections):
+        server = self._server
+        if server is not None:
+            server.close()
+        connections = tuple(self._connections)
+        for connection in connections:
             connection.cancel()
-        if self._connections:
-            await asyncio.gather(*self._connections, return_exceptions=True)
+        if connections:
+            await asyncio.gather(*connections, return_exceptions=True)
+        if server is not None:
+            await server.wait_closed()
+            self._server = None
         for task in list(self._tasks.values()):
             if not task.future.done():
                 task.future.set_result(
@@ -394,7 +398,7 @@ class CoordinatorRunner(BaseRunner):
         self._leases.clear()
 
     def _accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        if self._connection_count >= 128:
+        if self._connection_count >= MAX_ACTIVE_API_CONNECTIONS:
             writer.close()
             return
         self._connection_count += 1
@@ -411,37 +415,38 @@ class CoordinatorRunner(BaseRunner):
         status = 400
         response: dict[str, Any] = {"error": "invalid request"}
         try:
-            method, path, _, document = await asyncio.wait_for(
-                read_request(reader, expected_authorization=f"Bearer {self.token}"),
-                timeout=15.0,
-            )
-            if method != "POST":
-                status, response = 405, {"error": "method not allowed"}
-            else:
-                status, response = await self._route(path, document)
-        except WorkerAuthenticationError:
-            status, response = 401, {"error": "unauthorized"}
-        except (WorkerProtocolError, TimeoutError, ValueError) as exc:
-            status, response = 400, {"error": str(exc)[:500]}
-        except Exception:  # noqa: BLE001 - never disclose coordinator internals to a worker
-            # Internal failures are deliberately not reflected to a remote worker.
-            status, response = 500, {"error": "coordinator internal error"}
-        try:
-            body = json_bytes(response, maximum=MAX_RESPONSE_BYTES)
-        except WorkerProtocolError:
-            status = 500
-            body = b'{"error":"coordinator response exceeded protocol limits"}'
-        try:
-            writer.write(
-                f"HTTP/1.1 {status} {_reason(status)}\r\n"
-                "Content-Type: application/json\r\n"
-                f"Content-Length: {len(body)}\r\n"
-                "Connection: close\r\n\r\n".encode("ascii")
-                + body
-            )
-            await writer.drain()
-        except (ConnectionError, OSError):
-            pass
+            try:
+                method, path, _, document = await asyncio.wait_for(
+                    read_request(reader, expected_authorization=f"Bearer {self.token}"),
+                    timeout=15.0,
+                )
+                if method != "POST":
+                    status, response = 405, {"error": "method not allowed"}
+                else:
+                    status, response = await self._route(path, document)
+            except WorkerAuthenticationError:
+                status, response = 401, {"error": "unauthorized"}
+            except (WorkerProtocolError, TimeoutError, ValueError) as exc:
+                status, response = 400, {"error": str(exc)[:500]}
+            except Exception:  # noqa: BLE001 - never disclose coordinator internals to a worker
+                # Internal failures are deliberately not reflected to a remote worker.
+                status, response = 500, {"error": "coordinator internal error"}
+            try:
+                body = json_bytes(response, maximum=MAX_RESPONSE_BYTES)
+            except WorkerProtocolError:
+                status = 500
+                body = b'{"error":"coordinator response exceeded protocol limits"}'
+            try:
+                writer.write(
+                    f"HTTP/1.1 {status} {_reason(status)}\r\n"
+                    "Content-Type: application/json\r\n"
+                    f"Content-Length: {len(body)}\r\n"
+                    "Connection: close\r\n\r\n".encode("ascii")
+                    + body
+                )
+                await writer.drain()
+            except (ConnectionError, OSError):
+                pass
         finally:
             writer.close()
             try:

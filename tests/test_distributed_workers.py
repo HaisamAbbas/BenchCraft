@@ -427,6 +427,73 @@ def test_worker_re_registers_after_coordinator_forgets_its_worker_id() -> None:
     asyncio.run(scenario())
 
 
+def test_coordinator_close_cancels_active_worker_long_poll() -> None:
+    async def scenario() -> None:
+        ready: dict[str, Any] = {}
+        coordinator = CoordinatorRunner(
+            _spec(),
+            run_id="run-close-test",
+            options=_options(),
+            token=_TOKEN,
+            on_ready=ready.update,
+        )
+        coordinator_start = asyncio.create_task(coordinator.prepare())
+        client = httpx.AsyncClient(trust_env=False, timeout=None)
+        poll: asyncio.Task[httpx.Response] | None = None
+        headers = {"Authorization": f"Bearer {_TOKEN}"}
+        try:
+            for _ in range(100):
+                if ready:
+                    break
+                await asyncio.sleep(0.01)
+            assert ready["url"]
+            registration = await client.post(
+                ready["url"] + "/v1/register",
+                headers=headers,
+                json={
+                    "protocol": WORKER_PROTOCOL,
+                    "client_id": "closing-worker",
+                    "application_hash": coordinator.application_hash,
+                    "engine_version": __version__,
+                    "capacity": 1,
+                },
+            )
+            assert registration.status_code == 200, registration.text
+            worker_id = registration.json()["worker_id"]
+            await asyncio.wait_for(coordinator_start, timeout=1)
+            poll = asyncio.create_task(
+                client.post(
+                    ready["url"] + "/v1/claim",
+                    headers=headers,
+                    json={"worker_id": worker_id},
+                )
+            )
+            for _ in range(100):
+                if coordinator._connections:
+                    break
+                await asyncio.sleep(0.01)
+            assert coordinator._connections
+            await asyncio.sleep(0.02)
+
+            await asyncio.wait_for(coordinator.close(), timeout=1)
+
+            assert coordinator._server is None
+            assert not coordinator._connections
+            with pytest.raises(httpx.HTTPError):
+                await asyncio.wait_for(poll, timeout=1)
+        finally:
+            if poll is not None and not poll.done():
+                poll.cancel()
+                await asyncio.gather(poll, return_exceptions=True)
+            if not coordinator_start.done():
+                coordinator_start.cancel()
+                await asyncio.gather(coordinator_start, return_exceptions=True)
+            await coordinator.close()
+            await client.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_worker_command_uses_a_path_placeholder_for_the_remote_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
