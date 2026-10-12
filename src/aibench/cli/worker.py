@@ -33,6 +33,11 @@ def connect(
     capacity: int = typer.Option(
         1, "--capacity", min=1, max=64, help="Concurrent application calls this worker can accept."
     ),
+    report_runtime: bool = typer.Option(
+        False,
+        "--report-runtime",
+        help="Report OS, architecture, Python version, and CPU count during registration.",
+    ),
     ca_bundle: Path | None = typer.Option(  # noqa: B008
         None, "--ca-bundle", help="CA bundle for a private coordinator TLS certificate."
     ),
@@ -74,6 +79,7 @@ def connect(
                     application_hash=content_hash(loaded.spec.model_dump(mode="json")),
                     capacity=capacity,
                     ca_bundle=str(ca_bundle.expanduser().resolve()) if ca_bundle else None,
+                    report_runtime=report_runtime,
                     on_connected=connected,
                 )
                 await runner.prepare()

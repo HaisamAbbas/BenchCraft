@@ -58,12 +58,40 @@ _MAX_CONCURRENCY = 64
 MAX_ACTIVE_API_CONNECTIONS = 128
 
 
+def _worker_runtime(value: Any) -> dict[str, str | int | None] | None:
+    if not isinstance(value, dict):
+        return None
+
+    def text_field(name: str) -> str | None:
+        item = value.get(name)
+        if not isinstance(item, str):
+            return None
+        if any(ord(character) < 32 or ord(character) == 127 for character in item):
+            return None
+        item = item.strip()
+        if not item:
+            return None
+        return item[:64]
+
+    logical_cpus = value.get("logical_cpus")
+    if type(logical_cpus) is not int or not 1 <= logical_cpus <= 4096:
+        logical_cpus = None
+    runtime: dict[str, str | int | None] = {
+        "os": text_field("os"),
+        "architecture": text_field("architecture"),
+        "python": text_field("python"),
+        "logical_cpus": logical_cpus,
+    }
+    return runtime if any(item is not None for item in runtime.values()) else None
+
+
 @dataclass
 class _Worker:
     worker_id: str
     client_id: str
     capacity: int
     last_seen: float
+    runtime: dict[str, str | int | None] | None = None
 
 
 @dataclass
@@ -476,6 +504,7 @@ class CoordinatorRunner(BaseRunner):
             return 409, {"error": "worker BenchCraft version does not match the coordinator"}
         client_id = document.get("client_id")
         capacity = document.get("capacity")
+        runtime = _worker_runtime(document.get("runtime"))
         if not isinstance(client_id, str) or not 1 <= len(client_id) <= 80:
             return 400, {"error": "client_id must be a non-empty string of at most 80 characters"}
         if type(capacity) is not int or not 1 <= capacity <= _MAX_CONCURRENCY:
@@ -485,17 +514,26 @@ class CoordinatorRunner(BaseRunner):
         if worker is None:
             if len(self._workers) >= _MAX_WORKERS:
                 return 429, {"error": f"coordinator supports at most {_MAX_WORKERS} workers"}
-            worker = _Worker(uuid.uuid4().hex, client_id, capacity, time.monotonic())
+            worker = _Worker(
+                uuid.uuid4().hex, client_id, capacity, time.monotonic(), runtime=runtime
+            )
             self._workers[worker.worker_id] = worker
             self._clients[client_id] = worker
         else:
             worker.capacity = capacity
             worker.last_seen = time.monotonic()
+            worker.runtime = runtime
         self._available_workers.set()
         if self.event_sink is not None:
+            event_payload: dict[str, Any] = {
+                "worker_id": worker.worker_id,
+                "capacity": worker.capacity,
+            }
+            if worker.runtime is not None:
+                event_payload["runtime"] = worker.runtime
             self.event_sink(
                 "distributed_worker_connected",
-                {"worker_id": worker.worker_id, "capacity": worker.capacity},
+                event_payload,
             )
         return 200, {
             "protocol": WORKER_PROTOCOL,

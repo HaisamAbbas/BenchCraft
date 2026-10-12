@@ -56,6 +56,8 @@ def test_distributed_measurement_runs_a_real_worker_process(tmp_path: Path) -> N
     measured = document["measurement"]
     assert measured["worker_processes"] == 1
     assert measured["worker_workspace_created"] is False
+    [worker_runtime] = measured["worker_runtime_by_worker_id_at_latest_registration"].values()
+    assert isinstance(worker_runtime["python"], str)
     assert measured["outcomes_succeeded"] == 8
     assert measured["outcomes_failed"] == 0
     assert measured["application_requests_accepted"] == 8
@@ -176,6 +178,7 @@ def test_remote_worker_instructions_use_custom_token_environment_variable(
     assert "--ca-bundle '/etc/ssl/Bench Craft/benchcraft-ca.pem'" in instructions
     assert "BenchCraft checkout at the coordinator's exact version" in instructions
     assert "uv run --locked python -m aibench worker connect" in instructions
+    assert "--report-runtime" in instructions
     assert "--app-config 'worker app-config.json'" in instructions
     assert "keeping its filename" in instructions
     assert "at least 2; POSIX shell" in instructions
@@ -246,6 +249,7 @@ def test_opt_in_probe_measures_a_separately_started_worker_process(
                         str(details["app_config"]),
                         "--capacity",
                         str(details["capacity"]),
+                        "--report-runtime",
                         "--token-env",
                         details["token_env"],
                     ],
@@ -296,6 +300,9 @@ def test_opt_in_probe_measures_a_separately_started_worker_process(
         assert len(capacities_by_worker_id) == 2
         assert all(isinstance(worker_id, str) for worker_id in capacities_by_worker_id)
         assert sorted(capacities_by_worker_id.values()) == [2, 2]
+        runtime_by_worker_id = measured["worker_runtime_by_worker_id_at_latest_registration"]
+        assert set(runtime_by_worker_id) == set(capacities_by_worker_id)
+        assert all(isinstance(runtime["python"], str) for runtime in runtime_by_worker_id.values())
         assert measured["registered_worker_connection_pool_budget"] == 12
         assert measured["coordinator_active_api_connection_limit"] == 128
         assert measured["registered_worker_pool_budget_exceeds_coordinator_limit"] is False

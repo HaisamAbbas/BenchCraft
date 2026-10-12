@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import platform
 import ssl
 import uuid
 from collections.abc import Callable
@@ -48,6 +50,7 @@ class DistributedWorker:
         application_hash: str,
         capacity: int = 1,
         ca_bundle: str | None = None,
+        report_runtime: bool = False,
         on_connected: Callable[[str], None] | None = None,
     ) -> None:
         self.runner = runner
@@ -56,6 +59,7 @@ class DistributedWorker:
         self.application_hash = application_hash
         self.capacity = capacity
         self.ca_bundle = ca_bundle
+        self.report_runtime = report_runtime
         self.on_connected = on_connected
         self.client_id = uuid.uuid4().hex
         self.worker_id: str | None = None
@@ -87,14 +91,25 @@ class DistributedWorker:
     async def stop(self) -> None:
         self._stopping.set()
 
-    async def _register_when_available(self, client: httpx.AsyncClient) -> None:
-        document = {
+    def _registration_document(self) -> dict[str, Any]:
+        document: dict[str, Any] = {
             "protocol": WORKER_PROTOCOL,
             "client_id": self.client_id,
             "application_hash": self.application_hash,
             "engine_version": __version__,
             "capacity": self.capacity,
         }
+        if self.report_runtime:
+            document["runtime"] = {
+                "os": platform.system(),
+                "architecture": platform.machine(),
+                "python": platform.python_version(),
+                "logical_cpus": os.cpu_count(),
+            }
+        return document
+
+    async def _register_when_available(self, client: httpx.AsyncClient) -> None:
+        document = self._registration_document()
         while not self._stopping.is_set():
             try:
                 reply = await self._request(client, "/v1/register", document, timeout=15.0)

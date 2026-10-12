@@ -160,6 +160,7 @@ async def _measure(
     worker_log: Any = None
     worker_process: subprocess.Popen[bytes] | None = None
     coordinator: CoordinatorRunner | None = None
+    registered_worker_runtime: dict[str, Any] = {}
 
     try:
         scratch = Path(tempfile.mkdtemp(prefix="aibench-distributed-measure-"))
@@ -210,6 +211,7 @@ async def _measure(
                     str(app_config),
                     "--capacity",
                     str(capacity),
+                    "--report-runtime",
                 ],
                 cwd=worker_root,
                 env=environment,
@@ -217,6 +219,10 @@ async def _measure(
                 stdout=subprocess.DEVNULL,
                 stderr=worker_log,
             )
+
+        def collect_worker_event(name: str, payload: dict[str, Any]) -> None:
+            if name == "distributed_worker_connected":
+                registered_worker_runtime[str(payload["worker_id"])] = payload.get("runtime")
 
         coordinator = CoordinatorRunner(
             loaded.spec,
@@ -233,6 +239,7 @@ async def _measure(
                 "trust_local_app": False,
             },
             token=token,
+            event_sink=collect_worker_event,
             on_ready=worker_ready,
         )
         await coordinator.prepare()
@@ -271,6 +278,9 @@ async def _measure(
                 "cases": cases,
                 "worker_processes": 1,
                 "worker_capacity": capacity,
+                "worker_runtime_by_worker_id_at_latest_registration": dict(
+                    sorted(registered_worker_runtime.items())
+                ),
                 "fixture_delay_seconds": delay,
                 "fixture_rate_per_second": rate,
                 "fixture_burst": burst,
@@ -378,6 +388,7 @@ def _print_remote_worker_instructions(
         app_config.name,
         "--capacity",
         str(capacity),
+        "--report-runtime",
         "--token-env",
         token_env,
     ]
@@ -442,10 +453,13 @@ async def _measure_external_worker(
     loaded = load_application(config_path)
     run_id = f"remote-measure-{uuid.uuid4().hex}"
     registered_capacities: dict[str, int] = {}
+    registered_runtime: dict[str, Any] = {}
 
     def collect_worker_event(name: str, payload: dict[str, Any]) -> None:
         if name == "distributed_worker_connected":
-            registered_capacities[str(payload["worker_id"])] = int(payload["capacity"])
+            worker_id = str(payload["worker_id"])
+            registered_capacities[worker_id] = int(payload["capacity"])
+            registered_runtime[worker_id] = payload.get("runtime")
 
     coordinator = CoordinatorRunner(
         loaded.spec,
@@ -519,6 +533,9 @@ async def _measure_external_worker(
                 "registered_capacity_by_worker_id_at_latest_registration": dict(
                     sorted(registered_capacities.items())
                 ),
+                "worker_runtime_by_worker_id_at_latest_registration": dict(
+                    sorted(registered_runtime.items())
+                ),
                 "registered_worker_connection_pool_budget": sum(
                     capacity + 4 for capacity in registered_capacities.values()
                 ),
@@ -549,7 +566,7 @@ async def _measure_external_worker(
                 },
             },
             "limitations": [
-                "The operator must start the CLI worker and synthetic app fixture on a separate host; host separation is not independently attested.",
+                "The operator must start the CLI worker and synthetic app fixture on a separate host; host separation is not independently attested, and worker runtime details are self-reported.",
                 "The coordinator waits for at least the requested worker count but accepts additional registrations; reported IDs and capacities do not establish which workers contributed for the full timed interval.",
                 "The worker HTTP client pool budget is capacity plus four connections per worker; excessive aggregate budgets can exceed the coordinator API's active-connection limit and cause retries.",
                 "The report measures the coordinator API, worker polling, network round trips, and synthetic HTTP app together; it excludes workspace writes, scoring, and full CLI run time.",

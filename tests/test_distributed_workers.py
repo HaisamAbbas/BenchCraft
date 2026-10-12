@@ -121,12 +121,14 @@ def test_coordinator_worker_round_trip_uses_the_authenticated_api() -> None:
     async def scenario() -> None:
         spec = _spec().model_copy(update={"effects": EffectLevel.REVERSIBLE})
         ready: dict[str, Any] = {}
+        worker_events: list[tuple[str, dict[str, Any]]] = []
         coordinator = CoordinatorRunner(
             spec,
             run_id="run-test",
             options=_options(),
             token=_TOKEN,
             on_ready=ready.update,
+            event_sink=lambda name, payload: worker_events.append((name, payload)),
         )
         worker_runner = _EchoRunner(spec)
         coordinator_start = asyncio.create_task(coordinator.prepare())
@@ -149,6 +151,7 @@ def test_coordinator_worker_round_trip_uses_the_authenticated_api() -> None:
                 coordinator_url=ready["url"],
                 token=_TOKEN,
                 application_hash=coordinator.application_hash,
+                report_runtime=True,
             )
             worker_loop = asyncio.create_task(worker.run())
             await coordinator_start
@@ -164,6 +167,16 @@ def test_coordinator_worker_round_trip_uses_the_authenticated_api() -> None:
             assert outcome.correlation_id == "corr-123"
             assert outcome.observations.usage == {"tokens": 3}
             assert outcome.captures[0].data == b"hello"
+            registrations = [
+                payload for name, payload in worker_events if name == "distributed_worker_connected"
+            ]
+            assert registrations
+            registration = registrations[-1]
+            runtime = registration["runtime"]
+            assert isinstance(runtime["os"], str)
+            assert isinstance(runtime["architecture"], str)
+            assert isinstance(runtime["python"], str)
+            assert runtime["logical_cpus"] is None or type(runtime["logical_cpus"]) is int
             worker_loop.cancel()
             await asyncio.gather(worker_loop, return_exceptions=True)
         finally:
@@ -174,6 +187,77 @@ def test_coordinator_worker_round_trip_uses_the_authenticated_api() -> None:
             await worker_runner.close()
 
     asyncio.run(scenario())
+
+
+def test_registration_sanitizes_worker_reported_runtime_details() -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    coordinator = CoordinatorRunner(
+        _spec(),
+        run_id="run-test",
+        options=_options(),
+        token=_TOKEN,
+        event_sink=lambda name, payload: events.append((name, payload)),
+    )
+    status, _ = coordinator._register(
+        {
+            "protocol": WORKER_PROTOCOL,
+            "client_id": "worker-one",
+            "application_hash": coordinator.application_hash,
+            "engine_version": __version__,
+            "capacity": 1,
+            "runtime": {
+                "os": "L" * 100,
+                "architecture": "\ninvalid",
+                "python": "3.12.0",
+                "logical_cpus": True,
+                "hostname": "private-host-name",
+            },
+        }
+    )
+    assert status == 200
+    runtime = events[0][1]["runtime"]
+    assert runtime == {
+        "os": "L" * 64,
+        "architecture": None,
+        "python": "3.12.0",
+        "logical_cpus": None,
+    }
+
+
+def test_worker_runtime_reporting_is_opt_in() -> None:
+    worker = DistributedWorker(
+        _EchoRunner(_spec()),
+        coordinator_url="http://127.0.0.1:8765",
+        token=_TOKEN,
+        application_hash="sha256:test",
+    )
+    assert "runtime" not in worker._registration_document()
+
+
+def test_registration_without_runtime_preserves_connection_event_shape() -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    coordinator = CoordinatorRunner(
+        _spec(),
+        run_id="run-test",
+        options=_options(),
+        token=_TOKEN,
+        event_sink=lambda name, payload: events.append((name, payload)),
+    )
+    status, _ = coordinator._register(
+        {
+            "protocol": WORKER_PROTOCOL,
+            "client_id": "worker-one",
+            "application_hash": coordinator.application_hash,
+            "engine_version": __version__,
+            "capacity": 1,
+        }
+    )
+    assert status == 200
+    assert len(events) == 1
+    name, payload = events[0]
+    assert name == "distributed_worker_connected"
+    assert set(payload) == {"worker_id", "capacity"}
+    assert payload["capacity"] == 1
 
 
 def test_registration_refuses_a_different_frozen_application_spec() -> None:
