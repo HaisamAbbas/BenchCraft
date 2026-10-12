@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22.13 follow-on: upstream MCP evaluator metrics",
+  "current_item": "G22.14 follow-on: DeepEval upstream multimodal audio metrics",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.12 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. Diarization, upstream multimodal audio and MCP metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.13 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. G22.13 adds pinned DeepEval MCP-Use, MCP Task Completion, and multi-turn MCP-Use scoring over a frozen server inventory and recorded successful MCP tool events. Explicit typed MCP events count by default; untyped events require an MCP-only opt-in, and episode scoring fails closed on missing or malformed telemetry. No live MCP server or provider was contacted. Resource and prompt execution events remain unsupported because stored events do not distinguish them. Diarization, upstream multimodal audio metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -1057,6 +1057,23 @@
           "review": "implementation/G22.12-upstream-image-metrics-review.md",
           "implementation": "implementation/G22.12-upstream-image-metrics.md",
           "commit": "4ece2f80abedc67acb63c36596955a2c1883b8e3",
+          "pushed": true
+        },
+        {
+          "name": "DeepEval upstream MCP evaluator metrics",
+          "status": "delivered",
+          "verification": [
+            "All three pinned metrics were discovered with their exact field scopes and bounded retry/concurrency manifests.",
+            "Final focused run `tests/test_deepeval_mcp.py tests/test_deepeval_image_metrics.py`: 25 passed in 96.32 seconds.",
+            "Tests exercised the pinned DeepEval 4.2.5 worker with deterministic local judges; no live MCP server or provider was contacted.",
+            "Regression coverage includes typed-event provenance, explicit opt-in for untyped events, unsuccessful/request-only calls, malformed and missing episode telemetry, and evidence caps.",
+            "Dispatched `httpx.WriteError` and `httpx.DecodingError` teardown regressions verify unknown cost and call accounting while retaining successful sibling token usage.",
+            "Ruff check and formatting passed for the 11 affected Python files; Mypy passed for the changed judge and MCP modules; `git diff --check` passed.",
+            "Final defect-first review found no remaining actionable findings; typed resource/prompt execution events and live MCP/provider validation remain unsupported."
+          ],
+          "review": "implementation/G22.13-upstream-mcp-metrics-review.md",
+          "implementation": "implementation/G22.13-upstream-mcp-metrics.md",
+          "commit": "b558d4314939de96483602516efe49f1e89c53c5",
           "pushed": true
         }
       ]
