@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.6 are implemented and locally verified. G22.3 cross-host throughput/failure-rate measurement and G22.5 cross-provider semantic calibration remain unmeasured; the dashboard is loopback-only and excludes answer text. Compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.6 are implemented and locally verified. G22.3 now has reproducible one-host subprocess measurements, but cross-host throughput/failure-rate measurement and G22.5 cross-provider semantic calibration remain unmeasured; the dashboard is loopback-only and excludes answer text. Compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -891,11 +891,19 @@
             "Combined distributed-worker and run-CLI regression batch: 24 passed",
             "Engine, engine-fault, and storage repository regressions: 59 passed",
             "Ruff and git diff --check passed; Windows-target Mypy passed for all 172 source files",
-            "Cross-host latency, TLS deployment, throughput, and failure rates remain unmeasured; API v1 supports reset mode none only"
+            "A separate-process Windows 11 / Python 3.12.10 loopback probe completed 100 calls at 27.22 invocations/s with capacity 1 and 72.44/s with capacity 4 on a 20 ms HTTP fixture; both had zero failures and observed app concurrency matched configured capacity",
+            "An 8-call quota probe recorded one success and seven HTTP 429 failures at a 0.01 requests/s fixture limit; reproducible commands and raw JSON evidence are in docs/engineering/evidence/22 and scripts/measure_distributed_workers.py",
+            "Six regression tests in tests/test_distributed_measurement.py plus 12 distributed-worker tests passed (18 total); they cover real CLI-worker invocation, finite-input refusal, setup-failure cleanup, and an exited-worker termination race",
+            "The probe enforces finite bounded fixture inputs and a 10-minute default measurement deadline (60-minute maximum); bounded process/coordinator/server cleanup may add up to about 60 seconds",
+            "Cross-host latency, TLS deployment, and external-network throughput/failure rates remain unmeasured; the probe calls CoordinatorRunner directly and excludes SQLite commits, evaluation, and full CLI run time; API v1 supports reset mode none only"
           ],
           "review": "implementation/G22.3-distributed-workers-review.md",
+          "measurement_review": "implementation/G22.3-measurement-review.md",
           "implementation": "implementation/G22.3-distributed-workers.md",
           "commit": "427a7c6659060c27d2dd0fd7c980031ff2f86c5a",
+          "additional_commits": [
+            "2016e9a0"
+          ],
           "pushed": true
         },
         {
