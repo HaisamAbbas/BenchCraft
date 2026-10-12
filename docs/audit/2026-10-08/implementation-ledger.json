@@ -345,6 +345,23 @@
       "pushed": true
     },
     {
+      "id": "F20",
+      "priority": "P2",
+      "title": "Synchronous DeepEval judge leaves cost known after a transport error",
+      "detail": "Supplemental 2026-10-13 implementation review; dispatched MockTransport WriteError reproduced",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Before the fix, MockTransport dispatched one request and reproduced cost_known=true, cost 0.0, and no uncertain-call accounting",
+        "After the fix, the synchronous WriteError and related async transport regressions passed: 3 passed, 9 deselected",
+        "The report_judge_usage output records unknown cost, calls=null, and one call without tokens; the request is not retried",
+        "Ruff passed for the changed source and test files; Mypy passed for judges.py; git diff --check passed"
+      ],
+      "review": "evidence/F20-review.md",
+      "commit": "115acd225337787e7b0eb3705a53237238814c7d",
+      "pushed": true
+    },
+    {
       "id": "G01",
       "priority": "P1",
       "title": "Consistent global configuration and scripting options",
@@ -1075,6 +1092,7 @@
             "Tests exercised the pinned DeepEval 4.2.5 worker with deterministic local judges; no live MCP server or provider was contacted.",
             "Regression coverage includes typed-event provenance, explicit opt-in for untyped events, unsuccessful/request-only calls, malformed and missing episode telemetry, and evidence caps.",
             "Dispatched `httpx.WriteError` and `httpx.DecodingError` teardown regressions verify unknown cost and call accounting while retaining successful sibling token usage.",
+            "Supplemental sync-judge `MockTransport` regression: 3 related synchronous/asynchronous transport tests passed; ambiguous sync spend is reported unknown without replay.",
             "Ruff check and formatting passed for the 11 affected Python files; Mypy passed for the changed judge and MCP modules; `git diff --check` passed.",
             "Final defect-first review found no remaining actionable findings; typed resource/prompt execution events and live MCP/provider validation remain unsupported."
           ],
