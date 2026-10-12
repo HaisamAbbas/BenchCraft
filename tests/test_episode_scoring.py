@@ -25,7 +25,10 @@ from aibench.evaluators.protocol import (
 )
 from aibench.inspection.dataset_summary import summarize_cases
 from aibench.registry import EvaluatorRegistry
-from aibench.services.scoring import episode_prefixes
+from aibench.services.scoring import (
+    MAX_EVALUATOR_EPISODE_TURNS,
+    episode_prefixes,
+)
 from tests.scoring_support import Seeded, case, execution
 
 
@@ -148,8 +151,11 @@ def test_retrieval_is_added_to_each_turn_only_when_the_metric_reads_it(tmp_path:
 def test_scalar_episode_metric_means_weight_cases_equally(tmp_path: Path) -> None:
     seeded = Seeded(tmp_path)
     seeded.seed(
-        [case("a1", group_id="episode-a"), case("a2", group_id="episode-a"),
-         case("b1", group_id="episode-b")],
+        [
+            case("a1", group_id="episode-a"),
+            case("a2", group_id="episode-a"),
+            case("b1", group_id="episode-b"),
+        ],
         [
             execution("a1", "first"),
             execution("a1", "repeat", repetition_id=1),
@@ -180,6 +186,95 @@ def test_episode_order_follows_the_dataset_and_ignores_other_cases() -> None:
     assert "x" not in prefixes
     assert [c.case_id for c in prefixes["a2"]] == ["a1", "a2"]
     assert [c.case_id for c in prefixes["b1"]] == ["b1"]
+
+
+def test_long_episode_prefix_storage_is_bounded() -> None:
+    cases = [case(f"long-{index:04d}", group_id="long") for index in range(1_000)]
+
+    prefixes = episode_prefixes(cases)
+
+    assert len(prefixes) == len(cases)
+    assert len(prefixes["long-0000"]) == 1
+    assert len(prefixes[f"long-{MAX_EVALUATOR_EPISODE_TURNS - 1:04d}"]) == (
+        MAX_EVALUATOR_EPISODE_TURNS
+    )
+    sentinel = prefixes[f"long-{MAX_EVALUATOR_EPISODE_TURNS:04d}"]
+    assert len(sentinel) == MAX_EVALUATOR_EPISODE_TURNS + 1
+    assert prefixes["long-0999"] is sentinel
+
+
+def test_evaluator_episode_limits_are_applied_before_worker_dispatch(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    from aibench.services import scoring
+
+    monkeypatch.setattr(scoring, "MAX_EVALUATOR_EPISODE_BYTES", 160)
+    cases = [case("bounded-1", group_id="bounded"), case("bounded-2", group_id="bounded")]
+    seeded = Seeded(tmp_path)
+    seeded.seed(
+        cases,
+        [execution("bounded-1", "short"), execution("bounded-2", "x" * 180)],
+    )
+    registry = EvaluatorRegistry.with_native()
+    metric = _conversation_metric(retrieval=False)
+    registry.register(metric)
+
+    report = seeded.score([{"metric": metric.manifest.evaluator_id}], registry=registry)
+    results = {result.case_id: result for result in report.results}
+
+    assert results["bounded-1"].status is ExecutionStatus.OK
+    assert (results["bounded-2"].status, results["bounded-2"].reason) == (
+        ExecutionStatus.NOT_APPLICABLE,
+        "episode_too_large",
+    )
+
+
+def test_episode_after_turn_limit_is_not_applicable(tmp_path: Path) -> None:
+    cases = [
+        case(f"bounded-{index:02d}", group_id="bounded")
+        for index in range(MAX_EVALUATOR_EPISODE_TURNS + 1)
+    ]
+    seeded = Seeded(tmp_path)
+    seeded.seed(cases, [execution(item.case_id, item.case_id) for item in cases])
+    registry = EvaluatorRegistry.with_native()
+    metric = _conversation_metric(retrieval=False)
+    registry.register(metric)
+
+    report = seeded.score([{"metric": metric.manifest.evaluator_id}], registry=registry)
+    results = {result.case_id: result for result in report.results}
+
+    assert all(
+        results[item.case_id].status is ExecutionStatus.OK
+        for item in cases[:MAX_EVALUATOR_EPISODE_TURNS]
+    )
+    assert (
+        results[cases[-1].case_id].status,
+        results[cases[-1].case_id].reason,
+    ) == (ExecutionStatus.NOT_APPLICABLE, "episode_too_many_turns")
+
+
+def test_episode_payload_bound_counts_worker_json_unicode_escaping(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    from aibench.services import scoring
+
+    monkeypatch.setattr(scoring, "MAX_EVALUATOR_EPISODE_BYTES", 400)
+    seeded = Seeded(tmp_path)
+    seeded.seed(
+        [case("unicode", group_id="unicode")],
+        [execution("unicode", "漢" * 80)],
+    )
+    registry = EvaluatorRegistry.with_native()
+    metric = _conversation_metric(retrieval=False)
+    registry.register(metric)
+
+    report = seeded.score([{"metric": metric.manifest.evaluator_id}], registry=registry)
+
+    [result] = report.results
+    assert (result.status, result.reason) == (
+        ExecutionStatus.NOT_APPLICABLE,
+        "episode_too_large",
+    )
 
 
 def test_only_datasets_with_episodes_report_group_ids() -> None:

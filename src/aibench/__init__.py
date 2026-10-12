@@ -1,3 +1,3 @@
 """aibench: conversational CLI for AI application benchmarking (working name BenchCraft)."""
 
-__version__ = "0.1.0rc34"
+__version__ = "0.1.0rc35"

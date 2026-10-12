@@ -76,6 +76,10 @@ DEFAULT_MODEL_EVALUATION_TIMEOUT_SECONDS = 600.0
 # Evaluator startup (prepare, and rebuilding a worker after a timeout) has its own bound, so
 # a slow framework import never eats into a case's evaluation budget.
 DEFAULT_PREPARE_TIMEOUT_SECONDS = 300.0
+# Conversation history is sent to evaluators as one bounded evidence object. Cap both its
+# length and serialized size before an isolated worker request is built.
+MAX_EVALUATOR_EPISODE_TURNS = 50
+MAX_EVALUATOR_EPISODE_BYTES = 7 * 1024 * 1024
 _VALUE_TYPES: dict[str, tuple[type, ...]] = {
     "boolean": (bool,),
     "scalar": (int, float),
@@ -407,8 +411,10 @@ def declared_dependency_identity(metrics: Sequence[ResolvedMetric]) -> str | Non
         if worker_spec is not None and not worker_runtime_identity:
             # The same venv path can be upgraded to a different Python runtime in place.
             return None
-        if worker_spec is None and metric.manifest.uses_models and not (
-            metric.manifest.package_name and metric.manifest.package_version
+        if (
+            worker_spec is None
+            and metric.manifest.uses_models
+            and not (metric.manifest.package_name and metric.manifest.package_version)
         ):
             return None
         environment = None
@@ -783,7 +789,12 @@ async def score_recorded_run(
 
 def episode_prefixes(cases: Iterable[BenchmarkCase]) -> dict[str, tuple[BenchmarkCase, ...]]:
     """For each case in an episode (cases sharing a `group_id`), that episode's cases up to
-    and including it, in dataset order: the conversation a conversational metric scores."""
+    and including it, in dataset order: the conversation a conversational metric scores.
+
+    Prefix storage stays linear in the case count. Prefixes past the evaluator history limit
+    share one bounded sentinel; `_episode_turns` marks those outcomes not applicable before
+    assembling or dispatching their history.
+    """
     groups: dict[str, list[BenchmarkCase]] = {}
     prefixes: dict[str, tuple[BenchmarkCase, ...]] = {}
     for case in cases:
@@ -791,7 +802,12 @@ def episode_prefixes(cases: Iterable[BenchmarkCase]) -> dict[str, tuple[Benchmar
             continue
         group = groups.setdefault(case.group_id, [])
         group.append(case)
-        prefixes[case.case_id] = tuple(group)
+    for group in groups.values():
+        sentinel = tuple(group[: MAX_EVALUATOR_EPISODE_TURNS + 1])
+        for index, case in enumerate(group):
+            prefixes[case.case_id] = (
+                tuple(group[: index + 1]) if index < MAX_EVALUATOR_EPISODE_TURNS else sentinel
+            )
     return prefixes
 
 
@@ -1218,7 +1234,10 @@ class BindingScorer:
         prefix = self.episodes.get(case.case_id)
         if not prefix:
             return None, None
-        turns = []
+        if len(prefix) > MAX_EVALUATOR_EPISODE_TURNS:
+            return None, "episode_too_many_turns"
+        turns: list[dict[str, Any]] = []
+        payload_bytes = 2  # JSON array brackets.
         for turn_case in prefix:
             if turn_case.case_id == case.case_id:
                 recorded: ExecutionResult | None = execution
@@ -1239,6 +1258,16 @@ class BindingScorer:
                 if f"execution.{name}" in self._paths:
                     value = earlier.get(f"execution.{name}")
                     turn[name] = None if value is MISSING else value
+            try:
+                # Match the evaluator worker's json.dumps(request).encode("utf-8")
+                # representation so escaped Unicode and default separators count toward
+                # the pre-dispatch size bound.
+                encoded_turn = json.dumps(turn, allow_nan=False).encode("utf-8")
+            except (TypeError, ValueError):
+                return None, "episode_turn_not_serializable"
+            payload_bytes += len(encoded_turn) + (2 if turns else 0)
+            if payload_bytes > MAX_EVALUATOR_EPISODE_BYTES:
+                return None, "episode_too_large"
             turns.append(turn)
         return tuple(turns), None
 

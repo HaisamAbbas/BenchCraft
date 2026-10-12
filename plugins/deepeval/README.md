@@ -8,11 +8,11 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 ## Metrics
 
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
-recorded data can feed (40, with the head-to-head judge below). DeepEval's upstream image,
-audio, voice, and MCP metric families are not wired into this adapter. Separate
+recorded data can feed (40, with the head-to-head judge below). Separate
 `deepeval.vision_g_eval`, `deepeval.audio_g_eval`, and `deepeval.video_frames_g_eval`
 evaluators provide bounded image-backed, audio-backed, and timestamped sampled-frame task
-scoring for text or generated media outputs.
+scoring for text or generated media outputs. The pinned DeepEval voice metrics score stored
+timestamped conversation turns; they do not simulate calls or connect to voice agents.
 JSON correctness
 is covered by `native.json_schema`: upstream's score is the same pass/fail schema check, with
 the judge only writing the explanation. Each is an
@@ -99,8 +99,8 @@ or `transport.max_response_bytes` when needed. For example, 4 MiB generated audi
 The evaluator sends labeled `input_audio` parts to the configured
 [Chat Completions endpoint](https://platform.openai.com/docs/api-reference/chat/create); the
 selected provider/model must support audio input. Audio, prompt, reference answer, and output
-are sent to that endpoint. The evaluator does not score timestamps, diarization, interruptions,
-or multi-turn voice interaction, and it does not wire DeepEval's upstream voice metrics.
+are sent to that endpoint. This single-request task evaluator does not score timestamps,
+diarization, interruptions, or multi-turn voice interaction.
 
 Bind it with a rubric and an audio-capable OpenAI-compatible judge:
 
@@ -112,6 +112,51 @@ Pass the key using the plugin-environment `secret_env` mechanism and allow the e
 judge model, and plugin interpreter in policy. The evaluator does not follow redirects,
 limits judge replies to 1 MiB, records provider token usage when present, and leaves cost
 unknown unless the provider reports it.
+
+### Stored voice-conversation metrics
+
+The pinned DeepEval voice metrics run against each case's episode prefix (`group_id`) using
+recorded transcripts and inline audio. They make no judge or provider call. The supported
+metrics are `deepeval.turn_taking_naturalness`, `deepeval.agent_responsiveness`,
+`deepeval.audio_integrity`, `deepeval.voice_naturalness`,
+`deepeval.speech_intelligibility`, `deepeval.voice_consistency`, and
+`deepeval.voice_reliability`.
+
+Each user case input has a transcript and a bounded WAV clip. Supply `audio_start_ms` when the
+timestamp is call-relative and known:
+
+```json
+{"case_id":"call-01-turn-01","group_id":"call-01","input":{"transcript":"Please check my delivery.","audio":{"mime_type":"audio/wav","data_base64":"UklGR..."},"audio_start_ms":0}}
+```
+
+The application's recorded output is an assistant transcript and, when spoken audio exists,
+the matching clip and its call-relative start time:
+
+```json
+{"transcript":"It is arriving tomorrow.","audio":{"mime_type":"audio/wav","data_base64":"UklGR..."},"audio_start_ms":860}
+```
+
+`audio_start_ms` is optional for audio-quality metrics; turn-taking scoring requires a known
+start for every clip and returns not-applicable when timestamps are missing. The metric derives
+duration from the WAV frame count, so it does not infer timing from transcript length or a
+declared duration. Input accepts only inline 16-bit PCM WAV up to 512 KiB per user clip; the
+512 KiB bound leaves room under the built-in 1,000,000-byte dataset row cap. Assistant clips
+are limited to 1 MiB each and all audio across a scored episode to 4 MiB. Application responses
+larger than the HTTP default need `transport.max_response_bytes` raised; 2,097,152 bytes carries
+one maximum-size assistant clip plus JSON/base64 overhead. The host limits an episode to 50
+turns and 7 MiB of serialized evidence before building a worker request.
+
+`deepeval.agent_responsiveness` is a narrow proxy over the recorded format: it detects missing
+assistant audio. Since each case records exactly one user turn and one assistant turn, it cannot
+represent or detect user reprompts, call-ending reasons, interruptions, or live response latency.
+The adapter rejects `latency_ms` and `interrupted` fields so they cannot be mistaken for scored
+signals. Turn-taking uses only the supplied call-relative audio timestamps and clip durations.
+
+These metrics analyze the stored conversation only. They do not start voice calls, capture
+audio, generate/transcribe speech, evaluate MP3 or other WAV encodings, or establish how
+listeners perceive naturalness or intelligibility. See
+DeepEval's [voice evaluation contract](https://deepeval.com/docs/evaluation-voice) and
+[turn-taking metric](https://deepeval.com/docs/metrics-turn-taking-naturalness).
 
 ### Timestamped sampled-video task scoring
 
@@ -270,8 +315,8 @@ message content out) takes the case's input as the agent's task and the recorded
 `plan_quality` and `plan_adherence` are not applicable (`no_plan_in_trace`) when the judge
 finds no plan in the trace: DeepEval would score that 1, which is no evidence of a good plan.
 
-Not included: raw-video decoding or continuous motion scoring, DeepEval's native multimodal and
-audio metrics, timestamped voice metrics, and MCP metrics.
+Not included: raw-video decoding or continuous motion scoring, DeepEval's upstream multimodal
+image/audio and MCP metric families.
 DAG and arena metrics need objects a plan cannot declare.
 
 ## Judges

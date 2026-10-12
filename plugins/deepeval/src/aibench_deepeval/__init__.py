@@ -10,6 +10,7 @@ from aibench_deepeval.faithfulness import Faithfulness
 from aibench_deepeval.metrics import METRICS, GEval
 from aibench_deepeval.video_frames import VideoFramesGEval
 from aibench_deepeval.vision import VisionGEval
+from aibench_deepeval.voice import VOICE_EVALUATORS
 
 __all__ = [
     "EVALUATORS",
@@ -27,6 +28,7 @@ __all__ = [
 EVALUATORS = (
     Faithfulness,
     *METRICS,
+    *VOICE_EVALUATORS,
     GEval,
     VisionGEval,
     AudioGEval,
