@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22 follow-on: bounded audio input and output evaluation",
+  "current_item": "G22 follow-on: bounded video task evaluation",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.8 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; paired reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. Audio, video, DeepEval upstream multimodal metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.9 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. Timestamped voice metrics, video, DeepEval upstream multimodal metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -995,6 +995,22 @@
           "review": "implementation/G22.8-generated-image-outputs-review.md",
           "implementation": "implementation/G22.8-generated-image-outputs.md",
           "commit": "58a027bee706d034aff4d7738910b3753875aa7e",
+          "pushed": true
+        },
+        {
+          "name": "bounded inline WAV/MP3 audio task evaluation",
+          "status": "delivered",
+          "verification": [
+            "Combined audio, vision, and DeepEval metric regression run: 53 passed; after strict WAV/MP3 validation hardening, the final audio module passed 3 tests",
+            "HTTPRunner integration carried a generated WAV through JSON output selection, durable execution storage, and isolated audio scoring; bounded text output scored, while remote output and malformed case audio made no judge call",
+            "Malformed WAV containers, byte rates, block alignment, data chunks, oversized payloads, short MP3 headers, unsupported MIME types, and remote outputs are rejected; complete WAV, raw MP3, and tagged MP3 fixtures are accepted",
+            "Ruff check/format passed for changed Python files; Mypy passed for audio.py; git diff --check passed",
+            "Independent review findings on WAV format consistency and practical ingestion/transport limits were resolved; see implementation/G22.9-audio-evaluation-review.md",
+            "Feature commit bf9a6f10528f1088fd1d19f2a9683e7928419484 was pushed to origin/fix/plugin-core-match and the remote ref was verified; no live provider call was made"
+          ],
+          "review": "implementation/G22.9-audio-evaluation-review.md",
+          "implementation": "implementation/G22.9-audio-evaluation.md",
+          "commit": "bf9a6f10528f1088fd1d19f2a9683e7928419484",
           "pushed": true
         }
       ]

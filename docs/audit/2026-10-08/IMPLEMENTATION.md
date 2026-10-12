@@ -29,6 +29,13 @@ G22.8 extends `deepeval.vision_g_eval` to score a recorded generated image besid
 image, task, and reviewed answer. Both images use the strict inline PNG/JPEG/WebP contract;
 remote paths and URLs remain rejected.
 
+G22.9 adds `deepeval.audio_g_eval` for text or generated-audio output against one bounded
+inline WAV/MP3 case. It validates supported WAV/MP3 framing before the isolated worker sends
+labeled `input_audio` parts to the explicitly configured judge. Dataset-line and HTTP transport
+limits may be lower than the evaluator's per-audio 4 MiB cap; the plugin guide documents the
+effective limits and configuration. This does not provide timestamped voice-interaction,
+diarization, or video metrics.
+
 G23 adds source-turn planner usage attribution and combined workflow cost accounting. Reports
 retain separate application, primary evaluator-pass, and planner views while the workflow total
 includes every evaluator scoring pass. Planner dollar pricing and total-cost budget enforcement
