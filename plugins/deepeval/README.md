@@ -226,6 +226,34 @@ barge-in exchange.
 
 See DeepEval's [transcription accuracy documentation](https://deepeval.com/docs/metrics-transcription-accuracy).
 
+### Literal WER and CER
+
+`deepeval.word_error_rate` and `deepeval.character_error_rate` provide deterministic, local
+edit-rate measurements for one case at a time. The reference comes from the case's `transcript`
+(or a string input), and the hypothesis comes from `provider_transcript` in the recorded
+application output. They can be used without audio bytes, and they ignore the other voice fields,
+including speaker annotations.
+
+Both evaluators apply Unicode NFKC normalization, case-folding, and Unicode punctuation removal by
+default. `lowercase` and `strip_punctuation` can each be set to `false`. WER splits normalized text
+on whitespace. CER aligns Unicode code points, including whitespace that remains after punctuation
+removal. Each side is capped at 16,000 characters and each alignment at four million dynamic
+programming cells. Empty normalized references are not applicable; an empty hypothesis counts as
+deletions. Raw output includes substitution, deletion, insertion, reference-unit, and total-edit
+counts.
+
+The saved value is an utterance-level rate. A normal run report's mean is therefore a macro-average
+across cases, while the raw counts allow a corpus-level rate to be recomputed by summing errors and
+reference units. No default pass threshold is supplied because acceptable ASR error depends on the
+language, task, and reference convention; set a lower-is-better rule in the metric binding. These
+metrics do not judge semantic equivalence, align barge-in segments, recognize speech, or contact a
+model. The implementation follows standard dynamic-programming word alignment and error counting
+as described by the [NIST SCTK SCLITE documentation](https://github.com/usnistgov/SCTK/blob/master/doc/sclite.htm).
+
+```json
+{"metric":"deepeval.word_error_rate","params":{"lowercase":true,"strip_punctuation":true},"rule":{"comparator":"<=","threshold":0.2}}
+```
+
 ### Recorded speaker attribution
 
 `deepeval.diarization_error_rate` scores application-provided speaker intervals against reviewed

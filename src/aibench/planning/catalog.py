@@ -29,6 +29,7 @@ from aibench.security.policy import ExecutionPolicy, evaluator_denials
 
 CONCEPTS: dict[str, str] = {
     "correctness": "the answer matches the reviewed reference answer",
+    "transcription_error_rate": "the speech recognition transcript has few word or character edit errors against a reference",
     "groundedness": "the answer is supported by the passages the application actually retrieved",
     "format": "the output satisfies a declared structure, such as a JSON Schema",
     "tool_use": "the application called the expected tools",
@@ -81,6 +82,15 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
         r"wrong",
         r"incorrect",
         r"(?:expected|reference) answers?",
+    ),
+    "transcription_error_rate": (
+        r"word error rate",
+        r"character error rate",
+        r"transcription accuracy",
+        r"\bwer\b",
+        r"\bcer\b",
+        r"\basr\b",
+        r"speech recognition accuracy",
     ),
     "groundedness": (
         r"faithful(ness)?",

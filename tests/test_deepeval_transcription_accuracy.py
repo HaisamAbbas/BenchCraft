@@ -22,10 +22,14 @@ CASE = BenchmarkCase(case_id="turn-2", input={"transcript":"Please renew the car
 EXECUTION = ExecutionResult(execution_id="e", run_id="r", case_id="turn-2", status="ok",
     output={"transcript":"I can help.", "provider_transcript":"Please renew the card."})
 TURNS = [
-    {"case_id":"turn-1", "input":{"transcript":"I need to change my address."},
-     "output":{"transcript":"Sure.", "provider_transcript":"I need to change my address."}},
-    {"case_id":"turn-2", "input":{"transcript":"Please renew the card."},
-     "output":{"transcript":"I can help.", "provider_transcript":"Please renew the card."}},
+    {"case_id":"turn-1", "input":{"transcript":"I need to change my address.",
+     "diarization_reference":{"segments":[]}},
+     "output":{"transcript":"Sure.", "provider_transcript":"I need to change my address.",
+     "diarization":{"segments":[]}}},
+    {"case_id":"turn-2", "input":{"transcript":"Please renew the card.",
+     "diarization_reference":{"segments":[]}},
+     "output":{"transcript":"I can help.", "provider_transcript":"Please renew the card.",
+     "diarization":{"segments":[]}}},
 ]
 async def outcome(turns=None, judge=None):
     evaluator = BY_ID["deepeval.transcription_accuracy_g_eval"]()
@@ -47,7 +51,7 @@ def test_transcription_evaluator_is_discovered_with_a_bounded_judge_contract() -
     assert [load.error for load in loads] == [None]
     manifest, _ = registry.resolve("deepeval.transcription_accuracy_g_eval@1")
 
-    assert manifest.plugin_version == "0.2.0rc24"
+    assert manifest.plugin_version == "0.2.0rc25"
     assert manifest.package_name == "deepeval"
     assert manifest.package_version == "4.2.5"
     assert manifest.uses_models and manifest.requires_worker

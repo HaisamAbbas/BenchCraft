@@ -184,7 +184,13 @@ def _transcription_exchanges(
             return [], evidence_bytes
         if not isinstance(output, dict):
             raise TypeError("assistant output must be text or an object")
-        if set(output) - {"transcript", "provider_transcript", "audio", "audio_start_ms"}:
+        if set(output) - {
+            "transcript",
+            "provider_transcript",
+            "diarization",
+            "audio",
+            "audio_start_ms",
+        }:
             raise ValueError("assistant output contains unsupported transcription fields")
         if "provider_transcript" not in output:
             return [], evidence_bytes
@@ -197,7 +203,12 @@ def _transcription_exchanges(
         if isinstance(caller, str):
             spoken_value = caller
         elif isinstance(caller, dict):
-            if set(caller) - {"transcript", "audio", "audio_start_ms"}:
+            if set(caller) - {
+                "transcript",
+                "audio",
+                "audio_start_ms",
+                "diarization_reference",
+            }:
                 raise ValueError("caller input contains unsupported transcription fields")
             spoken_value = caller.get("transcript")
         else:

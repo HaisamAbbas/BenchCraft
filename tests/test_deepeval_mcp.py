@@ -107,7 +107,7 @@ def test_mcp_evaluators_are_discovered_with_correct_scope_and_concepts(
         assert manifest.uses_models and manifest.requires_worker
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS)
         assert "never connects to or discovers a live MCP server" in " ".join(manifest.limitations)
-        assert manifest.plugin_version == "0.2.0rc24"
+        assert manifest.plugin_version == "0.2.0rc25"
     expected_resources = {
         "deepeval.mcp_use": (8, 1),
         "deepeval.mcp_task_completion": (204, 50),

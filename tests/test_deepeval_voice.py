@@ -35,6 +35,8 @@ SCORED_METRICS = (
     "deepeval.voice_consistency",
     "deepeval.voice_reliability",
     "deepeval.diarization_error_rate",
+    "deepeval.word_error_rate",
+    "deepeval.character_error_rate",
 )
 
 
@@ -92,9 +94,10 @@ def _case(case_id: str, *, start_ms: int) -> BenchmarkCase:
     )
 
 
-def _output(transcript: str, *, start_ms: int) -> dict[str, Any]:
+def _output(transcript: str, *, start_ms: int, provider_transcript: str) -> dict[str, Any]:
     return {
         "transcript": transcript,
+        "provider_transcript": provider_transcript,
         "audio": INLINE_WAV,
         "audio_start_ms": start_ms,
         "diarization": {"segments": [{"start_ms": 0, "end_ms": 100, "speaker_id": "app"}]},
@@ -102,7 +105,11 @@ def _output(transcript: str, *, start_ms: int) -> dict[str, Any]:
 
 
 def _binding(metric: str) -> dict[str, Any]:
-    if metric == "deepeval.diarization_error_rate":
+    if metric in {
+        "deepeval.diarization_error_rate",
+        "deepeval.word_error_rate",
+        "deepeval.character_error_rate",
+    }:
         return {"metric": metric, "params": {}, "rule": {"comparator": "<=", "threshold": 0.2}}
     return {"metric": metric, "params": {}, "rule": {"comparator": ">=", "threshold": 0.5}}
 
@@ -115,7 +122,7 @@ def test_voice_metric_family_is_discovered_with_local_only_contracts() -> None:
     for metric in METRICS:
         manifest, _ = registry.resolve(metric)
         assert manifest.version == "1.0.0"
-        assert manifest.plugin_version == "0.2.0rc24"
+        assert manifest.plugin_version == "0.2.0rc25"
         assert manifest.package_version == "4.2.5"
         assert manifest.requires_worker
         assert not manifest.uses_models
@@ -133,8 +140,16 @@ def test_voice_metrics_score_stored_wav_conversation_and_timestamps(
     first = _case("turn-1", start_ms=0)
     second = _case("turn-2", start_ms=1300)
     outputs = {
-        "turn-1": _output("I can help with that.", start_ms=600),
-        "turn-2": _output("Your request is complete.", start_ms=1750),
+        "turn-1": _output(
+            "I can help with that.",
+            start_ms=600,
+            provider_transcript="Please help with request turn-1.",
+        ),
+        "turn-2": _output(
+            "Your request is complete.",
+            start_ms=1750,
+            provider_transcript="Please help with request turn-2.",
+        ),
     }
     seeded = Seeded(tmp_path)
     seeded.seed([first, second], [])
@@ -177,6 +192,12 @@ def test_voice_metrics_score_stored_wav_conversation_and_timestamps(
     assert der.decision.value == "fail"
     assert der.raw_artifact_ref is not None
     assert der.resources["model_calls"] == 0
+    for metric in ("deepeval.word_error_rate", "deepeval.character_error_rate"):
+        error_rate = results[(metric, "turn-2")]
+        assert error_rate.status is ExecutionStatus.OK
+        assert error_rate.value is not None and error_rate.value.value == 0
+        assert error_rate.decision.value == "pass"
+        assert error_rate.resources["model_calls"] == 0
     turn_taking = results[("deepeval.turn_taking_naturalness", "turn-2")]
     assert turn_taking.value is not None and turn_taking.value.value > 0.5
     assert turn_taking.raw_artifact_ref is not None

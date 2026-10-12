@@ -49,9 +49,9 @@ def test_diarization_metric_is_discovered_with_recorded_evidence_contract() -> N
     assert [load.error for load in loads] == [None]
     manifest, _ = registry.resolve("deepeval.diarization_error_rate@1")
 
-    assert manifest.plugin_version == "0.2.0rc24"
+    assert manifest.plugin_version == "0.2.0rc25"
     assert manifest.package_name == "aibench-deepeval"
-    assert manifest.package_version == "0.2.0rc24"
+    assert manifest.package_version == "0.2.0rc25"
     assert manifest.direction.value == "lower"
     assert manifest.default_rule is not None
     assert manifest.default_rule.comparator == "<="
