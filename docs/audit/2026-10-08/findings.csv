@@ -19,3 +19,4 @@ F17,P2,Smoke testing rejects a changed revision of an existing application,CLI r
 F18,P2,Terminal regression tests inherit capability/color flags and report false failures,Original and normalized-environment rechecks
 F19,P1,Comparison ignores selected work and uses workspace-wide dataset cases as its denominator,Distinct-run CLI reproduction
 F20,P2,Synchronous DeepEval judge leaves cost known after a transport error,"Supplemental 2026-10-13 implementation review; dispatched MockTransport WriteError reproduced"
+F21,P2,CLI error tests assume Rich never wraps text or paths,"Supplemental CI reproduction; whitespace and path wrapping reproduced on Python 3.12 Windows"

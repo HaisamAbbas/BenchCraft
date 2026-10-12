@@ -6,7 +6,7 @@ Audit started: **8 October 2026**, continued into **9 October 2026, Asia/Karachi
 
 **The main application works, but I would not yet rely on it for cost-bounded evaluation or automated release decisions.** The clean installed wheel passed all 32 checks across the repository's eight end-to-end journeys. Additional adversarial and cross-workflow probes found failures in data isolation, measurement integrity, rescoring budgets, reproducibility, and scripting behavior.
 
-The original source audit identified **19 findings: 8 P1 and 11 P2**. A follow-up implementation review on 13 October added supplemental finding F20, bringing the tracked total to **20 findings: 8 P1 and 12 P2**. Sixteen original findings concern runtime behavior or data handling, one concerns the failing type-check gate, one concerns the terminal test harness, and one concerns dependency hygiene. Dependency advisories are a risk inventory, not proof of exploitation through BenchCraft.
+The original source audit identified **19 findings: 8 P1 and 11 P2**. Follow-up implementation reviews on 13 October added supplemental findings F20 and F21, bringing the tracked total to **21 findings: 8 P1 and 13 P2**. Sixteen original findings concern runtime behavior or data handling, one concerns the failing type-check gate, one concerns the terminal test harness, and one concerns dependency hygiene. Dependency advisories are a risk inventory, not proof of exploitation through BenchCraft.
 
 The most consequential results are:
 
@@ -111,6 +111,7 @@ The clean-bootstrap invocation printed a Windows WMI diagnostic (`0x8007000e`) w
 | F18 | P2 | Terminal regression tests inherit capability/color flags and report false failures | Original and normalized-environment rechecks |
 | F19 | P1 | Comparison ignores selected work and uses workspace-wide dataset cases as its denominator | Distinct-run CLI reproduction |
 | F20 | P2 | Synchronous DeepEval judge leaves cost known after a transport error | Supplemental review and dispatched `MockTransport` reproduction |
+| F21 | P2 | CLI error tests assume Rich never wraps text or paths | Supplemental CI reproduction and focused regressions |
 
 ## 4. Detailed findings
 
@@ -379,6 +380,23 @@ missing-token calls.
 replaying them. The existing transient retry set is unchanged. The regression verifies one
 dispatch, unknown cost, one uncertain call, and no retry. See the
 [G22.13 follow-up review](implementation/G22.13-upstream-mcp-metrics-review.md).
+
+### F21 — CLI error tests assume Rich never wraps text or paths (supplemental)
+
+**Source:** The Python 3.12 Windows full-suite reproduction on 13 October 2026, after the
+hosted Ubuntu jobs reported pytest failures. Rich's console wrapping depends on the temporary
+project path and can insert whitespace within a phrase or filename. Two assertions treated
+the captured display as an unwrapped string: one searched for the contiguous phrase `is bound
+to`, and another searched for `cases.jsonl` in a line that could display it as `cases.js onl`.
+
+**Impact:** the CLI returned the intended exit code and message, but the tests failed solely
+because Rich formatted the long path across lines. This created a false CI failure on otherwise
+valid output.
+
+**Resolution/acceptance:** the phrase assertion now normalizes whitespace, and the calibration
+test checks the semantic error phrase separately from a whitespace-compacted filename. The
+focused CLI assertion passed, and both calibration path variants passed. Product formatting and
+exit-code behavior are unchanged. See the [F21 review](evidence/F21-review.md).
 
 ## 5. Missing and incomplete CLI capabilities
 
