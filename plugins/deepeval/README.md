@@ -10,8 +10,9 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
 recorded data can feed (40, with the head-to-head judge below). DeepEval's upstream image,
 audio, voice, and MCP metric families are not wired into this adapter. Separate
-`deepeval.vision_g_eval` and `deepeval.audio_g_eval` evaluators provide bounded image-backed
-and audio-backed task scoring for text or generated media outputs.
+`deepeval.vision_g_eval`, `deepeval.audio_g_eval`, and `deepeval.video_frames_g_eval`
+evaluators provide bounded image-backed, audio-backed, and timestamped sampled-frame task
+scoring for text or generated media outputs.
 JSON correctness
 is covered by `native.json_schema`: upstream's score is the same pass/fail schema check, with
 the judge only writing the explanation. Each is an
@@ -111,6 +112,45 @@ Pass the key using the plugin-environment `secret_env` mechanism and allow the e
 judge model, and plugin interpreter in policy. The evaluator does not follow redirects,
 limits judge replies to 1 MiB, records provider token usage when present, and leaves cost
 unknown unless the provider reports it.
+
+### Timestamped sampled-video task scoring
+
+`deepeval.video_frames_g_eval` evaluates a sequence of supplied video-frame samples against
+the task and reviewed reference. It does not decode video files or claim to assess motion
+between samples. Case input uses an ordered `video.frames` list with integer millisecond
+timestamps and inline images:
+
+```json
+{"case_id":"door-01","input":{"prompt":"Does the person enter and then leave?","video":{"frames":[{"timestamp_ms":0,"image":{"mime_type":"image/png","data_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"}},{"timestamp_ms":1500,"image":{"mime_type":"image/png","data_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"}}]}},"reference":{"answer":"The person enters, then leaves."}}
+```
+
+Sequences require 2 to 8 strictly increasing timestamps within 24 hours. Case frames are
+capped at 512 KiB total decoded so their base64 representation fits under the built-in dataset
+reader's row limit alongside the prompt, reference, and metadata. Generated output frames allow
+1 MiB per frame and 4 MiB total decoded. A generated-frame output uses
+`{"frames":[{"timestamp_ms":0,"image":{"mime_type":"image/png","data_base64":"..."}},...]}`;
+a bounded text output is also accepted. The evaluator sends each image as an individually
+labeled inline image part in chronological order. It refuses URLs, local paths, raw video
+containers, audio tracks, extra frame fields, repeated/out-of-order timestamps, malformed
+images, and over-limit sequences before contacting the judge.
+
+Built-in JSONL, JSON, CSV, and Parquet dataset readers cap each row at 1,000,000 bytes,
+including frame base64 and other case fields. The 512 KiB input budget leaves room for those
+other fields; the limit depends on the prompt, reference, and row metadata.
+HTTP application request and response limits default to 1 MiB; raise the applicable `transport.max_request_bytes` or
+`transport.max_response_bytes` for larger generated sequences. The 4 MiB generated sequence
+limit needs about 5.34 MiB in base64 before its JSON wrapper; configure
+`max_response_bytes` to at least 8,388,608. Frame images, prompt, reference answer, and output
+are sent to the configured [Chat Completions endpoint](https://platform.openai.com/docs/api-reference/chat/create).
+The selected provider/model must support multiple image parts. The evaluator bounds judge
+replies to 1 MiB, reports token usage when present, and leaves cost unknown unless the provider
+reports it. No live provider call is made by its tests.
+
+Bind it with a rubric and an OpenAI-compatible vision judge:
+
+```json
+{"metric":"deepeval.video_frames_g_eval","params":{"criteria":"Score whether the answer correctly describes the sampled event order.","judge":{"kind":"openai_compatible","base_url":"https://api.example/v1","model":"vision-model","api_key_env":"AIBENCH_VIDEO_KEY"}}}
+```
 
 **DAG: a decision tree as JSON.** The judge walks the tree; the verdict it lands on gives the
 score (0 to 10, reported as 0 to 1) or hands over to a G-Eval for the grade. A starting node
@@ -230,7 +270,8 @@ message content out) takes the case's input as the agent's task and the recorded
 `plan_quality` and `plan_adherence` are not applicable (`no_plan_in_trace`) when the judge
 finds no plan in the trace: DeepEval would score that 1, which is no evidence of a good plan.
 
-Not included: DeepEval's native multimodal and audio metrics, timestamped voice metrics, and MCP metrics.
+Not included: raw-video decoding or continuous motion scoring, DeepEval's native multimodal and
+audio metrics, timestamped voice metrics, and MCP metrics.
 DAG and arena metrics need objects a plan cannot declare.
 
 ## Judges

@@ -386,7 +386,9 @@ def decode_execution_output(value: Any) -> str | tuple[str, bytes]:
     return mime_type, image_bytes
 
 
-def decode_inline_image(value: Any, label: str) -> tuple[str, bytes]:
+def decode_inline_image(
+    value: Any, label: str, *, max_bytes: int = MAX_IMAGE_BYTES
+) -> tuple[str, bytes]:
     if not isinstance(value, dict) or set(value) != {"mime_type", "data_base64"}:
         raise ValueError(f"invalid:{label.replace('.', '_')}_shape")
     mime_type, encoded = value["mime_type"], value["data_base64"]
@@ -394,13 +396,13 @@ def decode_inline_image(value: Any, label: str) -> tuple[str, bytes]:
         raise ValueError(f"unsupported:{label.replace('.', '_')}_mime_type")
     if not isinstance(encoded, str) or not encoded:
         raise ValueError(f"missing:{label.replace('.', '_')}_data")
-    if len(encoded) > ((MAX_IMAGE_BYTES + 2) // 3) * 4:
+    if len(encoded) > ((max_bytes + 2) // 3) * 4:
         raise ValueError(f"oversized:{label.replace('.', '_')}")
     try:
         data = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError(f"invalid:{label.replace('.', '_')}_base64") from exc
-    if not data or len(data) > MAX_IMAGE_BYTES:
+    if not data or len(data) > max_bytes:
         raise ValueError(f"oversized:{label.replace('.', '_')}")
     if not _IMAGE_SIGNATURES[mime_type](data):
         raise ValueError(f"invalid:{label.replace('.', '_')}_signature")

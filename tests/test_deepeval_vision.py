@@ -149,9 +149,9 @@ def test_vision_metric_is_discovered_with_an_explicit_inline_image_contract() ->
 
     assert manifest.requires_worker and manifest.uses_models
     assert manifest.version == "1.1.0"
-    assert manifest.plugin_version == "0.2.0rc18"
+    assert manifest.plugin_version == "0.2.0rc19"
     assert manifest.package_name == "aibench-deepeval"
-    assert manifest.package_version == "0.2.0rc18"
+    assert manifest.package_version == "0.2.0rc19"
     assert manifest.internal_retries == 0
     assert {item.path for item in manifest.requires} == {
         "case.input",
