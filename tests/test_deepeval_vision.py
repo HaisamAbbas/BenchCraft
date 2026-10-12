@@ -21,7 +21,10 @@ from aibench.core.models import (
     ReferenceAnswer,
 )
 from aibench.registry import BindingValidationError, EvaluatorRegistry
+from aibench.runners import HttpRunner
+from aibench.services.execution import invoke_and_record
 from tests.deepeval_support import PLUGIN_ENV, plugin_python, requires_plugin_env
+from tests.runner_support import http_spec, run, serving
 from tests.scoring_support import Seeded, execution
 
 pytestmark = requires_plugin_env
@@ -79,6 +82,28 @@ class _VisionHandler(BaseHTTPRequestHandler):
         return
 
 
+class _ImageApplication(ThreadingHTTPServer):
+    def __init__(self, image: dict[str, str]) -> None:
+        self.image = image
+        super().__init__(("127.0.0.1", 0), _ImageApplicationHandler)
+
+
+class _ImageApplicationHandler(BaseHTTPRequestHandler):
+    server: _ImageApplication
+
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = json.dumps({"output": self.server.image}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+
 def _server() -> tuple[_VisionJudge, threading.Thread]:
     server = _VisionJudge()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -123,9 +148,10 @@ def test_vision_metric_is_discovered_with_an_explicit_inline_image_contract() ->
     manifest, _ = registry.resolve("deepeval.vision_g_eval")
 
     assert manifest.requires_worker and manifest.uses_models
-    assert manifest.plugin_version == "0.2.0rc16"
+    assert manifest.version == "1.1.0"
+    assert manifest.plugin_version == "0.2.0rc17"
     assert manifest.package_name == "aibench-deepeval"
-    assert manifest.package_version == "0.2.0rc16"
+    assert manifest.package_version == "0.2.0rc17"
     assert manifest.internal_retries == 0
     assert {item.path for item in manifest.requires} == {
         "case.input",
@@ -157,6 +183,7 @@ def test_vision_endpoint_and_image_validation_reject_unsafe_inputs() -> None:
         """
 import json
 from aibench_deepeval.vision import MAX_IMAGE_BYTES, decode_case_image, validate_base_url
+from aibench_deepeval.vision import decode_execution_output
 values = [
     "https://api.example/v1",
     "http://127.0.0.1:9000/v1",
@@ -182,12 +209,25 @@ for encoded in ("%%%", "A" * (((MAX_IMAGE_BYTES + 2) // 3) * 4 + 4)):
         image_errors.append(str(exc).split(":", 1)[0])
     else:
         image_errors.append("accepted")
-print(json.dumps({"endpoints": answers, "images": image_errors}))
+output_errors = []
+for output in (
+    {"url": "https://169.254.169.254/latest/meta-data"},
+    {"mime_type": "image/png", "data_base64": "bm90IGFuIGltYWdl"},
+    {"mime_type": "image/png", "data_base64": "A" * (((MAX_IMAGE_BYTES + 2) // 3) * 4 + 4)},
+):
+    try:
+        decode_execution_output(output)
+    except ValueError as exc:
+        output_errors.append(str(exc).split(":", 1)[0])
+    else:
+        output_errors.append("accepted")
+print(json.dumps({"endpoints": answers, "images": image_errors, "outputs": output_errors}))
 """
     )
     assert result == {
         "endpoints": [True, True, False, False, False, False, False],
         "images": ["invalid", "oversized"],
+        "outputs": ["invalid", "invalid", "oversized"],
     }
 
 
@@ -205,24 +245,30 @@ def test_vision_worker_sends_only_declared_fields_and_signature_checked_inline_i
     cases = [
         _vision_case("good", good_image),
         _vision_case("provider_error", good_image),
+        _vision_case("generated_image", good_image),
+        _vision_case("remote_output", good_image),
+        _vision_case("wrong_output_signature", good_image),
         _vision_case("url", {"url": "https://169.254.169.254/latest/meta-data"}),
         _vision_case(
             "wrong_signature",
             {"mime_type": "image/png", "data_base64": base64.b64encode(b"not an image").decode()},
         ),
     ]
+    outputs: dict[str, Any] = {
+        "good": "The picture shows a red bicycle.",
+        "provider_error": "trigger HTTP error",
+        "generated_image": good_image,
+        "remote_output": {"url": "https://169.254.169.254/latest/meta-data"},
+        "wrong_output_signature": {
+            "mime_type": "image/png",
+            "data_base64": base64.b64encode(b"not an image").decode(),
+        },
+    }
     seeded = Seeded(tmp_path)
     seeded.seed(
         cases,
         [
-            execution(
-                item.case_id,
-                (
-                    "The picture shows a red bicycle."
-                    if item.case_id != "provider_error"
-                    else "trigger HTTP error"
-                ),
-            )
+            execution(item.case_id, outputs.get(item.case_id, "The picture shows a red bicycle."))
             for item in cases
         ],
     )
@@ -245,11 +291,23 @@ def test_vision_worker_sends_only_declared_fields_and_signature_checked_inline_i
     assert results["provider_error"].status is ExecutionStatus.ERROR
     assert results["provider_error"].resources["model_calls"] == 1
     assert results["provider_error"].resources["cost"] is None
+    assert results["generated_image"].status is ExecutionStatus.OK
+    assert results["generated_image"].value is not None
+    assert results["generated_image"].value.value == 0.9
+    assert results["remote_output"].status is ExecutionStatus.NOT_APPLICABLE
+    assert results["wrong_output_signature"].status is ExecutionStatus.NOT_APPLICABLE
     assert results["url"].status is ExecutionStatus.NOT_APPLICABLE
     assert results["wrong_signature"].status is ExecutionStatus.NOT_APPLICABLE
-    assert len(server.requests) == 2
+    assert len(server.requests) == 3
 
-    request = server.requests[0]
+    request = next(
+        request
+        for request in server.requests
+        if any(
+            part.get("text") == "Application-generated output image:"
+            for part in request["body"]["messages"][1]["content"]
+        )
+    )
     assert request["path"] == "/v1/chat/completions"
     assert request["auth"] == "Bearer vision-secret-value"
     body = request["body"]
@@ -258,8 +316,12 @@ def test_vision_worker_sends_only_declared_fields_and_signature_checked_inline_i
     assert "A red bicycle." in content[0]["text"]
     assert "This reference context must not reach" not in content[0]["text"]
     assert "unrequested metadata" not in content[0]["text"]
-    image_url = content[1]["image_url"]["url"]
+    image_url = content[2]["image_url"]["url"]
     assert image_url == "data:image/png;base64," + base64.b64encode(PNG).decode()
+    assert content[3] == {"type": "text", "text": "Application-generated output image:"}
+    output_image_url = content[4]["image_url"]["url"]
+    assert output_image_url == "data:image/png;base64," + base64.b64encode(PNG).decode()
+    assert "data_base64" not in content[0]["text"]
 
     result = results["good"]
     assert result.resources["model_calls"] == 1
@@ -267,3 +329,55 @@ def test_vision_worker_sends_only_declared_fields_and_signature_checked_inline_i
     assert result.resources["cost"] is None
     raw = seeded.artifacts.read_bytes(seeded.storage.get_artifact(result.raw_artifact_ref))
     assert b"vision-secret-value" not in raw
+
+
+def test_generated_image_survives_http_output_binding_and_scores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise application JSON, output-pointer extraction, durable storage, and scoring."""
+    monkeypatch.setenv("AIBENCH_VISION_TEST_KEY", "vision-secret-value")
+    image = {"mime_type": "image/png", "data_base64": base64.b64encode(PNG).decode()}
+    item = _vision_case("http-generated-image", image)
+    seeded = Seeded(tmp_path)
+    seeded.seed([item], [])
+    app_server = _ImageApplication(image)
+    with serving(app_server) as base_url:
+        spec = http_spec(f"{base_url}/generate", output_binding={"output": "/output"})
+
+        async def invoke() -> Any:
+            async with HttpRunner(spec, base_dir=tmp_path) as runner:
+                return await invoke_and_record(
+                    runner,
+                    item,
+                    storage=seeded.storage,
+                    artifacts=seeded.artifacts,
+                    run_id="run-1",
+                )
+
+        recorded = run(invoke())
+
+    assert recorded.status is ExecutionStatus.OK
+    assert recorded.output["mime_type"] == "image/png"
+    registry = EvaluatorRegistry.with_native()
+    loads = registry.load_plugin_environment(
+        PLUGIN_ENV, secret_env={"VISION_JUDGE_KEY": "env:AIBENCH_VISION_TEST_KEY"}
+    )
+    assert [load.error for load in loads] == [None]
+    judge, thread = _server()
+    try:
+        report = seeded.score([_binding(judge.base_url)], registry=registry)
+    finally:
+        judge.shutdown()
+        judge.server_close()
+        thread.join(timeout=5)
+
+    [result] = report.results
+    assert result.status is ExecutionStatus.OK
+    assert result.value is not None and result.value.value == 0.9
+    content = judge.requests[0]["body"]["messages"][1]["content"]
+    image_parts = [part for part in content if part["type"] == "image_url"]
+    assert len(image_parts) == 2
+    assert all(
+        part["image_url"]["url"] == "data:image/png;base64," + image["data_base64"]
+        for part in image_parts
+    )

@@ -10,7 +10,8 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
 recorded data can feed (40, with the head-to-head judge below). DeepEval's upstream image,
 audio, voice, and MCP metric families are not wired into this adapter. The separate
-`deepeval.vision_g_eval` evaluator provides bounded image-first scoring for text answers.
+`deepeval.vision_g_eval` evaluator provides bounded image-first scoring for text answers and
+generated images.
 JSON correctness
 is covered by `native.json_schema`: upstream's score is the same pass/fail schema check, with
 the judge only writing the explanation. Each is an
@@ -43,18 +44,21 @@ toxicity and the other safety metrics that way), and is decided by the plan's ru
 
 ### Image-first vision scoring
 
-`deepeval.vision_g_eval` scores a recorded text answer using the image supplied to the
-application, its task prompt, and the reviewed reference answer. The image is carried inside
-`input`; the reference remains judge-only:
+`deepeval.vision_g_eval` scores a recorded text or image output using the image supplied to
+the application, its task prompt, and the reviewed reference answer. The case image is carried
+inside `input`; the reference remains judge-only:
 
 ```json
 {"case_id":"receipt-01","input":{"prompt":"What is the total?","image":{"mime_type":"image/png","data_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"}},"reference":{"answer":"$18.42"}}
 ```
 
-The image must be base64-encoded PNG, JPEG, or WebP, no larger than 4 MiB after decoding.
-The MIME type and file signature must agree. Remote URLs, local file paths, audio, video, and
-image-valued application outputs are not supported. This avoids fetching untrusted case URLs
-or reading arbitrary files in the evaluator.
+Case images must be base64-encoded PNG, JPEG, or WebP, no larger than 4 MiB after decoding.
+The MIME type and file signature must agree. A text output remains a bounded string. An image
+output is an object with exactly `mime_type` and `data_base64`, using the same image formats
+and 4 MiB decoded limit. Configure the application's output selector to return that object.
+Remote URLs, local file paths, audio, and video are not supported. This avoids fetching
+untrusted URLs or reading arbitrary files in the evaluator. Both images are labeled and sent
+as inline data URLs to the configured judge.
 
 Bind the evaluator with a rubric and an OpenAI-compatible vision model:
 
