@@ -1,75 +1,50 @@
-# Installing, upgrading and recovering (aibench 0.1.0rc1)
+# Installing, upgrading and recovering
 
-This covers installing from the release artifacts, what happens to a workspace when you
-upgrade, and what to do when a run or session is interrupted. Each recovery path below is
-exercised by the automated test named beside it.
+This guide covers the current `aibench 0.1.0rc35` source candidate, workspace upgrades,
+and recovery from interrupted work. Each recovery path is exercised by the automated test
+named beside it. The candidate is not published to a package index.
 
-## Installing from the release artifacts
+## Installing the current source candidate
 
-aibench is not published to a package index. The Phase 2 working tree builds these six files:
-
-| File | What it is |
-|---|---|
-| `aibench-0.1.0rc1-py3-none-any.whl` | The CLI and library. This is what you install |
-| `aibench-0.1.0rc1.tar.gz` | Source distribution of the same code |
-| `aibench_deepeval-0.1.0rc1-py3-none-any.whl` | Optional DeepEval judge adapter, for its own environment |
-| `aibench_deepeval-0.1.0rc1.tar.gz` | Its source distribution |
-| `aibench_ragas-0.1.0rc1-py3-none-any.whl` | Optional Ragas adapter, for a separate environment |
-| `aibench_ragas-0.1.0rc1.tar.gz` | Its source distribution |
-
-Check the files against `SHA256SUMS` before installing. The same sums are recorded in
-`docs/engineering/evidence/13/SHA256SUMS`.
-In this repository, the four verified files are in `docs/engineering/evidence/13/dist/`;
-copy them beside `SHA256SUMS` when preparing a local handoff.
+From the root of a fresh checkout, install the source into a virtual environment:
 
 ```bash
-sha256sum -c SHA256SUMS                         # PowerShell: Get-FileHash FILE -Algorithm SHA256
 python -m venv .venv
-.venv/Scripts/pip install aibench-0.1.0rc1-py3-none-any.whl     # Linux/macOS: .venv/bin/pip
-.venv/Scripts/aibench --version                                  # aibench 0.1.0rc1
+.venv/Scripts/python -m pip install .       # Windows
+.venv/bin/python -m pip install .           # Linux/macOS
 ```
 
-The dependencies (pydantic, typer, rich, httpx, jsonschema, prompt_toolkit) come from the
-package index. Python 3.11 or 3.12 is required; see the
-[compatibility matrix](../engineering/platform-matrix.md).
+To build an installable candidate and check the clean-wheel journey, run
+`python scripts/release_check.py --out DIR`. The current core and optional-adapter artifacts
+are written under `DIR/dist`; the command writes `SHA256SUMS` and verifies the install. Use
+`--python PATH` once per interpreter. Add `--plugin` to install and check the DeepEval
+and Ragas adapters in separate clean environments. Verify `SHA256SUMS` before transferring
+a built artifact.
+The rc1 files retained in `docs/engineering/evidence/13/dist/` are historical evidence and
+must not be used as the current candidate.
 
-**Building the artifacts yourself.** From a clone:
-`python scripts/release_check.py --out DIR` builds all six files into `DIR/dist` and writes
-`SHA256SUMS`. It then installs the wheel into a clean environment and runs the documented
-demo. Add `--python PATH` once per interpreter to check, and `--plugin` to check both
-evaluator adapters in separate clean environments.
+Python 3.11 or 3.12 is required; see the [compatibility matrix](../engineering/platform-matrix.md).
 
-**The DeepEval adapter** goes in its own environment, never in the one aibench runs in:
+**The DeepEval adapter** runs in its own environment, never in the one aibench runs in. It
+pins `deepeval==4.2.5` and refuses to run with another version. Install or update it with
+`aibench plugins install deepeval`; see [support.md](../support.md#optional-evaluators).
 
-```bash
-python -m venv deepeval-env
-deepeval-env/Scripts/pip install aibench-0.1.0rc1-py3-none-any.whl aibench_deepeval-0.1.0rc1-py3-none-any.whl
-```
-
-It pins `deepeval==4.2.5` and refuses to run with another version. How a plan uses it is
-described in [support.md](../support.md#optional-evaluators).
-
-**The Ragas adapter** also goes in its own environment. Do not co-install the two adapter
+**The Ragas adapter** also runs in its own environment. Do not co-install the two adapter
 packages merely to save disk space: their upstream dependency trees are independently
-controlled and the release verifier keeps them isolated.
-
-```bash
-python -m venv ragas-env
-ragas-env/Scripts/pip install aibench-0.1.0rc1-py3-none-any.whl aibench_ragas-0.1.0rc1-py3-none-any.whl
-```
-
-It pins `ragas==0.4.3`, exposes only text faithfulness, and refuses another upstream
-version. Ragas 0.4.3 has an open multi-modal SSRF advisory; this adapter never exposes the
-affected metric and accepts only stored text. See ADR 0013 for the compensating control and
-`plugins/ragas/README.md` for judge configuration.
+controlled and the release verifier keeps them isolated. It pins `ragas==0.4.3`, exposes
+only text faithfulness, and refuses another upstream version. Ragas 0.4.3 has an open
+[multi-modal SSRF advisory (GHSA-95ww-475f-pr4f)](https://github.com/advisories/GHSA-95ww-475f-pr4f);
+this adapter never exposes the affected metric and accepts only stored text. See ADR 0013
+and `plugins/ragas/README.md`.
 
 ## Upgrading
 
 ### Updating a plugin
 
-After upgrading BenchCraft, update each plugin with `/plugins install NAME` in the chat (for
-example `/plugins install deepeval`). It installs the new adapter and this version's aibench
-together in the plugin's environment; the project's judge settings are kept.
+After upgrading BenchCraft, update each plugin with `aibench plugins install NAME` (for
+example `aibench plugins install deepeval`), or run `/plugins install NAME` in the chat.
+It installs the new adapter and this version's aibench together in the plugin's environment;
+the project's judge settings are kept.
 
 Do not install only the adapter's wheel into that environment (`pip install --no-deps`): the
 environment keeps its older aibench, and an adapter that needs the newer one does not load. A
@@ -86,11 +61,14 @@ A project's workspace is its `.aibench/` directory:
 - **Prompt 18 workspace schema 9.** The migration adds candidate pools, candidate cases, and append-only candidate review/verification events. Candidate records are kept separately from ordinary datasets. Existing workspace contents remain available after the forward migration.
 - **Prompt 17 workspace schema 10.** The migration adds durable remote evaluation job state for the hosted Evals API bridge.
 - **Prompt 19 workspace schema 11.** Migration 11 adds experiment contracts and trial lineage, append-only lifecycle events, and protected holdout digest reservations. Existing runs and datasets remain available after the forward migration.
+- **Run catalog schema 12.** Adds run tags, sanitized notes, approved baseline aliases, and append-only baseline promotion history.
+- **Run control schema 13.** Adds durable desired state for supervised pause, resume, and cancellation.
+- **Dataset suite schema 14.** Adds the immutable named suite catalog; existing dataset and run records remain available.
 - **Older aibench, newer workspace.** Refused with exit code 2: "this workspace was upgraded by a newer aibench (schema version N; this aibench knows up to M)". Nothing is written. Install the newer version again to use it. (`tests/test_release_candidate.py`)
 
-0.1.0rc1 is the first release, so there is nothing to migrate from yet. A workspace created
-by an unreleased development build before this candidate is migrated forward like any
-other.
+Workspaces created by prior candidates are migrated forward by the current version. Keep a
+verified backup before upgrading important workspaces. Migrations are forward-only; an older
+BenchCraft version refuses to write to a workspace created by a newer schema.
 
 ### Runs that span an upgrade
 

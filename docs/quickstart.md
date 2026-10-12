@@ -7,20 +7,27 @@ locally. Nothing here calls a paid service unless you add an assistant model you
 
 ## 1. Install
 
-aibench is not published to a package index. Install the release wheel you were given,
-using Python 3.11 or 3.12. Check it against its `SHA256SUMS` first:
+The current source candidate is `aibench 0.1.0rc35`; it is not published to a package
+index. Python 3.11 or 3.12 is required. From the root of a fresh source checkout, install the
+current code into a virtual environment:
+
+Do not use `pip install aibench` for BenchCraft: the [PyPI project with that name](https://pypi.org/project/aibench/)
+is a separate AIBenchmark package.
 
 ```bash
 python -m venv .venv
-.venv/Scripts/pip install aibench-0.1.0rc1-py3-none-any.whl    # Windows
-.venv/bin/pip install aibench-0.1.0rc1-py3-none-any.whl        # Linux/macOS
-aibench --version                                               # aibench 0.1.0rc1
+.venv/Scripts/python -m pip install .       # Windows
+.venv/bin/python -m pip install .           # Linux/macOS
+.venv/Scripts/aibench.exe --version         # Windows
+.venv/bin/aibench --version                 # Linux/macOS
 ```
 
-From a clone of the repository, `pip install .` works too.
-`python scripts/release_check.py --out DIR` builds the release files and checks them. See
-[upgrade and recovery](release/upgrade-and-recovery.md) for upgrading and for interrupted
-runs.
+The old `0.1.0rc1` artifacts in `docs/engineering/evidence/13/` are historical and do
+not contain the current CLI. To build a clean installable candidate from this checkout, run
+`python scripts/release_check.py --out DIR`; it creates the release artifacts and checksum
+manifest, installs the wheel in a clean environment, and runs the documented checks. Verify
+the generated `SHA256SUMS` before handing an artifact to another machine. See
+[upgrade and recovery](release/upgrade-and-recovery.md).
 
 The core install has no evaluator framework in it. Optional evaluators are installed
 separately (see [Optional evaluators](support.md#optional-evaluators)).

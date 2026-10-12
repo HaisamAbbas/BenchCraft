@@ -1,7 +1,8 @@
 # Support and limitations
 
-This describes the current `aibench 0.1.0rc34` source candidate, what has actually
-been tested, and what isn't available yet. The release decision and its open items are in
+This describes the current `aibench 0.1.0rc35` source candidate, what has actually
+been tested, and what isn't available yet. This candidate is not published to a package
+index. The release decision and its open items are in
 `docs/engineering/release-readiness.md`. The authoritative design is `docs/spec/implementation-plan.md`, and
 per-prompt evidence is in `docs/engineering/reports/`.
 
@@ -23,7 +24,7 @@ The core install ships the native evaluators: `native.exact_match`, `native.json
 and custom Python evaluators you trust. Evaluator frameworks are never imported into the
 aibench process. They run in their own environment, driven by a worker.
 
-**DeepEval** (40 metrics, pinned to `deepeval==4.2.5`): faithfulness, answer
+**DeepEval** (pinned to `deepeval==4.2.5`): faithfulness, answer
 relevancy, contextual precision/recall/relevancy, hallucination, bias, toxicity, PII
 leakage, misuse, non-advice, role violation, prompt alignment, summarization, task
 completion, argument and tool correctness, tool permission, exact and pattern match, and
@@ -38,7 +39,8 @@ efficiency, plan quality, plan adherence, agent loop detection) over traces impo
 deepeval --judge-provider PROVIDER.json`, or type `/plugins install deepeval` in the chat to
 use the assistant's model as judge. Either one shows its changes before making them:
 
-- a plugin environment under `.aibench/plugins/deepeval/` (about 70 packages);
+- a dedicated plugin environment under `.aibench/plugins/deepeval/` for DeepEval and its
+  pinned dependencies;
 - `plugin_environments` in `aibench.json`, with the judge as the default for `deepeval.*`;
 - the policy lines it needs: `allowed_plugin_environments` (that interpreter),
   `allowed_evaluators: deepeval.*`, `allow_model_evaluators: true` and the judge's key
@@ -51,11 +53,14 @@ status` shows each optional plugin's state. The judge model is a paid external c
 OpenAI-compatible endpoint (such as GLM on Z.ai) works without code. Metrics, field mapping
 and judges are described in `plugins/deepeval/README.md`. Multi-turn conversational metrics
 are also available.
-DeepEval's native multimodal, audio, voice, and MCP metric families are not included.
-The DeepEval plugin includes narrower `deepeval.vision_g_eval` and
-`deepeval.audio_g_eval` paths for text or generated-media outputs on image-backed or
-audio-backed cases with bounded inline data; see the [vision](../plugins/deepeval/README.md#image-first-vision-scoring)
-and [audio](../plugins/deepeval/README.md#bounded-audio-task-scoring) contracts.
+The plugin also includes bounded image and generated-image evaluation, audio-task scoring,
+sampled-video evaluation, stored-episode voice and MCP metrics, text-only provider-transcript
+accuracy, transcript WER/CER, and recorded diarization error rate. These adapters score stored
+case or episode evidence; they do not capture live calls or connect to MCP servers. The
+transcript-accuracy adapter uses G-Eval over text. The dedicated upstream transcription class
+is absent from the pinned package and was also absent from DeepEval's latest checked release;
+see the [release check](audit/2026-10-08/implementation/G22.19-upstream-audio-release-gate.md).
+Bounds and supported media formats are in the [DeepEval plugin guide](../plugins/deepeval/README.md).
 
 **Ragas faithfulness** (`ragas.faithfulness@1`, pinned to `ragas==0.4.3`) is the
 independent second ecosystem used by the Phase 2 comparison workflow. Install it separately:
@@ -70,8 +75,9 @@ A plan names that interpreter in `plugin_environments`, allows `ragas.*` and mod
 evaluators in policy, and supplies any provider key through `secret_env`. Only text
 faithfulness is exposed, and it scores the application's recorded output and observed
 retrieved text. It never substitutes the Golden's reference context. Ragas 0.4.3 has an
-open multi-modal SSRF advisory; the adapter does not expose the affected metric and runs in
-an isolated worker. See ADR 0013 and `plugins/ragas/README.md`.
+open [multi-modal SSRF advisory (GHSA-95ww-475f-pr4f)](https://github.com/advisories/GHSA-95ww-475f-pr4f);
+the adapter does not expose the affected metric and runs in an isolated worker. See ADR 0013
+and `plugins/ragas/README.md`.
 
 Promptfoo is not integrated. OpenAI Evals (open-source and hosted) and Langfuse are: see
 [docs/integrations.md](integrations.md).
@@ -174,16 +180,20 @@ dataclass fields before storing a case.
 ## Supported now
 
 - **Conversational benchmarking:** in a terminal, `aibench`/`aibench chat` handles planning, runs, live status, pause/resume/stop, failures, case evidence and reports. Sessions survive exit and crashes, and are never restarted automatically.
-- **Headless commands:**
-  - `init`, `doctor`;
-  - `dataset validate`, `inspect`;
-  - `plan`, `plan validate`, `plan benchmark` (planner fixture set), `plan opportunities` (read-only evidence-aware metric recommendations);
-  - `run`, `resume`, `evaluate` (rescore stored outputs);
-  - `runs list/show/status`, `report`, `compare`, `benchmark`;
-  - `sessions list/show/delete`, `evaluators list/describe/plugin/calibrate`, `plugins list`, `score`, `app describe/smoke`.
+- **Headless commands:** `aibench --help` lists the complete command tree. It includes
+  project/configuration setup, dataset and suite utilities, app inspection and smoke tests,
+  plan/benchmark/run/resume/evaluate/score workflows, supervised detached runs and durable
+  pause/resume/cancel controls, run/session/trace history, report and case export, comparison
+  and experiments, evaluators and plugins, cache/workspace maintenance, coordinator workers,
+  dashboards, and external integrations. Root options include `--json`,
+  `--non-interactive`, `--policy`, `--config`, `--quiet`, and `--verbose`.
 - **Reports:** JSON, Markdown, static HTML, JUnit XML and SARIF 2.1.0, from stored facts. They include typed metric profiles, full denominators, release gates, latency definitions, cost completeness and case evidence.
-- **Local dashboard:** `aibench dashboard` shows stored runs, session summaries, content-withheld report facts and on-demand run comparisons. It binds to loopback only, has no authentication, rejects non-local origins, and does not start or change benchmark work. Remote exposure is unsupported until an authenticated remote mode exists. See [the dashboard guide](dashboard.md).
-- **Release gates** in plans (`gates`): a minimum pass rate or minimum completed coverage for one metric binding, always over selected cases.
+- **Dashboard:** `aibench dashboard` is read-only and shows stored runs, session summaries,
+  content-withheld report facts, and on-demand run comparisons. It binds to loopback by
+  default. Opt-in remote access requires TLS 1.2 or newer and an environment-sourced bearer
+  token; API reads remain authenticated. See [the dashboard guide](dashboard.md).
+- **Release gates** in executable plans and conversation drafts: minimum pass rate or
+  completed coverage for a metric binding, always over selected cases.
 - **Application transports** (Phase 2, Prompt 15): CLI, HTTP, Python callable (`python`), container (`container`) and OpenAI-compatible endpoint (`openai_compatible`). See `docs/runner-protocol.md`.
 - **HTTP API boundary** (Prompt 28): HTTP evaluates an explicitly configured JSON API using `POST`/`PUT` request bindings and response-field bindings. TLS verification is on by default; endpoint/origin policy, secret references, redaction, request/response byte caps, timeouts, effect-aware retry behavior, quotas and run budgets apply. Live endpoints require configured targets and policy approval. This transport does not browse websites, infer URLs from source or provide arbitrary browser actions. Live remote endpoints were not tested.
 - **Stateful applications and agents** (Prompt 15):
@@ -209,28 +219,51 @@ dataclass fields before storing a case.
   timeout. Unknown token use is reported as unenforced, and monetary limits remain soft
   estimates. Rescoring executes serially and never invokes the application.
 
+- **Workspace portability and maintenance:** preview-first garbage collection, workspace
+  backup/restore/check/repair, retention and usage reports, safe project-path migration, and
+  portable run/session bundle import and export. See [upgrade and recovery](release/upgrade-and-recovery.md).
+- **Distributed workers:** workers pull application invocations from an authenticated
+  coordinator API and do not share its SQLite workspace. Matching BenchCraft/app versions
+  are required and only reset mode `none` is supported. Cross-host performance evidence is
+  still pending. See the [worker implementation](audit/2026-10-08/implementation/G22.3-distributed-workers.md)
+  and [remote probe](audit/2026-10-08/implementation/G22.7-remote-worker-probe.md).
+- **Whole-workflow usage attribution:** session reports separate application, evaluator,
+  planner, and combined usage; unknown usage and unavailable planner prices remain explicit.
+  See [G23](audit/2026-10-08/implementation/G23-whole-workflow-cost.md).
+
 ## Not available yet
 
-| Feature | Status |
+| Feature or evidence | Status |
 |---|---|
-| Phase 2 time-saved study | Not measured. The repeatable comparison workflow exists; §18's demonstrated time saved over direct framework configuration still needs real trials |
-| Dashboard or web app | Not planned for the MVP. Reports are static files |
+| Phase 2 time-saved study | Not measured; real trials against direct framework configuration are still needed |
 | Website crawling or browser automation | Not supported; the configured JSON HTTP API runner is not a browser or generic URL evaluator |
-| Release gates in conversation drafts | Gates are authored in plan files. A session's draft can't declare them yet |
-| Planning and conversation cost per run | New session-run starts attach planner calls and reported tokens to run reports; planner dollar prices remain unknown, and legacy runs without stored attribution are labelled not attributed. `/budget` remains a session-level view |
-| Source-code inspection beyond Python and JS/TS | Other languages, dynamic imports and plugins loaded by name are not seen |
-| Distributed workers, detached runs | Not available. A run stops dispatching when its terminal exits and resumes on request |
-| Session export | Not available. Sessions can be deleted (`aibench sessions delete`), and deletion keeps run records |
-| Live model checks | The conversation, DeepEval adapter and Ragas adapter are tested against scripted or deterministic local judges. No live provider run is part of this evidence |
+| Source-code inspection beyond Python and JS/TS | Other languages, dynamic imports, and plugins loaded by name are not analyzed |
+| Cross-host worker evidence | The coordinator/worker API exists, but real separate-host throughput and failure-rate measurements have not been run |
+| Dedicated upstream `TranscriptionAccuracyMetric` integration | Deferred until a released package artifact contains the documented class; the current adapter scores bounded text transcripts only |
+| Live model and judge behavior | No live provider-backed run or external pilot is included in the evidence; calibration labels still need human review |
+| Planner dollar estimates | Provider prices are not available from token counts alone; reports preserve usage and mark unknown dollar costs explicitly |
 
 ## Known limits
 
-- **Engine throughput** is low. On the development machine (Windows 11, 14 CPUs), 1,000 cases took between 152 and 233 s at concurrency 16 against an instant local service. Each call waits on a fresh HTTP connection and on its capture artifacts being durably written and verified. Profiles are in `docs/engineering/evidence/12/`. A later measurement (Prompt 20, ADR 0019) used a different workload: the CLI against a local mock with one deterministic metric. It found one run completing about 18–23 cases/s against an instant local service at concurrency 16–64, and about 8 cases/s at concurrency 1. The harness uses one core at that point, and each case costs about 50–64 ms of harness CPU in durable SQLite and artifact bookkeeping. For a local service with 1 s latency at concurrency 64, it completed 14 cases/s of the 64 the service allowed. The machine was 86% busy with other work during the measurement, and only a local mock was measured (`docs/engineering/evidence/20/`). A 3,000-case run peaked at 185 MiB of memory, against about 62 MiB at 300 cases, consistent with work items being held in memory. Extrapolated, not measured, a million-case run would need about 44 GiB, so million-case runs on one host are not supported yet. Distributed workers are deferred: no PostgreSQL coordinator, queue or object store exists.
+- **Capacity evidence is workload-specific.** The earlier 1,000- and 3,000-case profiles in
+  `docs/engineering/evidence/12/` and `20/` predate the current streamed compile path and are
+  not current capacity guarantees. The current 1,000-case interrupt/resume probe completed
+  all work at 13.2 MiB peak traced Python allocations in 90.6 s, compared with the audit
+  sample's 17.1 MiB in 64.6 s. This is traced allocation, not RSS; the full-selected case
+  snapshot still grows with the selected dataset. Million-case capacity has not been measured.
+- **Distributed-worker measurements are synthetic and one-host.** The local HTTP-fixture
+  harness recorded 27.22 invocations/s at worker capacity 1 and 72.44 at capacity 4 over
+  100 calls with 20 ms fixture latency and zero failures; its rate-limit probe received seven
+  HTTP 429 responses out of eight under the configured fixture quota. These numbers do not
+  establish cross-host throughput or provider performance. The CLI also offers bounded
+  open-loop/ramping profiles, but no external load study has been run.
 - **Planner and judge measurements** (`aibench plan benchmark`, `aibench evaluators calibrate`) use fixture annotations and labels that no person has reviewed yet. The template planner misses objectives phrased without its keywords: 17/21 recall on the v1 fixture set, below the 0.85 target.
 - **Claim checking** links every number in an assistant reply to a result queried in that turn, and flags numbers it can't trace. It shows where a number could have come from, not that the sentence around it is right. An explanation of why cases failed is a hypothesis unless a stored result states it.
 - **Redaction** of credentials is pattern-based, as a safety net. Use secret references rather than relying on it.
 - **Latency** is runner-measured wall time per request under the plan's concurrency. It is not a load test. Cache hits are excluded.
-- **Parallel execution** was measured only against a local rate-limited server: a 15 rps quota held 45 cases to at most 17 starts per second and 3 in flight, with event-loop lag under 0.25 s. This says nothing about production-scale capacity; no million-case throughput is claimed. Work items are held in memory, and the workspace has a single SQLite writer.
+- **SQLite remains a single-writer workspace.** Coordinator workers persist run state, retry
+  decisions, budgets, artifacts, and evaluations on the coordinator; workers do not share the
+  workspace. Cross-host reliability and capacity have not been established.
 - **Imported traces** are only as complete as the export. Usage from partial traces is a lower bound, and traces without a correlation ID stay unmatched.
 - **Containers** run non-root, read-only, capability-free, resource-limited and offline by default, but they are not a hostile multi-tenant sandbox: they share the host kernel. Only Linux images were exercised, with Docker Engine 29.7.2 through Docker Desktop on Windows 11. The host `docker` client is fixed, engine-sensitive environment overrides are refused, and image pulls are disabled for each invocation. Per-episode state is not supported for containers.
 - **OpenAI-compatible endpoints** were exercised against a local stub only. Tool calls from a model are recorded as requests, never as executed effects, and cost stays unknown.
