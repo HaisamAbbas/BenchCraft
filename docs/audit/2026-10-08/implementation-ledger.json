@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22 follow-on: bounded video task evaluation",
+  "current_item": "G22 follow-on: timestamped voice interaction evaluation",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.9 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. Timestamped voice metrics, video, DeepEval upstream multimodal metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.10 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. Timestamped voice metrics, DeepEval upstream multimodal metrics, and remote dashboard access remain unsupported; compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -1011,6 +1011,22 @@
           "review": "implementation/G22.9-audio-evaluation-review.md",
           "implementation": "implementation/G22.9-audio-evaluation.md",
           "commit": "bf9a6f10528f1088fd1d19f2a9683e7928419484",
+          "pushed": true
+        },
+        {
+          "name": "timestamped sampled-video frame evaluation",
+          "status": "delivered",
+          "verification": [
+            "Focused video-frame, audio/vision/metric discovery batch: 6 passed",
+            "Decoder coverage verifies strictly increasing timestamps, exact frame shapes, image bounds, 512 KiB case aggregate and 4 MiB generated-output aggregate limits",
+            "HTTPRunner carried generated frames through output selection and durable storage into the isolated evaluator worker; ordered judge parts, usage, secret omission, and malformed/remote refusal verified",
+            "Ruff and formatting passed for changed Python files; Mypy passed for video_frames.py; git diff --check passed",
+            "Independent review found and resolved dataset-row/evaluator-limit mismatch; final review found no remaining actionable findings",
+            "Feature commit 0f8e32162c0eaae6a589d58923fec7b55e32ff46 was pushed to origin/fix/plugin-core-match; no live judge/provider call was made"
+          ],
+          "review": "implementation/G22.10-video-frames-review.md",
+          "implementation": "implementation/G22.10-video-frames.md",
+          "commit": "0f8e32162c0eaae6a589d58923fec7b55e32ff46",
           "pushed": true
         }
       ]

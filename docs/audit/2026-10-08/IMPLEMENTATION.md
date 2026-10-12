@@ -31,10 +31,18 @@ remote paths and URLs remain rejected.
 
 G22.9 adds `deepeval.audio_g_eval` for text or generated-audio output against one bounded
 inline WAV/MP3 case. It validates supported WAV/MP3 framing before the isolated worker sends
-labeled `input_audio` parts to the explicitly configured judge. Dataset-line and HTTP transport
-limits may be lower than the evaluator's per-audio 4 MiB cap; the plugin guide documents the
-effective limits and configuration. This does not provide timestamped voice-interaction,
-diarization, or video metrics.
+labeled `input_audio` parts to the explicitly configured judge. Built-in dataset rows are
+hard-capped at 1,000,000 bytes, so imported case audio has a lower practical limit than the
+per-audio evaluator cap; HTTP transport limits can be raised in application configuration.
+Timestamped voice-interaction and diarization metrics are not included.
+
+G22.10 adds `deepeval.video_frames_g_eval` for text or supplied sampled-frame output. Case input
+uses 2 to 8 strictly ordered timestamps and inline PNG/JPEG/WebP images, capped at 512 KiB per
+sequence to fit within the built-in 1,000,000-byte dataset row limit alongside task and
+reference text. Generated output allows 1 MiB per frame and 4 MiB per sequence. Frame order
+and timestamp labels are retained in the judge request; the configured HTTP response limit
+can be raised to carry maximum generated output. This scores only supplied samples; it does not
+decode raw video containers or score motion between samples.
 
 G23 adds source-turn planner usage attribution and combined workflow cost accounting. Reports
 retain separate application, primary evaluator-pass, and planner views while the workflow total
