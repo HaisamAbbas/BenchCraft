@@ -8,7 +8,8 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 ## Metrics
 
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
-recorded data can feed (40, with the head-to-head judge below). Separate
+recorded data can feed (40, with the head-to-head judge below). The five upstream image
+metrics are listed in their own section. Separate
 `deepeval.vision_g_eval`, `deepeval.audio_g_eval`, and `deepeval.video_frames_g_eval`
 evaluators provide bounded image-backed, audio-backed, and timestamped sampled-frame task
 scoring for text or generated media outputs. The pinned DeepEval voice metrics score stored
@@ -74,6 +75,46 @@ redirects, limits judge replies to 1 MiB, reports provider token counts when pre
 leaves cost unknown unless the provider reports it (no price is guessed). Only a returned
 finite 0–1 score with a non-empty reason is accepted; the harness applies the frozen decision
 rule. Scores remain judge-dependent.
+
+### DeepEval's upstream image metrics
+
+The adapter exposes DeepEval's five image-specific metrics:
+`deepeval.image_coherence`, `deepeval.image_helpfulness`, `deepeval.image_reference`,
+`deepeval.text_to_image`, and `deepeval.image_editing`. The first three score one generated
+image against the caption or answer text around it. Text-to-image scores one image generated
+from a text prompt. Image-editing compares one supplied source image with one generated image
+against the edit prompt. These use the upstream metric implementations and preserve their
+sub-score reasoning.
+
+For the first four metrics, `case.input` is prompt text or `{"prompt":"..."}`. For image
+editing it is `{"prompt":"...","image":{"mime_type":"image/png","data_base64":"..."}}`.
+Application output is either one image object with `mime_type` and `data_base64`, or an object
+with `text` and `image` fields so the metrics that use surrounding text can score a caption:
+
+```json
+{"text":"The bicycle is blue.","image":{"mime_type":"image/png","data_base64":"iVBORw0KGgo..."}}
+```
+
+Only inline signature-checked PNG, JPEG, and WebP are accepted. Each scored case has at most
+one output image, and the source plus output images together cannot exceed 4 MiB decoded.
+URLs, filesystem paths, extra image fields, and reserved DeepEval image markers are rejected.
+Validation checks MIME signatures and byte bounds, not full image structure or decoded pixel
+dimensions; a corrupt signature-matching image can still fail after a judge request.
+The selected OpenAI-compatible judge must support image parts; images and prompt text go to
+that endpoint. The built-in JSONL reader has a fixed 1 MB per-row limit, so keep encoded case
+images within that row size; application transport response limits default to 1 MB and can be
+raised in the application configuration when a generated image requires it. `max_context_size`
+is available for coherence, helpfulness, and reference metrics (1 to 20,000 characters; default
+4,000). Judge replies are capped at 1 MiB; failed, oversized, timed-out, or cancelled judge
+calls leave their spend unknown. The first three metrics declare four possible retries for one
+judge call; text-to-image and image-editing declare eight across two parallel calls.
+
+See DeepEval's documentation for [image coherence](https://deepeval.com/docs/multimodal-metrics-image-coherence),
+[image helpfulness](https://deepeval.com/docs/multimodal-metrics-image-helpfulness),
+[image reference](https://deepeval.com/docs/multimodal-metrics-image-reference),
+[text-to-image](https://deepeval.com/docs/multimodal-metrics-text-to-image), and
+[image editing](https://deepeval.com/docs/multimodal-metrics-image-editing). The adapter
+sends inline image data only; it never follows image URLs or reads local paths.
 
 ### Bounded audio task scoring
 

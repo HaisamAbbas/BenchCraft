@@ -896,6 +896,8 @@ def test_unknown_planner_call_count_keeps_workflow_accounting_unknown(tmp_path: 
                 run_id=run_id,
                 role=UsageRole.PLANNER,
                 calls=None,
+                calls_without_tokens=1,
+                tokens={"prompt_tokens": 12},
                 cost=0.125,
             )
         )
@@ -903,6 +905,8 @@ def test_unknown_planner_call_count_keeps_workflow_accounting_unknown(tmp_path: 
     finally:
         storage.db.close()
     assert report["cost"]["planner"]["calls"] == 0
+    assert report["cost"]["planner"]["calls_with_unknown_tokens"] == 1
+    assert report["cost"]["planner"]["reported_tokens"] == 12
     assert report["cost"]["planner"]["unquantified_usage_events"] == 1
     assert report["cost"]["planner"]["accounting"] == "unknown"
     assert report["cost"]["workflow"]["unquantified_usage_events"] == 1

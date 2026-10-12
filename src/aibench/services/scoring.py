@@ -1382,6 +1382,20 @@ class BindingScorer:
                     tokens[name] = tokens.get(name, 0) + count
             if tokens:
                 resources["tokens"] = tokens  # absent means unknown, never zero
+            unknown_token_calls = 0
+            has_token_completeness_gap = False
+            for usage in ctx.usage:
+                if usage.calls_without_tokens is not None:
+                    unknown_token_calls += usage.calls_without_tokens
+                    has_token_completeness_gap = True
+                elif not usage.tokens:
+                    # Backward-compatible plugin reports have no per-call token field. Empty
+                    # token maps mean all known calls lack token usage; an uncounted report is
+                    # represented as one unquantified usage event in the summary.
+                    unknown_token_calls += usage.calls if type(usage.calls) is int else 1
+                    has_token_completeness_gap = True
+            if has_token_completeness_gap:
+                resources["calls_with_unknown_tokens"] = unknown_token_calls
         return resources
 
     def _result(
@@ -1410,6 +1424,7 @@ class BindingScorer:
                         tokens=report.tokens or None,
                         calls=report.calls,
                         cost=report.cost,
+                        calls_without_tokens=report.calls_without_tokens,
                     )
                 )
         evidence = tuple(

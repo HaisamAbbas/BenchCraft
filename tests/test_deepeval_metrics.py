@@ -107,7 +107,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc20" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc21" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -673,9 +673,9 @@ def test_openai_compatible_judge_waits_out_a_rate_limit_and_still_scores(
     assert result.status is ExecutionStatus.OK and result.value.value == 1.0
     limited = [r for r in server.requests[:3]]
     assert len(limited) == 3 and len(server.requests) > 3
-    # Only answered calls are counted as the judge's calls and tokens.
+    # Every response is a known call; refused responses do not provide token usage.
     answered = len(server.requests) - 3
-    assert result.resources["model_calls"] == answered
+    assert result.resources["model_calls"] == len(server.requests)
     assert result.resources["tokens"]["input"] == 100 * answered
 
 

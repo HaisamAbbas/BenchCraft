@@ -275,6 +275,7 @@ class WorkerEvaluator(Evaluator):
                 calls=usage.get("calls"),
                 tokens={self._redactor.text(name): count for name, count in tokens.items()} or None,
                 cost=usage.get("cost"),
+                calls_without_tokens=usage.get("calls_without_tokens"),
             )
         return self._outcome(response.get("outcome") or {})
 
@@ -434,11 +435,26 @@ class WorkerEvaluator(Evaluator):
             return ["usage entry must be an object"]
         problems = []
         calls, cost = usage.get("calls"), usage.get("cost")
+        calls_without_tokens = usage.get("calls_without_tokens")
         tokens = usage.get("tokens") or {}
         if calls is not None and (
             isinstance(calls, bool) or not isinstance(calls, int) or calls < 0
         ):
             problems.append(f"calls must be a non-negative integer or null, got {calls!r}")
+        if calls_without_tokens is not None and (
+            type(calls_without_tokens) is not int or calls_without_tokens < 0
+        ):
+            problems.append(
+                "calls_without_tokens must be a non-negative integer or null, "
+                f"got {calls_without_tokens!r}"
+            )
+        elif (
+            calls is not None
+            and type(calls) is int
+            and calls_without_tokens is not None
+            and calls_without_tokens > calls
+        ):
+            problems.append("calls_without_tokens cannot exceed calls")
         if cost is not None and (
             isinstance(cost, bool)
             or not isinstance(cost, (int, float))

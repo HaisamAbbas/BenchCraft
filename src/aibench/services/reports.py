@@ -307,7 +307,12 @@ def _pass_cost(attempts: list[EvaluationResult]) -> dict[str, Any]:
             continue
         if isinstance(resources.get("tokens"), dict) and resources["tokens"]:
             tokens += sum(v for v in resources["tokens"].values() if isinstance(v, int))
-        else:
+        reported_unknown = resources.get("calls_with_unknown_tokens")
+        if type(reported_unknown) is int and reported_unknown >= 0:
+            # New evaluator protocol reports token completeness per provider call, including
+            # retries. Older evaluators have only the result-level fallback above.
+            unknown_tokens += reported_unknown
+        elif not (isinstance(resources.get("tokens"), dict) and resources["tokens"]):
             unknown_tokens += 1
     return _cost_block(len(called), known, unknown, tokens=tokens, unknown_tokens=unknown_tokens)
 
@@ -388,6 +393,8 @@ def _planner_cost(storage: Storage, run_id: str, *, granted_by: str | None) -> d
                 tokens += sum(
                     value for value in reported_tokens.values() if type(value) is int and value >= 0
                 )
+            if event.calls_without_tokens is not None:
+                unknown_tokens += event.calls_without_tokens
             continue
         event_calls = max(0, event.calls)
         if event.cost is None or not math.isfinite(event.cost):
