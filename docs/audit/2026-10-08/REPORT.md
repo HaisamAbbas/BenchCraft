@@ -470,7 +470,17 @@ These should become shared contracts with direct cross-entry-point tests. Adding
 
 Large source modules also increase review cost: comparison is 2,894 lines; conversation agent 2,102; session controller 1,668; repositories 1,547; experiments 1,474; models 1,405; statistics 1,087; engine 1,085; scoring 1,032. Size alone is not a bug. Extract cohesive policy/identity/outcome/aggregation helpers when fixing the affected workflows, rather than performing a broad rewrite first. See [inventory](evidence/inventory.json).
 
-Documentation needs a current consolidated support/readiness snapshot. `docs/support.md`, the platform matrix, upgrade examples, and release-readiness history contain useful evidence but prominently name rc1 and earlier phases while the current source is rc34. Readers need one current statement of supported commands, tested versions, open defects, and deferred scope.
+The audit's documentation-consolidation recommendation was addressed in follow-up commits
+through 13 October. The [quickstart](../../quickstart.md), [support guide](../../support.md),
+and [upgrade and recovery guide](../../release/upgrade-and-recovery.md) describe the rc35
+source candidate, current CLI and workspace workflows, and known boundaries. The quickstart
+also warns that the existing PyPI distribution named `aibench` is a different project.
+The [platform matrix](../../engineering/platform-matrix.md) and
+[release-readiness record](../../engineering/release-readiness.md) distinguish rc35 from
+rc34, the last source with a fully passed hosted platform matrix. The hosted run for the rc35
+source fixes, [38301696360](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38301696360),
+had no final conclusion at its last observed status; rc35 platform compatibility remains
+unverified until that validation completes.
 
 ### Planning and measurement quality
 
@@ -490,6 +500,15 @@ Native calibration was also rerun. Exact match agreed with **10/13** fixture lab
 | 6 | Make the CLI effective for CI | G01–G09 | Configured headless operation, regression policies, all-case exports, baseline management, direct validated controls, reproducible runs. |
 | 7 | Improve operational workflows | G10–G21 | Selective reruns, supervised execution, configuration tools, logs, slicing, portable workspaces, current platform evidence. |
 | 8 | Expand performance/scale scope deliberately | G14–G16, G22 | Published measurement definitions and local validation for each claimed performance/scale capability. |
+
+### Follow-up delivery status (13 October 2026)
+
+The [implementation ledger](implementation-ledger.json) records 43 of 44 top-level finding
+and feature items as delivered. G22 has substantial local implementations and synthetic
+measurements, but its closeout remains pending separate-host worker evidence and approved
+live-provider calibration. G22.19 remains deferred until an upstream release provides a
+verifiable audio-evaluation API. These open items are evidence or upstream gates; they do not
+invalidate the locally tested functionality described in the implementation records.
 
 Do not put performance polish ahead of data isolation and result correctness. A benchmark that runs quickly but changes inputs, ignores a cost limit, or stamps the wrong evaluator identity produces untrustworthy evidence.
 
