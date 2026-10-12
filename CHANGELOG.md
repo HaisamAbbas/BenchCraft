@@ -5,6 +5,41 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc35 — audit fixes, CI and workspace tools, distributed runs, multimodal metrics
+
+DeepEval plugin 0.2.0rc25.
+
+**Correctness and safety (audit F01–F19).** Budgets and quotas apply to rescoring stored
+outputs; a rescore keeps the selected work and reports incomplete scoring; a score is reused
+only when its producer is verified; the application's identity is frozen across resumes;
+comparisons use the frozen selected work, not the workspace's case history; non-finite case
+values and hidden fixture inputs are refused; every report export format is redacted; streamed
+responses are size-limited; plugin environments are audited and kept isolated; malformed CLI
+input gives a clear error.
+
+**CLI and CI.** Consistent root options and a versioned JSON output contract; comparison
+regression policies; case-level result export; JUnit and SARIF reports; a searchable run
+catalog with named baselines; bounded run controls with a dry run; reproducibility controls
+and provenance; release gates in session drafts; selective retry; detached supervision; config
+management with provider profiles; a structured run event log; warmup separated from
+measurement, richer performance statistics, streaming metrics for OpenAI-compatible apps, and
+metadata segment analysis. CI runs on Windows, Linux and macOS and audits dependencies.
+
+**Datasets and workspaces.** Import common dataset formats (Parquet with the `parquet`
+extra), diff, deduplicate, grouped splits and an immutable named suite catalog. Workspace
+garbage collection, verified backup and restore, integrity check and repair, retention and
+usage, safe path migration, and portable run and session bundles.
+
+**Scale.** Coordinator-backed distributed workers (local and remote probes), open-loop and
+ramping load profiles, batched and paged work scheduling, streamed plan selection and case
+loading, and whole-workflow cost attribution. A local read-only dashboard, with an
+authenticated remote mode.
+
+**Evaluators.** Image-first vision scoring with paired judge calibration and policy-gated
+live calibration, generated images, audio tasks, sampled video frames and stored voice
+metrics; DeepEval's image and MCP metrics; transcript accuracy, transcript error rates and
+recorded diarization error rate.
+
 ## 0.1.0rc34 — failures that looked like success
 
 Found by comparing LightRAG's `hybrid` and `mix` retrieval modes with `/compare --judge`.
