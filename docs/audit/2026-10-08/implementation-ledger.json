@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22.19 follow-on: upstream multimodal audio metric support",
+  "current_item": "G22 external evidence: separate-host worker measurement and approved live-provider calibration",
   "items": [
     {
       "id": "F01",
@@ -1151,6 +1151,17 @@
           "implementation": "implementation/G22.18-streaming-compile-case-cache.md",
           "commit": "e421cdf9e63159e1a77a100d2881679877a3a5dc",
           "pushed": true
+        },
+        {
+          "name": "G22.19 follow-on: upstream multimodal audio metric support",
+          "status": "deferred_upstream_release",
+          "verification": [
+            "Official PyPI latest release as of 2026-10-12 was DeepEval 4.2.8; inspected wheel SHA-256 1bc6ec6ad9f36427e5578a01b4a2aaa357d7ac51bb0cd726af7315304b0339f8 and found no TranscriptionAccuracyMetric symbol in packaged Python sources",
+            "Current DeepEval docs describe TranscriptionAccuracyMetric as text-only provider-transcript comparison, not audio input evaluation",
+            "No dependency pin was changed because no released API was available to verify and the existing adapter requires an exact package pin"
+          ],
+          "review": "implementation/G22.19-upstream-audio-release-gate-review.md",
+          "implementation": "implementation/G22.19-upstream-audio-release-gate.md"
         }
       ]
     },
