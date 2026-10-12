@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22 closeout: external performance validation remains",
+  "current_item": "G22 closeout: remote probe delivered; cross-host evidence pending",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.6 are implemented and locally verified. G22.3 now has reproducible one-host subprocess measurements, but cross-host throughput/failure-rate measurement and approved live cross-provider semantic calibration remain unmeasured. G22.5 now reports paired image-judge agreement and score deltas on identical reviewed samples, without claiming equivalence. The dashboard is loopback-only and excludes answer text. Compilation and the case map still retain cases in memory.",
+      "detail": "**Partial.** G22.1 through G22.6 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. Approved live cross-provider semantic calibration also remains unmeasured. G22.5 reports paired image-judge agreement and score deltas on identical reviewed samples, without claiming equivalence. The dashboard is loopback-only and excludes answer text. Compilation and the case map still retain cases in memory.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -962,6 +962,25 @@
             "198cbd87084916be20dc05a20803c6b9020a9012",
             "48514b83108176c052cc92a3c60f08fb5c6bc2c9"
           ],
+          "pushed": true
+        },
+        {
+          "name": "opt-in remote-worker measurement probe",
+          "status": "delivered",
+          "architecture_decision": "The coordinator serves an authenticated HTTPS API; an operator starts the worker on the separate host, which does not share coordinator SQLite storage.",
+          "verification": [
+            "Two real worker CLI subprocesses registered and completed a six-case integration measurement against a loopback coordinator API and isolated synthetic application",
+            "Remote-mode input validation rejects loopback, .localhost, unspecified, broadcast and multicast advertise hosts; invalid token-env names; missing credentials; unsafe timeouts; conflicting output paths; worker counts outside 1-64; and cases above 1000",
+            "The report distinguishes minimum worker count from the distinct registered IDs and latest capacities observed; extra workers may still register, and registration does not prove full-interval contribution",
+            "Preflight bounds each configured worker pool to capacity + 4 connections and keeps the requested aggregate at or below the coordinator's 128-connection limit; reports disclose when extra registered workers exceed that budget",
+            "Worker app config is created exclusively at a new path and contains no coordinator token; the printed worker command reads the token from the selected environment variable",
+            "The report marks host separation as operator-selected and unverified; cross-host evidence remains pending until a separate host is available",
+            "27 focused distributed measurement and worker tests passed, including two real CLI worker processes and coordinator shutdown with an active long poll",
+            "Ruff check and formatting, Mypy for the coordinator service and measurement script, CSV/JSON validation, and git diff --check passed"
+          ],
+          "review": "implementation/G22.7-remote-worker-probe-review.md",
+          "implementation": "implementation/G22.7-remote-worker-probe.md",
+          "commit": "cb37c574bf887329cc6bd142d67acdd47adb7056",
           "pushed": true
         }
       ]
