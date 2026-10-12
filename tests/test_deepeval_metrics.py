@@ -1088,16 +1088,20 @@ def test_metrics_scored_on_a_share_pass_only_when_nothing_is_broken() -> None:
     """Verified on real data: one bad turn in two scored 0.5, six identical tool calls scored
     0.6 for loop detection, and an agent that deleted .env with a forbidden tool scored 0.5;
     each passed at the 0.5 pass mark. Where one breach is a failure, the pass mark is 1.0;
-    every other metric keeps 0.5."""
+    every other metric with a numeric threshold keeps 0.5."""
     strict = plugin_python(
         "import json; from aibench_deepeval import EVALUATORS;"
         "print(json.dumps({e.manifest.evaluator_id: e.manifest.default_rule.threshold"
-        " for e in EVALUATORS if e.manifest.default_rule.threshold is not None}))"
+        " for e in EVALUATORS if e.manifest.default_rule is not None"
+        " and e.manifest.default_rule.threshold is not None}))"
     )
-    assert {name for name, mark in strict.items() if mark != 0.5} == {
+    strict_metrics = {
         "deepeval.tool_permission",
         "deepeval.agent_loop_detection",
         "deepeval.role_adherence",
         "deepeval.turn_faithfulness",
     }
-    assert all(strict[name] == 1.0 for name in strict if strict[name] != 0.5)
+    assert all(strict[name] == 1.0 for name in strict_metrics)
+    assert strict["deepeval.diarization_error_rate"] == 0.2
+    exceptions = strict_metrics | {"deepeval.diarization_error_rate"}
+    assert all(mark == 0.5 for name, mark in strict.items() if name not in exceptions)
