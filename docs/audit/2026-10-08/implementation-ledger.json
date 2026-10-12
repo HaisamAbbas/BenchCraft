@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22.15 follow-on: recorded speaker attribution and diarization",
+  "current_item": "G22.16 follow-on: remaining multimodal audio metric coverage",
   "items": [
     {
       "id": "F01",
@@ -1088,6 +1088,20 @@
           "review": "implementation/G22.14-transcription-accuracy-review.md",
           "implementation": "implementation/G22.14-transcription-accuracy.md",
           "commit": "94275aa6aa01dd510cff43b597ee9887fde7938b",
+          "pushed": true
+        },
+        {
+          "name": "recorded speaker attribution and diarization error rate",
+          "status": "delivered",
+          "verification": [
+            "Final diarization evaluator and stored-voice integration selection: 5 passed in 17.55 seconds; affected DeepEval discovery/version selection: 9 passed, 84 deselected",
+            "Ruff check and formatting, Mypy on diarization.py and voice.py, and git diff --check passed",
+            "Tests cover optimal episode-wide label matching, DER components, overlap, collars, malformed and empty evidence, and declared episode, segment, speaker, and audio bounds",
+            "No live provider, audio endpoint, or model was contacted; scorer compares recorded labels and does not perform acoustic diarization"
+          ],
+          "review": "implementation/G22.15-recorded-diarization-review.md",
+          "implementation": "implementation/G22.15-recorded-diarization.md",
+          "commit": "05cc0116b6fc8cfef9b035c96939524d5ab1ce4d",
           "pushed": true
         }
       ]
