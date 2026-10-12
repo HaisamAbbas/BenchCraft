@@ -1,0 +1,58 @@
+{
+  "tool": "scripts/measure_distributed_workers.py",
+  "argv": [
+    "--cases",
+    "100",
+    "--capacity",
+    "4",
+    "--delay",
+    "0.02",
+    "--rate",
+    "100000",
+    "--burst",
+    "100000",
+    "--measurement-timeout",
+    "600",
+    "--out",
+    "docs/engineering/evidence/22/distributed-worker-loopback-capacity-4.json"
+  ],
+  "measured_at": "2026-10-12T14:06:51+0500",
+  "machine": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "processor": "Intel64 Family 6 Model 170 Stepping 4, GenuineIntel",
+    "logical_cpus": 14
+  },
+  "measurement": {
+    "mode": "one-machine, separate coordinator API and CLI worker process",
+    "cases": 100,
+    "worker_processes": 1,
+    "worker_capacity": 4,
+    "fixture_delay_seconds": 0.02,
+    "fixture_rate_per_second": 100000.0,
+    "fixture_burst": 100000,
+    "measurement_timeout_seconds": 600.0,
+    "coordinator_workspace_created": false,
+    "worker_workspace_created": false,
+    "warm_worker_invocations_per_second": 72.44,
+    "elapsed_seconds": 1.3804,
+    "outcomes_succeeded": 100,
+    "outcomes_failed": 0,
+    "outcome_failure_rate": 0.0,
+    "application_requests_accepted": 100,
+    "application_http_429": 0,
+    "application_peak_concurrency": 4,
+    "application_http_429_rate": 0.0,
+    "invocation_latency_seconds": {
+      "p50": 0.6666,
+      "p95": 1.3108,
+      "max": 1.3755
+    }
+  },
+  "limitations": [
+    "The coordinator and worker run on one host over loopback; external network latency is not measured.",
+    "This invokes the coordinator runner directly and does not measure SQLite commits, evaluation, or full CLI run time.",
+    "The local HTTP fixture is synthetic and does not establish real-provider throughput or quota behavior.",
+    "The measurement deadline excludes bounded cleanup, which can add up to about 60 seconds."
+  ]
+}
