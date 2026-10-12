@@ -104,7 +104,7 @@
       "title": "Scoring/rescoring returns success for incomplete or failed evaluation",
       "detail": "CLI reproduction",
       "kind": "finding",
-      "status": "verified",
+      "status": "delivered",
       "verification": [
         "84 focused score/evaluate/rescore/report regressions passed",
         "48 supplementary outcome, CLI chat, and conversation tests passed after review fix",
