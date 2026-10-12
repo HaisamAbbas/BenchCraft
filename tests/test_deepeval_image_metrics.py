@@ -120,7 +120,7 @@ def test_all_five_pinned_deepeval_image_metrics_are_discovered() -> None:
         assert manifest.internal_retries == 4 * parallel_calls
         assert manifest.internal_concurrency == parallel_calls
         assert manifest.package_name == "deepeval" and manifest.package_version == "4.2.5"
-        assert manifest.plugin_version == "0.2.0rc22"
+        assert manifest.plugin_version == "0.2.0rc23"
         assert {field.path for field in manifest.requires} == {"case.input", "execution.output"}
         assert any("4 MiB" in limit for limit in manifest.limitations)
 

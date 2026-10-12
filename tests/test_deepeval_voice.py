@@ -108,7 +108,7 @@ def test_voice_metric_family_is_discovered_with_local_only_contracts() -> None:
     for metric in METRICS:
         manifest, _ = registry.resolve(metric)
         assert manifest.version == "1.0.0"
-        assert manifest.plugin_version == "0.2.0rc22"
+        assert manifest.plugin_version == "0.2.0rc23"
         assert manifest.package_version == "4.2.5"
         assert manifest.requires_worker
         assert not manifest.uses_models

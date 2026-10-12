@@ -30,7 +30,7 @@ from aibench.evaluators.protocol import (
 from aibench_deepeval._version import __version__
 from aibench_deepeval.faithfulness import PINNED_DEEPEVAL, _require_pinned_deepeval
 from aibench_deepeval.metrics import _jsonable
-from aibench_deepeval.vision import checked_text
+from aibench_deepeval.vision import MAX_TEXT_CHARS, checked_text
 
 MAX_CASE_AUDIO_BYTES = 512 * 1024
 MAX_OUTPUT_AUDIO_BYTES = 1 * 1024 * 1024
@@ -302,6 +302,7 @@ def _decode_assistant_turn(value: Any, index: int) -> tuple[Any, int] | str:
         or not set(value)
         <= {
             "transcript",
+            "provider_transcript",
             "audio",
             "audio_start_ms",
         }
@@ -310,6 +311,11 @@ def _decode_assistant_turn(value: Any, index: int) -> tuple[Any, int] | str:
         return f"invalid:episode.turn.{index}.assistant_shape"
     try:
         transcript = checked_text(value["transcript"], "assistant transcript")
+        if "provider_transcript" in value and (
+            not isinstance(value["provider_transcript"], str)
+            or len(value["provider_transcript"]) > MAX_TEXT_CHARS
+        ):
+            raise ValueError("invalid:provider_transcript")
         encoded_audio = value.get("audio")
         if encoded_audio is None:
             if value.get("audio_start_ms") is not None:

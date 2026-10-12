@@ -199,6 +199,33 @@ listeners perceive naturalness or intelligibility. See
 DeepEval's [voice evaluation contract](https://deepeval.com/docs/evaluation-voice) and
 [turn-taking metric](https://deepeval.com/docs/metrics-turn-taking-naturalness).
 
+### Recorded transcription accuracy
+
+`deepeval.transcription_accuracy_g_eval` scores the caller transcript stored in each case
+against the voice agent's `provider_transcript` in its recorded episode output. The case input
+can be plain text or `{"transcript":"...","audio":...}`; the assistant output can be a
+transcript string or an object containing `transcript`, `provider_transcript`, and the optional
+voice-audio fields shown above. The caller transcript and provider transcript are text evidence;
+audio bytes are ignored by this metric and are not sent to the judge.
+
+The evaluator uses the pinned DeepEval 4.2.5 G-Eval API with a fixed transcription rubric because
+that release does not contain the dedicated `TranscriptionAccuracyMetric` described in the
+upstream beta documentation. If any turn in the episode lacks a provider transcript, the whole
+episode is not applicable so a partial conversation cannot inflate the mean; an empty transcript
+is scored as `[NO WORDS RECOGNIZED]`. Episodes are capped at 50 turns, 16,000
+characters per transcript, and 1 MiB of combined transcript evidence. Caller transcripts and
+provider transcripts are sent to the configured judge. This evaluates semantic transcript
+fidelity only; it does not decode audio, calculate word error rate, diarize speakers, capture
+live speech, or replace an upstream audio metric. The stored format pairs one caller case with
+the provider transcript on that turn; it does not join multiple caller segments into one
+barge-in exchange.
+
+```json
+{"metric":"deepeval.transcription_accuracy_g_eval","params":{"judge":{"kind":"openai_compatible","base_url":"https://api.example/v1","model":"judge-model","api_key_env":"AIBENCH_JUDGE_KEY"}}}
+```
+
+See DeepEval's [transcription accuracy documentation](https://deepeval.com/docs/metrics-transcription-accuracy).
+
 ### Timestamped sampled-video task scoring
 
 `deepeval.video_frames_g_eval` evaluates a sequence of supplied video-frame samples against

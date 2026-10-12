@@ -10,6 +10,7 @@ from aibench_deepeval.faithfulness import Faithfulness
 from aibench_deepeval.image_metrics import IMAGE_EVALUATORS
 from aibench_deepeval.mcp_metrics import MCP_EVALUATORS
 from aibench_deepeval.metrics import METRICS, GEval
+from aibench_deepeval.transcription_accuracy import TRANSCRIPTION_EVALUATORS
 from aibench_deepeval.video_frames import VideoFramesGEval
 from aibench_deepeval.vision import VisionGEval
 from aibench_deepeval.voice import VOICE_EVALUATORS
@@ -34,6 +35,7 @@ EVALUATORS = (
     *IMAGE_EVALUATORS,
     *VOICE_EVALUATORS,
     *MCP_EVALUATORS,
+    *TRANSCRIPTION_EVALUATORS,
     GEval,
     VisionGEval,
     AudioGEval,
