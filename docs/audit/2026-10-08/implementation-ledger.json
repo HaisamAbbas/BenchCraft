@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22.16 follow-on: remaining multimodal audio metric coverage",
+  "current_item": "G22.17 follow-on: authenticated remote dashboard access",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.14 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. G22.13 adds pinned DeepEval MCP-Use, MCP Task Completion, and multi-turn MCP-Use scoring over a frozen server inventory and recorded successful MCP tool events. Explicit typed MCP events count by default; untyped events require an MCP-only opt-in, and episode scoring fails closed on missing or malformed telemetry. No live MCP server or provider was contacted. Resource and prompt execution events remain unsupported because stored events do not distinguish them. G22.14 adds bounded, text-only provider-transcription accuracy over stored episodes using pinned DeepEval 4.2.5 G-Eval. Every turn needs a provider transcript; each transcript is capped at 16,000 characters and total text at 1 MiB. It does not submit audio, calculate word error rate, or implement barge-in joining. The dedicated upstream beta class is absent from the pinned package, so upstream multimodal audio metrics remain unsupported. Diarization, remote dashboard access, and in-memory compilation/case maps remain open.",
+      "detail": "**Partial.** G22.1 through G22.16 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard is loopback-only and excludes answer text. G22.13 adds pinned DeepEval MCP-Use, MCP Task Completion, and multi-turn MCP-Use scoring over a frozen server inventory and recorded successful MCP tool events. Explicit typed MCP events count by default; untyped events require an MCP-only opt-in, and episode scoring fails closed on missing or malformed telemetry. No live MCP server or provider was contacted. Resource and prompt execution events remain unsupported because stored events do not distinguish them. G22.14 adds bounded, text-only provider-transcription accuracy over stored episodes using pinned DeepEval 4.2.5 G-Eval. Every turn needs a provider transcript; each transcript is capped at 16,000 characters and total text at 1 MiB. It does not submit audio or implement barge-in joining. The dedicated upstream beta class is absent from the pinned package. G22.15 adds local deterministic DER over recorded speaker annotations but does not diarize audio. G22.16 adds deterministic local case-level WER/CER, with 16,000-character and four-million-alignment-cell caps; reports average utterance rates, raw counts allow corpus recomputation, and bindings require explicit lower-is-better thresholds. Upstream multimodal audio metrics remain unsupported. Remote dashboard access and in-memory compilation/case maps remain open.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -1102,6 +1102,21 @@
           "review": "implementation/G22.15-recorded-diarization-review.md",
           "implementation": "implementation/G22.15-recorded-diarization.md",
           "commit": "05cc0116b6fc8cfef9b035c96939524d5ab1ce4d",
+          "pushed": true
+        },
+        {
+          "name": "deterministic word and character transcription error rates",
+          "status": "delivered",
+          "verification": [
+            "Focused WER/CER, stored-voice integration, and transcription G-Eval co-binding selection: 6 passed in 19.19 seconds",
+            "Affected DeepEval discovery/version selection: 9 passed, 84 deselected in 13.77 seconds",
+            "Ruff check and formatting, Mypy on transcript_error_rate.py and transcription_accuracy.py, and git diff --check passed",
+            "Tests cover edit components, Unicode normalization, empty hypotheses and references, utterance macro-average semantics, and dynamic-programming work limits",
+            "No live provider, audio endpoint, or judge was contacted; metrics operate on recorded text only"
+          ],
+          "review": "implementation/G22.16-transcript-error-rates-review.md",
+          "implementation": "implementation/G22.16-transcript-error-rates.md",
+          "commit": "f576f67322c457d9feb053c9e0fd409a5f9069b2",
           "pushed": true
         }
       ]
