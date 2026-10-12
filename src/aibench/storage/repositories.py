@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -373,6 +373,36 @@ class Storage:
             (dataset_content_hash,),
         ).fetchall()
         return [BenchmarkCase.model_validate_json(row["data"]) for row in rows]
+
+    def iter_case_ids(self, dataset_content_hash: str) -> Iterator[str]:
+        """Yield distinct case IDs in first-seen order without loading case bodies."""
+        cursor = self.conn.execute(
+            "SELECT case_id FROM cases WHERE dataset_content_hash = ? "
+            "GROUP BY case_id ORDER BY MIN(source_line)",
+            (dataset_content_hash,),
+        )
+        for row in cursor:
+            yield str(row["case_id"])
+
+    def get_case(self, dataset_content_hash: str, case_id: str) -> BenchmarkCase | None:
+        """Load one frozen Golden. If legacy storage contains duplicate IDs, preserve the
+        old dict-building behavior by returning the last source-line occurrence."""
+        stored = self.get_case_with_size(dataset_content_hash, case_id)
+        return stored[0] if stored is not None else None
+
+    def get_case_with_size(
+        self, dataset_content_hash: str, case_id: str
+    ) -> tuple[BenchmarkCase, int] | None:
+        """Load one Golden and its stored UTF-8 JSON size for byte-budgeted caches."""
+        row = self.conn.execute(
+            "SELECT data, length(CAST(data AS BLOB)) AS size_bytes FROM cases "
+            "WHERE dataset_content_hash = ? AND case_id = ? "
+            "ORDER BY source_line DESC LIMIT 1",
+            (dataset_content_hash, case_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return BenchmarkCase.model_validate_json(row["data"]), int(row["size_bytes"])
 
     # ---------------------------------------------------------------- candidate generation / review
 

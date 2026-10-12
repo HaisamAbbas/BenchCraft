@@ -24,6 +24,7 @@ loaded, so a denied plan never runs plugin code.
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 from collections import Counter
 from dataclasses import dataclass, field
@@ -244,55 +245,107 @@ def sample_cases(cases: list[BenchmarkCase], size: int, seed: int) -> list[Bench
         key = json.dumps([seed, case.case_id, case.source_line, index])
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
-    picked = sorted(sorted(enumerate(cases), key=rank)[:size], key=lambda item: item[0])
+    picked = heapq.nsmallest(size, enumerate(cases), key=rank)
+    picked.sort(key=lambda item: item[0])
     return [case for _, case in picked]
 
 
-def _select(analysis: PlanAnalysis, cases: list[BenchmarkCase]) -> list[BenchmarkCase]:
-    selection = analysis.plan.selection
-    by_id: dict[str, list[BenchmarkCase]] = {}
-    for case in cases:
-        by_id.setdefault(case.case_id, []).append(case)
-    if selection.case_ids:
-        missing = [cid for cid in selection.case_ids if cid not in by_id]
-        if missing:
-            analysis.add(
-                "invalid",
-                f"selection.case_ids not in the dataset: {', '.join(missing)}",
-                "selection",
-            )
-        chosen = [c for c in cases if c.case_id in set(selection.case_ids)]
-    else:
-        chosen = list(cases)
-    for predicate in selection.where:
-        problem = EvaluationView.path_problem(predicate.path)
-        if problem:
-            analysis.add("invalid", f"selection.where: {problem}", "selection")
-            continue
-        chosen = [c for c in chosen if _matches(c, predicate)]
-    if selection.sample_size is not None and selection.seed is not None:
-        if selection.sample_size > len(chosen):
-            analysis.add(
-                "invalid",
-                f"selection.sample_size={selection.sample_size} exceeds the "
-                f"{len(chosen)} case(s) available to sample",
-                "selection",
-            )
-        else:
-            chosen = sample_cases(chosen, selection.sample_size, selection.seed)
-    if selection.limit is not None:
-        chosen = chosen[: selection.limit]
-    duplicated = sorted({c.case_id for c in chosen if len(by_id[c.case_id]) > 1})
-    if duplicated:
-        analysis.add(
-            "invalid",
-            "selected cases have duplicate case_ids (their Goldens would be ambiguous): "
-            + ", ".join(duplicated),
-            "selection",
+class _StreamingCaseSelection:
+    """Apply a plan selection while ingestion validates one case at a time.
+
+    Ordinary filters and limits retain only selected cases. Seeded samples keep a bounded
+    max-heap of the requested size, using exactly the rank and source ordering of
+    ``sample_cases``. Episode validation retains only case IDs, never the full case models.
+    """
+
+    def __init__(self, analysis: PlanAnalysis) -> None:
+        self.analysis = analysis
+        self.selection = analysis.plan.selection
+        self.requested_ids = set(self.selection.case_ids)
+        self.seen_requested_ids: set[str] = set()
+        self.predicates: list[CasePredicate] = []
+        self.invalid_predicates: list[str] = []
+        for predicate in self.selection.where:
+            problem = EvaluationView.path_problem(predicate.path)
+            if problem:
+                self.invalid_predicates.append(problem)
+            else:
+                self.predicates.append(predicate)
+        app = analysis.application
+        self.track_episodes = app is not None and app.spec.reset_policy is ResetPolicy.PER_EPISODE
+        self.episodes: dict[str, list[str]] = {}
+        self.selected: list[BenchmarkCase] = []
+        self.sample_heap: list[tuple[int, int, int, BenchmarkCase]] = []
+        self.eligible_count = 0
+
+    def add(self, case: BenchmarkCase) -> None:
+        if self.track_episodes:
+            episode = case.group_id or case.case_id
+            self.episodes.setdefault(episode, []).append(case.case_id)
+        if case.case_id in self.requested_ids:
+            self.seen_requested_ids.add(case.case_id)
+        if self.selection.case_ids and case.case_id not in self.requested_ids:
+            return
+        if any(not _matches(case, predicate) for predicate in self.predicates):
+            return
+
+        order = self.eligible_count
+        self.eligible_count += 1
+        if self.selection.sample_size is not None:
+            assert self.selection.seed is not None
+            rank_bytes = json.dumps(
+                [self.selection.seed, case.case_id, case.source_line, order]
+            ).encode("utf-8")
+            rank = int(hashlib.sha256(rank_bytes).hexdigest(), 16)
+            entry = (-rank, -order, order, case)
+            if len(self.sample_heap) < self.selection.sample_size:
+                heapq.heappush(self.sample_heap, entry)
+            elif (rank, order) < (-self.sample_heap[0][0], -self.sample_heap[0][1]):
+                heapq.heapreplace(self.sample_heap, entry)
+            return
+        if self.selection.limit is None or len(self.selected) < self.selection.limit:
+            self.selected.append(case)
+
+    def finish(self, duplicate_case_ids: tuple[str, ...]) -> list[BenchmarkCase]:
+        if self.selection.case_ids:
+            missing = [
+                case_id
+                for case_id in self.selection.case_ids
+                if case_id not in self.seen_requested_ids
+            ]
+            if missing:
+                self.analysis.add(
+                    "invalid",
+                    f"selection.case_ids not in the dataset: {', '.join(missing)}",
+                    "selection",
+                )
+        for problem in self.invalid_predicates:
+            self.analysis.add("invalid", f"selection.where: {problem}", "selection")
+
+        if self.selection.sample_size is not None:
+            if self.selection.sample_size > self.eligible_count:
+                self.analysis.add(
+                    "invalid",
+                    f"selection.sample_size={self.selection.sample_size} exceeds the "
+                    f"{self.eligible_count} case(s) available to sample",
+                    "selection",
+                )
+            self.selected = [entry[3] for entry in sorted(self.sample_heap, key=lambda x: x[2])]
+
+        duplicate_ids = set(duplicate_case_ids)
+        duplicated = sorted(
+            {case.case_id for case in self.selected if case.case_id in duplicate_ids}
         )
-    if not chosen and not analysis.blocking("invalid"):
-        analysis.add("invalid", "the selection contains no cases", "selection")
-    return chosen
+        if duplicated:
+            self.analysis.add(
+                "invalid",
+                "selected cases have duplicate case_ids (their Goldens would be ambiguous): "
+                + ", ".join(duplicated),
+                "selection",
+            )
+        if not self.selected and not self.analysis.blocking("invalid"):
+            self.analysis.add("invalid", "the selection contains no cases", "selection")
+        return self.selected
 
 
 # --------------------------------------------------------------------------- metrics
@@ -483,17 +536,14 @@ def _check_cache(analysis: PlanAnalysis) -> None:
         )
 
 
-def _check_episodes(analysis: PlanAnalysis, all_cases: list[BenchmarkCase]) -> None:
+def _check_episodes(analysis: PlanAnalysis, all_cases_by_episode: dict[str, list[str]]) -> None:
     """A selection must keep episodes whole from their first turn: a later turn run without
     the turns before it would start from the seed instead of the state they build."""
     app = analysis.application
     if app is None or app.spec.reset_policy is not ResetPolicy.PER_EPISODE:
         return
     selected = {c.case_id for c in analysis.cases}
-    turns: dict[str, list[str]] = {}
-    for case in all_cases:
-        turns.setdefault(case.group_id or case.case_id, []).append(case.case_id)
-    for episode, ids in turns.items():
+    for episode, ids in all_cases_by_episode.items():
         kept = [i for i in ids if i in selected]
         if kept and kept != ids[: len(kept)]:
             missing = [i for i in ids[: ids.index(kept[-1])] if i not in selected]
@@ -604,6 +654,29 @@ def work_graph(
     return graph
 
 
+def _work_graph_definition_problems(binding_hashes: list[str]) -> list[str]:
+    """Check the only generated-key collision that can break the implicit work graph.
+
+    The graph is structurally acyclic: executions have no dependencies, and evaluations
+    depend only on their corresponding execution. Materializing every task just to prove
+    that shape made compilation memory proportional to cases x repetitions x metrics.
+    Full graph construction remains available to callers that need the graph itself.
+    """
+    seen: dict[str, str] = {}
+    problems: list[str] = []
+    for binding_hash in binding_hashes:
+        key_suffix = binding_hash[7:23]
+        previous = seen.get(key_suffix)
+        if previous is not None:
+            problems.append(
+                "metric bindings produce the same evaluation work-item key suffix "
+                f"{key_suffix!r}: {previous} and {binding_hash}"
+            )
+        else:
+            seen[key_suffix] = binding_hash
+    return problems
+
+
 def dag_problems(graph: dict[str, tuple[str, ...]]) -> list[str]:
     """Undefined dependencies and cycles, found by a depth-first walk."""
     problems = [
@@ -699,14 +772,19 @@ def analyze_plan(
     _check_cache(analysis)
 
     try:
-        report = ingest_dataset(analysis.plan_dir / plan.dataset)
+        selector = _StreamingCaseSelection(analysis)
+        report = ingest_dataset(
+            analysis.plan_dir / plan.dataset,
+            retain_cases=False,
+            case_consumer=selector.add,
+        )
         for error in report.errors:
             analysis.add("invalid", f"dataset: {error}", "dataset")
         if report.is_valid and report.manifest is not None:
             analysis.dataset = report.manifest
-            analysis.dataset_case_count = len(report.cases)
-            analysis.cases = _select(analysis, report.cases)
-            _check_episodes(analysis, report.cases)
+            analysis.dataset_case_count = report.manifest.case_count
+            analysis.cases = selector.finish(report.manifest.duplicate_case_ids)
+            _check_episodes(analysis, selector.episodes)
     except AibenchError as exc:
         analysis.add("invalid", f"dataset: {exc}", "dataset")
 
@@ -727,13 +805,7 @@ def analyze_plan(
         analysis.add("missing_permission", denial, "evaluators")
     _check_coverage(analysis)
     _check_budgets(analysis)
-    graph = work_graph(
-        [c.case_id for c in analysis.cases],
-        plan.repetitions,
-        [m.binding_hash for m in analysis.metrics],
-        plan.warmup_repetitions,
-    )
-    for problem in dag_problems(graph):
+    for problem in _work_graph_definition_problems([m.binding_hash for m in analysis.metrics]):
         analysis.add("invalid", f"work graph: {problem}", "plan")
     return analysis
 

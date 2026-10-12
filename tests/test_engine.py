@@ -20,6 +20,7 @@ from aibench.engine.engine import (
     RunController,
     RunEngine,
     RunState,
+    StoredCaseMap,
     _Item,
     evaluation_key,
     execution_key,
@@ -36,6 +37,66 @@ def _states(h: Harness, run_id: str) -> dict[str, dict[str, int]]:
     storage, _ = h.storage()
     try:
         return run_status(storage, run_id)["counts"]
+    finally:
+        storage.db.close()
+
+
+def test_stored_case_map_keeps_only_a_bounded_number_of_case_bodies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    h = Harness(tmp_path)
+    compiled = compile_plan(
+        h.plan(
+            dataset=h.dataset({f"case-{i:02d}": "x" * 20_000 for i in range(12)}),
+            application=h.cli_app(),
+        ),
+        policy=ExecutionPolicy(),
+        trusted_local=True,
+    )
+    storage, artifacts = h.storage()
+    try:
+        create_run(compiled, storage=storage, artifacts=artifacts, granted_by="test")
+        case_ids = list(storage.iter_case_ids(compiled.dataset.content_hash))
+        cases = StoredCaseMap(
+            storage,
+            compiled.dataset.content_hash,
+            case_ids,
+            max_cached_items=3,
+            max_cached_bytes=1_000_000,
+        )
+
+        assert list(cases) == case_ids
+        assert not cases._cache  # enumerating the work plan does not parse any Golden bodies
+        for case_id in case_ids:
+            assert cases[case_id].case_id == case_id
+        assert len(cases._cache) == 3
+
+        reads = 0
+        original_get_case = storage.get_case_with_size
+
+        def counted_get_case(dataset_hash: str, case_id: str) -> Any:
+            nonlocal reads
+            reads += 1
+            return original_get_case(dataset_hash, case_id)
+
+        monkeypatch.setattr(storage, "get_case_with_size", counted_get_case)
+        assert cases[case_ids[0]].case_id == case_ids[0]  # oldest entry was evicted
+        assert reads == 1
+        assert len(cases._cache) == 3
+        with pytest.raises(KeyError):
+            cases["not-in-this-run"]
+
+        byte_bounded = StoredCaseMap(
+            storage,
+            compiled.dataset.content_hash,
+            case_ids,
+            max_cached_items=12,
+            max_cached_bytes=30_000,
+        )
+        for case_id in case_ids:
+            byte_bounded[case_id]
+        assert len(byte_bounded._cache) <= 1
+        assert byte_bounded._cached_bytes <= 30_000
     finally:
         storage.db.close()
 
@@ -172,8 +233,7 @@ def test_run_engine_pages_pending_work_queues(tmp_path: Path) -> None:
         engine._eval_queue.extend(engine._item(item) for _, item in held_rows)
         deadline = time.monotonic() - 1
         engine._delayed = [
-            (deadline, index, engine._item(item))
-            for index, (_, item) in enumerate(delayed_rows)
+            (deadline, index, engine._item(item)) for index, (_, item) in enumerate(delayed_rows)
         ]
         engine._eval_after_row_id = scenario_rows[717][0]
         engine._refill_evaluation_queue()
@@ -347,7 +407,12 @@ def test_warmups_consume_application_budget_before_measurements(tmp_path: Path) 
     try:
         attempts = storage.list_execution_attempts(run_id)
         assert len(attempts) == 1 and attempts[0].warmup
-        assert sum(item.kind == "execution" and item.warmup for item in storage.list_work_items(run_id)) == 2
+        assert (
+            sum(
+                item.kind == "execution" and item.warmup for item in storage.list_work_items(run_id)
+            )
+            == 2
+        )
     finally:
         storage.db.close()
 

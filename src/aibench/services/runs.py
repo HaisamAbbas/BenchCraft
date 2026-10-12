@@ -87,6 +87,7 @@ from aibench.engine.engine import (
     RunEngine,
     RunOutcome,
     RunState,
+    StoredCaseMap,
     evaluation_key,
     execution_key,
     parse_work_item_key,
@@ -1538,10 +1539,19 @@ async def _execute_leased(
     else:
         _, metrics = _frozen_registry(plan, manifest, policy, spec)
 
-    cases = {c.case_id: c for c in storage.list_cases(manifest.dataset_hash)}
     needed = {parse_work_item_key(w.task_key, w.kind)[0] for w in storage.iter_work_items(run_id)}
-    if not needed <= set(cases):
+    ordered_case_ids: list[str] = []
+    if needed:
+        for case_id in storage.iter_case_ids(manifest.dataset_hash):
+            if case_id in needed:
+                ordered_case_ids.append(case_id)
+                needed.remove(case_id)
+                if not needed:
+                    break
+    if needed:
         raise RunError("stored Goldens are missing for some of this run's cases")
+    cases = StoredCaseMap(storage, manifest.dataset_hash, ordered_case_ids)
+    ordered_case_ids.clear()
 
     ledger = BudgetLedger(plan.budgets)
     _replay_prior_spend(storage, run_id, ledger, params["scoring_id"])  # before recovery
@@ -1649,7 +1659,7 @@ async def _execute_leased(
         world_seed=seed,
         execution_cache=execution_cache,
         evaluation_cache_policy=params["policy_hash"] if plan.cache.evaluations else None,
-        cases={cid: case for cid, case in cases.items() if cid in needed},  # dataset order
+        cases=cases,
         metrics=metrics,
         dependency_lock_hash=manifest.dependency_lock_hash,
         scoring_id=params["scoring_id"],

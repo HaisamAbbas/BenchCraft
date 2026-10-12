@@ -33,7 +33,7 @@ import random
 import sqlite3
 import time
 from collections import OrderedDict, deque
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, TypeVar
@@ -83,6 +83,70 @@ _WORK_QUEUE_PAGE_SIZE = 500
 # A due retry may join a page that was already prefetched. The delayed heap itself is capped
 # at one page, so this is the maximum queue size after promotion.
 _WORK_QUEUE_MAX_BUFFER = _WORK_QUEUE_PAGE_SIZE * 2
+_CASE_CACHE_MAX_ITEMS = 512
+_CASE_CACHE_MAX_BYTES = 4 * 1024 * 1024
+
+
+class StoredCaseMap(Mapping[str, BenchmarkCase]):
+    """A run's Goldens, loaded from SQLite through a small least-recently-used cache.
+
+    Work scheduling needs every case ID, but only a few case bodies are in use at once.
+    Keeping the selected IDs plus at most 512 parsed bodies under a 4 MiB serialized-size
+    budget avoids rebuilding a full multimodal case map when a run starts or resumes.
+    """
+
+    def __init__(
+        self,
+        storage: Storage,
+        dataset_content_hash: str,
+        case_ids: Iterator[str] | list[str] | tuple[str, ...],
+        *,
+        max_cached_items: int = _CASE_CACHE_MAX_ITEMS,
+        max_cached_bytes: int = _CASE_CACHE_MAX_BYTES,
+    ) -> None:
+        if max_cached_items < 1 or max_cached_bytes < 1:
+            raise ValueError("case cache limits must be positive")
+        self._storage = storage
+        self._dataset_content_hash = dataset_content_hash
+        self._case_ids = tuple(case_ids)
+        self._case_id_set = frozenset(self._case_ids)
+        if len(self._case_ids) != len(self._case_id_set):
+            raise ValueError("case_ids must be unique")
+        self._max_cached_items = max_cached_items
+        self._max_cached_bytes = max_cached_bytes
+        self._cached_bytes = 0
+        self._cache: OrderedDict[str, tuple[BenchmarkCase, int]] = OrderedDict()
+
+    def __getitem__(self, case_id: str) -> BenchmarkCase:
+        if case_id not in self._case_id_set:
+            raise KeyError(case_id)
+        cached = self._cache.pop(case_id, None)
+        if cached is None:
+            stored = self._storage.get_case_with_size(self._dataset_content_hash, case_id)
+            if stored is None:
+                raise KeyError(case_id)
+            case, size_bytes = stored
+            if size_bytes <= self._max_cached_bytes:
+                while self._cache and (
+                    len(self._cache) >= self._max_cached_items
+                    or self._cached_bytes + size_bytes > self._max_cached_bytes
+                ):
+                    _, (_, evicted_bytes) = self._cache.popitem(last=False)
+                    self._cached_bytes -= evicted_bytes
+                self._cache[case_id] = (case, size_bytes)
+                self._cached_bytes += size_bytes
+        else:
+            case, size_bytes = cached
+            self._cache[case_id] = (case, size_bytes)
+        return case
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._case_ids)
+
+    def __len__(self) -> int:
+        return len(self._case_ids)
+
+
 _ENGINE_CACHE_SIZE = 500
 _T = TypeVar("_T")
 # Evaluations held by a quota that dispatch looks past per pass (bounded work per pass).
@@ -254,7 +318,7 @@ class RunEngine:
     plan: ExecutablePlan
     application: ApplicationSpec
     runner: BaseRunner | None  # None when no execution work remains (e.g. resume)
-    cases: dict[str, BenchmarkCase]
+    cases: Mapping[str, BenchmarkCase]
     metrics: list[ResolvedMetric]
     scoring_id: str
     ledger: BudgetLedger
@@ -782,11 +846,7 @@ class RunEngine:
             self._start(task, gates)
 
     def _arrival_dispatch_details(self, item: _Item) -> dict[str, Any] | None:
-        if (
-            item.attempt != 1
-            or item.arrival_ordinal is None
-            or item.arrival_offset_seconds is None
-        ):
+        if item.attempt != 1 or item.arrival_ordinal is None or item.arrival_offset_seconds is None:
             return None
         elapsed = self._profile_elapsed()
         return {

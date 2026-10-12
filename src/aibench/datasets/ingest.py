@@ -8,7 +8,7 @@ import json
 import os
 import sqlite3
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
@@ -170,6 +170,7 @@ def ingest_dataset(
     dataset_id: str | None = None,
     split: str | None = None,
     retain_cases: bool = True,
+    case_consumer: Callable[[BenchmarkCase], None] | None = None,
     max_errors: int = DEFAULT_MAX_ERRORS,
     max_warnings: int = DEFAULT_MAX_WARNINGS,
     large_file_threshold_bytes: int = LARGE_FILE_DEDUP_THRESHOLD_BYTES,
@@ -182,8 +183,10 @@ def ingest_dataset(
 
     - `retain_cases=True` (the default, suited to small fixtures and API callers that need the
       full parsed dataset) keeps every normalized `BenchmarkCase` in `IngestReport.cases`, so
-      peak memory scales with dataset content size. `retain_cases=False` (what
-      `aibench dataset validate` uses) keeps no case bodies at all.
+      peak memory scales with dataset content size. `retain_cases=False` keeps no case bodies
+      in the report; an optional `case_consumer` can inspect each normalized case synchronously
+      so callers can retain only a selection while ingestion continues streaming. The dataset
+      validator uses `retain_cases=False` without a consumer.
     - Duplicate-ID tracking is independent of `retain_cases` — it must see every case ID
       regardless — and by default lives in an in-memory dict, so *that* still scales with the
       number of distinct case IDs. Once `path` exceeds `large_file_threshold_bytes` (default
@@ -263,6 +266,8 @@ def ingest_dataset(
             case_count += 1
             if retain_cases:
                 cases.append(case)
+            if case_consumer is not None:
+                case_consumer(case)
 
     manifest = DatasetManifest(
         dataset_id=dataset_id or path.stem,
