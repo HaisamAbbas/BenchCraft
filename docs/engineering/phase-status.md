@@ -26,7 +26,7 @@ COMPLETE | PARTIAL | BLOCKED | DEFERRED | NOT_STARTED.
 | 18 | Phase 3 | Reviewed dataset generation and advanced episodes | COMPLETE | `docs/engineering/reports/18.md` |
 | 19 | Phase 3 | Controlled optimization experiments | COMPLETE | `docs/engineering/reports/19.md` |
 | 20 | Phase 3 | Distributed execution after measured need | DEFERRED | `docs/engineering/reports/20.md` |
-| 21 | Phase 3 | Optional dashboard and curated plugin catalog | NOT_STARTED | — |
+| 21 | Phase 3 | Optional dashboard and curated plugin catalog | PARTIAL | `docs/engineering/reports/21.md` |
 | 22 | MVP closeout | End-to-end acceptance and ticket-value audit | COMPLETE (local technical scope; external validation not started) | `docs/engineering/reports/22.md` |
 | 23 | Final acceptance audit | Satisfied by Prompt 22 (user confirmed numbering mismatch; no duplicate audit) | COMPLETE (alias of 22; local technical scope only) | `docs/engineering/reports/22.md` |
 | 24 | V4 alignment checkpoint | Product alignment and repository delta map | COMPLETE (84 targeted tests passed; 3 skipped; full suite not rerun) | `docs/engineering/reports/24.md` |

@@ -18,9 +18,11 @@ Each item follows the same sequence:
 5. Commit, push without force, and verify the remote commit before beginning the next item.
 
 G22.1-G22.4 cover batched work persistence, bounded queue paging, coordinator-backed
-distributed workers, and open-loop/ramping load profiles. G22.5 now adds image-first vision
-scoring with bounded inline image input; the dashboard is the remaining G22 deliverable.
-No existing deferred label is treated as authorization to omit the feature.
+distributed workers, and open-loop/ramping load profiles. G22.5 adds image-first vision
+scoring with bounded inline image input; G22.6 adds a local read-only dashboard over shared
+stored-result services. Cross-host performance evidence and broader modality support remain
+explicit limitations. No existing deferred label is treated as authorization to omit a
+feature selected by the user.
 
 The implementation order follows the report's remediation sequence. F14 is a small
 prerequisite to obtain a clean type-check baseline; F03 and F05 then protect input
