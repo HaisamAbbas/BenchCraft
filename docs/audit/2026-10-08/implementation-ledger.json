@@ -348,7 +348,7 @@
       "id": "G01",
       "priority": "P1",
       "title": "Consistent global configuration and scripting options",
-      "detail": "**Missing/partial; specified.** Root options do not provide global `--config`, `--json`, `--non-interactive`, or policy selection. Equivalent controls are scattered among commands.",
+      "detail": "Implemented. Root CLI options provide --config, --policy, --json, and --non-interactive; defaults propagate to supported nested commands and command-local policy takes precedence. Commands without JSON mode retain documented output. See implementation/G01.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -366,7 +366,7 @@
       "id": "G02",
       "priority": "P1",
       "title": "Stable machine-output API",
-      "detail": "**Partial.** Successful commands often support JSON; failures, envelope/schema, exit details, and event output are inconsistent. F06/F07/F10 demonstrate the consequences.",
+      "detail": "Implemented. JSON commands share a versioned result envelope and structured expected-error document with process-matching exit codes. JSONL progress remains the separate G13 feature. See implementation/G02.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -384,7 +384,7 @@
       "id": "G03",
       "priority": "P1",
       "title": "Regression policies for CI",
-      "detail": "**Partial.** Absolute release gates and compatible run deltas exist. `compare` exits for compatibility/coverage, not a configured degradation in score, latency, or cost. Add predeclared regression tolerances and fail rules.",
+      "detail": "Implemented. compare --regression-policy evaluates metric, p95 latency, and observed application-cost tolerances with stable policy hashes and explicit strictness, coverage, and indeterminate outcomes; unknown or incomplete measurements cannot pass. See implementation/G03.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -401,7 +401,7 @@
       "id": "G04",
       "priority": "P1",
       "title": "Complete case-result export",
-      "detail": "**Partial.** Report JSON contains summaries and non-passing evidence. There is no general headless export of every passing/failing case and repetition to JSONL/CSV, with explicit content controls.",
+      "detail": "Implemented. aibench export RUN_ID writes stored case and repetition evidence as JSONL or CSV, with scoring-pass selection, content withholding, and spreadsheet-formula protection; export does not invoke applications or evaluators. See implementation/G04.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -419,7 +419,7 @@
       "id": "G05",
       "priority": "P1",
       "title": "CI report adapters",
-      "detail": "**Missing.** Benchmark-result JUnit/SARIF-style exports are absent. The repository's pytest JUnit files are test evidence, not a user feature.",
+      "detail": "Implemented. Stored run evidence exports as JUnit XML or SARIF 2.1.0 with explicit failed, errored, and skipped mappings and --no-content support; SARIF output was schema-validated. See implementation/G05.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -436,7 +436,7 @@
       "id": "G06",
       "priority": "P1",
       "title": "Named baselines, tags, and searchable run history",
-      "detail": "**Partial.** Run IDs, status filters, and a limit exist. Baseline aliases, run tags/notes, metadata search, pagination, and promotion of an approved baseline are missing.",
+      "detail": "Implemented. Run history supports searchable annotations, exact status/tag/baseline filters, pagination, and approved baseline promotion with append-only replacement history. Promotion requires a healthy completed run and passing declared gates. See implementation/G06.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -453,7 +453,7 @@
       "id": "G07",
       "priority": "P1",
       "title": "Convenient bounded run controls",
-      "detail": "**Partial.** Plans support selection, repeats, concurrency, retries, timeouts, budgets, caches, and quotas. `run` largely requires editing a plan file. Add validated direct overrides and a dry-run that prints the exact frozen scope.",
+      "detail": "Implemented. run accepts validated one-shot selection, concurrency, retry, timeout, budget, estimate, and cache overrides; --dry-run reports exact selected IDs, hashes, and work counts without persistence or dispatch. Advanced quotas, retry backoff, plugin settings, and gates remain plan-only. See implementation/G07.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -471,7 +471,7 @@
       "id": "G08",
       "priority": "P1",
       "title": "Reproducibility controls and provenance",
-      "detail": "**Partial.** Selection/bootstrap seeds and frozen configuration exist. The run CLI does not expose the engine's `run_seed`; local source/dependency/commit provenance is incomplete, as F04 shows.",
+      "detail": "Implemented. run --run-seed and bounded application/runtime/dependency/Git provenance are recorded and checked on resume. Ignored files and external resources still require an owner-supplied revision or environment digest. See implementation/G08.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -488,7 +488,7 @@
       "id": "G09",
       "priority": "P1",
       "title": "Release gates in conversation drafts",
-      "detail": "**Missing; documented limitation.** Gates can be authored in executable plans but not declared through session draft choices/patches.",
+      "detail": "Implemented. Conversation plan patches can add gates tied to stable metric identities; threshold changes require explicit authorization, and missing targets require explicit removal or retargeting. See implementation/G09.md.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
