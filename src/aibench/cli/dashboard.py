@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import json
 import logging
+import os
 import re
 import socket
+import ssl
+import sys
 import threading
 import time
 import webbrowser
@@ -33,6 +38,8 @@ from aibench.storage.db import Workspace
 console = Console()
 logger = logging.getLogger(__name__)
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_TOKEN_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_BEARER_TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 _MAX_REJECTED_BODY_BYTES = 256 * 1024
 _PAGE = """<!doctype html>
 <html lang="en">
@@ -57,7 +64,11 @@ _PAGE = """<!doctype html>
   </head>
   <body>
     <h1>BenchCraft dashboard</h1>
-    <p class="muted">Local read-only view. Evidence text and conversations are withheld.</p>
+    <p class="muted">Read-only view. Evidence text and conversations are withheld.</p>
+    <form id="auth" hidden autocomplete="off">
+      <label>Dashboard token <input id="token" type="password" maxlength="256" autocomplete="off" required></label>
+      <button type="submit">Connect</button>
+    </form>
     <button id="refresh">Refresh</button>
     <span id="updated" class="muted"></span>
     <p id="error" role="alert"></p>
@@ -90,10 +101,26 @@ _PAGE = """<!doctype html>
     </section>
     <script>
       const byId = (id) => document.getElementById(id);
+      const requiresToken = __REQUIRES_TOKEN__;
+      let bearerToken = null;
 
       async function api(path) {
-        const response = await fetch(path, { headers: { Accept: 'application/json' } });
+        const headers = { Accept: 'application/json' };
+        if (requiresToken) {
+          if (!bearerToken) {
+            byId('auth').hidden = false;
+            throw new Error('Enter the dashboard token, then select Connect.');
+          }
+          headers.Authorization = 'Bearer ' + bearerToken;
+        }
+        const response = await fetch(path, { headers });
         const body = await response.json();
+        if (response.status === 401 && requiresToken) {
+          bearerToken = null;
+          byId('auth').hidden = false;
+          byId('error').textContent = 'Dashboard token rejected. Enter the correct token and connect again.';
+          throw new Error('Dashboard token rejected.');
+        }
         if (!response.ok) throw new Error(body.error || 'Request failed');
         return body.data;
       }
@@ -190,6 +217,15 @@ _PAGE = """<!doctype html>
 
       byId('refresh').addEventListener('click', refresh);
       byId('compare').addEventListener('click', compare);
+      byId('auth').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const input = byId('token');
+        if (!input.value) return;
+        bearerToken = input.value;
+        input.value = '';
+        byId('auth').hidden = true;
+        refresh();
+      });
       refresh();
     </script>
   </body>
@@ -203,12 +239,28 @@ class _DashboardServer(ThreadingHTTPServer):
     request_timeout_seconds = 10
     max_request_duration_seconds = 30
 
-    def __init__(self, workspace: Workspace, port: int) -> None:
+    def __init__(
+        self,
+        workspace: Workspace,
+        port: int,
+        *,
+        host: str = "127.0.0.1",
+        bearer_token: str | None = None,
+        ssl_context: ssl.SSLContext | None = None,
+    ) -> None:
         self.workspace = workspace
+        self.bearer_token = bearer_token
+        self.scheme = "https" if ssl_context is not None else "http"
         self._request_slots = threading.BoundedSemaphore(self.max_concurrent_requests)
         self._request_timers: dict[Any, threading.Timer] = {}
         self._request_timers_lock = threading.Lock()
-        super().__init__(("127.0.0.1", port), _DashboardHandler)
+        super().__init__((host, port), _DashboardHandler)
+        if ssl_context is not None:
+            # Defer the TLS handshake to the bounded request thread rather than
+            # blocking the accept loop on an incomplete client handshake.
+            self.socket = ssl_context.wrap_socket(
+                self.socket, server_side=True, do_handshake_on_connect=False
+            )
 
     def process_request(self, request: Any, client_address: Any) -> None:
         if not self._request_slots.acquire(blocking=False):
@@ -330,20 +382,38 @@ class _DashboardServer(ThreadingHTTPServer):
             self._cancel_request_timer(request)
             self._request_slots.release()
 
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # TLS handshake exceptions can contain untrusted connection details.
+        error = sys.exc_info()[0]
+        logger.warning("dashboard connection failed (%s)", error.__name__ if error else "unknown")
+
 
 class _DashboardHandler(BaseHTTPRequestHandler):
     server: _DashboardServer
 
     def do_GET(self) -> None:
-        if not self._is_local_origin():
-            self._json(403, {"error": "local dashboard requests only"})
+        if not self._is_allowed_origin():
+            self._json(403, {"error": "dashboard requests must use the serving origin"})
             return
         parsed = urlsplit(self.path)
         if parsed.path == "/":
-            self._send(200, _PAGE, "text/html; charset=utf-8")
+            page = _PAGE.replace(
+                b"const requiresToken = __REQUIRES_TOKEN__;",
+                f"const requiresToken = {'true' if self.server.bearer_token else 'false'};".encode(
+                    "ascii"
+                ),
+            )
+            self._send(200, page, "text/html; charset=utf-8")
             return
         if not parsed.path.startswith("/api/"):
             self._json(404, {"error": "not found"})
+            return
+        if self.server.bearer_token is not None and not self._has_valid_bearer_token():
+            self._json(
+                401,
+                {"error": "a valid dashboard bearer token is required"},
+                authenticate='Bearer realm="BenchCraft dashboard"',
+            )
             return
         try:
             params = self._query(parsed.query)
@@ -531,28 +601,66 @@ class _DashboardHandler(BaseHTTPRequestHandler):
     def _valid_run_id(value: str) -> bool:
         return bool(_RUN_ID.fullmatch(value))
 
-    def _is_local_origin(self) -> bool:
-        expected_host = f"127.0.0.1:{self.server.server_port}"
+    def _is_allowed_origin(self) -> bool:
         host = self.headers.get("Host", "").lower()
-        if host not in {expected_host, f"localhost:{self.server.server_port}"}:
+        if not host or any(character in host for character in "\r\n/\\@"):
             return False
+        if self.server.bearer_token is None:
+            bound_host = str(self.server.server_address[0])
+            bound_host_header = (
+                f"[{bound_host}]:{self.server.server_port}"
+                if ":" in bound_host
+                else f"{bound_host}:{self.server.server_port}"
+            )
+            expected_hosts = {
+                bound_host_header,
+                f"localhost:{self.server.server_port}",
+            }
+            if host not in expected_hosts:
+                return False
         origin = self.headers.get("Origin")
-        return origin is None or origin.lower() in {
-            f"http://{expected_host}",
-            f"http://localhost:{self.server.server_port}",
-        }
+        return origin is None or origin.lower() == f"{self.server.scheme}://{host}"
 
-    def _json(self, status: int, payload: dict[str, Any], *, allow: str | None = None) -> None:
+    def _has_valid_bearer_token(self) -> bool:
+        authorization = self.headers.get("Authorization", "")
+        scheme, separator, token = authorization.partition(" ")
+        if not separator or scheme.lower() != "bearer":
+            return False
+        expected = self.server.bearer_token
+        if expected is None:
+            return True
+        return hmac.compare_digest(token.encode("utf-8"), expected.encode("ascii"))
+
+    def _json(
+        self,
+        status: int,
+        payload: dict[str, Any],
+        *,
+        allow: str | None = None,
+        authenticate: str | None = None,
+    ) -> None:
         try:
             body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
         except (TypeError, ValueError) as exc:
             logger.error("dashboard response serialization failed (%s)", type(exc).__name__)
             status = 500
             body = b'{"error":"stored workspace data could not be read"}'
-        self._send(status, body, "application/json; charset=utf-8", allow=allow)
+        self._send(
+            status,
+            body,
+            "application/json; charset=utf-8",
+            allow=allow,
+            authenticate=authenticate,
+        )
 
     def _send(
-        self, status: int, body: bytes, content_type: str, *, allow: str | None = None
+        self,
+        status: int,
+        body: bytes,
+        content_type: str,
+        *,
+        allow: str | None = None,
+        authenticate: str | None = None,
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -567,6 +675,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         )
         if allow is not None:
             self.send_header("Allow", allow)
+        if authenticate is not None:
+            self.send_header("WWW-Authenticate", authenticate)
         self.end_headers()
         self.wfile.write(body)
 
@@ -580,29 +690,97 @@ def serve_dashboard(
         None, "--workspace", help="Project root containing .aibench/ (default: cwd)."
     ),
     port: int = typer.Option(
-        8765, "--port", min=0, max=65535, help="Loopback port (0 chooses one)."
+        8765, "--port", min=0, max=65535, help="Listening port (0 chooses one)."
+    ),
+    bind: str = typer.Option(
+        "127.0.0.1",
+        "--bind",
+        help="Bind address (loopback by default; remote binds require TLS and a bearer token).",
+    ),
+    token_env: str | None = typer.Option(
+        None,
+        "--token-env",
+        help="Environment variable containing the remote dashboard token (32+ URL-safe characters).",
+    ),
+    tls_cert: Path | None = typer.Option(  # noqa: B008
+        None, "--tls-cert", help="TLS certificate PEM file (required for remote binds)."
+    ),
+    tls_key: Path | None = typer.Option(  # noqa: B008
+        None, "--tls-key", help="TLS private key PEM file (required for remote binds)."
     ),
     no_open: bool = typer.Option(
         False, "--no-open", help="Print the URL without opening a browser."
     ),
 ) -> None:
-    """Serve stored runs and sessions on loopback; no benchmark work is started."""
+    """Serve stored runs and sessions; no benchmark work is started."""
     ws = Workspace.at(workspace or Path.cwd())
     if not ws.db_path.is_file():
         console.print(f"No BenchCraft workspace at {ws.root}", style="red")
         raise typer.Exit(code=2)
     try:
-        server = _DashboardServer(ws, port)
-    except OSError as exc:
-        console.print(f"Could not start local dashboard: {exc}", style="red")
+        bearer_token, tls_context = _remote_security(bind, token_env, tls_cert, tls_key)
+        server = _DashboardServer(
+            ws,
+            port,
+            host=bind,
+            bearer_token=bearer_token,
+            ssl_context=tls_context,
+        )
+    except (OSError, ssl.SSLError, ValueError) as exc:
+        console.print(f"Could not start dashboard: {exc}", style="red")
         raise typer.Exit(code=2) from exc
-    url = f"http://127.0.0.1:{server.server_port}/"
-    console.print(f"Dashboard listening at {url} (loopback only; press Ctrl+C to stop)")
+    scheme = "https" if tls_context is not None else "http"
+    url_host = f"[{bind}]" if ":" in bind else bind
+    url = f"{scheme}://{url_host}:{server.server_port}/"
+    if bearer_token is None:
+        console.print(f"Dashboard listening at {url} (loopback only; press Ctrl+C to stop)")
+    else:
+        console.print(
+            f"Dashboard bound at {url} (TLS and bearer authentication enabled; "
+            "connect using a hostname covered by the certificate; press Ctrl+C to stop)"
+        )
     try:
-        if not no_open:
+        if not no_open and bearer_token is None:
             webbrowser.open(url)
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+
+
+def _is_loopback_bind(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        # Hostnames other than localhost can resolve to a non-loopback address;
+        # treat them as remote and require the complete secure configuration.
+        return False
+
+
+def _remote_security(
+    host: str,
+    token_env: str | None,
+    tls_cert: Path | None,
+    tls_key: Path | None,
+) -> tuple[str | None, ssl.SSLContext | None]:
+    if _is_loopback_bind(host):
+        if token_env is not None or tls_cert is not None or tls_key is not None:
+            raise ValueError("--token-env, --tls-cert, and --tls-key are only for remote binds")
+        return None, None
+    if token_env is None or tls_cert is None or tls_key is None:
+        raise ValueError("remote dashboard binds require --token-env, --tls-cert, and --tls-key")
+    if not _TOKEN_ENV_NAME.fullmatch(token_env):
+        raise ValueError("--token-env must be a valid environment variable name")
+    token = os.environ.get(token_env)
+    if token is None or not _BEARER_TOKEN.fullmatch(token):
+        raise ValueError(
+            f"{token_env} must contain 32 to 256 URL-safe token characters; "
+            "generate one with Python secrets.token_urlsafe(32)"
+        )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(tls_cert, tls_key)
+    return token, context

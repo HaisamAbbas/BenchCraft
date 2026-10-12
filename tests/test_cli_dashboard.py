@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import ssl
 import threading
 import time
 from collections.abc import Iterator
@@ -445,31 +446,55 @@ def test_dashboard_rejects_excess_concurrent_requests(tmp_path: Path) -> None:
         body = b"x" * (512 * 1024)
         requests = (
             (
-                f"POST / HTTP/1.1\r\nHost: {host}\r\nContent-Length: {len(body)}\r\n"
-                "Connection: close\r\n\r\n"
-            ).encode("ascii")
-            + body,
+                (
+                    f"POST / HTTP/1.1\r\nHost: {host}\r\nContent-Length: {len(body)}\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode("ascii"),
+                body,
+            ),
             (
-                f"PATCH / HTTP/1.1\r\nHost: {host}\r\nTransfer-Encoding: chunked\r\n"
-                "Connection: close\r\n\r\n"
-            ).encode("ascii")
-            + f"{len(body):x}\r\n".encode("ascii")
-            + body
-            + b"\r\n0\r\n\r\n",
+                (
+                    f"PATCH / HTTP/1.1\r\nHost: {host}\r\nTransfer-Encoding: chunked\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode("ascii"),
+                f"{len(body):x}\r\n".encode("ascii") + body + b"\r\n0\r\n\r\n",
+            ),
         )
-        for raw_request in requests:
+        for request_headers, request_body in requests:
             with socket.create_connection(server.server_address, timeout=5) as client:
                 client.settimeout(5)
-                client.sendall(raw_request)
+                client.sendall(request_headers)
                 response = bytearray()
-                while True:
+                while b"\r\n\r\n" not in response:
                     try:
                         chunk = client.recv(4096)
-                    except ConnectionResetError:
+                    except (ConnectionAbortedError, ConnectionResetError):
                         break
                     if not chunk:
                         break
                     response.extend(chunk)
+                headers, separator, response_body = bytes(response).partition(b"\r\n\r\n")
+                assert separator
+                content_length = next(
+                    int(line.partition(b":")[2].strip())
+                    for line in headers.split(b"\r\n")
+                    if line.lower().startswith(b"content-length:")
+                )
+                while len(response_body) < content_length:
+                    try:
+                        chunk = client.recv(4096)
+                    except (ConnectionAbortedError, ConnectionResetError):
+                        break
+                    if not chunk:
+                        break
+                    response.extend(chunk)
+                    _, _, response_body = bytes(response).partition(b"\r\n\r\n")
+                if request_body:
+                    try:
+                        client.sendall(request_body)
+                    except OSError:
+                        # The oversized content-length request can already be closed.
+                        pass
             headers, separator, response_body = bytes(response).partition(b"\r\n\r\n")
             assert separator
             assert headers.startswith(b"HTTP/1.1 503 Service Unavailable\r\n")
@@ -505,3 +530,114 @@ def test_dashboard_cli_requires_existing_workspace_and_exposes_help(tmp_path: Pa
     assert help_result.exit_code == 0
     assert "loopback" in help_result.stdout
     assert "--no-open" in help_result.stdout
+
+
+def _dashboard_tls_context() -> tuple[ssl.SSLContext, ssl.SSLContext, Path, Path]:
+    fixture = Path(__file__).parent / "fixtures" / "dashboard_tls"
+    certificate = fixture / "cert.pem"
+    private_key = fixture / "key.pem"
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    server_context.load_cert_chain(certificate, private_key)
+    client_context = ssl.create_default_context(cafile=str(certificate))
+    return server_context, client_context, certificate, private_key
+
+
+def test_dashboard_remote_mode_requires_tls_and_token_and_authenticates_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_run(tmp_path, "remote-run")
+    server_context, client_context, certificate, private_key = _dashboard_tls_context()
+    token = "a" * 42
+    monkeypatch.setenv("BENCHCRAFT_DASHBOARD_TEST_TOKEN", token)
+
+    with pytest.raises(ValueError, match="require --token-env"):
+        dashboard_cli._remote_security("0.0.0.0", None, None, None)
+    with pytest.raises(ValueError, match="32 to 256"):
+        monkeypatch.setenv("BENCHCRAFT_DASHBOARD_TEST_TOKEN", "too-short")
+        dashboard_cli._remote_security(
+            "0.0.0.0",
+            "BENCHCRAFT_DASHBOARD_TEST_TOKEN",
+            certificate,
+            private_key,
+        )
+    monkeypatch.setenv("BENCHCRAFT_DASHBOARD_TEST_TOKEN", token)
+    configured_token, configured_tls = dashboard_cli._remote_security(
+        "0.0.0.0",
+        "BENCHCRAFT_DASHBOARD_TEST_TOKEN",
+        certificate,
+        private_key,
+    )
+    assert configured_token == token
+    assert configured_tls is not None
+    assert configured_tls.minimum_version is ssl.TLSVersion.TLSv1_2
+    with pytest.raises(ValueError, match="only for remote binds"):
+        dashboard_cli._remote_security("127.0.0.1", "BENCHCRAFT_DASHBOARD_TEST_TOKEN", None, None)
+
+    server = _DashboardServer(
+        Workspace.at(tmp_path),
+        0,
+        host="0.0.0.0",
+        bearer_token=token,
+        ssl_context=server_context,
+    )
+    assert server.server_address[0] == "0.0.0.0"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"https://127.0.0.1:{server.server_port}"
+    stalled_tls_client = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
+    try:
+        # An incomplete handshake must occupy only a bounded worker, not stall accepts.
+        time.sleep(0.05)
+        with urlopen(base + "/", context=client_context, timeout=5) as page_response:
+            page = page_response.read().decode("utf-8")
+        assert "const requiresToken = true;" in page
+        assert 'id="token" type="password"' in page
+        assert "sessionStorage" not in page
+        assert "window.prompt" not in page
+        assert token not in page
+
+        with pytest.raises(HTTPError) as missing:
+            urlopen(base + "/api/runs", context=client_context, timeout=5)
+        assert missing.value.code == 401
+        assert missing.value.headers["WWW-Authenticate"] == 'Bearer realm="BenchCraft dashboard"'
+
+        wrong_token = Request(base + "/api/runs", headers={"Authorization": "Bearer " + "b" * 42})
+        with pytest.raises(HTTPError) as rejected:
+            urlopen(wrong_token, context=client_context, timeout=5)
+        assert rejected.value.code == 401
+
+        cross_origin = Request(
+            base + "/api/runs",
+            headers={
+                "Authorization": "Bearer " + token,
+                "Origin": "https://attacker.example",
+            },
+        )
+        with pytest.raises(HTTPError) as origin_error:
+            urlopen(cross_origin, context=client_context, timeout=5)
+        assert origin_error.value.code == 403
+
+        valid_token = Request(base + "/api/runs", headers={"Authorization": "Bearer " + token})
+        with urlopen(valid_token, context=client_context, timeout=5) as response:
+            payload = json.loads(response.read())
+        assert payload["data"][0]["run_id"] == "remote-run"
+    finally:
+        stalled_tls_client.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_dashboard_remote_cli_fails_closed_without_complete_secure_configuration(
+    tmp_path: Path,
+) -> None:
+    _seed_run(tmp_path, "r1")
+    result = runner.invoke(
+        app,
+        ["dashboard", "--workspace", str(tmp_path), "--bind", "0.0.0.0", "--no-open"],
+    )
+    assert result.exit_code == 2
+    assert "remote dashboard binds require --token-env" in result.stdout
+    assert "--tls-cert" in result.stdout
+    assert "--tls-key" in result.stdout
