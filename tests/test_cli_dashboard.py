@@ -585,8 +585,9 @@ def test_dashboard_remote_mode_requires_tls_and_token_and_authenticates_api(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"https://127.0.0.1:{server.server_port}"
-    stalled_tls_client = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
+    stalled_tls_client: socket.socket | None = None
     try:
+        stalled_tls_client = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
         # An incomplete handshake must occupy only a bounded worker, not stall accepts.
         time.sleep(0.05)
         with urlopen(base + "/", context=client_context, timeout=5) as page_response:
@@ -623,7 +624,8 @@ def test_dashboard_remote_mode_requires_tls_and_token_and_authenticates_api(
             payload = json.loads(response.read())
         assert payload["data"][0]["run_id"] == "remote-run"
     finally:
-        stalled_tls_client.close()
+        if stalled_tls_client is not None:
+            stalled_tls_client.close()
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
