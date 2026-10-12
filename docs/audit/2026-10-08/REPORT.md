@@ -2,6 +2,11 @@
 
 Audit started: **8 October 2026**, continued into **9 October 2026, Asia/Karachi**. Source: **`154fb45a`**, `aibench 0.1.0rc34`. Environment: Windows 11, Python 3.12.10.
 
+**Reading this report:** reproduction results and baseline assessments describe the audited rc34
+source unless a follow-up is identified. Implementations and later verification are recorded in
+the [implementation ledger](implementation-ledger.json) and the follow-up status below. Do not
+interpret a historical failure as an uncorrected current bug, or an rc34 pass as rc35 evidence.
+
 ## 1. Executive assessment
 
 **The main application works, but I would not yet rely on it for cost-bounded evaluation or automated release decisions.** The clean installed wheel passed all 32 checks across the repository's eight end-to-end journeys. Additional adversarial and cross-workflow probes found failures in data isolation, measurement integrity, rescoring budgets, reproducibility, and scripting behavior.
@@ -398,9 +403,13 @@ test checks the semantic error phrase separately from a whitespace-compacted fil
 focused CLI assertion passed, and both calibration path variants passed. Product formatting and
 exit-code behavior are unchanged. See the [F21 review](evidence/F21-review.md).
 
-## 5. Missing and incomplete CLI capabilities
+## 5. CLI capability gap analysis and delivery status
 
-This application is primarily an **AI application evaluation CLI**. Its own specification defines that scope. Warmup, throughput, and arrival-rate controls are useful if it also aims to be a performance benchmark CLI, but a full load generator is a distinct product commitment.
+This section records gaps found in the baseline audit. The table includes follow-up delivery
+state; it is not a list of capabilities still missing from the current CLI. The application is
+primarily an **AI application evaluation CLI**. Its own specification defines that scope.
+Warmup, throughput, and arrival-rate controls are useful if it also aims to be a performance
+benchmark CLI, but a full load generator is a distinct product commitment.
 
 For context, established tools expose practical scriptable controls: Hyperfine documents warmup, repeated measurements, preparation/cleanup, parameter scans, and exports; LM Evaluation Harness documents seeds, example limits, sample logging, and batch controls; pytest-benchmark documents historical comparison and regression-failure thresholds. These are reference points, not claims that BenchCraft should copy every feature. [Hyperfine](https://github.com/sharkdp/hyperfine), [LM Evaluation Harness CLI](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/docs/interface.md), [pytest-benchmark comparison](https://pytest-benchmark.readthedocs.io/en/latest/comparing.html).
 
@@ -518,9 +527,17 @@ Do not put performance polish ahead of data isolation and result correctness. A 
 2. Run equivalent fixtures through engine scoring, direct scoring, plan-based evaluation, headless chat, and interactive controls. Compare their selected counts, coverage, budgets, and failure semantics.
 3. Test source/dependency changes between interrupted sessions and scoring passes. Require drift refusal or explicit new-run lineage.
 4. Verify error and export contracts with nested data, non-finite numbers, unmatched quotes, malformed UTF-8/OTLP, arbitrary category values, and fake credentials.
-5. Pass fresh-install journeys plus the full relevant suite, Ruff, and Mypy on the supported CI matrix. Add macOS only when its support claim is backed by execution.
+5. Pass fresh-install journeys plus the full relevant suite, Ruff, and Mypy on the supported CI matrix; tie each platform claim to results from the same source candidate.
 6. Audit optional plugin environments independently; validate compatible dependency upgrades against actual pinned evaluator packages and deterministic judges.
 7. Separately obtain live-provider and real-team validation before claiming live integration reliability, billing-limit accuracy, or planner/judge quality. Historical scripted-fixture recall and calibration are not substitutes for reviewed labels and real usage.
+
+**Current gate status:** individual finding fixes and their regression evidence are recorded in
+the implementation ledger. The last fully passed hosted matrix is rc34; the rc35 source-fix
+workflow [38301696360](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38301696360)
+had no final conclusion at its last observed status, so verification item 5 is not established
+for rc35. Separate-host worker measurements, approved live-provider calibration, and real-team
+pilot evidence remain outstanding; those are external validation gates, not claims supported
+by local fixtures.
 
 ## 9. Reproduction and artifact guide
 
@@ -556,4 +573,11 @@ Relevant standalone records:
 
 ## 10. Decision
 
-**Keep the architecture and existing working journeys, but address the eight P1 findings before treating benchmark outcomes and budgets as dependable.** The immediate product work should make headless benchmarking and CI regression decisions complete and consistent. Advanced performance and scale features should follow a defined scope and evidence plan.
+**The remediation implementation is substantially delivered, but rc35 is not release-cleared.**
+The ledger records all 21 tracked findings as delivered, along with G01–G21 and G23. G22
+contains local implementations and synthetic evidence, while separate-host worker measurements
+and approved live-provider calibration remain open; G22.19 remains deferred pending a verifiable
+upstream API. The last fully passed hosted platform matrix is rc34. The hosted run for rc35's
+source fixes had no final conclusion at its last observed status, so platform readiness must not
+be carried forward from rc34. Keep the architecture and existing working journeys, close those
+external evidence gates, and obtain the remaining CI result before making release claims.
