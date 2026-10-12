@@ -365,7 +365,7 @@ def test_run_refuses_a_dataset_its_configured_plan_does_not_use(
     other.write_text((project / "dataset.jsonl").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.chdir(project)
     result = cli.invoke(app, ["run", str(other)])
-    assert result.exit_code == 2 and "is bound to" in result.output
+    assert result.exit_code == 2 and "is bound to" in " ".join(result.output.split())
     empty = tmp_path / "empty"
     empty.mkdir()
     missing = cli.invoke(app, ["run", str(empty)])
