@@ -333,6 +333,37 @@ so the expected outcome is not available to them (upstream reads node fields per
 A score outside 0..1 (a judge answer DeepEval did not bound) is an evaluator error, never a
 recorded score.
 
+### MCP tool metrics
+
+The plugin exposes DeepEval's `deepeval.mcp_use`, `deepeval.mcp_task_completion`, and
+`deepeval.multi_turn_mcp_use`. Bind one with a frozen server inventory so the judge knows which
+tools and argument schemas were available:
+
+```json
+{"metric":"deepeval.mcp_use","params":{"judge":{"kind":"python_factory","factory":"my_judges:judge"},"mcp_servers":[{"server_name":"orders","transport":"stdio","available_tools":[{"name":"lookup_order","description":"Look up one order","inputSchema":{"type":"object","properties":{"order_id":{"type":"string"}},"required":["order_id"]}}]}]}}
+```
+
+`mcp_task_completion` and `multi_turn_mcp_use` score the stored episode and require cases with
+a `group_id`. The adapter maps successfully recorded events with an explicit MCP type
+(`mcp`, `mcp_tool`, `mcp_tool_call`, `mcptool`, or `mcptoolcall`) to MCP tool calls, including
+undeclared names so the judge can assess a wrong-tool call. To use untyped generic events, set
+`tool_events_are_mcp_only: true` only when the application's entire recorded tool-event stream
+contains MCP calls; the adapter will not infer MCP provenance from a matching tool name.
+Model-requested calls without a recorded successful execution do not count. Episode metrics
+are not applicable if any turn's tool telemetry is missing. The project does not discover or
+contact live MCP servers. Inventory, prompt and tool text, arguments, and
+results are sent to the configured judge; local `python_factory` judges make no provider
+request. Evidence limits are 16 servers and 128 KiB of inventory; 64 primitives of each kind
+per server; 256 recorded events per turn, 512 per case, and 1,024 per episode; and 32
+successful calls per turn, 64 per case, and 256 per episode. Each call is limited to 16 KiB,
+call evidence to 64 KiB per case and 256 KiB per episode, text fields to 16,000 characters,
+and total episode evidence to 1 MiB. Resource reads and prompt retrievals are not scored because
+BenchCraft's stored execution schema currently records only generic tool events.
+
+See DeepEval's docs for [MCP-Use](https://deepeval.com/docs/metrics-mcp-use),
+[MCP Task Completion](https://deepeval.com/docs/metrics-mcp-task-completion), and
+[Multi-Turn MCP-Use](https://deepeval.com/docs/metrics-multi-turn-mcp-use).
+
 ### Agent-trace metrics
 
 For agents that export OpenTelemetry spans: run the app, attach its traces with `aibench
@@ -357,7 +388,8 @@ message content out) takes the case's input as the agent's task and the recorded
 finds no plan in the trace: DeepEval would score that 1, which is no evidence of a good plan.
 
 Not included: raw-video decoding or continuous motion scoring, DeepEval's upstream multimodal
-image/audio and MCP metric families.
+audio metric family, or typed resource reads and prompt retrievals (the recorded execution
+format currently stores generic tool events).
 DAG and arena metrics need objects a plan cannot declare.
 
 ## Judges

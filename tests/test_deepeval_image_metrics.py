@@ -120,7 +120,7 @@ def test_all_five_pinned_deepeval_image_metrics_are_discovered() -> None:
         assert manifest.internal_retries == 4 * parallel_calls
         assert manifest.internal_concurrency == parallel_calls
         assert manifest.package_name == "deepeval" and manifest.package_version == "4.2.5"
-        assert manifest.plugin_version == "0.2.0rc21"
+        assert manifest.plugin_version == "0.2.0rc22"
         assert {field.path for field in manifest.requires} == {"case.input", "execution.output"}
         assert any("4 MiB" in limit for limit in manifest.limitations)
 
@@ -233,13 +233,113 @@ async def scenario():
     cancelled = await cancelled_judge.settle_pending_calls(timeout_seconds=0.01)
     await asyncio.gather(task, return_exceptions=True)
     class Context:
-        usage = []
+        def __init__(self):
+            self.usage = []
+
         def report_usage(self, **usage):
             self.usage.append(usage)
     context = Context()
     report_judge_usage(context, None, cancelled_judge)
     cancelled_usage = {'settled':cancelled,'cancelled':task.cancelled(),'calls_without_tokens':cancelled_judge.calls_without_tokens,'cost':cancelled_judge.cost(),'reported':context.usage}
-    return {'pending':pending_usage,'cancelled':cancelled_usage}
+
+    parent_cancelled_judge = openai_compatible_multimodal_judge(config)
+    success_finished = asyncio.Event()
+    async def mixed(self, client, prompt):
+        if prompt == 'pending':
+            await asyncio.sleep(30)
+            raise AssertionError('cancelled request unexpectedly finished')
+        await asyncio.sleep(0.01)
+        success_finished.set()
+        return httpx.Response(200, json={'choices':[{'message':{'content':'ok'}}], 'usage':{'prompt_tokens':123,'completion_tokens':9,'cost':0.25}})
+    parent_cancelled_judge._apost = MethodType(mixed, parent_cancelled_judge)
+    async def gathered_requests():
+        await asyncio.gather(parent_cancelled_judge.a_generate('success'), parent_cancelled_judge.a_generate('pending'))
+    parent = asyncio.create_task(gathered_requests())
+    await success_finished.wait()
+    await asyncio.sleep(0.01)
+    parent.cancel()
+    try:
+        await parent
+    except asyncio.CancelledError:
+        pass
+    await parent_cancelled_judge.settle_pending_calls()
+    parent_context = Context()
+    report_judge_usage(parent_context, None, parent_cancelled_judge)
+    parent_cancelled_usage = {'cancelled':parent.cancelled(),'uncertain_calls':parent_cancelled_judge.uncertain_calls,'calls_without_tokens':parent_cancelled_judge.calls_without_tokens,'tokens':parent_cancelled_judge.tokens,'cost':parent_cancelled_judge.cost(),'reported':parent_context.usage}
+
+    queued_config = {**config, 'max_concurrent_calls':1}
+    queued_judge = openai_compatible_multimodal_judge(queued_config)
+    request_started = asyncio.Event()
+    async def blocked(self, client, prompt):
+        request_started.set()
+        await asyncio.sleep(30)
+        raise AssertionError('cancelled request unexpectedly finished')
+    queued_judge._apost = MethodType(blocked, queued_judge)
+    async def queued_requests():
+        await asyncio.gather(queued_judge.a_generate('active'), queued_judge.a_generate('queued'))
+    queued_parent = asyncio.create_task(queued_requests())
+    await request_started.wait()
+    await asyncio.sleep(0.01)
+    queued_parent.cancel()
+    try:
+        await queued_parent
+    except asyncio.CancelledError:
+        pass
+    await queued_judge.settle_pending_calls()
+    queued_context = Context()
+    report_judge_usage(queued_context, None, queued_judge)
+    queued_usage = {'cancelled':queued_parent.cancelled(),'uncertain_calls':queued_judge.uncertain_calls,'calls_without_tokens':queued_judge.calls_without_tokens,'cost':queued_judge.cost(),'reported':queued_context.usage}
+
+    teardown_judge = openai_compatible_multimodal_judge(config)
+    teardown_started = asyncio.Event()
+    from contextlib import asynccontextmanager
+    class BlockingGate:
+        @asynccontextmanager
+        async def slot(self):
+            yield type('Slot', (), {'refused':False})()
+            teardown_started.set()
+            await asyncio.sleep(30)
+    teardown_judge._gate = BlockingGate()
+    async def response_before_teardown(self, client, prompt):
+        return httpx.Response(200, json={'choices':[{'message':{'content':'ok'}}], 'usage':{'prompt_tokens':123,'completion_tokens':9,'cost':0.25}})
+    teardown_judge._apost = MethodType(response_before_teardown, teardown_judge)
+    teardown_task = asyncio.create_task(teardown_judge.a_generate('response received'))
+    await asyncio.wait_for(teardown_started.wait(), 2)
+    teardown_task.cancel()
+    try:
+        await teardown_task
+    except asyncio.CancelledError:
+        pass
+    await teardown_judge.settle_pending_calls()
+    teardown_context = Context()
+    report_judge_usage(teardown_context, None, teardown_judge)
+    teardown_usage = {'cancelled':teardown_task.cancelled(),'uncertain_calls':teardown_judge.uncertain_calls,'calls_without_tokens':teardown_judge.calls_without_tokens,'cost':teardown_judge.cost(),'reported':teardown_context.usage}
+
+    transient_judge = openai_compatible_multimodal_judge(config)
+    transient_teardown_started = asyncio.Event()
+    class TransientBlockingGate:
+        @asynccontextmanager
+        async def slot(self):
+            try:
+                yield type('Slot', (), {'refused':False})()
+            finally:
+                transient_teardown_started.set()
+                await asyncio.sleep(30)
+    transient_judge._gate = TransientBlockingGate()
+    async def timeout_response(self, client, prompt):
+        raise httpx.ReadTimeout('provider request timed out')
+    transient_judge._apost = MethodType(timeout_response, transient_judge)
+    transient_task = asyncio.create_task(transient_judge.a_generate('transient response'))
+    await asyncio.wait_for(transient_teardown_started.wait(), 2)
+    transient_task.cancel()
+    try:
+        await transient_task
+    except asyncio.CancelledError:
+        pass
+    transient_context = Context()
+    report_judge_usage(transient_context, None, transient_judge)
+    transient_usage = {'cancelled':transient_task.cancelled(),'uncertain_calls':transient_judge.uncertain_calls,'calls_without_tokens':transient_judge.calls_without_tokens,'cost':transient_judge.cost(),'reported':transient_context.usage}
+    return {'pending':pending_usage,'cancelled':cancelled_usage,'parent_cancelled':parent_cancelled_usage,'queued_cancelled':queued_usage,'teardown_cancelled':teardown_usage,'transient_cancelled':transient_usage}
 print(json.dumps(asyncio.run(scenario())))
 """
     )
@@ -253,6 +353,194 @@ print(json.dumps(asyncio.run(scenario())))
     assert result["cancelled"] == {
         "settled": False,
         "cancelled": True,
+        "calls_without_tokens": 1,
+        "cost": None,
+        "reported": [
+            {
+                "provider": "vision-test",
+                "calls": None,
+                "tokens": {},
+                "cost": None,
+                "calls_without_tokens": 1,
+            }
+        ],
+    }
+    assert result["parent_cancelled"] == {
+        "cancelled": True,
+        "uncertain_calls": 1,
+        "calls_without_tokens": 1,
+        "tokens": {"input": 123, "output": 9},
+        "cost": None,
+        "reported": [
+            {
+                "provider": "vision-test",
+                "calls": None,
+                "tokens": {"input": 123, "output": 9},
+                "cost": None,
+                "calls_without_tokens": 1,
+            }
+        ],
+    }
+    assert result["queued_cancelled"] == {
+        "cancelled": True,
+        "uncertain_calls": 1,
+        "calls_without_tokens": 1,
+        "cost": None,
+        "reported": [
+            {
+                "provider": "vision-test",
+                "calls": None,
+                "tokens": {},
+                "cost": None,
+                "calls_without_tokens": 1,
+            }
+        ],
+    }
+    assert result["teardown_cancelled"] == {
+        "cancelled": True,
+        "uncertain_calls": 1,
+        "calls_without_tokens": 1,
+        "cost": None,
+        "reported": [
+            {
+                "provider": "vision-test",
+                "calls": None,
+                "tokens": {},
+                "cost": None,
+                "calls_without_tokens": 1,
+            }
+        ],
+    }
+    assert result["transient_cancelled"] == {
+        "cancelled": True,
+        "uncertain_calls": 1,
+        "calls_without_tokens": 1,
+        "cost": None,
+        "reported": [
+            {
+                "provider": "vision-test",
+                "calls": None,
+                "tokens": {},
+                "cost": None,
+                "calls_without_tokens": 1,
+            }
+        ],
+    }
+
+
+def test_multimodal_judge_marks_dispatched_write_error_cost_unknown() -> None:
+    result = plugin_python(
+        """
+import asyncio, json, os
+from types import MethodType
+import httpx
+from aibench_deepeval.judges import openai_compatible_multimodal_judge, report_judge_usage
+os.environ['AIBENCH_IMAGE_TEST_KEY'] = 'placeholder'
+config = {'kind':'openai_compatible','base_url':'http://127.0.0.1:9000/v1','model':'vision-test','api_key_env':'AIBENCH_IMAGE_TEST_KEY'}
+judge = openai_compatible_multimodal_judge(config)
+dispatched = asyncio.Event()
+async def reply(self, client, prompt):
+    if prompt == 'write-error':
+        dispatched.set()
+        raise httpx.WriteError('connection dropped while writing request')
+    await dispatched.wait()
+    await asyncio.sleep(0.01)
+    return httpx.Response(200, json={'choices':[{'message':{'content':'ok'}}], 'usage':{'prompt_tokens':123,'completion_tokens':9,'cost':0.25}})
+judge._apost = MethodType(reply, judge)
+class Context:
+    def __init__(self):
+        self.usage = []
+    def report_usage(self, **usage):
+        self.usage.append(usage)
+async def scenario():
+    outcomes = await asyncio.gather(
+        judge.a_generate('write-error'),
+        judge.a_generate('successful sibling'),
+        return_exceptions=True,
+    )
+    context = Context()
+    report_judge_usage(context, None, judge)
+    return {
+        'outcomes':[type(outcome).__name__ if isinstance(outcome, BaseException) else outcome for outcome in outcomes],
+        'uncertain_calls':judge.uncertain_calls,
+        'calls_without_tokens':judge.calls_without_tokens,
+        'tokens':judge.tokens,
+        'cost':judge.cost(),
+        'reported':context.usage,
+    }
+print(json.dumps(asyncio.run(scenario())))
+"""
+    )
+    assert result == {
+        "outcomes": ["WriteError", "ok"],
+        "uncertain_calls": 1,
+        "calls_without_tokens": 1,
+        "tokens": {"input": 123, "output": 9},
+        "cost": None,
+        "reported": [
+            {
+                "provider": "vision-test",
+                "calls": None,
+                "tokens": {"input": 123, "output": 9},
+                "cost": None,
+                "calls_without_tokens": 1,
+            }
+        ],
+    }
+
+
+def test_multimodal_judge_accounts_request_error_during_gate_teardown() -> None:
+    result = plugin_python(
+        """
+import asyncio, json, os
+from contextlib import asynccontextmanager
+from types import MethodType
+import httpx
+from aibench_deepeval.judges import openai_compatible_multimodal_judge, report_judge_usage
+os.environ['AIBENCH_IMAGE_TEST_KEY'] = 'placeholder'
+config = {'kind':'openai_compatible','base_url':'http://127.0.0.1:9000/v1','model':'vision-test','api_key_env':'AIBENCH_IMAGE_TEST_KEY'}
+judge = openai_compatible_multimodal_judge(config)
+teardown_started = asyncio.Event()
+class BlockingGate:
+    @asynccontextmanager
+    async def slot(self):
+        try:
+            yield type('Slot', (), {'refused':False})()
+        finally:
+            teardown_started.set()
+            await asyncio.sleep(30)
+judge._gate = BlockingGate()
+async def broken_response(self, client, prompt):
+    raise httpx.DecodingError('response body could not be decoded')
+judge._apost = MethodType(broken_response, judge)
+class Context:
+    def __init__(self):
+        self.usage = []
+    def report_usage(self, **usage):
+        self.usage.append(usage)
+async def scenario():
+    task = asyncio.create_task(judge.a_generate('response decode error'))
+    await asyncio.wait_for(teardown_started.wait(), 2)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    context = Context()
+    report_judge_usage(context, None, judge)
+    return {
+        'cancelled':task.cancelled(),
+        'uncertain_calls':judge.uncertain_calls,
+        'calls_without_tokens':judge.calls_without_tokens,
+        'cost':judge.cost(),
+        'reported':context.usage,
+    }
+print(json.dumps(asyncio.run(scenario())))
+"""
+    )
+    assert result == {
+        "cancelled": True,
+        "uncertain_calls": 1,
         "calls_without_tokens": 1,
         "cost": None,
         "reported": [

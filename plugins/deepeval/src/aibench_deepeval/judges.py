@@ -320,6 +320,9 @@ class _OpenAICompatible:
         self._max_concurrent = int(config.get("max_concurrent_calls", _MAX_CONCURRENT_CALLS))
         self._gate: _Gate | None = None  # made on first use, in the worker's event loop
         self._inflight_calls: set[asyncio.Task[Any]] = set()
+        self._active_requests: set[asyncio.Task[Any]] = set()
+        self._unaccounted_responses: set[asyncio.Task[Any]] = set()
+        self._cancelled_calls: set[asyncio.Task[Any]] = set()
         super().__init__(model=config["model"])  # type: ignore[call-arg]
 
     def load_model(self, *args: Any, **kwargs: Any) -> Any:
@@ -369,6 +372,17 @@ class _OpenAICompatible:
         finally:
             if task is not None:
                 self._inflight_calls.discard(task)
+                self._cancelled_calls.discard(task)
+                self._unaccounted_responses.discard(task)
+
+    def _mark_cancelled_call(self, task: asyncio.Task[Any]) -> None:
+        """Count a cancelled request once even if settlement and HTTP observe it together."""
+        if task in self._cancelled_calls:
+            return
+        self._cancelled_calls.add(task)
+        self.cost_known = False
+        self.uncertain_calls += 1
+        self.calls_without_tokens += 1
 
     async def _a_generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
         # A metric asks about each retrieved passage at once (12 to 16 calls for contextual
@@ -377,21 +391,51 @@ class _OpenAICompatible:
         # The judge's calls go through a gate that lets fewer through after a refusal.
         if self._gate is None:
             self._gate = _Gate(self._max_concurrent)
+        request_task = asyncio.current_task()
         async with httpx.AsyncClient(timeout=self._timeouts()) as client:
             for attempt in range(_ATTEMPTS):
                 try:
                     async with self._gate.slot() as slot:
-                        response = await self._apost(client, prompt)
+                        if request_task is not None:
+                            self._active_requests.add(request_task)
+                        try:
+                            response = await self._apost(client, prompt)
+                            if request_task is not None:
+                                self._unaccounted_responses.add(request_task)
+                        except asyncio.CancelledError:
+                            if request_task is not None:
+                                self._mark_cancelled_call(request_task)
+                            raise
+                        except (httpx.RequestError, TimeoutError):
+                            if request_task is not None:
+                                self._unaccounted_responses.add(request_task)
+                            raise
+                        finally:
+                            if request_task is not None:
+                                self._active_requests.discard(request_task)
                         slot.refused = response.status_code == 429
+                except asyncio.CancelledError:
+                    if request_task is not None and request_task in self._unaccounted_responses:
+                        self._mark_cancelled_call(request_task)
+                    raise
                 except _TRANSIENT:
                     self.cost_known = False
                     self.uncertain_calls += 1
                     self.calls_without_tokens += 1
+                    if request_task is not None:
+                        self._unaccounted_responses.discard(request_task)
                     wait = self._wait(attempt, None)
                     if wait is None:
                         raise
                     await asyncio.sleep(wait)
                     continue
+                except httpx.RequestError:
+                    self.cost_known = False
+                    self.uncertain_calls += 1
+                    self.calls_without_tokens += 1
+                    if request_task is not None:
+                        self._unaccounted_responses.discard(request_task)
+                    raise
                 wait = self._wait(attempt, response)
                 if wait is None:
                     try:
@@ -403,9 +447,14 @@ class _OpenAICompatible:
                             raise
                         self.retries += isinstance(exc, _BadJSON)
                         continue
+                    finally:
+                        if request_task is not None:
+                            self._unaccounted_responses.discard(request_task)
                 self.calls += 1
                 self.calls_without_tokens += 1
                 self.cost_known = False
+                if request_task is not None:
+                    self._unaccounted_responses.discard(request_task)
                 await asyncio.sleep(wait)
         raise AssertionError("unreachable: the last attempt returns or raises")
 
@@ -427,16 +476,17 @@ class _OpenAICompatible:
         settle_seconds = min(max(timeout_seconds, 0.0), _MAX_PENDING_CALL_SETTLE_SECONDS)
         done, pending = await asyncio.wait(pending, timeout=settle_seconds)
         if pending:
-            self.cost_known = False
-            self.uncertain_calls += len(pending)
-            self.calls_without_tokens += len(pending)
             for task in pending:
+                if task in self._active_requests or task in self._unaccounted_responses:
+                    self._mark_cancelled_call(task)
                 task.cancel()
             finished, still_running = await asyncio.wait(
                 pending, timeout=_CANCELLED_CALL_GRACE_SECONDS
             )
             done.update(finished)
             for task in still_running:
+                if task in self._active_requests or task in self._unaccounted_responses:
+                    self._mark_cancelled_call(task)
                 task.add_done_callback(_consume_task_exception)
         if done:
             await asyncio.gather(*done, return_exceptions=True)

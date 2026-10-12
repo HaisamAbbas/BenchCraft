@@ -8,6 +8,7 @@ from aibench_deepeval.conversational import CONVERSATIONAL_METRICS, Conversation
 from aibench_deepeval.dag import ConversationalDag, Dag
 from aibench_deepeval.faithfulness import Faithfulness
 from aibench_deepeval.image_metrics import IMAGE_EVALUATORS
+from aibench_deepeval.mcp_metrics import MCP_EVALUATORS
 from aibench_deepeval.metrics import METRICS, GEval
 from aibench_deepeval.video_frames import VideoFramesGEval
 from aibench_deepeval.vision import VisionGEval
@@ -32,6 +33,7 @@ EVALUATORS = (
     *METRICS,
     *IMAGE_EVALUATORS,
     *VOICE_EVALUATORS,
+    *MCP_EVALUATORS,
     GEval,
     VisionGEval,
     AudioGEval,
