@@ -5,7 +5,7 @@
   "branch": "fix/plugin-core-match",
   "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
   "status": "active",
-  "current_item": "G22.18 follow-on: bounded compile and case-map memory",
+  "current_item": "G22.19 follow-on: upstream multimodal audio metric support",
   "items": [
     {
       "id": "F01",
@@ -842,7 +842,7 @@
       "id": "G22",
       "priority": "P3",
       "title": "Advanced scale, load, and modality workflows",
-      "detail": "**Partial.** G22.1 through G22.17 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard defaults to loopback and excludes answer text; G22.17 adds remote binding only with TLS 1.2 or newer and an environment-sourced minimum-length bearer token. G22.13 adds pinned DeepEval MCP-Use, MCP Task Completion, and multi-turn MCP-Use scoring over a frozen server inventory and recorded successful MCP tool events. Explicit typed MCP events count by default; untyped events require an MCP-only opt-in, and episode scoring fails closed on missing or malformed telemetry. No live MCP server or provider was contacted. Resource and prompt execution events remain unsupported because stored events do not distinguish them. G22.14 adds bounded, text-only provider-transcription accuracy over stored episodes using pinned DeepEval 4.2.5 G-Eval. Every turn needs a provider transcript; each transcript is capped at 16,000 characters and total text at 1 MiB. It does not submit audio or implement barge-in joining. The dedicated upstream beta class is absent from the pinned package. G22.15 adds local deterministic DER over recorded speaker annotations but does not diarize audio. G22.16 adds deterministic local case-level WER/CER, with 16,000-character and four-million-alignment-cell caps; reports average utterance rates, raw counts allow corpus recomputation, and bindings require explicit lower-is-better thresholds. Upstream multimodal audio metrics remain unsupported. In-memory compilation and case maps remain open.",
+      "detail": "**Partial.** G22.1 through G22.18 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard defaults to loopback and excludes answer text; G22.17 adds remote binding only with TLS 1.2 or newer and an environment-sourced minimum-length bearer token. G22.13 adds pinned DeepEval MCP-Use, MCP Task Completion, and multi-turn MCP-Use scoring over a frozen server inventory and recorded successful MCP tool events. Explicit typed MCP events count by default; untyped events require an MCP-only opt-in, and episode scoring fails closed on missing or malformed telemetry. No live MCP server or provider was contacted. Resource and prompt execution events remain unsupported because stored events do not distinguish them. G22.14 adds bounded, text-only provider-transcription accuracy over stored episodes using pinned DeepEval 4.2.5 G-Eval. Every turn needs a provider transcript; each transcript is capped at 16,000 characters and total text at 1 MiB. It does not submit audio or implement barge-in joining. The dedicated upstream beta class is absent from the pinned package. G22.15 adds local deterministic DER over recorded speaker annotations but does not diarize audio. G22.16 adds deterministic local case-level WER/CER, with 16,000-character and four-million-alignment-cell caps; reports average utterance rates, raw counts allow corpus recomputation, and bindings require explicit lower-is-better thresholds. Upstream multimodal audio metrics remain unsupported. G22.18 streams plan selection, avoids full work-graph allocation, and bounds the resumed-run case-body cache to 512 items / 4 MiB serialized JSON; all-selected compiled case snapshots still scale with the selected dataset. The opt-in 1,000-case interrupt/resume workload used 13.2 MiB traced Python allocations in 90.6 seconds; the audit sample used 17.1 MiB in 64.6 seconds, so the local memory result improved with higher elapsed time.",
       "kind": "feature",
       "status": "pending",
       "verification": [],
@@ -1135,6 +1135,21 @@
           "additional_commits": [
             "5a01e8e37facb00c00c6673dac988020731f20fc"
           ],
+          "pushed": true
+        },
+        {
+          "name": "stream plan selection and bound run case-body memory",
+          "status": "delivered",
+          "verification": [
+            "Plan validation, planning regressions, ingestion, bounded case-cache, real run/rescore, and storage-backed restart selections: 60 passed",
+            "The opt-in 1,000-case HTTP workload interrupted and resumed with all executions and evaluations succeeded; final result: 13.2 MiB peak traced Python allocations in 90.6 seconds",
+            "Compared with the audit sample (17.1 MiB in 64.6 seconds), the local traced-memory result is lower and elapsed time is higher; neither measurement establishes RSS or production capacity",
+            "Ruff check/format, Windows-target Mypy for all five changed source modules, and git diff --check passed",
+            "Final defect-first review found no actionable findings; all-selected compiled case snapshots still scale with the selected dataset"
+          ],
+          "review": "implementation/G22.18-streaming-compile-case-cache-review.md",
+          "implementation": "implementation/G22.18-streaming-compile-case-cache.md",
+          "commit": "e421cdf9e63159e1a77a100d2881679877a3a5dc",
           "pushed": true
         }
       ]

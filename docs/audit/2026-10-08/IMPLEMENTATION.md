@@ -29,6 +29,8 @@ G22.17 extends the dashboard with opt-in remote binding that requires TLS 1.2 or
 random bearer token sourced from an environment variable. The loopback-only default remains
 unchanged; no separate-host reachability or browser-automation evidence is claimed.
 
+G22.18 streams case selection during JSONL validation, keeps deterministic samples in a sample-sized heap, and avoids building the complete planned work graph during analysis. Run and resume load case bodies through a SQLite-backed cache capped at 512 entries and 4 MiB of serialized JSON. The 1,000-case interrupt/resume workload used 13.2 MiB of traced Python allocations in 90.6 seconds; the earlier audit sample used 17.1 MiB in 64.6 seconds. The lower traced allocation came with higher elapsed time, and plans that select every case still retain the compiled selected-case snapshot. See the [G22.18 implementation](implementation/G22.18-streaming-compile-case-cache.md) and [read-only review](implementation/G22.18-streaming-compile-case-cache-review.md).
+
 G22.8 extends `deepeval.vision_g_eval` to score a recorded generated image beside the case
 image, task, and reviewed answer. Both images use the strict inline PNG/JPEG/WebP contract;
 remote paths and URLs remain rejected.
