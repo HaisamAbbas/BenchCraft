@@ -2,12 +2,12 @@
 
 ## Current candidate: `0.1.0rc35` (2026-10-13)
 
-The source candidate is not published. The latest hosted workflow,
+The source candidate is not published. The hosted workflow for the source fixes,
 [38301696360](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38301696360), tests
 commit `64ea5c5d097435805941d0daa5b908d30d289eed`, which contains the current source fixes.
-At the last status check, the run had no final conclusion and some jobs were still queued or
-running. Treat the rc34 results below as the last fully verified platform matrix; they do not
-establish rc35 compatibility.
+At the last status check of that run, it had no final conclusion and some jobs were still
+queued or running. Treat the rc34 results below as the last fully verified platform matrix;
+they do not establish rc35 compatibility.
 
 ## Last fully CI-verified source: `0.1.0rc34` at `af918898` (2026-10-11)
 

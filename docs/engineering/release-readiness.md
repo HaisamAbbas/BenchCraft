@@ -5,9 +5,9 @@
 **Status: hosted validation pending; release not authorized.** This unpublished candidate
 includes the synchronous DeepEval transport-accounting fix and CLI output tests that tolerate
 Rich-wrapped text. Their focused regressions passed locally: three transport-accounting tests,
-one CLI binding test, and two calibration path tests. The latest hosted workflow,
+one CLI binding test, and two calibration path tests. The hosted workflow for these source fixes,
 [38301696360](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38301696360), has no
-final conclusion in the last status check; its 18 jobs were queued or still running. The
+final conclusion at its last status check; its 18 jobs were queued or still running. The
 last fully verified platform matrix below is for rc34 and does not establish rc35 readiness.
 
 No cross-host distributed-worker measurement or approved live-provider calibration has been
