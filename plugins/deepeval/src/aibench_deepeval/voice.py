@@ -259,7 +259,7 @@ def _decode_user_turn(value: Any, index: int) -> tuple[Any, int] | str:
     if (
         not isinstance(value, dict)
         or not {"transcript", "audio"} <= set(value)
-        or not set(value) <= {"transcript", "audio", "audio_start_ms"}
+        or not set(value) <= {"transcript", "audio", "audio_start_ms", "diarization_reference"}
     ):
         return f"invalid:episode.turn.{index}.user_shape"
     try:
@@ -303,6 +303,7 @@ def _decode_assistant_turn(value: Any, index: int) -> tuple[Any, int] | str:
         <= {
             "transcript",
             "provider_transcript",
+            "diarization",
             "audio",
             "audio_start_ms",
         }

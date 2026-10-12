@@ -47,7 +47,7 @@ def test_transcription_evaluator_is_discovered_with_a_bounded_judge_contract() -
     assert [load.error for load in loads] == [None]
     manifest, _ = registry.resolve("deepeval.transcription_accuracy_g_eval@1")
 
-    assert manifest.plugin_version == "0.2.0rc23"
+    assert manifest.plugin_version == "0.2.0rc24"
     assert manifest.package_name == "deepeval"
     assert manifest.package_version == "4.2.5"
     assert manifest.uses_models and manifest.requires_worker

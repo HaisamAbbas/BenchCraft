@@ -6,6 +6,7 @@ from aibench_deepeval.arena import ArenaGEval
 from aibench_deepeval.audio import AudioGEval
 from aibench_deepeval.conversational import CONVERSATIONAL_METRICS, ConversationalGEval
 from aibench_deepeval.dag import ConversationalDag, Dag
+from aibench_deepeval.diarization import DIARIZATION_EVALUATORS
 from aibench_deepeval.faithfulness import Faithfulness
 from aibench_deepeval.image_metrics import IMAGE_EVALUATORS
 from aibench_deepeval.mcp_metrics import MCP_EVALUATORS
@@ -36,6 +37,7 @@ EVALUATORS = (
     *VOICE_EVALUATORS,
     *MCP_EVALUATORS,
     *TRANSCRIPTION_EVALUATORS,
+    *DIARIZATION_EVALUATORS,
     GEval,
     VisionGEval,
     AudioGEval,

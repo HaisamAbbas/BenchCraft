@@ -226,6 +226,37 @@ barge-in exchange.
 
 See DeepEval's [transcription accuracy documentation](https://deepeval.com/docs/metrics-transcription-accuracy).
 
+### Recorded speaker attribution
+
+`deepeval.diarization_error_rate` scores application-provided speaker intervals against reviewed
+reference intervals stored on the same grouped voice episode. Both sides use integer clip-relative
+milliseconds and non-empty `speaker_id` labels capped at 64 characters. The input keeps the existing
+inline PCM WAV and may include:
+
+```json
+{"diarization_reference":{"segments":[{"start_ms":0,"end_ms":750,"speaker_id":"reference-1"}]}}
+```
+
+Each recorded assistant output may add its own intervals beside `transcript`:
+
+```json
+{"transcript":"I can help.","diarization":{"segments":[{"start_ms":0,"end_ms":750,"speaker_id":"output-1"}]}}
+```
+
+The evaluator finds one optimal speaker-label permutation for the complete episode, then reports
+DER as missed speaker time, false-alarm speaker time, and speaker confusion divided by reference
+speaker time. The default includes overlapping speakers; `skip_overlap: true` excludes reference
+overlap. `collar_ms` optionally removes a total-width region centered on each reference active-set
+boundary, including clip boundaries. A default pass requires DER no greater than `0.2`.
+
+Every turn must contain both annotations and an inline WAV so timestamps are bounded to the clip;
+episodes with missing or malformed evidence are not applicable. The limits are 50 turns, 128
+segments per side per turn, 512 segments per side per episode, 64 speakers per side, 512 KiB per
+input clip, and 4 MiB of decoded input audio per episode. This is a deterministic comparison of
+recorded annotations: it does not diarize audio or verify speaker identity, and it sends no audio
+or labels to a model. `deepeval.diarization_error_rate` is not an upstream DeepEval metric class;
+the pinned package currently supplies no diarization scorer.
+
 ### Timestamped sampled-video task scoring
 
 `deepeval.video_frames_g_eval` evaluates a sequence of supplied video-frame samples against

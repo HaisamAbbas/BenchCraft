@@ -34,6 +34,7 @@ SCORED_METRICS = (
     "deepeval.turn_taking_naturalness",
     "deepeval.voice_consistency",
     "deepeval.voice_reliability",
+    "deepeval.diarization_error_rate",
 )
 
 
@@ -82,6 +83,9 @@ def _case(case_id: str, *, start_ms: int) -> BenchmarkCase:
             "transcript": f"Please help with request {case_id}.",
             "audio": INLINE_WAV,
             "audio_start_ms": start_ms,
+            "diarization_reference": {
+                "segments": [{"start_ms": 0, "end_ms": 100, "speaker_id": f"ref-{case_id}"}]
+            },
         },
         fixtures=(),
         group_id="phone-call-1",
@@ -93,10 +97,13 @@ def _output(transcript: str, *, start_ms: int) -> dict[str, Any]:
         "transcript": transcript,
         "audio": INLINE_WAV,
         "audio_start_ms": start_ms,
+        "diarization": {"segments": [{"start_ms": 0, "end_ms": 100, "speaker_id": "app"}]},
     }
 
 
 def _binding(metric: str) -> dict[str, Any]:
+    if metric == "deepeval.diarization_error_rate":
+        return {"metric": metric, "params": {}, "rule": {"comparator": "<=", "threshold": 0.2}}
     return {"metric": metric, "params": {}, "rule": {"comparator": ">=", "threshold": 0.5}}
 
 
@@ -108,7 +115,7 @@ def test_voice_metric_family_is_discovered_with_local_only_contracts() -> None:
     for metric in METRICS:
         manifest, _ = registry.resolve(metric)
         assert manifest.version == "1.0.0"
-        assert manifest.plugin_version == "0.2.0rc23"
+        assert manifest.plugin_version == "0.2.0rc24"
         assert manifest.package_version == "4.2.5"
         assert manifest.requires_worker
         assert not manifest.uses_models
@@ -164,6 +171,12 @@ def test_voice_metrics_score_stored_wav_conversation_and_timestamps(
     assert (
         results[("deepeval.voice_consistency", "turn-1")].status is ExecutionStatus.NOT_APPLICABLE
     )
+    der = results[("deepeval.diarization_error_rate", "turn-2")]
+    assert der.status is ExecutionStatus.OK
+    assert der.value is not None and der.value.value == 0.5
+    assert der.decision.value == "fail"
+    assert der.raw_artifact_ref is not None
+    assert der.resources["model_calls"] == 0
     turn_taking = results[("deepeval.turn_taking_naturalness", "turn-2")]
     assert turn_taking.value is not None and turn_taking.value.value > 0.5
     assert turn_taking.raw_artifact_ref is not None
