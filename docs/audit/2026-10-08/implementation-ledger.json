@@ -1164,11 +1164,14 @@
           "status": "deferred_upstream_release",
           "verification": [
             "Official PyPI latest release as of 2026-10-12 was DeepEval 4.2.8; inspected wheel SHA-256 1bc6ec6ad9f36427e5578a01b4a2aaa357d7ac51bb0cd726af7315304b0339f8 and found no TranscriptionAccuracyMetric symbol in packaged Python sources",
+            "Official PyPI recheck on 2026-10-13 still lists 4.2.8 with the same wheel hash; current versioned docs require provider_transcript and describe transcript comparison rather than audio-input scoring",
             "Current DeepEval docs describe TranscriptionAccuracyMetric as text-only provider-transcript comparison, not audio input evaluation",
             "No dependency pin was changed because no released API was available to verify and the existing adapter requires an exact package pin"
           ],
           "review": "implementation/G22.19-upstream-audio-release-gate-review.md",
-          "implementation": "implementation/G22.19-upstream-audio-release-gate.md"
+          "implementation": "implementation/G22.19-upstream-audio-release-gate.md",
+          "commit": "6a9e83db32510008df0f9878d5dba93c848d5db3",
+          "pushed": true
         }
       ]
     },
