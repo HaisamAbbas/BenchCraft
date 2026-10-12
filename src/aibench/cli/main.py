@@ -17,6 +17,7 @@ from aibench.cli import cache as cache_cli
 from aibench.cli import chat as chat_cli
 from aibench.cli import config as config_cli
 from aibench.cli import connect as connect_cli
+from aibench.cli import dashboard as dashboard_cli
 from aibench.cli import dataset as dataset_cli
 from aibench.cli import experiments as experiments_cli
 from aibench.cli import export as export_cli
@@ -77,6 +78,7 @@ app.command("chat")(chat_cli.chat)
 app.command("init")(project_cli.init)
 app.command("doctor")(project_cli.doctor)
 app.command("benchmark")(benchmark_cli.benchmark)
+app.command("dashboard")(dashboard_cli.serve_dashboard)
 app.command("report")(report_cli.report)
 app.command("export")(export_cli.export)
 app.command("compare")(project_cli.compare)

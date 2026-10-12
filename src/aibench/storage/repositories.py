@@ -1730,6 +1730,48 @@ class Storage:
         ).fetchone()
         return int(row["count"])
 
+    def count_dashboard_source_rows(self, run_id: str, dataset_hash: str, *, limit: int) -> int:
+        """Count materialized rows with indexed scans capped at `limit + 1` per table."""
+        if limit < 0:
+            raise ValueError("dashboard source-row limit cannot be negative")
+        cap = limit + 1
+        row = self.conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM work_items WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM execution_attempts WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM evaluation_attempts WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM metric_results WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM run_events WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM trace_observations WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM cases WHERE dataset_content_hash = ? LIMIT ?)) AS total
+            """,
+            (
+                run_id,
+                cap,
+                run_id,
+                cap,
+                run_id,
+                cap,
+                run_id,
+                cap,
+                run_id,
+                cap,
+                run_id,
+                cap,
+                dataset_hash,
+                cap,
+            ),
+        ).fetchone()
+        return int(row["total"])
+
     def work_item_counts(self, run_id: str) -> dict[str, dict[str, int]]:
         """Return run work totals without decoding and retaining every work-item record."""
         rows = self.conn.execute(
