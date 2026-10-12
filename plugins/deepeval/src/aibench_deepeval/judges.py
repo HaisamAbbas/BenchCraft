@@ -345,6 +345,13 @@ class _OpenAICompatible:
                         raise
                     time.sleep(wait)
                     continue
+                except httpx.RequestError:
+                    # The provider may have received a request before the transport failed.
+                    # Account for uncertain spend, but do not replay outside the retry set.
+                    self.cost_known = False
+                    self.uncertain_calls += 1
+                    self.calls_without_tokens += 1
+                    raise
                 wait = self._wait(attempt, response)
                 if wait is None:
                     try:

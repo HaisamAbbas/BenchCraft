@@ -6,7 +6,7 @@ Audit started: **8 October 2026**, continued into **9 October 2026, Asia/Karachi
 
 **The main application works, but I would not yet rely on it for cost-bounded evaluation or automated release decisions.** The clean installed wheel passed all 32 checks across the repository's eight end-to-end journeys. Additional adversarial and cross-workflow probes found failures in data isolation, measurement integrity, rescoring budgets, reproducibility, and scripting behavior.
 
-This audit identifies **19 findings: 8 P1 and 11 P2**. Sixteen concern runtime behavior or data handling, one concerns the failing type-check gate, one concerns the terminal test harness, and one concerns dependency hygiene. Dependency advisories are a risk inventory, not proof of exploitation through BenchCraft.
+The original source audit identified **19 findings: 8 P1 and 11 P2**. A follow-up implementation review on 13 October added supplemental finding F20, bringing the tracked total to **20 findings: 8 P1 and 12 P2**. Sixteen original findings concern runtime behavior or data handling, one concerns the failing type-check gate, one concerns the terminal test harness, and one concerns dependency hygiene. Dependency advisories are a risk inventory, not proof of exploitation through BenchCraft.
 
 The most consequential results are:
 
@@ -110,6 +110,7 @@ The clean-bootstrap invocation printed a Windows WMI diagnostic (`0x8007000e`) w
 | F17 | P2 | Smoke testing rejects a changed revision of an existing application | CLI reproduction |
 | F18 | P2 | Terminal regression tests inherit capability/color flags and report false failures | Original and normalized-environment rechecks |
 | F19 | P1 | Comparison ignores selected work and uses workspace-wide dataset cases as its denominator | Distinct-run CLI reproduction |
+| F20 | P2 | Synchronous DeepEval judge leaves cost known after a transport error | Supplemental review and dispatched `MockTransport` reproduction |
 
 ## 4. Detailed findings
 
@@ -358,6 +359,26 @@ Engine evaluation work keys retain the **hex-only** short binding prefix, for ex
 **Impact:** prior runs change whether a later limited/sample benchmark can qualify, even when its selected cases all completed. Comparison fabricates coverage loss for cases that were never selected. This is the opposite denominator error from F07.
 
 **Remediation/acceptance:** normalize hash prefixes before matching, preferably share the engine's work-key parser, and derive selected pairs from the frozen run selection/work graph. Two completed selected cases should report 100% coverage whether or not a prior run cataloged additional dataset cases. Test limits, samples, predicates, repetitions, and partial runs in a reused workspace.
+
+### F20 — Synchronous judge transport errors hide uncertain spend (supplemental)
+
+**Source:** A follow-up defect-first review of the shared DeepEval judge transport on 13 October
+2026. This finding was not part of the original 8 October source inventory.
+
+`_OpenAICompatible.generate()` marked cost unknown for its explicit retryable `_TRANSIENT`
+exceptions. Other `httpx.RequestError` subclasses, including `WriteError`, escaped without
+changing usage accounting. A write failure can happen after a provider has accepted the request,
+so leaving the report at known zero spend is misleading.
+
+**Observed:** a `MockTransport` received one request and raised `httpx.WriteError`; before the
+fix the judge propagated the error with `cost_known=True`, `cost()==0.0`, and no uncertain or
+missing-token calls.
+
+**Resolution/acceptance:** the synchronous judge now records one uncertain call, increments
+`calls_without_tokens`, marks cost unknown, and propagates non-retryable request errors without
+replaying them. The existing transient retry set is unchanged. The regression verifies one
+dispatch, unknown cost, one uncertain call, and no retry. See the
+[G22.13 follow-up review](implementation/G22.13-upstream-mcp-metrics-review.md).
 
 ## 5. Missing and incomplete CLI capabilities
 

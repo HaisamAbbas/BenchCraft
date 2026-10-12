@@ -489,6 +489,73 @@ print(json.dumps(asyncio.run(scenario())))
     }
 
 
+def test_sync_judge_accounts_dispatched_write_error() -> None:
+    result = plugin_python(
+        """
+import json, os
+import httpx
+from aibench_deepeval.judges import openai_compatible_judge, report_judge_usage
+os.environ['AIBENCH_SYNC_JUDGE_TEST_KEY'] = 'placeholder'
+judge = openai_compatible_judge({
+    'kind':'openai_compatible',
+    'base_url':'http://127.0.0.1:9000/v1',
+    'model':'sync-test',
+    'api_key_env':'AIBENCH_SYNC_JUDGE_TEST_KEY',
+})
+dispatched = []
+def fail_after_dispatch(request):
+    dispatched.append(request)
+    raise httpx.WriteError('connection dropped while writing request', request=request)
+client = httpx.Client(transport=httpx.MockTransport(fail_after_dispatch))
+httpx.Client = lambda **kwargs: client
+try:
+    try:
+        judge.generate('account this request')
+    except httpx.WriteError as exc:
+        outcome = type(exc).__name__
+    else:
+        outcome = 'no error'
+finally:
+    client.close()
+class Context:
+    def __init__(self):
+        self.usage = []
+    def report_usage(self, **usage):
+        self.usage.append(usage)
+context = Context()
+report_judge_usage(context, None, judge)
+print(json.dumps({
+    'outcome':outcome,
+    'dispatched':len(dispatched),
+    'cost_known':judge.cost_known,
+    'cost':judge.cost(),
+    'uncertain_calls':judge.uncertain_calls,
+    'calls_without_tokens':judge.calls_without_tokens,
+    'calls':judge.calls,
+    'reported':context.usage,
+}))
+"""
+    )
+    assert result == {
+        "outcome": "WriteError",
+        "dispatched": 1,
+        "cost_known": False,
+        "cost": None,
+        "uncertain_calls": 1,
+        "calls_without_tokens": 1,
+        "calls": 0,
+        "reported": [
+            {
+                "provider": "sync-test",
+                "calls": None,
+                "tokens": {},
+                "cost": None,
+                "calls_without_tokens": 1,
+            }
+        ],
+    }
+
+
 def test_multimodal_judge_accounts_request_error_during_gate_teardown() -> None:
     result = plugin_python(
         """
