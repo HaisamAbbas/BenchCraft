@@ -75,11 +75,15 @@ on `9611ede768725abf968d1c4914ce911f4f20e719` published all six per-platform JUn
 six core `pytest` jobs again failed with generic exit-code annotations. The artifact contents were
 not accessible through this unauthenticated review session, so their test details remain unknown.
 The subsequent source adds content-withheld test-ID and exception-type annotations. Hosted run
-38369979240 is still in progress; its public annotations identify
+38369979240 failed across all six core jobs and identified
 `tests.test_cli_dashboard::test_dashboard_cli_requires_existing_workspace_and_exposes_help` with
-`AssertionError` in repeated core jobs. The targeted test passes locally on Windows/Python 3.12 and
-contains several assertions, so the source revision now adds the failing source line. Hosted
-verification of that line annotation is pending.
+`AssertionError`. Follow-up run
+[38371903480](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38371903480) verified source
+locations on all six failures and pinpointed `tests/test_cli_dashboard.py:532`, the assertion that
+expects `--no-open` in captured help output. The targeted test and full dashboard module pass
+locally on Windows with Python 3.11 and 3.12. A full-order local replay also passed that test before
+being stopped at 10%; it did not complete the suite. The JUnit assertion detail remains inaccessible
+in this session, so the hosted-only mismatch is not yet explained.
 
 A CI-style Windows 11 / Python 3.11.16 full-suite attempt once failed in
 `test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with `Access is

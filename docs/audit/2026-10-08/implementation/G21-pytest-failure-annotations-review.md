@@ -12,9 +12,10 @@ a pass. Detailed output remains in the seven-day JUnit artifact and the job log.
 Ten focused tests passed, including source-line extraction, malformed/empty reports,
 command-injection escaping, content withholding, and the annotation cap. Ruff lint and format checks
 passed, Windows-target Mypy passed for the helper, and both Python 3.11 and 3.12 accepted the script.
-Workflow YAML and the audit ledger parse successfully. The annotations still need hosted
-verification. The read-only `$review-agent` review of the complete helper/test diff and workflow
-call site found no actionable defects. Local checks pass; hosted verification of the source-line
-annotation remains the material gap.
+Workflow YAML and the audit ledger parse successfully. Hosted run 38371903480 rendered the source
+file and line on all six core failures, confirming CI integration. The read-only `$review-agent`
+review of the complete helper/test diff and workflow call site found no actionable defects. The
+annotation works; the unresolved issue is the hosted test assertion itself, whose JUnit detail is
+not accessible in this session.
 
 **No findings.**

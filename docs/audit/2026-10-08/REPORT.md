@@ -587,11 +587,13 @@ run, [38367136426](https://github.com/HaisamAbbas/BenchCraft/actions/runs/383671
 checks and six plugin contract jobs passed, while all six core `pytest` jobs failed. The run includes
 the F02 orphaned-metadata fix and published six JUnit artifacts, but their contents were not
 accessible in this unauthenticated review session; the visible annotations still expose only
-generic exit code 1. A later annotation run is still in progress; its visible checks have surfaced
-the dashboard CLI test ID and `AssertionError`, but not the failing assertion. The current CI
-follow-up adds a bounded source-file line as well as the test ID and exception type, while keeping
-assertion contents in the protected artifact. Hosted verification of the source-line annotation is
-pending.
+generic exit code 1. The bounded annotation follow-up was verified in hosted run
+[38371903480](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38371903480): all six core jobs
+identify `tests.test_cli_dashboard::test_dashboard_cli_requires_existing_workspace_and_exposes_help`
+at `tests/test_cli_dashboard.py:532`, where the test expects `--no-open` in captured help output.
+The assertion passes locally on Windows with Python 3.11 and 3.12, including in full-suite order;
+the underlying hosted discrepancy remains unresolved because the JUnit failure detail is not
+accessible in this session. The annotation itself withholds assertion output.
 The clean local Python 3.12.10 full suite on the F02 follow-up passed 1,853 tests and skipped 222;
 four focused regression tests passed under both Python 3.11.16 and 3.12.10. The hosted failure's
 cause remains unconfirmed. Do not carry forward rc34's pass as current readiness. Keep the
