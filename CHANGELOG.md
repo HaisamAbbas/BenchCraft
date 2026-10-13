@@ -5,6 +5,16 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc36 — sessions from earlier releases redraft again
+
+- **"plan-….json holds a different plan; refusing to overwrite it".** After upgrading to
+  rc35, a session made by an earlier release could not refresh its plan (when it was reopened,
+  when a plugin was installed) or take any change that drafted the same plan again. rc35 added
+  `warmup_repetitions` and `load_profile` to plans and leaves their defaults out of a plan's
+  hash, so an unchanged plan kept its ID and its file name; but the file was written with
+  them, so its text differed from the file the earlier release wrote. Plan files are now written
+  in the form that is hashed.
+
 ## 0.1.0rc35 — audit fixes, CI and workspace tools, distributed runs, multimodal metrics
 
 DeepEval plugin 0.2.0rc25.

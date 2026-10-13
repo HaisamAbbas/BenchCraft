@@ -40,7 +40,7 @@ from aibench.core.sessions import (
     SessionChoices,
     SessionReleaseGate,
 )
-from aibench.engine.compile import freeze_plan, load_policy
+from aibench.engine.compile import freeze_plan, load_policy, plan_document
 from aibench.planning.catalog import CONCEPTS
 from aibench.planning.drafts import PlanDraft, PlannerProvenance, draft_document, validate_draft
 from aibench.planning.planner import PlanningInputs, PlanningOutcome
@@ -339,7 +339,7 @@ def build_draft(
     plan_file = f"plan-{plan_hash.split(':', 1)[-1][:16]}.json"
     _write_once(
         directory / plan_file,
-        json.dumps(validation.plan.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        json.dumps(plan_document(validation.plan), indent=2, sort_keys=True) + "\n",
     )
     outcome = PlanningOutcome(proposal, validation, PlannerProvenance(kind="template"))
     document = draft_document(

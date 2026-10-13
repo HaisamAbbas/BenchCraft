@@ -31,7 +31,7 @@ from aibench.core.plans import (
     PluginEnvironmentRef,
     RetryPolicy,
 )
-from aibench.engine.compile import freeze_plan, load_plan
+from aibench.engine.compile import freeze_plan, load_plan, plan_document
 from aibench.inspection.dataset_summary import summarize_dataset
 from aibench.inspection.profile import inspect_application
 from aibench.inspection.source import CodebaseInspector
@@ -305,7 +305,7 @@ def write_draft(
         dataset_hash=inputs.dataset.content_hash,
         supersedes=supersedes,
     )
-    plan_json = json.dumps(validation.plan.model_dump(mode="json"), indent=2, sort_keys=True)
+    plan_json = json.dumps(plan_document(validation.plan), indent=2, sort_keys=True)
     _write_atomic(plan_file, plan_json + "\n")
     _write_atomic(draft_file, document.model_dump_json(indent=2) + "\n")
     return document

@@ -365,8 +365,19 @@ def test_dashboard_request_timeout_releases_stalled_slots(tmp_path: Path) -> Non
             acquired += 1
         for _ in range(acquired):
             server._request_slots.release()
-        with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=5) as response:
-            assert response.status == 200
+        # On a slow runner (macOS CI) the test can take the slots before the stalled
+        # handlers do; they then take them afterwards, and a request in that window is
+        # refused as busy until their timeout releases them. Released is what matters.
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=5) as response:
+                    assert response.status == 200
+                break
+            except HTTPError as exc:
+                if exc.code != 503 or time.monotonic() > deadline:
+                    raise
+                time.sleep(0.05)
     finally:
         for client in clients:
             client.close()
