@@ -605,7 +605,7 @@ def _application_environment_identity(
         site_paths, import_paths, import_paths_trackable = environment_paths(
             executable, user_environment=user_environment
         )
-        dependency_versions = dependency_lock_hash(site_paths) or content_hash([])
+        dependency_versions = dependency_lock_hash(site_paths)
         import_source_hash = (
             plugin_paths_hash(
                 [path for path in import_paths if path.exists()],
@@ -625,6 +625,7 @@ def _application_environment_identity(
             )
             if import_paths_trackable
             and import_source_hash is not None
+            and dependency_versions is not None
             and custom_user_base is None
             and not opaque_user_base
             and custom_python_home is None

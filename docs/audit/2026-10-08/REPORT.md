@@ -148,6 +148,10 @@ The clean-bootstrap invocation printed a Windows WMI diagnostic (`0x8007000e`) w
 
 **Acceptance:** an implementation or dependency change causes a fresh evaluation or an explicit incompatibility, and never silently stamps a new producer identity on an old value.
 
+**Follow-up:** malformed or orphaned `dist-info` metadata now makes the dependency inventory
+unknown. It no longer crashes run creation or becomes a false empty-environment fingerprint;
+resume requires a verifiable environment identity. See the [F02 metadata follow-up](implementation/F02-orphaned-metadata.md).
+
 ### F03 — `"false"` becomes application-visible
 
 **Location:** `src/aibench/datasets/normalize.py:131`.
@@ -578,13 +582,12 @@ The ledger records all 21 tracked findings as delivered, along with G01–G21 an
 contains local implementations and synthetic evidence, while separate-host worker measurements
 and approved live-provider calibration remain open; G22.19 remains deferred pending a verifiable
 upstream API. The last fully passed hosted platform matrix is rc34. The latest completed hosted
-run, [38355637698](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38355637698) on
-`2f586c7bd710d35dc73b0d959db6a1c6c334a291`, completed with 12/18 jobs passing: all six
-clean-wheel checks and six plugin contract jobs passed, while all six core `pytest` jobs failed.
-The previous run [38351148266](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38351148266)
-had the same outcome. Available annotations expose only generic exit code 1. A CI-style local
-full-suite attempt failed once in workspace repair but passed the same test in 12 isolated repeats
-and a later traced replay; the hosted failure's cause remains unconfirmed and the full suite has
-not completed locally. Do not carry forward rc34's pass as current readiness. Keep the architecture
-and existing working journeys, close the external G22 evidence gates, identify and resolve the CI
-test failure, then obtain a green hosted matrix before making release claims.
+run, [38357086081](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38357086081) on
+`21fad75f`, completed with 12/18 jobs passing: all six clean-wheel checks and six plugin contract
+jobs passed, while all six core `pytest` jobs failed. It predates the F02 orphaned-metadata
+follow-up, so it does not validate that fix. Available annotations expose only generic exit code 1.
+The clean local Python 3.12.10 full suite on the F02 follow-up passed 1,853 tests and skipped 222;
+four focused regression tests passed under both Python 3.11.16 and 3.12.10. The hosted failure's
+cause remains unconfirmed. Do not carry forward rc34's pass as current readiness. Keep the
+architecture and existing working journeys, close the external G22 evidence gates, identify and
+resolve the hosted CI test failure, then obtain a green hosted matrix before making release claims.

@@ -38,9 +38,13 @@
         "Mypy: 140 source files passed; Ruff src/tests passed",
         "Plugin package and worker dependency versions, custom import-path contents, and interpreter runtime are included in compatibility/cache identity",
         "Unknown, incomplete, oversized, or unreadable worker identity disables carry-forward and evaluation-cache reuse",
-        "Final independent review: no findings"
+        "Final independent review: no findings",
+        "F02 follow-up: orphaned dist-info metadata now produces an unknown dependency identity instead of a TypeError or an empty-set fallback; Python 3.11.16 and 3.12.10 focused regression selections passed (4 each), and the clean Python 3.12.10 full suite passed (1,853 passed, 222 skipped)",
+        "Windows-target Mypy passed for 175 source files and Ruff lint passed for changed files; see implementation/F02-orphaned-metadata.md and implementation/F02-orphaned-metadata-review.md"
       ],
       "review": "evidence/F02-review.md",
+      "follow_up_review": "implementation/F02-orphaned-metadata-review.md",
+      "follow_up_implementation": "implementation/F02-orphaned-metadata.md",
       "commit": "f3e542a4ec7d915f308c98ce15b08e51e577d6ef",
       "pushed": true
     },

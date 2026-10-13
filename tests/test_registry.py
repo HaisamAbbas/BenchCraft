@@ -64,6 +64,29 @@ def test_worker_dependency_lock_hash_tracks_installed_versions(tmp_path: Path) -
     assert first_hash != dependency_lock_hash([second])
 
 
+def test_worker_dependency_lock_hash_identifies_an_empty_inventory(tmp_path: Path) -> None:
+    first_hash = dependency_lock_hash([tmp_path])
+
+    assert first_hash is not None
+    assert first_hash == dependency_lock_hash([tmp_path])
+
+
+def test_worker_dependency_lock_hash_fails_closed_on_incomplete_metadata(
+    tmp_path: Path,
+) -> None:
+    valid = tmp_path / "valid_dependency-1.0.dist-info"
+    valid.mkdir()
+    (valid / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: valid-dependency\nVersion: 1.0\n",
+        encoding="utf-8",
+    )
+    orphan = tmp_path / "orphan_dependency-2.0.dist-info"
+    orphan.mkdir()
+    (orphan / "licenses").mkdir()
+
+    assert dependency_lock_hash([tmp_path]) is None
+
+
 def test_worker_python_identity_reads_the_interpreter_runtime() -> None:
     assert worker_python_identity(Path(sys.executable)) is not None
 

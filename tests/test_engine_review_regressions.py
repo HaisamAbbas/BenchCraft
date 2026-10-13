@@ -570,6 +570,51 @@ def test_editable_install_source_is_part_of_python_environment_identity(
     )
 
 
+def test_python_environment_identity_is_unknown_with_orphaned_distribution_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.core.models import ApplicationSpec, CliTransport
+    from aibench.services import runs as run_service
+
+    site = tmp_path / "site-packages"
+    orphan = site / "orphan_dependency-2.0.dist-info"
+    orphan.mkdir(parents=True)
+    (orphan / "licenses").mkdir()
+    monkeypatch.setattr(
+        run_service,
+        "environment_paths",
+        lambda _python, **_kwargs: ([site], [site], True),
+    )
+    spec = ApplicationSpec(
+        application_id="cli-python-with-orphaned-metadata",
+        runner="cli",
+        target="app.py",
+        transport=CliTransport(argv=(sys.executable, "app.py")),
+    )
+
+    identity = run_service._application_environment_identity(spec, tmp_path, {})
+
+    assert identity is not None
+    assert identity["dependencies"] is None
+
+    h = Harness(tmp_path / "run")
+    run_id = h.create(h.plan(dataset=h.dataset({"a": "hi"}), application=h.cli_app()))
+    storage, _ = h.storage()
+    try:
+        record = storage.get_run(run_id)
+        assert record is not None
+        assert (
+            record.manifest.parameters["application_environment_identity"]["dependencies"] is None
+        )
+        storage.update_run_status(run_id, "interrupted")
+    finally:
+        storage.db.close()
+
+    with pytest.raises(RunError, match="installed dependencies could not be fully fingerprinted"):
+        h.execute(run_id)
+    assert h.count() == 0
+
+
 def test_drift_does_not_prevent_a_dead_cancellation_from_finishing(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     run_id = h.create(

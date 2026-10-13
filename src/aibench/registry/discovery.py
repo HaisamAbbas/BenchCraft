@@ -98,16 +98,23 @@ def core_version(paths: Sequence[Path]) -> str | None:
 
 
 def dependency_lock_hash(paths: Sequence[Path]) -> str | None:
-    """Hash installed distribution names and versions in a plugin environment."""
+    """Hash installed distributions; malformed metadata makes the inventory unknown."""
     installed = set()
     for dist in metadata.distributions(path=[str(path) for path in paths]):
-        try:
-            name = dist.metadata["Name"]
-        except KeyError:
-            continue
-        installed.add((re.sub(r"[-_.]+", "-", name).casefold(), dist.version))
-    if not installed:
-        return None
+        if "Name" not in dist.metadata:
+            return None
+        name = dist.metadata["Name"]
+        if not isinstance(name, str) or not name.strip():
+            return None
+        if "Version" not in dist.metadata:
+            return None
+        version = dist.version
+        if not isinstance(version, str) or not version.strip():
+            return None
+        normalized_name = re.sub(r"[-_.]+", "-", name).casefold()
+        if not normalized_name:
+            return None
+        installed.add((normalized_name, version))
     return content_hash([{"name": name, "version": version} for name, version in sorted(installed)])
 
 

@@ -51,13 +51,21 @@ jobs failed at `Tests (pytest)`, while the plugin and clean-wheel jobs passed. T
 `Tests (pytest)`, and all six plugin and six clean-wheel jobs passed. Failure annotations still
 contain only the generic exit code 1, so the hosted failing test and root cause are not established.
 
-A CI-style Windows 11 / Python 3.11.16 full-suite attempt passed 355 tests and skipped 13 before
-once failing in `test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with
-`Access is denied` while opening the preview `.aibench` directory as an archive. That test passed
-alone, in the 55-pass workspace module, and in 12 consecutive isolated repeats; a traced full-suite
-replay also passed it before being interrupted at 24%. This local result is inconclusive and does
-not establish the hosted root cause. The full suite on this source has not completed; do not carry
-the earlier platform pass forward as current rc35 readiness.
+The subsequent [hosted run 38357086081](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38357086081)
+on `21fad75f` also completed 12/18 with the same job split. It predates the F02 orphaned-metadata
+fix documented in [its follow-up](F02-orphaned-metadata.md), so it does not validate that change.
+The public annotations still omit failing test names.
+
+A CI-style Windows 11 / Python 3.11.16 full-suite attempt once failed in
+`test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with `Access is
+denied` while opening the preview `.aibench` directory as an archive. That test passed alone, in the
+55-pass workspace module, and in 12 consecutive isolated repeats. A later clean CI-style Python
+3.11.16 full-suite run on the source immediately before the F02 follow-up passed 1,850 tests and
+skipped 222. After the F02 fix, a fresh Windows 11 / Python 3.12.10 CI-style full suite passed
+1,853 tests and skipped 222; its four focused regression tests also passed under both Python
+3.11.16 and 3.12.10. Windows-target Mypy passed for 175 source files and Ruff lint passed on the
+changed files. These local runs give current source-level evidence, but they do not explain or
+clear the hosted core-job failures. The F02 follow-up's hosted matrix is still pending.
 
 ## Scope boundary
 
