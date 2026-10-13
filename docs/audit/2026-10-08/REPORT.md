@@ -577,10 +577,13 @@ Relevant standalone records:
 The ledger records all 21 tracked findings as delivered, along with G01–G21 and G23. G22
 contains local implementations and synthetic evidence, while separate-host worker measurements
 and approved live-provider calibration remain open; G22.19 remains deferred pending a verifiable
-upstream API. The last fully passed hosted platform matrix is rc34. The latest hosted run for
-rc35 source commit `d8fda15389e1ddb58a5cdc4c4f9ca6e150dafd65` completed with 12/18 jobs passing:
-all six clean-wheel checks and six plugin contract jobs passed, while all six core `pytest` jobs
-failed. Available annotations expose only generic exit code 1, and the full suite on this commit
-has not completed locally. Do not carry forward rc34's pass as current readiness. Keep the
-architecture and existing working journeys, close the external G22 evidence gates, identify and
-resolve the CI test failure, then obtain a green hosted matrix before making release claims.
+upstream API. The last fully passed hosted platform matrix is rc34. The latest completed hosted
+run, [38351148266](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38351148266) on
+`e3df04568ffc08d082b7283c2cc190bb20576ab6`, completed with 12/18 jobs passing: all six
+clean-wheel checks and six plugin contract jobs passed, while all six core `pytest` jobs failed.
+Available annotations expose only generic exit code 1. A CI-style local full-suite attempt failed
+once in workspace repair but passed the same test in 12 isolated repeats and a later traced replay;
+the hosted failure's cause remains unconfirmed and the full suite has not completed locally. Do
+not carry forward rc34's pass as current readiness. Keep the architecture and existing working
+journeys, close the external G22 evidence gates, identify and resolve the CI test failure, then
+obtain a green hosted matrix before making release claims.

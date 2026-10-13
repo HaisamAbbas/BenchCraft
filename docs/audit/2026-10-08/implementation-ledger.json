@@ -863,14 +863,16 @@
       "id": "G21",
       "priority": "P2",
       "title": "Platform and release confidence",
-      "detail": "**Delivered.** Hosted run 38145775882 passed all 18 jobs on source commit af918898e8a7d14bff2b861c6b3140d3185844d9. The latest hosted run 38308978546 on d8fda15389e1ddb58a5cdc4c4f9ca6e150dafd65 passed the six clean-wheel release checks and six real-package DeepEval/Ragas contract jobs, but all six core pytest jobs failed. Current rc35 platform readiness is not green; see implementation/G21-platform-readiness.md. No live provider, external pilot, or release authorization is implied.",
+      "detail": "**Delivered.** Hosted run 38145775882 passed all 18 jobs on source commit af918898e8a7d14bff2b861c6b3140d3185844d9. The latest completed hosted run 38351148266 on e3df04568ffc08d082b7283c2cc190bb20576ab6 passed the six clean-wheel release checks and six real-package DeepEval/Ragas contract jobs, but all six core pytest jobs failed. Current rc35 platform readiness is not green; see implementation/G21-platform-readiness.md. No live provider, external pilot, or release authorization is implied.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
         "Hosted Actions run 38145775882 on af918898e8a7d14bff2b861c6b3140d3185844d9 passed all 18 jobs: six platform/version pytest suites, six clean-wheel release checks, and six real-package DeepEval/Ragas contract jobs; see implementation/G21-platform-readiness.md",
         "Core suites: Ubuntu 1,745 passed / 187 skipped per Python version; Windows 1,742 / 190; macOS 1,743 / 189",
         "Latest hosted run 38308978546 on d8fda15389e1ddb58a5cdc4c4f9ca6e150dafd65: all six clean-wheel checks and six plugin contract jobs passed; all six core jobs passed setup, dependency audits, Ruff, and Mypy but failed at Tests (pytest). Annotations expose only generic exit code 1, and the full source-commit suite has not completed locally.",
+        "Follow-up run 38351148266 on e3df04568ffc08d082b7283c2cc190bb20576ab6 repeated the same matrix outcome: all six core jobs failed at Tests (pytest), and all six release checks plus six plugin contract jobs passed. Failure annotations again provide only generic exit code 1.",
         "Focused local Windows 11 / Python 3.12.10 verification on current source: DeepEval metric module 45 passed, 1 skipped; judge-calibration module 23 passed, 1 skipped. These focused runs do not replace the full hosted matrix.",
+        "CI-style Windows 11 / Python 3.11.16 full-suite reproduction passed 355 tests and skipped 13 before one failure in workspace repair (Access denied opening the preview .aibench directory as an archive); that test passed alone and in 12 isolated repeats, and a traced full-suite replay passed it before interruption at 24%. Root cause is unconfirmed; the full suite did not complete.",
         "Local Ruff, Mypy for 168 source files, and focused workspace/integrity/quickstart regressions passed; independent review found no code findings"
       ],
       "review": "implementation/G21-platform-readiness-review.md",

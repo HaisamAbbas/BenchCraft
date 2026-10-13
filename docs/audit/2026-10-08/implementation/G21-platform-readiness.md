@@ -37,13 +37,24 @@ contract jobs passed across the three operating systems on Python 3.12. Earlier 
 SQLite descriptor/sidecar races and a fractional-latency claim-check regression; the final run
 includes the fixes and their regression coverage.
 
-The subsequent [hosted run 38308978546](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38308978546)
+The first rc35 follow-up [hosted run 38308978546](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38308978546)
 on `d8fda15389e1ddb58a5cdc4c4f9ca6e150dafd65` completed with 12 of 18 jobs passing. All six
 DeepEval/Ragas contract jobs and all six clean-wheel release checks passed. All six core jobs
 passed setup, dependency audits, Ruff, and Mypy, then failed at `Tests (pytest)`; their CLI smoke
-and build steps were skipped. GitHub's available annotations show only a generic exit code 1, so
-the failing test names and root cause are not established by this run. Focused local metric and
-calibration modules pass, but the full suite on this source commit has not completed. Do not carry
+and build steps were skipped.
+
+The later [hosted run 38351148266](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38351148266)
+on `e3df04568ffc08d082b7283c2cc190bb20576ab6` repeated that 12/18 result: each of the six core
+jobs failed at `Tests (pytest)`, while the plugin and clean-wheel jobs passed. Failure annotations
+still contain only the generic exit code 1, so the hosted failing test and root cause are not
+established.
+
+A CI-style Windows 11 / Python 3.11.16 full-suite attempt passed 355 tests and skipped 13 before
+once failing in `test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with
+`Access is denied` while opening the preview `.aibench` directory as an archive. That test passed
+alone, in the 55-pass workspace module, and in 12 consecutive isolated repeats; a traced full-suite
+replay also passed it before being interrupted at 24%. This local result is inconclusive and does
+not establish the hosted root cause. The full suite on this source has not completed; do not carry
 the earlier platform pass forward as current rc35 readiness.
 
 ## Scope boundary
