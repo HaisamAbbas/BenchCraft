@@ -10,9 +10,9 @@ advisory. An earlier hosted run for source commit `af918898` passed all 18 jobs.
 for the current rc35 source has six failing core test jobs, so platform readiness is not green.
 
 The core matrix stores a per-platform JUnit report for seven days. A follow-up check step emits up
-to 20 content-withheld annotations containing each failed test ID and recognized exception type;
-full failure details stay in the report artifact. Missing or malformed reports produce a warning
-without replacing the pytest result.
+to 20 content-withheld annotations containing each failed test ID, test source location, and
+recognized exception type; assertion values stay in the report artifact. Missing or malformed
+reports produce a warning without replacing the pytest result.
 
 The first hosted run exposed stale platform assumptions in path handling, SQLite restore
 publication, CLI output assertions, plugin isolation, and session-recovery fixtures. The changes
@@ -29,7 +29,7 @@ their purpose is to test resumption rather than working-tree changes.
   22 skipped on Windows 11 / Python 3.12.10.
 - The DeepEval metric module passed: 45 passed, 1 skipped; the judge-calibration module passed:
   23 passed, 1 skipped, using the editable development environment and isolated plugin workers.
-- The pytest report annotator passed eight focused tests, Ruff lint/format, Windows-target Mypy,
+- The pytest report annotator passed ten focused tests, Ruff lint/format, Windows-target Mypy,
   workflow YAML parsing, and a failing-report serialization check. See the
   [annotation review](G21-pytest-failure-annotations-review.md).
 - The independent read-only review found no findings.
@@ -74,7 +74,12 @@ The next [hosted run 38367136426](https://github.com/HaisamAbbas/BenchCraft/acti
 on `9611ede768725abf968d1c4914ce911f4f20e719` published all six per-platform JUnit artifacts; all
 six core `pytest` jobs again failed with generic exit-code annotations. The artifact contents were
 not accessible through this unauthenticated review session, so their test details remain unknown.
-This follow-up adds content-withheld test-ID annotations; hosted verification is pending.
+The subsequent source adds content-withheld test-ID and exception-type annotations. Hosted run
+38369979240 is still in progress; its public annotations identify
+`tests.test_cli_dashboard::test_dashboard_cli_requires_existing_workspace_and_exposes_help` with
+`AssertionError` in repeated core jobs. The targeted test passes locally on Windows/Python 3.12 and
+contains several assertions, so the source revision now adds the failing source line. Hosted
+verification of that line annotation is pending.
 
 A CI-style Windows 11 / Python 3.11.16 full-suite attempt once failed in
 `test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with `Access is

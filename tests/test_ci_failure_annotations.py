@@ -15,6 +15,7 @@ def _write_junit(
     *,
     class_name: str = "tests.test_example",
     failure_message: str = "AssertionError: private diagnostic value",
+    failure_traceback: str = "",
 ) -> None:
     root = ET.Element("testsuites")
     suite = ET.SubElement(root, "testsuite")
@@ -25,7 +26,8 @@ def _write_junit(
             classname=class_name,
             name=f"test_failure_{index}",
         )
-        ET.SubElement(case, "failure", message=failure_message)
+        failure = ET.SubElement(case, "failure", message=failure_message)
+        failure.text = failure_traceback
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
 
 
@@ -84,6 +86,46 @@ def test_empty_failure_message_falls_back_to_generic_type(tmp_path: Path) -> Non
 
     assert result.returncode == 0
     assert "Failure type: failure." in result.stdout
+
+
+def test_annotation_includes_test_source_location_without_assertion_text(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "junit.xml"
+    _write_junit(
+        report,
+        failure_traceback=(
+            "Traceback (most recent call last):\n"
+            "C:\\work\\BenchCraft\\tests\\test_example.py:12: AssertionError\n"
+            "    assert secret == 'private value'\n"
+            "AssertionError: private diagnostic"
+        ),
+    )
+
+    result = _run_report(report)
+
+    assert result.returncode == 0
+    assert "file=tests/test_example.py,line=12,title=" in result.stdout
+    assert "title=Pytest failure%3A" in result.stdout
+    assert "private value" not in result.stdout
+    assert "private diagnostic" not in result.stdout
+
+
+def test_annotation_omits_invalid_or_oversized_source_location(tmp_path: Path) -> None:
+    traces = (
+        f"tests/{'a' * 321}.py:12: AssertionError",
+        f"tests/test_example.py:{'9' * 11}: AssertionError",
+        "tests/test_example.py:0: AssertionError",
+    )
+    for index, trace in enumerate(traces):
+        report = tmp_path / f"junit-{index}.xml"
+        _write_junit(report, failure_traceback=trace)
+
+        result = _run_report(report)
+
+        assert result.returncode == 0
+        assert "::error title=" in result.stdout
+        assert " file=" not in result.stdout
 
 
 def test_unbounded_exception_name_is_not_exposed(tmp_path: Path) -> None:

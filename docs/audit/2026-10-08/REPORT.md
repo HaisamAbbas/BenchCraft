@@ -587,9 +587,11 @@ run, [38367136426](https://github.com/HaisamAbbas/BenchCraft/actions/runs/383671
 checks and six plugin contract jobs passed, while all six core `pytest` jobs failed. The run includes
 the F02 orphaned-metadata fix and published six JUnit artifacts, but their contents were not
 accessible in this unauthenticated review session; the visible annotations still expose only
-generic exit code 1. The current CI follow-up adds bounded test-ID and exception-type annotations
-while keeping assertion contents in the protected artifact. Hosted verification of those
-annotations is pending.
+generic exit code 1. A later annotation run is still in progress; its visible checks have surfaced
+the dashboard CLI test ID and `AssertionError`, but not the failing assertion. The current CI
+follow-up adds a bounded source-file line as well as the test ID and exception type, while keeping
+assertion contents in the protected artifact. Hosted verification of the source-line annotation is
+pending.
 The clean local Python 3.12.10 full suite on the F02 follow-up passed 1,853 tests and skipped 222;
 four focused regression tests passed under both Python 3.11.16 and 3.12.10. The hosted failure's
 cause remains unconfirmed. Do not carry forward rc34's pass as current readiness. Keep the

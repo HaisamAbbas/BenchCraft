@@ -3,15 +3,18 @@
 This read-only review inspected the complete CI workflow change, the JUnit parser, its regression
 tests, and the existing report-artifact upload step. No `AGENTS.md` files apply to this repository.
 
-The annotations expose only a bounded test ID and a recognized exception class; assertion values
-and traceback content stay out of them. Workflow-command delimiters are escaped, output is capped
-at 20 failures, and missing or malformed XML only emits a warning. The annotator does not alter
-pytest's exit status, so it cannot turn a failed test job into a pass. Detailed output remains in
-the seven-day JUnit artifact and the job log.
+The annotations expose only a bounded test ID, an optional source-file line, and a recognized
+exception class; assertion values and traceback content stay out of them. Workflow-command
+delimiters are escaped, output is capped at 20 failures, and missing or malformed XML only emits a
+warning. The annotator does not alter pytest's exit status, so it cannot turn a failed test job into
+a pass. Detailed output remains in the seven-day JUnit artifact and the job log.
 
-Eight focused tests passed, including malformed/empty reports, command-injection escaping,
-content withholding, and the annotation cap. Ruff lint and format checks passed, Windows-target
-Mypy passed for the helper, and both Python 3.11 and 3.12 accepted the script. Workflow YAML and
-the audit ledger parse successfully. The annotations still need hosted verification.
+Ten focused tests passed, including source-line extraction, malformed/empty reports,
+command-injection escaping, content withholding, and the annotation cap. Ruff lint and format checks
+passed, Windows-target Mypy passed for the helper, and both Python 3.11 and 3.12 accepted the script.
+Workflow YAML and the audit ledger parse successfully. The annotations still need hosted
+verification. The read-only `$review-agent` review of the complete helper/test diff and workflow
+call site found no actionable defects. Local checks pass; hosted verification of the source-line
+annotation remains the material gap.
 
 **No findings.**

@@ -10,6 +10,10 @@ from pathlib import Path
 
 MAX_ANNOTATIONS = 20
 MAX_TEST_ID_LENGTH = 240
+MAX_SOURCE_PATH_LENGTH = 320
+_TEST_LOCATION = re.compile(
+    r"(?m)(?:^|[/\\])(?P<path>tests(?:[/\\][^:\r\n]+)*?\.py):(?P<line>[0-9]+)"
+)
 
 
 def _escape_command_property(value: str) -> str:
@@ -26,13 +30,13 @@ def _escape_command_data(value: str) -> str:
     return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
-def _failure_records(report: Path) -> list[tuple[str, str]] | None:
+def _failure_records(report: Path) -> list[tuple[str, str, str | None]] | None:
     try:
         root = ET.parse(report).getroot()
     except (OSError, ET.ParseError):
         return None
 
-    records: list[tuple[str, str]] = []
+    records: list[tuple[str, str, str | None]] = []
     for testcase in root.iter("testcase"):
         class_name = testcase.get("classname", "unknown")
         test_name = testcase.get("name", "unnamed")
@@ -53,7 +57,15 @@ def _failure_records(report: Path) -> list[tuple[str, str]] | None:
                 )
                 else result.tag
             )
-            records.append((test_id, exception_type))
+            locations = list(_TEST_LOCATION.finditer(result.text or ""))
+            source_location = None
+            if locations:
+                location = locations[-1]
+                source_path = location.group("path").replace("\\", "/")
+                line = location.group("line")
+                if len(source_path) <= MAX_SOURCE_PATH_LENGTH and len(line) <= 10 and int(line) > 0:
+                    source_location = f"{source_path}:{line}"
+            records.append((test_id, exception_type, source_location))
     return records
 
 
@@ -70,12 +82,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    for test_id, exception_type in failures[:MAX_ANNOTATIONS]:
+    for test_id, exception_type, source_location in failures[:MAX_ANNOTATIONS]:
         title = _escape_command_property(f"Pytest failure: {test_id}")
+        properties: list[str] = []
+        if source_location is not None:
+            source_path, line = source_location.rsplit(":", 1)
+            properties.extend((f"file={_escape_command_property(source_path)}", f"line={line}"))
+        properties.append(f"title={title}")
+        message = f"Failure type: {exception_type}"
         message = _escape_command_data(
-            f"Failure type: {exception_type}. See the JUnit artifact or pytest log for details."
+            f"{message}. See the JUnit artifact or pytest log for details."
         )
-        print(f"::error title={title}::{message}")
+        print(f"::error {','.join(properties)}::{message}")
 
     omitted = len(failures) - MAX_ANNOTATIONS
     if omitted > 0:
