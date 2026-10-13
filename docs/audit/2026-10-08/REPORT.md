@@ -578,12 +578,13 @@ The ledger records all 21 tracked findings as delivered, along with G01–G21 an
 contains local implementations and synthetic evidence, while separate-host worker measurements
 and approved live-provider calibration remain open; G22.19 remains deferred pending a verifiable
 upstream API. The last fully passed hosted platform matrix is rc34. The latest completed hosted
-run, [38351148266](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38351148266) on
-`e3df04568ffc08d082b7283c2cc190bb20576ab6`, completed with 12/18 jobs passing: all six
+run, [38355637698](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38355637698) on
+`2f586c7bd710d35dc73b0d959db6a1c6c334a291`, completed with 12/18 jobs passing: all six
 clean-wheel checks and six plugin contract jobs passed, while all six core `pytest` jobs failed.
-Available annotations expose only generic exit code 1. A CI-style local full-suite attempt failed
-once in workspace repair but passed the same test in 12 isolated repeats and a later traced replay;
-the hosted failure's cause remains unconfirmed and the full suite has not completed locally. Do
-not carry forward rc34's pass as current readiness. Keep the architecture and existing working
-journeys, close the external G22 evidence gates, identify and resolve the CI test failure, then
-obtain a green hosted matrix before making release claims.
+The previous run [38351148266](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38351148266)
+had the same outcome. Available annotations expose only generic exit code 1. A CI-style local
+full-suite attempt failed once in workspace repair but passed the same test in 12 isolated repeats
+and a later traced replay; the hosted failure's cause remains unconfirmed and the full suite has
+not completed locally. Do not carry forward rc34's pass as current readiness. Keep the architecture
+and existing working journeys, close the external G22 evidence gates, identify and resolve the CI
+test failure, then obtain a green hosted matrix before making release claims.

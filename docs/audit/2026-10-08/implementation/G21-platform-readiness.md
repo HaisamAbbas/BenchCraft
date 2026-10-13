@@ -45,9 +45,11 @@ and build steps were skipped.
 
 The later [hosted run 38351148266](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38351148266)
 on `e3df04568ffc08d082b7283c2cc190bb20576ab6` repeated that 12/18 result: each of the six core
-jobs failed at `Tests (pytest)`, while the plugin and clean-wheel jobs passed. Failure annotations
-still contain only the generic exit code 1, so the hosted failing test and root cause are not
-established.
+jobs failed at `Tests (pytest)`, while the plugin and clean-wheel jobs passed. The latest completed
+[hosted run 38355637698](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38355637698) on
+`2f586c7bd710d35dc73b0d959db6a1c6c334a291` again completed 12/18: all six core jobs failed at
+`Tests (pytest)`, and all six plugin and six clean-wheel jobs passed. Failure annotations still
+contain only the generic exit code 1, so the hosted failing test and root cause are not established.
 
 A CI-style Windows 11 / Python 3.11.16 full-suite attempt passed 355 tests and skipped 13 before
 once failing in `test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with
