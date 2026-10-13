@@ -577,7 +577,10 @@ Relevant standalone records:
 The ledger records all 21 tracked findings as delivered, along with G01–G21 and G23. G22
 contains local implementations and synthetic evidence, while separate-host worker measurements
 and approved live-provider calibration remain open; G22.19 remains deferred pending a verifiable
-upstream API. The last fully passed hosted platform matrix is rc34. The hosted run for rc35's
-source fixes had no final conclusion at its last observed status, so platform readiness must not
-be carried forward from rc34. Keep the architecture and existing working journeys, close those
-external evidence gates, and obtain the remaining CI result before making release claims.
+upstream API. The last fully passed hosted platform matrix is rc34. The latest hosted run for
+rc35 source commit `d8fda15389e1ddb58a5cdc4c4f9ca6e150dafd65` completed with 12/18 jobs passing:
+all six clean-wheel checks and six plugin contract jobs passed, while all six core `pytest` jobs
+failed. Available annotations expose only generic exit code 1, and the full suite on this commit
+has not completed locally. Do not carry forward rc34's pass as current readiness. Keep the
+architecture and existing working journeys, close the external G22 evidence gates, identify and
+resolve the CI test failure, then obtain a green hosted matrix before making release claims.
