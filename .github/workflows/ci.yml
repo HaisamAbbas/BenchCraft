@@ -56,6 +56,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Annotate pytest failures
+        if: always()
+        run: python scripts/annotate_pytest_failures.py "${{ runner.temp }}/pytest-results.xml"
+
       - name: CLI smoke
         run: python -m aibench --help
 

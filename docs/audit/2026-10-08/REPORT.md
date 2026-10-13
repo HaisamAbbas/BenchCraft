@@ -582,12 +582,14 @@ The ledger records all 21 tracked findings as delivered, along with G01–G21 an
 contains local implementations and synthetic evidence, while separate-host worker measurements
 and approved live-provider calibration remain open; G22.19 remains deferred pending a verifiable
 upstream API. The last fully passed hosted platform matrix is rc34. The latest completed hosted
-run, [38365229012](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38365229012) on
-`a686cf9b5a7b0011a695698913526633fd300ba2`, completed with 12/18 jobs passing: all six clean-wheel
+run, [38367136426](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38367136426) on
+`9611ede768725abf968d1c4914ce911f4f20e719`, completed with 12/18 jobs passing: all six clean-wheel
 checks and six plugin contract jobs passed, while all six core `pytest` jobs failed. The run includes
-the F02 orphaned-metadata fix but its public annotations expose only generic exit code 1, leaving
-the failing tests unknown. The CI follow-up now publishes per-platform JUnit artifacts for future
-test failures; that artifact path has not yet been exercised on a hosted run.
+the F02 orphaned-metadata fix and published six JUnit artifacts, but their contents were not
+accessible in this unauthenticated review session; the visible annotations still expose only
+generic exit code 1. The current CI follow-up adds bounded test-ID and exception-type annotations
+while keeping assertion contents in the protected artifact. Hosted verification of those
+annotations is pending.
 The clean local Python 3.12.10 full suite on the F02 follow-up passed 1,853 tests and skipped 222;
 four focused regression tests passed under both Python 3.11.16 and 3.12.10. The hosted failure's
 cause remains unconfirmed. Do not carry forward rc34's pass as current readiness. Keep the

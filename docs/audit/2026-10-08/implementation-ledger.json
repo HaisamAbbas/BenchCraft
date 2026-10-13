@@ -867,7 +867,7 @@
       "id": "G21",
       "priority": "P2",
       "title": "Platform and release confidence",
-    "detail": "**Delivered.** Hosted run 38145775882 passed all 18 jobs on source commit af918898e8a7d14bff2b861c6b3140d3185844d9. The latest completed hosted run 38365229012 on a686cf9b5a7b0011a695698913526633fd300ba2 passed the six clean-wheel release checks and six real-package DeepEval/Ragas contract jobs, but all six core pytest jobs failed. CI now uploads a per-platform JUnit report for seven days to expose failing test names and tracebacks; hosted verification of that artifact path is pending. Current rc35 platform readiness is not green; see implementation/G21-platform-readiness.md. No live provider, external pilot, or release authorization is implied.",
+      "detail": "**Delivered.** Hosted run 38145775882 passed all 18 jobs on source commit af918898e8a7d14bff2b861c6b3140d3185844d9. Latest hosted run 38367136426 on 9611ede768725abf968d1c4914ce911f4f20e719 passed the six clean-wheel release checks and six real-package DeepEval/Ragas contract jobs, but all six core pytest jobs failed. All six per-platform JUnit artifacts uploaded with seven-day retention; their contents were inaccessible in the unauthenticated review session, and visible annotations remained generic. CI now emits bounded failure-ID and exception-type annotations while withholding assertion text; that follow-up still needs hosted verification. Current rc35 platform readiness is not green; see implementation/G21-platform-readiness.md. No live provider, external pilot, or release authorization is implied.",
       "kind": "feature",
       "status": "delivered",
       "verification": [
@@ -877,11 +877,14 @@
         "Follow-up run 38351148266 on e3df04568ffc08d082b7283c2cc190bb20576ab6 repeated the same matrix outcome: all six core jobs failed at Tests (pytest), and all six release checks plus six plugin contract jobs passed. Failure annotations again provide only generic exit code 1.",
         "Latest run 38355637698 on 2f586c7bd710d35dc73b0d959db6a1c6c334a291 again completed with all six core jobs failing at Tests (pytest), while all six release checks and six plugin contract jobs passed; annotations still provide only generic exit code 1.",
         "Hosted run 38365229012 on a686cf9b5a7b0011a695698913526633fd300ba2 repeated the six core pytest failures with all plugin and release jobs passing. Public annotations exposed only exit code 1. The next core matrix publishes per-platform JUnit artifacts (seven-day retention); local workflow parsing and JUnit generation smoke checks passed.",
+        "Hosted run 38367136426 on 9611ede768725abf968d1c4914ce911f4f20e719 uploaded all six JUnit artifacts. All six core pytest jobs failed; the public status page still exposed only generic exit-code annotations. The report contents were inaccessible in this unauthenticated session. The content-withheld annotation follow-up passed eight local tests, Ruff lint/format checks, Mypy for the helper, and workflow/YAML validation; hosted verification is pending.",
         "Focused local Windows 11 / Python 3.12.10 verification on current source: DeepEval metric module 45 passed, 1 skipped; judge-calibration module 23 passed, 1 skipped. These focused runs do not replace the full hosted matrix.",
         "CI-style Windows 11 / Python 3.11.16 full-suite reproduction passed 355 tests and skipped 13 before one failure in workspace repair (Access denied opening the preview .aibench directory as an archive); that test passed alone and in 12 isolated repeats, and a traced full-suite replay passed it before interruption at 24%. Root cause is unconfirmed; the full suite did not complete.",
         "Local Ruff, Mypy for 168 source files, and focused workspace/integrity/quickstart regressions passed; independent review found no code findings"
       ],
       "review": "implementation/G21-platform-readiness-review.md",
+      "follow_up_review": "implementation/G21-pytest-failure-annotations-review.md",
+      "follow_up_implementation": "implementation/G21-platform-readiness.md",
       "commit": "af918898e8a7d14bff2b861c6b3140d3185844d9",
       "pushed": true
     },
