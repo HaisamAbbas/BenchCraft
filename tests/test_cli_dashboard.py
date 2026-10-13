@@ -14,6 +14,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
+from rich.ansi import AnsiDecoder
 from typer.testing import CliRunner
 
 from aibench.cli import dashboard as dashboard_cli
@@ -528,8 +529,9 @@ def test_dashboard_cli_requires_existing_workspace_and_exposes_help(tmp_path: Pa
 
     help_result = runner.invoke(app, ["dashboard", "--help"])
     assert help_result.exit_code == 0
-    assert "loopback" in help_result.stdout
-    assert "--no-open" in help_result.stdout
+    visible_help = "\n".join(segment.plain for segment in AnsiDecoder().decode(help_result.output))
+    assert "loopback" in visible_help
+    assert "--no-open" in visible_help
 
 
 def _dashboard_tls_context() -> tuple[ssl.SSLContext, ssl.SSLContext, Path, Path]:

@@ -581,7 +581,7 @@ Relevant standalone records:
 The ledger records all 21 tracked findings as delivered, along with G01–G21 and G23. G22
 contains local implementations and synthetic evidence, while separate-host worker measurements
 and approved live-provider calibration remain open; G22.19 remains deferred pending a verifiable
-upstream API. The last fully passed hosted platform matrix is rc34. The latest completed hosted
+upstream API. The last fully passed hosted platform matrix is rc34. The prior completed hosted
 run, [38367136426](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38367136426) on
 `9611ede768725abf968d1c4914ce911f4f20e719`, completed with 12/18 jobs passing: all six clean-wheel
 checks and six plugin contract jobs passed, while all six core `pytest` jobs failed. The run includes
@@ -591,11 +591,14 @@ generic exit code 1. The bounded annotation follow-up was verified in hosted run
 [38371903480](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38371903480): all six core jobs
 identify `tests.test_cli_dashboard::test_dashboard_cli_requires_existing_workspace_and_exposes_help`
 at `tests/test_cli_dashboard.py:532`, where the test expects `--no-open` in captured help output.
-The assertion passes locally on Windows with Python 3.11 and 3.12, including in full-suite order;
-the underlying hosted discrepancy remains unresolved because the JUnit failure detail is not
-accessible in this session. The annotation itself withholds assertion output.
+The cause is ANSI styling: with `TERM=xterm-256color`, Rich inserts style codes inside the visible
+option name, so a raw substring check fails. The test now decodes Rich output before checking the
+visible help text. The full dashboard module passes locally on Windows with Python 3.11 and 3.12
+under CI-like terminal variables; hosted verification of this fix is pending. No application
+runtime change was needed.
 The clean local Python 3.12.10 full suite on the F02 follow-up passed 1,853 tests and skipped 222;
-four focused regression tests passed under both Python 3.11.16 and 3.12.10. The hosted failure's
-cause remains unconfirmed. Do not carry forward rc34's pass as current readiness. Keep the
-architecture and existing working journeys, close the external G22 evidence gates, identify and
-resolve the hosted CI test failure, then obtain a green hosted matrix before making release claims.
+four focused regression tests passed under both Python 3.11.16 and 3.12.10. The ANSI cause is now
+reproduced and corrected locally; hosted verification remains open. Do not carry forward rc34's pass
+as current readiness. Keep the architecture and existing working journeys, close the external G22
+evidence gates, verify the hosted test correction, then obtain a green hosted matrix before making
+release claims.

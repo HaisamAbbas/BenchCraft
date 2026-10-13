@@ -80,10 +80,12 @@ The subsequent source adds content-withheld test-ID and exception-type annotatio
 `AssertionError`. Follow-up run
 [38371903480](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38371903480) verified source
 locations on all six failures and pinpointed `tests/test_cli_dashboard.py:532`, the assertion that
-expects `--no-open` in captured help output. The targeted test and full dashboard module pass
-locally on Windows with Python 3.11 and 3.12. A full-order local replay also passed that test before
-being stopped at 10%; it did not complete the suite. The JUnit assertion detail remains inaccessible
-in this session, so the hosted-only mismatch is not yet explained.
+expects `--no-open` in captured help output. Reproduction with `TERM=xterm-256color` showed Rich
+style escape sequences splitting the visible option label in raw captured text. The test now runs
+the help output through Rich's ANSI decoder before checking visible text. All 14 dashboard tests
+pass locally on Windows Python 3.11 and 3.12 with CI-like terminal variables; the next hosted run
+will verify the correction. No application runtime change was needed. See the
+[dashboard help review](G21-dashboard-help-ansi-review.md).
 
 A CI-style Windows 11 / Python 3.11.16 full-suite attempt once failed in
 `test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with `Access is
