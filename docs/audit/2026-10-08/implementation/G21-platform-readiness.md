@@ -9,6 +9,10 @@ execute natively on each operating system. CI upgrades setuptools past the curre
 advisory. An earlier hosted run for source commit `af918898` passed all 18 jobs. The latest run
 for the current rc35 source has six failing core test jobs, so platform readiness is not green.
 
+The core matrix now uploads a per-platform JUnit report for seven days, including failing test
+names and tracebacks. This makes future hosted pytest failures diagnosable from the run artifacts
+when the check annotation only reports a generic process exit code.
+
 The first hosted run exposed stale platform assumptions in path handling, SQLite restore
 publication, CLI output assertions, plugin isolation, and session-recovery fixtures. The changes
 in this batch correct those assumptions, preserve pinned workspace handles through database
@@ -56,6 +60,12 @@ on `21fad75f` also completed 12/18 with the same job split. It predates the F02 
 fix documented in [its follow-up](F02-orphaned-metadata.md), so it does not validate that change.
 The public annotations still omit failing test names.
 
+The latest completed [hosted run 38365229012](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38365229012)
+on `a686cf9b5a7b0011a695698913526633fd300ba2` again completed 12/18: all six core `pytest` jobs
+failed, and all six plugin and six clean-wheel jobs passed. Its annotations report only exit code 1;
+that workflow version did not publish test reports. The CI follow-up now uploads per-platform
+JUnit artifacts for seven days, but hosted verification of those artifacts is pending.
+
 A CI-style Windows 11 / Python 3.11.16 full-suite attempt once failed in
 `test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with `Access is
 denied` while opening the preview `.aibench` directory as an archive. That test passed alone, in the
@@ -65,7 +75,7 @@ skipped 222. After the F02 fix, a fresh Windows 11 / Python 3.12.10 CI-style ful
 1,853 tests and skipped 222; its four focused regression tests also passed under both Python
 3.11.16 and 3.12.10. Windows-target Mypy passed for 175 source files and Ruff lint passed on the
 changed files. These local runs give current source-level evidence, but they do not explain or
-clear the hosted core-job failures. The F02 follow-up's hosted matrix is still pending.
+clear the hosted core-job failures. The failing test names and root cause remain unknown.
 
 ## Scope boundary
 
