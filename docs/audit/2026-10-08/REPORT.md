@@ -404,8 +404,13 @@ valid output.
 
 **Resolution/acceptance:** the phrase assertion now normalizes whitespace, and the calibration
 test checks the semantic error phrase separately from a whitespace-compacted filename. The
-focused CLI assertion passed, and both calibration path variants passed. Product formatting and
-exit-code behavior are unchanged. See the [F21 review](evidence/F21-review.md).
+focused CLI assertion passed, and both calibration path variants passed. A later hosted failure
+showed the same test weakness in dashboard help: under `TERM=xterm-256color`, Rich placed ANSI
+style codes inside the visible `--no-open` option, defeating a raw substring check. The test now
+decodes Rich output before checking the visible option. All 14 dashboard tests pass locally on
+Python 3.11 and 3.12 with CI-like terminal variables; hosted verification is pending. Product
+formatting and exit-code behavior are unchanged. See the [F21 review](evidence/F21-review.md) and
+[dashboard ANSI follow-up review](implementation/G21-dashboard-help-ansi-review.md).
 
 ## 5. CLI capability gap analysis and delivery status
 

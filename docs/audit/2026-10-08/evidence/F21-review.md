@@ -28,7 +28,17 @@ code, filename, or error-category checks. No product behavior changed.
   assertion; the exact failure was then covered by the focused passing tests.
 - `git diff --check` passed.
 
+## Follow-up: ANSI-styled help output
+
+Hosted run 38371903480 later identified `tests/test_cli_dashboard.py:532` as another raw Rich
+output assertion. Reproduction with `TERM=xterm-256color` showed ANSI style sequences between
+characters of the displayed `--no-open` option. The test now decodes terminal styling before
+checking the visible help text; all 14 dashboard tests passed locally on Python 3.11 and 3.12
+under CI-like terminal variables. The read-only review found no actionable issues; the detailed
+review is in [G21-dashboard-help-ansi-review.md](../implementation/G21-dashboard-help-ansi-review.md).
+Hosted verification of this follow-up is pending.
+
 ## Review outcome
 
-No further actionable issues were found in the updated assertions. The hosted run for the fix
-is pending; the prior public check annotations did not expose individual test names.
+No further actionable issues were found in the whitespace or ANSI-aware assertions. The prior
+fix passed focused local tests; the ANSI follow-up awaits hosted verification.

@@ -369,19 +369,21 @@
       "id": "F21",
       "priority": "P2",
       "title": "CLI error tests assume Rich never wraps text or paths",
-      "detail": "Supplemental CI reproduction; whitespace and path wrapping reproduced on Python 3.12 Windows",
+      "detail": "Supplemental CI reproduction; Rich whitespace/path wrapping on Windows and ANSI-split dashboard help option with TERM=xterm-256color",
       "kind": "finding",
       "status": "delivered",
       "verification": [
         "The project-run wrapped-error assertion passed: 1 passed",
         "Both calibration outside-data-root path variants passed: 2 passed, 22 deselected",
         "Full local run reproduced the exact wrap-only failure after 841 passed; no CLI exit-code or error behavior change was needed",
-        "git diff --check passed"
+        "git diff --check passed",
+        "Hosted run 38371903480 exposed a second Rich-output false failure: TERM=xterm-256color inserted ANSI styles within the visible --no-open option. The test now decodes terminal styling before matching; all 14 dashboard tests passed on Windows Python 3.11 and 3.12 with CI-like terminal variables. Hosted verification is pending."
       ],
       "review": "evidence/F21-review.md",
       "commit": "b11f23b60528aa2d5bc8453e4c69c09781c81f41",
       "additional_commits": [
-        "4e205882c88be5dc435ef962f391e46d99c0fa29"
+        "4e205882c88be5dc435ef962f391e46d99c0fa29",
+        "ab85fdfc03ce005432b53ae224474e21d40b5fbc"
       ],
       "pushed": true
     },
