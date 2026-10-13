@@ -29,7 +29,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -210,15 +210,21 @@ def load_plan(path: Path) -> ExecutablePlan:
         raise PlanInvalid([f"invalid plan {path}: {exc}"]) from exc
 
 
-def freeze_plan(plan: ExecutablePlan) -> tuple[bytes, str]:
-    # Preserve the canonical bytes of plans written before warmup support. The new field's
-    # zero default has no semantic effect, so it must not invalidate an existing run ID.
+def plan_document(plan: ExecutablePlan) -> dict[str, Any]:
+    """The plan as it is hashed and written to a plan file. Preserve the canonical form of
+    plans written before warmup support: the new fields' defaults have no semantic effect,
+    so they must not invalidate an existing run ID, nor make a session's plan file (named by
+    that hash) differ from the one an earlier release wrote."""
     frozen = plan.model_dump(mode="json")
     if frozen.get("warmup_repetitions") == 0:
         frozen.pop("warmup_repetitions")
     if frozen.get("load_profile") == {"mode": "closed_loop"}:
         frozen.pop("load_profile")
-    data = json.dumps(frozen, sort_keys=True, separators=(",", ":"))
+    return frozen
+
+
+def freeze_plan(plan: ExecutablePlan) -> tuple[bytes, str]:
+    data = json.dumps(plan_document(plan), sort_keys=True, separators=(",", ":"))
     raw = data.encode("utf-8")
     return raw, bytes_hash(raw)
 
