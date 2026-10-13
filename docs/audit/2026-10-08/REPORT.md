@@ -408,8 +408,13 @@ focused CLI assertion passed, and both calibration path variants passed. A later
 showed the same test weakness in dashboard help: under `TERM=xterm-256color`, Rich placed ANSI
 style codes inside the visible `--no-open` option, defeating a raw substring check. The test now
 decodes Rich output before checking the visible option. All 14 dashboard tests pass locally on
-Python 3.11 and 3.12 with CI-like terminal variables; hosted verification is pending. Product
-formatting and exit-code behavior are unchanged. See the [F21 review](evidence/F21-review.md) and
+Python 3.11 and 3.12 with CI-like terminal variables. Hosted run 38376283063 passed 17/18 jobs,
+with its only failure at the separate `tests/test_cli_run.py:130` assertion; the test, all 18 tests
+in that module, and the 277-item suite prefix passed in a local Windows/Python 3.11.16 replay. The
+JUnit details for that one failure were inaccessible, so its cause remains unknown. Follow-up run
+[38377296862](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38377296862), on a docs-only
+commit after the test fix, passed all 18 jobs across the full matrix. Product formatting and
+exit-code behavior are unchanged. See the [F21 review](evidence/F21-review.md) and
 [dashboard ANSI follow-up review](implementation/G21-dashboard-help-ansi-review.md).
 
 ## 5. CLI capability gap analysis and delivery status
@@ -598,12 +603,17 @@ identify `tests.test_cli_dashboard::test_dashboard_cli_requires_existing_workspa
 at `tests/test_cli_dashboard.py:532`, where the test expects `--no-open` in captured help output.
 The cause is ANSI styling: with `TERM=xterm-256color`, Rich inserts style codes inside the visible
 option name, so a raw substring check fails. The test now decodes Rich output before checking the
-visible help text. The full dashboard module passes locally on Windows with Python 3.11 and 3.12
-under CI-like terminal variables; hosted verification of this fix is pending. No application
-runtime change was needed.
+visible help text. All 14 dashboard tests pass locally on Windows with Python 3.11 and 3.12 under
+CI-like terminal variables. Hosted run [38376283063](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38376283063)
+passed 17/18 jobs; Windows Python 3.11 failed at `tests/test_cli_run.py:130`, outside the ANSI
+assertion. The same test, its 18-test module, and the full-suite prefix through that test passed
+locally on Windows Python 3.11.16; the restricted JUnit report leaves the initial failure cause
+unknown. Follow-up hosted run [38377296862](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38377296862)
+passed all 18 jobs, including all six core OS/Python suites, on source containing the ANSI fix.
+Hosted verification of the correction is complete for that commit; no application runtime change
+was needed.
 The clean local Python 3.12.10 full suite on the F02 follow-up passed 1,853 tests and skipped 222;
 four focused regression tests passed under both Python 3.11.16 and 3.12.10. The ANSI cause is now
-reproduced and corrected locally; hosted verification remains open. Do not carry forward rc34's pass
-as current readiness. Keep the architecture and existing working journeys, close the external G22
-evidence gates, verify the hosted test correction, then obtain a green hosted matrix before making
-release claims.
+reproduced and corrected, and the hosted matrix is green on `4be8b455`. This is CI evidence for that
+commit; it does not close G22's separate-host worker and approved live-provider evidence gates, or
+authorize a release. Do not carry forward rc34's pass as current readiness.

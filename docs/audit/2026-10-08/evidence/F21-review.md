@@ -34,11 +34,16 @@ Hosted run 38371903480 later identified `tests/test_cli_dashboard.py:532` as ano
 output assertion. Reproduction with `TERM=xterm-256color` showed ANSI style sequences between
 characters of the displayed `--no-open` option. The test now decodes terminal styling before
 checking the visible help text; all 14 dashboard tests passed locally on Python 3.11 and 3.12
-under CI-like terminal variables. The read-only review found no actionable issues; the detailed
-review is in [G21-dashboard-help-ansi-review.md](../implementation/G21-dashboard-help-ansi-review.md).
-Hosted verification of this follow-up is pending.
+under CI-like terminal variables. Hosted run 38376283063 had one separate Windows Python 3.11
+failure at `tests/test_cli_run.py:130`; its restricted JUnit report did not expose assertion values.
+The exact test, all 18 tests in that module, and the 277-item full-suite prefix passed in a local
+Windows Python 3.11.16 replay. The subsequent full hosted matrix run 38377296862 passed all 18 jobs
+on source containing the ANSI fix. The earlier one-off failure remains unexplained. The read-only
+review found no actionable issues; the detailed review is in
+[G21-dashboard-help-ansi-review.md](../implementation/G21-dashboard-help-ansi-review.md).
 
 ## Review outcome
 
-No further actionable issues were found in the whitespace or ANSI-aware assertions. The prior
-fix passed focused local tests; the ANSI follow-up awaits hosted verification.
+No further actionable issues were found in the whitespace or ANSI-aware assertions. Focused local
+tests and the latest hosted matrix pass; the earlier hosted Windows Python 3.11 failure remains
+unexplained.

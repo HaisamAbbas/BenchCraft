@@ -6,8 +6,10 @@ CI now covers GitHub-hosted Windows, Ubuntu Linux, and macOS runners. Core and c
 release checks cover Python 3.11 and 3.12; DeepEval and Ragas contract jobs use Python 3.12.
 Static typing targets the Windows APIs used by the application on every runner, while tests
 execute natively on each operating system. CI upgrades setuptools past the current runner-image
-advisory. An earlier hosted run for source commit `af918898` passed all 18 jobs. The latest run
-for the current rc35 source has six failing core test jobs, so platform readiness is not green.
+advisory. An earlier hosted run for source commit `af918898` passed all 18 jobs. After the
+dashboard ANSI test correction, hosted run 38377296862 passed all 18 jobs on source commit
+`4be8b455`; the current matrix is green at that commit. A preceding run had one separate Windows
+Python 3.11 test failure, documented below.
 
 The core matrix stores a per-platform JUnit report for seven days. A follow-up check step emits up
 to 20 content-withheld annotations containing each failed test ID, test source location, and
@@ -83,9 +85,23 @@ locations on all six failures and pinpointed `tests/test_cli_dashboard.py:532`, 
 expects `--no-open` in captured help output. Reproduction with `TERM=xterm-256color` showed Rich
 style escape sequences splitting the visible option label in raw captured text. The test now runs
 the help output through Rich's ANSI decoder before checking visible text. All 14 dashboard tests
-pass locally on Windows Python 3.11 and 3.12 with CI-like terminal variables; the next hosted run
-will verify the correction. No application runtime change was needed. See the
+pass locally on Windows Python 3.11 and 3.12 with CI-like terminal variables. No application
+runtime change was needed. See the
 [dashboard help review](G21-dashboard-help-ansi-review.md).
+
+The first hosted run after this correction, [38376283063](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38376283063)
+on `ab85fdfc`, passed 17/18 jobs. Its only failure was the Windows/Python 3.11 full suite at
+`tests/test_cli_run.py:130`, a call-count assertion separate from the ANSI help test. The public
+annotation identified the test and line but not the assertion values; its JUnit artifact was
+access-restricted in this review session. A local Windows/Python 3.11.16 replay passed the exact
+test, all 18 tests in `tests/test_cli_run.py`, and the full-suite prefix through that test (272
+passed, 5 skipped). The cause of the one hosted failure remains unconfirmed.
+
+The subsequent docs-only commit retained the same source fix. Hosted run
+[38377296862](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38377296862) on `4be8b455`
+passed all 18 jobs: all six core OS/Python suites, all six clean-wheel release checks, and all six
+DeepEval/Ragas contract jobs. This verifies the ANSI test correction in the full hosted matrix;
+the unexplained failure from the preceding run remains recorded rather than attributed to the fix.
 
 A CI-style Windows 11 / Python 3.11.16 full-suite attempt once failed in
 `test_workspace_repair_previews_then_recovers_and_retains_previous_workspace` with `Access is
@@ -95,11 +111,11 @@ denied` while opening the preview `.aibench` directory as an archive. That test 
 skipped 222. After the F02 fix, a fresh Windows 11 / Python 3.12.10 CI-style full suite passed
 1,853 tests and skipped 222; its four focused regression tests also passed under both Python
 3.11.16 and 3.12.10. Windows-target Mypy passed for 175 source files and Ruff lint passed on the
-changed files. These local runs give current source-level evidence, but they do not explain or
-clear the hosted core-job failures. The failing test names and root cause remain unknown.
+changed files. These local runs give source-level evidence for the workspace repair path; they do
+not establish the cause of the separate one-off hosted failure at `tests/test_cli_run.py:130`.
 
 ## Scope boundary
 
 No live model provider was called, no external pilot was run, and no release was authorized or
-published. The earlier passing matrix is platform and packaging evidence for its source commit,
-not an external release decision or evidence of live-provider behavior.
+published. The green matrix is platform and packaging evidence for source commit `4be8b455`, not an
+external release decision or evidence of live-provider behavior.
