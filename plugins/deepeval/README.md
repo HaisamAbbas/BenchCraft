@@ -8,9 +8,13 @@ Pinned: `deepeval==4.2.5` (the adapter refuses to run on any other version).
 ## Metrics
 
 Every DeepEval 4.2.5 single-turn, conversation and agent-trace metric that aibench's
-recorded data can feed (40, with the head-to-head judge below). Not here: image, audio
-and voice metrics (including agent responsiveness, a voice-latency metric) and the MCP
-metrics. JSON correctness
+recorded data can feed (40, with the head-to-head judge below). The five upstream image
+metrics are listed in their own section. Separate
+`deepeval.vision_g_eval`, `deepeval.audio_g_eval`, and `deepeval.video_frames_g_eval`
+evaluators provide bounded image-backed, audio-backed, and timestamped sampled-frame task
+scoring for text or generated media outputs. The pinned DeepEval voice metrics score stored
+timestamped conversation turns; they do not simulate calls or connect to voice agents.
+JSON correctness
 is covered by `native.json_schema`: upstream's score is the same pass/fail schema check, with
 the judge only writing the explanation. Each is an
 evaluator `deepeval.<name>@1`, scores 0 to 1 with higher better (DeepEval normalizes bias,
@@ -39,6 +43,286 @@ toxicity and the other safety metrics that way), and is decided by the plan's ru
 | `pattern_match` | answer | `pattern` |
 | `g_eval` | what `evaluation_params` names (default: question, answer) | judge, `name`, `criteria` or `evaluation_steps`; optional `rubric`, `repeats` (1 to 9, default 3: the median of that many judge scores; scores more than 0.3 apart are reported as unstable) |
 | `dag` | what its nodes' `evaluation_params` name; beyond question and answer, only fields the plan's `evaluation_params` lists | judge, `dag`; optional `name`, `evaluation_params` |
+
+### Image-first vision scoring
+
+`deepeval.vision_g_eval` scores a recorded text or image output using the image supplied to
+the application, its task prompt, and the reviewed reference answer. The case image is carried
+inside `input`; the reference remains judge-only:
+
+```json
+{"case_id":"receipt-01","input":{"prompt":"What is the total?","image":{"mime_type":"image/png","data_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"}},"reference":{"answer":"$18.42"}}
+```
+
+Case images must be base64-encoded PNG, JPEG, or WebP, no larger than 4 MiB after decoding.
+The MIME type and file signature must agree. A text output remains a bounded string. An image
+output is an object with exactly `mime_type` and `data_base64`, using the same image formats
+and 4 MiB decoded limit. Configure the application's output selector to return that object.
+Remote URLs, local file paths, audio, and video are not supported. This avoids fetching
+untrusted URLs or reading arbitrary files in the evaluator. Both images are labeled and sent
+as inline data URLs to the configured judge.
+
+Bind the evaluator with a rubric and an OpenAI-compatible vision model:
+
+```json
+{"metric":"deepeval.vision_g_eval","params":{"criteria":"Score whether the answer gives the total shown on the receipt.","judge":{"kind":"openai_compatible","base_url":"https://api.example/v1","model":"vision-model","api_key_env":"AIBENCH_VISION_KEY"}}}
+```
+
+Use the existing plugin-environment `secret_env` mechanism for the key and allow the evaluator,
+model judges, and plugin interpreter in the project's policy. A call sends the image, task
+prompt, reference answer, and recorded output to that endpoint. The adapter does not follow
+redirects, limits judge replies to 1 MiB, reports provider token counts when present, and
+leaves cost unknown unless the provider reports it (no price is guessed). Only a returned
+finite 0–1 score with a non-empty reason is accepted; the harness applies the frozen decision
+rule. Scores remain judge-dependent.
+
+### DeepEval's upstream image metrics
+
+The adapter exposes DeepEval's five image-specific metrics:
+`deepeval.image_coherence`, `deepeval.image_helpfulness`, `deepeval.image_reference`,
+`deepeval.text_to_image`, and `deepeval.image_editing`. The first three score one generated
+image against the caption or answer text around it. Text-to-image scores one image generated
+from a text prompt. Image-editing compares one supplied source image with one generated image
+against the edit prompt. These use the upstream metric implementations and preserve their
+sub-score reasoning.
+
+For the first four metrics, `case.input` is prompt text or `{"prompt":"..."}`. For image
+editing it is `{"prompt":"...","image":{"mime_type":"image/png","data_base64":"..."}}`.
+Application output is either one image object with `mime_type` and `data_base64`, or an object
+with `text` and `image` fields so the metrics that use surrounding text can score a caption:
+
+```json
+{"text":"The bicycle is blue.","image":{"mime_type":"image/png","data_base64":"iVBORw0KGgo..."}}
+```
+
+Only inline signature-checked PNG, JPEG, and WebP are accepted. Each scored case has at most
+one output image, and the source plus output images together cannot exceed 4 MiB decoded.
+URLs, filesystem paths, extra image fields, and reserved DeepEval image markers are rejected.
+Validation checks MIME signatures and byte bounds, not full image structure or decoded pixel
+dimensions; a corrupt signature-matching image can still fail after a judge request.
+The selected OpenAI-compatible judge must support image parts; images and prompt text go to
+that endpoint. The built-in JSONL reader has a fixed 1 MB per-row limit, so keep encoded case
+images within that row size; application transport response limits default to 1 MB and can be
+raised in the application configuration when a generated image requires it. `max_context_size`
+is available for coherence, helpfulness, and reference metrics (1 to 20,000 characters; default
+4,000). Judge replies are capped at 1 MiB; failed, oversized, timed-out, or cancelled judge
+calls leave their spend unknown. The first three metrics declare four possible retries for one
+judge call; text-to-image and image-editing declare eight across two parallel calls.
+
+See DeepEval's documentation for [image coherence](https://deepeval.com/docs/multimodal-metrics-image-coherence),
+[image helpfulness](https://deepeval.com/docs/multimodal-metrics-image-helpfulness),
+[image reference](https://deepeval.com/docs/multimodal-metrics-image-reference),
+[text-to-image](https://deepeval.com/docs/multimodal-metrics-text-to-image), and
+[image editing](https://deepeval.com/docs/multimodal-metrics-image-editing). The adapter
+sends inline image data only; it never follows image URLs or reads local paths.
+
+### Bounded audio task scoring
+
+`deepeval.audio_g_eval` scores a recorded text or audio output against one inline audio input,
+the task prompt, and its reviewed reference answer. Case audio lives inside `input`; a generated
+audio output uses the same object shape:
+
+```json
+{"case_id":"greeting-01","input":{"prompt":"What does the speaker say?","audio":{"mime_type":"audio/wav","data_base64":"UklGR..."}},"reference":{"answer":"Hello there."}}
+```
+
+Only base64 PCM/IEEE-float WAV (`audio/wav`) and MPEG Layer III MP3 (`audio/mpeg`) are
+accepted, up to 4 MiB each after decoding. The parser checks RIFF chunk bounds, WAV rate and
+alignment fields, data-frame alignment, and a complete MP3 frame. Configure the application
+output selector to return exactly `{"mime_type":"audio/wav","data_base64":"..."}` or
+`audio/mpeg`; a bounded text answer is also accepted. URLs, paths, extra object fields, other
+media formats, and malformed or oversized payloads are not applicable and stop before the
+judge call. Dataset JSONL lines are capped at 1,000,000 bytes, including base64 and JSON
+overhead, so case audio loaded through JSONL must stay below roughly 750 KB decoded. HTTP
+application request and response limits default to 1 MiB; raise `transport.max_request_bytes`
+or `transport.max_response_bytes` when needed. For example, 4 MiB generated audio needs about
+5.34 MiB of base64 before its JSON wrapper, so set `max_response_bytes` to at least 8,388,608.
+The evaluator sends labeled `input_audio` parts to the configured
+[Chat Completions endpoint](https://platform.openai.com/docs/api-reference/chat/create); the
+selected provider/model must support audio input. Audio, prompt, reference answer, and output
+are sent to that endpoint. This single-request task evaluator does not score timestamps,
+diarization, interruptions, or multi-turn voice interaction.
+
+Bind it with a rubric and an audio-capable OpenAI-compatible judge:
+
+```json
+{"metric":"deepeval.audio_g_eval","params":{"criteria":"Score whether the output faithfully conveys the greeting, including the words and language.","judge":{"kind":"openai_compatible","base_url":"https://api.example/v1","model":"audio-model","api_key_env":"AIBENCH_AUDIO_KEY"}}}
+```
+
+Pass the key using the plugin-environment `secret_env` mechanism and allow the evaluator,
+judge model, and plugin interpreter in policy. The evaluator does not follow redirects,
+limits judge replies to 1 MiB, records provider token usage when present, and leaves cost
+unknown unless the provider reports it.
+
+### Stored voice-conversation metrics
+
+The pinned DeepEval voice metrics run against each case's episode prefix (`group_id`) using
+recorded transcripts and inline audio. They make no judge or provider call. The supported
+metrics are `deepeval.turn_taking_naturalness`, `deepeval.agent_responsiveness`,
+`deepeval.audio_integrity`, `deepeval.voice_naturalness`,
+`deepeval.speech_intelligibility`, `deepeval.voice_consistency`, and
+`deepeval.voice_reliability`.
+
+Each user case input has a transcript and a bounded WAV clip. Supply `audio_start_ms` when the
+timestamp is call-relative and known:
+
+```json
+{"case_id":"call-01-turn-01","group_id":"call-01","input":{"transcript":"Please check my delivery.","audio":{"mime_type":"audio/wav","data_base64":"UklGR..."},"audio_start_ms":0}}
+```
+
+The application's recorded output is an assistant transcript and, when spoken audio exists,
+the matching clip and its call-relative start time:
+
+```json
+{"transcript":"It is arriving tomorrow.","audio":{"mime_type":"audio/wav","data_base64":"UklGR..."},"audio_start_ms":860}
+```
+
+`audio_start_ms` is optional for audio-quality metrics; turn-taking scoring requires a known
+start for every clip and returns not-applicable when timestamps are missing. The metric derives
+duration from the WAV frame count, so it does not infer timing from transcript length or a
+declared duration. Input accepts only inline 16-bit PCM WAV up to 512 KiB per user clip; the
+512 KiB bound leaves room under the built-in 1,000,000-byte dataset row cap. Assistant clips
+are limited to 1 MiB each and all audio across a scored episode to 4 MiB. Application responses
+larger than the HTTP default need `transport.max_response_bytes` raised; 2,097,152 bytes carries
+one maximum-size assistant clip plus JSON/base64 overhead. The host limits an episode to 50
+turns and 7 MiB of serialized evidence before building a worker request.
+
+`deepeval.agent_responsiveness` is a narrow proxy over the recorded format: it detects missing
+assistant audio. Since each case records exactly one user turn and one assistant turn, it cannot
+represent or detect user reprompts, call-ending reasons, interruptions, or live response latency.
+The adapter rejects `latency_ms` and `interrupted` fields so they cannot be mistaken for scored
+signals. Turn-taking uses only the supplied call-relative audio timestamps and clip durations.
+
+These metrics analyze the stored conversation only. They do not start voice calls, capture
+audio, generate/transcribe speech, evaluate MP3 or other WAV encodings, or establish how
+listeners perceive naturalness or intelligibility. See
+DeepEval's [voice evaluation contract](https://deepeval.com/docs/evaluation-voice) and
+[turn-taking metric](https://deepeval.com/docs/metrics-turn-taking-naturalness).
+
+### Recorded transcription accuracy
+
+`deepeval.transcription_accuracy_g_eval` scores the caller transcript stored in each case
+against the voice agent's `provider_transcript` in its recorded episode output. The case input
+can be plain text or `{"transcript":"...","audio":...}`; the assistant output can be a
+transcript string or an object containing `transcript`, `provider_transcript`, and the optional
+voice-audio fields shown above. The caller transcript and provider transcript are text evidence;
+audio bytes are ignored by this metric and are not sent to the judge.
+
+The evaluator uses the pinned DeepEval 4.2.5 G-Eval API with a fixed transcription rubric because
+that release does not contain the dedicated `TranscriptionAccuracyMetric` described in the
+upstream beta documentation. If any turn in the episode lacks a provider transcript, the whole
+episode is not applicable so a partial conversation cannot inflate the mean; an empty transcript
+is scored as `[NO WORDS RECOGNIZED]`. Episodes are capped at 50 turns, 16,000
+characters per transcript, and 1 MiB of combined transcript evidence. Caller transcripts and
+provider transcripts are sent to the configured judge. This evaluates semantic transcript
+fidelity only; it does not decode audio, calculate word error rate, diarize speakers, capture
+live speech, or replace an upstream audio metric. The stored format pairs one caller case with
+the provider transcript on that turn; it does not join multiple caller segments into one
+barge-in exchange.
+
+```json
+{"metric":"deepeval.transcription_accuracy_g_eval","params":{"judge":{"kind":"openai_compatible","base_url":"https://api.example/v1","model":"judge-model","api_key_env":"AIBENCH_JUDGE_KEY"}}}
+```
+
+See DeepEval's [transcription accuracy documentation](https://deepeval.com/docs/metrics-transcription-accuracy).
+
+### Literal WER and CER
+
+`deepeval.word_error_rate` and `deepeval.character_error_rate` provide deterministic, local
+edit-rate measurements for one case at a time. The reference comes from the case's `transcript`
+(or a string input), and the hypothesis comes from `provider_transcript` in the recorded
+application output. They can be used without audio bytes, and they ignore the other voice fields,
+including speaker annotations.
+
+Both evaluators apply Unicode NFKC normalization, case-folding, and Unicode punctuation removal by
+default. `lowercase` and `strip_punctuation` can each be set to `false`. WER splits normalized text
+on whitespace. CER aligns Unicode code points, including whitespace that remains after punctuation
+removal. Each side is capped at 16,000 characters and each alignment at four million dynamic
+programming cells. Empty normalized references are not applicable; an empty hypothesis counts as
+deletions. Raw output includes substitution, deletion, insertion, reference-unit, and total-edit
+counts.
+
+The saved value is an utterance-level rate. A normal run report's mean is therefore a macro-average
+across cases, while the raw counts allow a corpus-level rate to be recomputed by summing errors and
+reference units. No default pass threshold is supplied because acceptable ASR error depends on the
+language, task, and reference convention; set a lower-is-better rule in the metric binding. These
+metrics do not judge semantic equivalence, align barge-in segments, recognize speech, or contact a
+model. The implementation follows standard dynamic-programming word alignment and error counting
+as described by the [NIST SCTK SCLITE documentation](https://github.com/usnistgov/SCTK/blob/master/doc/sclite.htm).
+
+```json
+{"metric":"deepeval.word_error_rate","params":{"lowercase":true,"strip_punctuation":true},"rule":{"comparator":"<=","threshold":0.2}}
+```
+
+### Recorded speaker attribution
+
+`deepeval.diarization_error_rate` scores application-provided speaker intervals against reviewed
+reference intervals stored on the same grouped voice episode. Both sides use integer clip-relative
+milliseconds and non-empty `speaker_id` labels capped at 64 characters. The input keeps the existing
+inline PCM WAV and may include:
+
+```json
+{"diarization_reference":{"segments":[{"start_ms":0,"end_ms":750,"speaker_id":"reference-1"}]}}
+```
+
+Each recorded assistant output may add its own intervals beside `transcript`:
+
+```json
+{"transcript":"I can help.","diarization":{"segments":[{"start_ms":0,"end_ms":750,"speaker_id":"output-1"}]}}
+```
+
+The evaluator finds one optimal speaker-label permutation for the complete episode, then reports
+DER as missed speaker time, false-alarm speaker time, and speaker confusion divided by reference
+speaker time. The default includes overlapping speakers; `skip_overlap: true` excludes reference
+overlap. `collar_ms` optionally removes a total-width region centered on each reference active-set
+boundary, including clip boundaries. A default pass requires DER no greater than `0.2`.
+
+Every turn must contain both annotations and an inline WAV so timestamps are bounded to the clip;
+episodes with missing or malformed evidence are not applicable. The limits are 50 turns, 128
+segments per side per turn, 512 segments per side per episode, 64 speakers per side, 512 KiB per
+input clip, and 4 MiB of decoded input audio per episode. This is a deterministic comparison of
+recorded annotations: it does not diarize audio or verify speaker identity, and it sends no audio
+or labels to a model. `deepeval.diarization_error_rate` is not an upstream DeepEval metric class;
+the pinned package currently supplies no diarization scorer.
+
+### Timestamped sampled-video task scoring
+
+`deepeval.video_frames_g_eval` evaluates a sequence of supplied video-frame samples against
+the task and reviewed reference. It does not decode video files or claim to assess motion
+between samples. Case input uses an ordered `video.frames` list with integer millisecond
+timestamps and inline images:
+
+```json
+{"case_id":"door-01","input":{"prompt":"Does the person enter and then leave?","video":{"frames":[{"timestamp_ms":0,"image":{"mime_type":"image/png","data_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"}},{"timestamp_ms":1500,"image":{"mime_type":"image/png","data_base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"}}]}},"reference":{"answer":"The person enters, then leaves."}}
+```
+
+Sequences require 2 to 8 strictly increasing timestamps within 24 hours. Case frames are
+capped at 512 KiB total decoded so their base64 representation fits under the built-in dataset
+reader's row limit alongside the prompt, reference, and metadata. Generated output frames allow
+1 MiB per frame and 4 MiB total decoded. A generated-frame output uses
+`{"frames":[{"timestamp_ms":0,"image":{"mime_type":"image/png","data_base64":"..."}},...]}`;
+a bounded text output is also accepted. The evaluator sends each image as an individually
+labeled inline image part in chronological order. It refuses URLs, local paths, raw video
+containers, audio tracks, extra frame fields, repeated/out-of-order timestamps, malformed
+images, and over-limit sequences before contacting the judge.
+
+Built-in JSONL, JSON, CSV, and Parquet dataset readers cap each row at 1,000,000 bytes,
+including frame base64 and other case fields. The 512 KiB input budget leaves room for those
+other fields; the limit depends on the prompt, reference, and row metadata.
+HTTP application request and response limits default to 1 MiB; raise the applicable `transport.max_request_bytes` or
+`transport.max_response_bytes` for larger generated sequences. The 4 MiB generated sequence
+limit needs about 5.34 MiB in base64 before its JSON wrapper; configure
+`max_response_bytes` to at least 8,388,608. Frame images, prompt, reference answer, and output
+are sent to the configured [Chat Completions endpoint](https://platform.openai.com/docs/api-reference/chat/create).
+The selected provider/model must support multiple image parts. The evaluator bounds judge
+replies to 1 MiB, reports token usage when present, and leaves cost unknown unless the provider
+reports it. No live provider call is made by its tests.
+
+Bind it with a rubric and an OpenAI-compatible vision judge:
+
+```json
+{"metric":"deepeval.video_frames_g_eval","params":{"criteria":"Score whether the answer correctly describes the sampled event order.","judge":{"kind":"openai_compatible","base_url":"https://api.example/v1","model":"vision-model","api_key_env":"AIBENCH_VIDEO_KEY"}}}
+```
 
 **DAG: a decision tree as JSON.** The judge walks the tree; the verdict it lands on gives the
 score (0 to 10, reported as 0 to 1) or hands over to a G-Eval for the grade. A starting node
@@ -135,6 +419,37 @@ so the expected outcome is not available to them (upstream reads node fields per
 A score outside 0..1 (a judge answer DeepEval did not bound) is an evaluator error, never a
 recorded score.
 
+### MCP tool metrics
+
+The plugin exposes DeepEval's `deepeval.mcp_use`, `deepeval.mcp_task_completion`, and
+`deepeval.multi_turn_mcp_use`. Bind one with a frozen server inventory so the judge knows which
+tools and argument schemas were available:
+
+```json
+{"metric":"deepeval.mcp_use","params":{"judge":{"kind":"python_factory","factory":"my_judges:judge"},"mcp_servers":[{"server_name":"orders","transport":"stdio","available_tools":[{"name":"lookup_order","description":"Look up one order","inputSchema":{"type":"object","properties":{"order_id":{"type":"string"}},"required":["order_id"]}}]}]}}
+```
+
+`mcp_task_completion` and `multi_turn_mcp_use` score the stored episode and require cases with
+a `group_id`. The adapter maps successfully recorded events with an explicit MCP type
+(`mcp`, `mcp_tool`, `mcp_tool_call`, `mcptool`, or `mcptoolcall`) to MCP tool calls, including
+undeclared names so the judge can assess a wrong-tool call. To use untyped generic events, set
+`tool_events_are_mcp_only: true` only when the application's entire recorded tool-event stream
+contains MCP calls; the adapter will not infer MCP provenance from a matching tool name.
+Model-requested calls without a recorded successful execution do not count. Episode metrics
+are not applicable if any turn's tool telemetry is missing. The project does not discover or
+contact live MCP servers. Inventory, prompt and tool text, arguments, and
+results are sent to the configured judge; local `python_factory` judges make no provider
+request. Evidence limits are 16 servers and 128 KiB of inventory; 64 primitives of each kind
+per server; 256 recorded events per turn, 512 per case, and 1,024 per episode; and 32
+successful calls per turn, 64 per case, and 256 per episode. Each call is limited to 16 KiB,
+call evidence to 64 KiB per case and 256 KiB per episode, text fields to 16,000 characters,
+and total episode evidence to 1 MiB. Resource reads and prompt retrievals are not scored because
+BenchCraft's stored execution schema currently records only generic tool events.
+
+See DeepEval's docs for [MCP-Use](https://deepeval.com/docs/metrics-mcp-use),
+[MCP Task Completion](https://deepeval.com/docs/metrics-mcp-task-completion), and
+[Multi-Turn MCP-Use](https://deepeval.com/docs/metrics-multi-turn-mcp-use).
+
 ### Agent-trace metrics
 
 For agents that export OpenTelemetry spans: run the app, attach its traces with `aibench
@@ -158,7 +473,9 @@ message content out) takes the case's input as the agent's task and the recorded
 `plan_quality` and `plan_adherence` are not applicable (`no_plan_in_trace`) when the judge
 finds no plan in the trace: DeepEval would score that 1, which is no evidence of a good plan.
 
-Not included: metrics that need data aibench does not record: images, audio, MCP servers.
+Not included: raw-video decoding or continuous motion scoring, DeepEval's upstream multimodal
+audio metric family, or typed resource reads and prompt retrievals (the recorded execution
+format currently stores generic tool events).
 DAG and arena metrics need objects a plan cannot declare.
 
 ## Judges
@@ -221,8 +538,10 @@ By hand, from the repository root:
 
 ```
 python -m venv plugins/deepeval/.venv
-plugins/deepeval/.venv/Scripts/pip install -e . -e plugins/deepeval     # Windows
-plugins/deepeval/.venv/bin/pip install -e . -e plugins/deepeval         # Linux/macOS
+plugins/deepeval/.venv/Scripts/python.exe -m pip install --upgrade "pip>=26.2.1,<27"  # Windows
+plugins/deepeval/.venv/Scripts/python.exe -m pip install -e . -e plugins/deepeval     # Windows
+plugins/deepeval/.venv/bin/python -m pip install --upgrade 'pip>=26.2.1,<27'           # Linux/macOS
+plugins/deepeval/.venv/bin/python -m pip install -e . -e plugins/deepeval              # Linux/macOS
 aibench score RUN_ID --metrics metrics.json \
   --plugin-env plugins/deepeval/.venv/Scripts/python.exe \
   --plugin-secret JUDGE_KEY=env:ZAI_API_KEY

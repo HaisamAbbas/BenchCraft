@@ -65,6 +65,23 @@ class Probe(Evaluator):
             raise ValueError("judge exploded")
         if mode == "usage":
             ctx.report_usage(provider="judge", calls=2, tokens={"input": 5}, cost=None)
+        if mode == "usage_partial_tokens":
+            ctx.report_usage(
+                provider="judge",
+                calls=2,
+                tokens={"input": 5},
+                cost=None,
+                calls_without_tokens=1,
+            )
+        if mode == "usage_partial_tokens_mixed":
+            ctx.report_usage(
+                provider="judge",
+                calls=2,
+                tokens={"input": 5},
+                cost=None,
+                calls_without_tokens=1,
+            )
+            ctx.report_usage(provider="judge", calls=3, cost=None)
         if mode == "usage_secret":
             secret = os.environ["JUDGE_KEY"]
             ctx.report_usage(provider=secret, calls=1, tokens={secret: 3}, cost=None)
@@ -308,7 +325,8 @@ def test_worker_raw_payload_shows_isolation_and_one_worker_per_binding(
     assert raws[0]["pid"] == raws[1]["pid"] != os.getpid()  # same worker for the binding
     assert [r["calls"] for r in raws] == [1, 2] and raws[0]["instances"] == 1
     assert raws[0]["leak"] is None  # harness environment is not inherited
-    assert raws[0]["home"] == raws[0]["cwd"] != os.getcwd()  # private HOME and workdir
+    assert Path(raws[0]["home"]).resolve() == Path(raws[0]["cwd"]).resolve()
+    assert Path(raws[0]["cwd"]).resolve() != Path.cwd().resolve()  # private HOME and workdir
 
 
 def test_stdout_noise_from_plugin_code_cannot_corrupt_the_protocol(tmp_path: Path) -> None:
@@ -364,6 +382,45 @@ def test_usage_is_passed_through_and_unknown_cost_stays_unknown(tmp_path: Path) 
     assert result.resources["cost"] is None and result.resources["accounting"] == "partial"
     [event] = seeded.storage.list_usage_events("run-1")
     assert (event.calls, event.cost) == (2, None)
+
+
+def test_worker_preserves_calls_with_partial_token_usage(tmp_path: Path) -> None:
+    from aibench.services.reports import _pass_cost
+
+    registry = _registry(tmp_path)
+    manifest = registry.resolve("vendor.probe")[0]
+    registry._external[(manifest.evaluator_id, manifest.version)] = manifest.model_copy(
+        update={"uses_models": True}
+    )
+    seeded, report = _score(tmp_path, {"a": "usage_partial_tokens"}, registry)
+    [result] = report.results
+    assert result.resources["model_calls"] == 2
+    assert result.resources["tokens"] == {"input": 5}
+    assert result.resources["calls_with_unknown_tokens"] == 1
+    assert _pass_cost([result])["calls_with_unknown_tokens"] == 1
+    [event] = seeded.storage.list_usage_events("run-1")
+    assert (event.calls, event.calls_without_tokens, event.tokens) == (2, 1, {"input": 5})
+
+
+def test_mixed_legacy_and_explicit_token_usage_keeps_unknown_counts(tmp_path: Path) -> None:
+    from aibench.services.reports import _pass_cost
+
+    registry = _registry(tmp_path)
+    manifest = registry.resolve("vendor.probe")[0]
+    registry._external[(manifest.evaluator_id, manifest.version)] = manifest.model_copy(
+        update={"uses_models": True}
+    )
+    seeded, report = _score(tmp_path, {"a": "usage_partial_tokens_mixed"}, registry)
+    [result] = report.results
+    assert result.resources["model_calls"] == 5
+    assert result.resources["tokens"] == {"input": 5}
+    assert result.resources["calls_with_unknown_tokens"] == 4
+    assert _pass_cost([result])["calls_with_unknown_tokens"] == 4
+    events = seeded.storage.list_usage_events("run-1")
+    assert sorted((event.calls, event.calls_without_tokens) for event in events) == [
+        (2, 1),
+        (3, None),
+    ]
 
 
 def test_configured_secrets_reach_the_worker_but_are_redacted_from_results(
@@ -423,6 +480,12 @@ def test_worker_usage_and_version_are_validated(tmp_path: Path) -> None:
             {"provider": None, "calls": None, "tokens": {}, "cost": None}
         )
         == []
+    )
+    assert WorkerEvaluator._usage_problems(
+        {"provider": "p", "calls": 1, "tokens": {}, "cost": None, "calls_without_tokens": 2}
+    ) == ["calls_without_tokens cannot exceed calls"]
+    assert WorkerEvaluator._usage_problems(
+        {"provider": "p", "calls": 1, "tokens": {}, "cost": None, "calls_without_tokens": True}
     )
     assert WorkerEvaluator._version_problem({"schema_version": "9.9.9"}) is not None
     assert WorkerEvaluator._version_problem({}) is not None  # an old worker that sends none

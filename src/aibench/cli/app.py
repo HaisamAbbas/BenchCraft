@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.core.models import BenchmarkCase, ExecutionResult, ExecutionStatus
 from aibench.datasets.ingest import ingest_dataset
@@ -47,8 +48,9 @@ def _safe(value: Any) -> str:
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
-    err_console.print(f"[red]{escape(message)}[/red]")
-    return typer.Exit(code=code)
+    return error_exit(
+        message, exit_code=code, json_output=False, console=console, err_console=err_console
+    )
 
 
 @app.command("describe")
@@ -100,6 +102,8 @@ def describe(
 
 def _select(cases: list[BenchmarkCase], case_ids: list[str], limit: int) -> list[BenchmarkCase]:
     if case_ids:
+        if len(case_ids) != len(set(case_ids)):
+            raise _fail("case IDs must be unique when selecting smoke cases")
         by_id = {c.case_id: c for c in cases}
         missing = [cid for cid in case_ids if cid not in by_id]
         if missing:
@@ -166,9 +170,14 @@ def smoke(
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
     if not report.is_valid or report.manifest is None:
-        for error in report.errors:
-            err_console.print(f"[red]{escape(str(error))}[/red]")
-        raise _fail("dataset is invalid; run `aibench dataset validate` for details")
+        raise error_exit(
+            "dataset is invalid; run `aibench dataset validate` for details",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+            details=[str(error) for error in report.errors],
+        )
     manifest = report.manifest
     selected = _select(report.cases, case_ids, limit)
 
@@ -214,7 +223,8 @@ def smoke(
                 "status": smoke_report.status,
                 "mode": "developer_smoke",
                 "results": [_result_row(r) for r in smoke_report.results],
-            }
+            },
+            cli_exit_code=1 if failures else 0,
         )
     else:
         console.print(

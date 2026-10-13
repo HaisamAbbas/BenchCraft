@@ -11,6 +11,7 @@ OpenAI evaluator plugin.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -23,8 +24,10 @@ from aibench.core.models import (
     OpenAICompatibleTransport,
     deep_unfreeze,
 )
+from aibench.runners.base import InvocationContext, InvocationOutcome
 from aibench.runners.bindings import AppInputEnvelope, BindingError, InputBinding
 from aibench.runners.http_runner import HttpRunner
+from aibench.runners.streaming import ChatCompletionSSE
 
 
 def _http_transport(t: OpenAICompatibleTransport) -> HttpTransport:
@@ -76,6 +79,12 @@ class ChatPayload:
         payload["messages"] = messages
         if t.tools:
             payload["tools"] = [deep_unfreeze(tool) for tool in t.tools]
+        if t.streaming_enabled:
+            options = payload.get("stream_options") or {}
+            payload["stream_options"] = {
+                **options,
+                "include_usage": options.get("include_usage", True),
+            }
         return payload
 
 
@@ -108,14 +117,41 @@ class OpenAICompatibleRunner(HttpRunner):
             spec.transport, InputBinding.from_spec(declared) if declared else None
         )
 
+    async def _invoke(
+        self, envelope: AppInputEnvelope, ctx: InvocationContext
+    ) -> InvocationOutcome:
+        if not self.openai.streaming_enabled:
+            return await super()._invoke(envelope, ctx)
+        parameters = deep_unfreeze(self.openai.parameters)
+        expected = parameters.get("n", 1)
+        if isinstance(expected, bool) or not isinstance(expected, int) or expected < 1:
+            expected = 1
+        observer = ChatCompletionSSE(
+            expected_choices=expected,
+            request_started=time.perf_counter(),
+        )
+        return await self._invoke_http(envelope, ctx, response_stream=observer)
+
     def _isolation(self) -> str:
         return (
             "stateless_request: each case is one chat-completions request; any state the "
             "endpoint keeps is not visible or reset"
         )
 
-    def _limitations(self) -> tuple[str, ...]:
+    def _transport_observables(self) -> tuple[str, ...]:
+        existing = super()._transport_observables()
+        if not self.openai.streaming_enabled:
+            return existing
         return (
+            *existing,
+            "time_to_first_token",
+            "inter_token_latency",
+            "output_tokens_per_second",
+            "stream_integrity",
+        )
+
+    def _limitations(self) -> tuple[str, ...]:
+        notes = [
             (
                 "observes only the endpoint's response: message content, reported usage and "
                 "requested tool calls; hidden application internals are unknown"
@@ -126,4 +162,12 @@ class OpenAICompatibleRunner(HttpRunner):
                 "responses from a sampled model vary between runs unless the endpoint is "
                 "deterministic"
             ),
-        )
+        ]
+        if self.openai.streaming_enabled:
+            notes.append(
+                "stream timings use client receive times for content deltas; output token "
+                "rate requires reported completion_tokens usage"
+            )
+        else:
+            notes.append("stream performance is opt-in with transport parameters.stream=true")
+        return tuple(notes)

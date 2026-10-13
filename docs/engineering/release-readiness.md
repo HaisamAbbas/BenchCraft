@@ -1,6 +1,46 @@
-# Release readiness — aibench 0.1.0rc1
+# Release readiness
 
-Date: 2026-09-24
+## Current source candidate — `aibench 0.1.0rc35` (2026-10-13)
+
+**Status: hosted validation pending; release not authorized.** This unpublished candidate
+includes the synchronous DeepEval transport-accounting fix and CLI output tests that tolerate
+Rich-wrapped text. Their focused regressions passed locally: three transport-accounting tests,
+one CLI binding test, and two calibration path tests. The hosted workflow for these source fixes,
+[38301696360](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38301696360), has no
+final conclusion at its last status check; its 18 jobs were queued or still running. The
+last fully verified platform matrix below is for rc34 and does not establish rc35 readiness.
+
+No cross-host distributed-worker measurement or approved live-provider calibration has been
+completed. These G22 evidence gates remain open. See the [current platform matrix](platform-matrix.md)
+and the [G22 implementation record](../audit/2026-10-08/REPORT.md) before making a release
+decision.
+
+## Last fully verified source snapshot — `aibench 0.1.0rc34` (2026-10-11)
+
+**Status: platform gate passed; release not authorized.** Hosted run
+[38145775882](https://github.com/HaisamAbbas/BenchCraft/actions/runs/38145775882) passed all
+18 jobs on source commit `af918898e8a7d14bff2b861c6b3140d3185844d9`: the core suite and
+clean-wheel release journey on Windows, Linux and macOS with Python 3.11 and 3.12, plus real
+DeepEval and Ragas package contract jobs on all three operating systems with Python 3.12.
+Platform/version core-suite totals are recorded in the [platform matrix](platform-matrix.md).
+This validates the tested runners and package journey; it does not authorize a release or
+establish live-provider or external-pilot behavior.
+
+At that source snapshot, the local platform observation was Windows 11 with Python 3.12.10. A clean
+rc34 wheel build/install, quickstart, and release journey passed all 17 checks locally;
+the separate [G20 live-calibration and policy/worker regression batch](../audit/2026-10-08/implementation/G20-live-calibration-review.md)
+passed 55 tests with one platform-dependent symlink test skipped. The 100-case acceptance
+run completed 200/200 application/evaluator calls, recorded the eight intentionally
+injected quality failures, and verified zero application calls while stopped and during
+rescore. The paid-provider path was exercised only with a local fake judge. Hosted CI
+results are recorded in the linked hosted run; no hosted model/provider call or external pilot
+was run, and no release was authorized or published. Review the [G21 implementation record](../audit/2026-10-08/implementation/G21-platform-readiness.md)
+and release artifacts before making a release decision.
+
+The detailed compatibility boundary is in [`platform-matrix.md`](platform-matrix.md).
+
+## Historical local readiness record — `aibench 0.1.0rc1` (2026-09-24)
+
 Decision: **Local technical candidate ready for MVP review on Windows; not cleared for a broad external release.**
 
 The package artifacts are local in [`evidence/13/dist/`](evidence/13/dist/), with SHA-256 values in [`evidence/13/SHA256SUMS`](evidence/13/SHA256SUMS). The core wheel's installed quickstart and 100-case acceptance workflow passed in clean Python 3.11 and 3.12 environments on Windows. The optional DeepEval adapter's installed-wheel contract tests passed with the pinned real package and a deterministic local judge.
@@ -26,15 +66,15 @@ The package artifacts are local in [`evidence/13/dist/`](evidence/13/dist/), wit
 
 The 3.11 and 3.12 artifact builds have different archive checksums, as expected for separately built archives, but their core and DeepEval wheel members were compared and had identical file names and contents. The distributed artifacts under `evidence/13/dist/` match the recorded Prompt 13 SHA-256 manifest.
 
-## Open validation and limitations
+## Validation outside the passing hosted matrix
 
-- Linux is declared supported and CI is configured, but no CI result was observed. macOS was not exercised and has no configured CI runner. Do not describe either platform as validated.
-- No hosted assistant, planner or judge provider was called. The live DeepEval test remains skipped; planner recall remains 17/21 against its 0.85 engineering target, and planner/judge fixture labels have not had human review.
+- The hosted matrix exercises the GitHub runner images shown above; it does not prove behavior on every Linux distribution, macOS release, or hardware configuration.
+- No hosted assistant, planner or judge provider was called. Live provider-backed DeepEval remains untested; planner recall remains 17/21 against its 0.85 engineering target, and planner/judge fixture labels have not had human review.
 - Both pilot recipes ran locally against stand-in applications. No real team has run them or returned a form. The two real-team trials and any claim of time saved remain pending. No pilot user was contacted.
 - The 1,000-case workload measured roughly 7 cases/second in the Prompt 12 evidence. It is a recorded performance limit, not a release-blocking correctness defect.
 - The disk-full path was exercised by making the real artifact write path raise `ENOSPC`; an actual full volume was not created.
 - The source distributions were built and the wheels were built from them. The release check installed the wheels; it did not install an sdist directly.
-- CI is configured but has no observed result. Package artifacts were not published or sent, and no deployment was made.
+- Package artifacts were not published or sent, and no deployment was made. The passing CI run is not release authorization.
 
 ## Concurrent worktree changes
 

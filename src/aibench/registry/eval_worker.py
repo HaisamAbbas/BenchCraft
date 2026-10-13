@@ -64,7 +64,13 @@ def _outcome_json(outcome: Any, ctx: EvaluatorContext) -> dict[str, Any]:
             "raw": outcome.raw,
         },
         "usage": [
-            {"provider": u.provider, "calls": u.calls, "tokens": u.tokens, "cost": u.cost}
+            {
+                "provider": u.provider,
+                "calls": u.calls,
+                "tokens": u.tokens,
+                "cost": u.cost,
+                "calls_without_tokens": u.calls_without_tokens,
+            }
             for u in ctx.usage
         ],
     }

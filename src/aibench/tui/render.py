@@ -118,7 +118,23 @@ def draft(console: Console, summary: dict[str, Any]) -> None:
     if summary.get("test_world"):
         out(console, f"  test world: {safe(summary['test_world'])} (loaded before each case)")
     for metric in summary.get("metrics", []):
-        out(console, f"  metric {safe(metric['metric'])}: {safe(metric['rationale'])}")
+        out(
+            console,
+            f"  metric binding {metric['binding']} ({safe(metric['metric'])}): "
+            f"{safe(metric['rationale'])}",
+        )
+    for gate in summary.get("gates", []):
+        thresholds = []
+        if gate.get("min_pass_rate") is not None:
+            thresholds.append(f"pass rate >= {gate['min_pass_rate'] * 100:g}%")
+        if gate.get("min_completed_coverage") is not None:
+            thresholds.append(f"completed coverage >= {gate['min_completed_coverage'] * 100:g}%")
+        metric = gate.get("metric", f"binding {gate['binding']}")
+        out(
+            console,
+            f"  release gate {safe(gate['gate_id'])} on {safe(metric)}: "
+            f"{safe('; '.join(thresholds))}",
+        )
     for gap in summary.get("gaps", []):
         out(console, f"  [yellow]gap[/yellow] {safe(gap['subject'])}: {safe(gap['reason'])}")
     for label, key in (
@@ -134,7 +150,8 @@ def draft(console: Console, summary: dict[str, Any]) -> None:
         cost_text = "unknown" if cost is None else f"${cost:g} (estimate)"
         out(
             console,
-            f"  {estimate['selected_cases']} case(s) x {estimate['repetitions']} repetition(s): "
+            f"  {estimate['selected_cases']} case(s) x {estimate['repetitions']} measured "
+            f"repetition(s) + {estimate['warmup_repetitions']} warmup(s): "
             f"up to {estimate['application_calls_upper_bound']} application call(s), "
             f"{estimate['evaluations']} evaluation(s), {estimate['model_evaluations']} by a "
             f"model judge; cost {cost_text}",
@@ -436,8 +453,12 @@ def rescored(console: Console, data: dict[str, Any]) -> None:
             + (" [dim](/rescore all evaluates everything again)[/dim]" if evaluated == 0 else ""),
         )
     for summary in data["summaries"]:
-        mean = summary["value_summary"].get("mean")
-        value = f" mean {_number(mean)}" if mean is not None else ""
+        value_summary = summary["value_summary"]
+        mean = value_summary.get("mean")
+        value = f" case-macro mean {_number(mean)}" if mean is not None else ""
+        repetition_weighted = value_summary.get("repetition_weighted_mean")
+        if repetition_weighted is not None:
+            value += f" (repetition-weighted {_number(repetition_weighted)})"
         line = (
             f"  {safe(summary['metric_id'])}:{value} completed {summary['completed']}/"
             f"{summary['selected']}, not applicable {summary['not_applicable']}, "
@@ -600,6 +621,33 @@ def report(console: Console, data: dict[str, Any]) -> None:
             else "not measured (no successful request)"
         ),
     )
+    for segment in data.get("segments", [])[:8]:
+        out(
+            console,
+            f"  segment {safe(segment['field'])}: {segment['category_count']} value(s) across "
+            f"{segment['selected_cases']} selected case(s)",
+        )
+        for group in segment.get("groups", [])[:5]:
+            app_summary = group.get("application") or {}
+            description = (
+                f"{safe(group['label'])}: {group['case_count']} case(s), application "
+                f"completed {_of(app_summary.get('completed_requests', 0), app_summary.get('planned_requests'))}, "
+                f"failed {app_summary.get('failed_requests', 0)}"
+            )
+            metric_summaries = []
+            for scoring in group.get("scoring_passes", []):
+                for metric in scoring.get("metrics", []):
+                    summary = metric["summary"]
+                    metric_summaries.append(
+                        f"{metric['metric']} pass "
+                        f"{_of(summary['decisions'].get('pass', 0), summary['selected'])}"
+                    )
+            if metric_summaries:
+                description += "; " + ", ".join(metric_summaries)
+            out(console, f"    {description}")
+        remaining = segment["category_count"] - min(5, len(segment.get("groups", [])))
+        if remaining > 0:
+            out(console, f"    ... and {remaining} more value(s) in the report")
     suspect = app.get("error_like_answers") or {"count": 0}
     if suspect["count"]:
         out(
@@ -654,10 +702,9 @@ def arena(console: Console, data: dict[str, Any]) -> None:
         )
     for row in data["rows"]:
         if row["verdict"] in ("baseline", "error"):  # what to look at first
-            out(
-                console,
-                f"    {safe(row['case_id'])}: {safe(row['verdict'])}: {safe(row['reason'][:200])}",
-            )
+            reason = row["reason"]  # the judge's reason starts with its verdict
+            said = reason if reason.startswith(row["verdict"]) else f"{row['verdict']}: {reason}"
+            out(console, f"    {safe(row['case_id'])}: {safe(said[:200])}")
 
 
 def comparison(console: Console, data: dict[str, Any]) -> None:
@@ -682,6 +729,37 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
         f"  {safe(baseline.get('run_id', '?'))} -> {safe(current.get('run_id', '?'))}; "
         f"{safe(data.get('basis', 'stored facts only'))}",
     )
+    performance = data.get("application_performance") or {}
+    for side_name in ("baseline", "current"):
+        side = performance.get(side_name) or {}
+        stats = side.get("latency_statistics") or {}
+        retry = side.get("retry_inclusive_latency") or {}
+        throughput = side.get("throughput") or {}
+        warmup = side.get("warmup_latency_statistics") or {}
+        streaming = side.get("streaming_performance") or {}
+        if stats or retry or throughput or warmup:
+            out(
+                console,
+                f"  {side_name} application: p95/p99 {_number(stats.get('p95_ms'))}/"
+                f"{_number(stats.get('p99_ms'))} ms, stddev {_number(stats.get('stddev_ms'))} ms; "
+                f"retry-inclusive p95 {_number(retry.get('p95_ms'))} ms; "
+                f"throughput {_number(throughput.get('successful_requests_per_second'))} req/s; "
+                f"warmup p95 {_number(warmup.get('p95_ms'))} ms",
+            )
+        if streaming.get("requests"):
+            ttft = streaming.get("time_to_first_token_ms") or {}
+            inter_token = streaming.get("inter_token_latency_ms") or {}
+            output_rate = streaming.get("output_tokens_per_second") or {}
+            integrity = streaming.get("integrity") or {}
+            out(
+                console,
+                f"  {side_name} streaming: TTFT p50/p95 {_number(ttft.get('p50_ms'))}/"
+                f"{_number(ttft.get('p95_ms'))} ms, inter-token mean "
+                f"{_number(inter_token.get('mean_ms'))} ms, output "
+                f"{_number(output_rate.get('p50'))} "
+                f"tokens/s median, {integrity.get('complete', 0)} complete / "
+                f"{integrity.get('incomplete', 0)} incomplete streams",
+            )
     gate: dict[str, Any] = data.get("overall_coverage_gate") or data.get("gate") or {}
     if gate:
         gate_status = str(gate.get("status", "unknown"))
@@ -691,6 +769,31 @@ def comparison(console: Console, data: dict[str, Any]) -> None:
             f"  coverage gate: [{gate_colour}]{safe(gate_status)}[/{gate_colour}]"
             f" {safe(str(gate.get('reason') or ''))}",
         )
+    regression_gate = data.get("regression_gate")
+    if isinstance(regression_gate, dict):
+        gate_status = str(regression_gate.get("status", "unknown"))
+        gate_colour = {"pass": "green", "fail": "red"}.get(gate_status, "yellow")
+        out(
+            console,
+            f"  regression policy: [{gate_colour}]{safe(gate_status)}[/{gate_colour}]",
+        )
+        rules = regression_gate.get("rules", [])
+        for rule in rules if isinstance(rules, list) else []:
+            if isinstance(rule, dict):
+                observed = rule.get("observed")
+                maximum = rule.get("maximum")
+                reason = rule.get("reason")
+                explanation = (
+                    f"; reason: {safe(reason.replace('_', ' '))}"
+                    if isinstance(reason, str) and reason
+                    else ""
+                )
+                out(
+                    console,
+                    f"    {safe(rule.get('rule', 'rule'))}: "
+                    f"{safe(rule.get('status', 'unknown'))} "
+                    f"(observed {_number(observed)}, maximum {_number(maximum)}{explanation})",
+                )
     for metric in data.get("metrics", []):
         detail = metric.get("comparison") or metric.get("diagnostic_comparison")
         if not isinstance(detail, dict):

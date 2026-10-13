@@ -153,6 +153,57 @@
       "title": "DecisionRule",
       "type": "object"
     },
+    "ReleaseGate": {
+      "additionalProperties": false,
+      "description": "A predeclared release gate on one metric binding (\u00a712), checked against the run's\nstored results. Both thresholds use every selected case as the denominator, so losing\nobservations can only fail a gate, never pass it:\n- `min_pass_rate`: passing decisions / selected;\n- `min_completed_coverage`: completed evaluations / selected.\nA gate is decided only for a finished run; a partial snapshot leaves it undecided.",
+      "properties": {
+        "binding": {
+          "minimum": 0,
+          "title": "Binding",
+          "type": "integer"
+        },
+        "gate_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Gate Id",
+          "type": "string"
+        },
+        "min_completed_coverage": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Completed Coverage"
+        },
+        "min_pass_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Pass Rate"
+        }
+      },
+      "required": [
+        "gate_id",
+        "binding"
+      ],
+      "title": "ReleaseGate",
+      "type": "object"
+    },
     "SamplePatch": {
       "additionalProperties": false,
       "description": "A seeded sample of `size` cases (\u00a73 \"a seeded 20-case pilot\"). Without a seed, the\ncurrent one is kept, or the session's own stable seed is used; either way the sample\nis recorded with its seed and is reproducible.",
@@ -239,6 +290,22 @@
       ],
       "default": null,
       "title": "Dataset"
+    },
+    "gates": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ReleaseGate"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Replace all release gates for this draft; [] clears them. Each binding is the zero-based index into the current draft's metrics list.",
+      "title": "Gates"
     },
     "limit": {
       "anyOf": [

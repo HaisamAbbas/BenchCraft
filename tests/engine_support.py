@@ -40,6 +40,12 @@ if text.startswith("crash"):
     sys.exit(3)
 with log.open("a") as f:
     f.write(json.dumps({"case": case, "start": start, "end": time.time()}) + "\n")
+after_log = os.environ.get("APP_AFTER_LOG_ONCE")
+if after_log and not pathlib.Path(after_log).exists():
+    pathlib.Path(after_log).write_text("logged")
+    release = pathlib.Path(after_log + ".release")
+    while not release.exists():
+        time.sleep(0.01)  # let crash-recovery tests kill the dispatcher after a durable result
 print(json.dumps({"output": "yes"}))
 """
 
@@ -63,7 +69,12 @@ class Harness:
         (self.root / name).write_text("\n".join(lines) + "\n", encoding="utf-8")
         return name
 
-    def cli_app(self, timeout: float = 20.0, effects: str = "none") -> str:
+    def cli_app(
+        self,
+        timeout: float = 20.0,
+        effects: str = "none",
+        environment_digest: str | None = None,
+    ) -> str:
         config = {
             "application_id": "instrumented",
             "runner": "cli",
@@ -76,6 +87,8 @@ class Harness:
                 "env": {"APP_LOG": str(self.log)},
             },
         }
+        if environment_digest is not None:
+            config["environment_digest"] = environment_digest
         (self.root / "app.json").write_text(json.dumps(config), encoding="utf-8")
         return "app.json"
 
@@ -99,17 +112,31 @@ class Harness:
         )
 
     def create(
-        self, plan: Path, policy: ExecutionPolicy | None = None, trusted: bool = True
+        self,
+        plan: Path,
+        policy: ExecutionPolicy | None = None,
+        trusted: bool = True,
+        environ: dict[str, str] | None = None,
     ) -> str:
         compiled = compile_plan(plan, policy=policy or ExecutionPolicy(), trusted_local=trusted)
         storage, artifacts = self.storage()
         try:
-            return create_run(compiled, storage=storage, artifacts=artifacts, granted_by="test")
+            return create_run(
+                compiled,
+                storage=storage,
+                artifacts=artifacts,
+                granted_by="test",
+                environ=environ,
+            )
         finally:
             storage.db.close()
 
     def execute(
-        self, run_id: str, controller: RunController | None = None, during: Any = None
+        self,
+        run_id: str,
+        controller: RunController | None = None,
+        during: Any = None,
+        environ: dict[str, str] | None = None,
     ) -> RunOutcome:
         """Run or resume `run_id` on a fresh connection (as a new process would)."""
         storage, artifacts = self.storage()
@@ -117,7 +144,13 @@ class Harness:
         async def go() -> RunOutcome:
             ctl = controller or RunController()
             task = asyncio.ensure_future(
-                execute_run(run_id, storage=storage, artifacts=artifacts, controller=ctl)
+                execute_run(
+                    run_id,
+                    storage=storage,
+                    artifacts=artifacts,
+                    controller=ctl,
+                    environ=environ,
+                )
             )
             if during is not None:
                 await during(ctl, self)
@@ -144,6 +177,18 @@ class Harness:
             if asyncio.get_running_loop().time() > deadline:
                 raise AssertionError(f"only {self.count()} invocations after {timeout}s")
             await asyncio.sleep(0.02)
+
+    async def wait_for_attempts(self, n: int, timeout: float = 30.0) -> None:
+        """Wait until the instrumented application has begun ``n`` invocations."""
+        attempts = self.log.with_suffix(".attempts")
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            started = len(attempts.read_text(encoding="utf-8").split()) if attempts.exists() else 0
+            if started >= n:
+                return
+            if asyncio.get_running_loop().time() > deadline:
+                raise AssertionError(f"only {started} application attempts after {timeout}s")
+            await asyncio.sleep(0.01)
 
 
 def max_overlap(invocations: list[dict[str, Any]]) -> int:

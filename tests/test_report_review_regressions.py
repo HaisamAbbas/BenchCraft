@@ -52,7 +52,7 @@ def test_a_rescore_keeps_work_that_never_ran_in_its_denominator(tmp_path: Path) 
     result = cli.invoke(
         app, ["evaluate", run_id, "--plan", str(rescore), "--workspace", str(tmp_path)]
     )
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 3, result.output  # incomplete rescoring is an unsuccessful run
     engine, rescored = project.report(run_id)["scoring_passes"]
     [metric] = rescored["metrics"]
     s = metric["summary"]

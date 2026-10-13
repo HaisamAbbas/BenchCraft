@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 
 from aibench.cli.main import app
 from aibench.observations.otel import TraceFormatError, normalize, parse_otlp
+from aibench.services.traces import _read_trace_file
 
 cli = CliRunner()
 # The fixture's two model calls: 12+5 and 20+9 tokens; its agent span repeats the total.
@@ -127,6 +128,171 @@ def test_a_file_that_is_not_a_trace_export_is_refused(traced: tuple[Path, Path])
     bad.write_text('{"spans": []}', encoding="utf-8")
     result = _cli("traces", "import", run_id, str(bad), *ws, code=2)
     assert "resourceSpans" in result.output
+
+
+def test_malformed_nested_trace_shape_is_a_json_input_error(traced: tuple[Path, Path]) -> None:
+    root, _ = traced
+    ws = ["--workspace", str(root)]
+    run_id = _cli("run", "--plan", str(root / "plan.json"), "--json", *ws)["run_id"]
+    malformed = root / "malformed.json"
+    malformed.write_text(json.dumps({"resourceSpans": [None]}), encoding="utf-8")
+    result = cli.invoke(
+        app,
+        ["traces", "import", run_id, str(malformed), "--json", *ws],
+    )
+    assert result.exit_code == 2, result.output
+    assert json.loads(result.stdout) == {
+        "schema": "aibench.cli-error/1",
+        "status": "error",
+        "message": "resourceSpans[0] entries must be objects",
+        "exit_code": 2,
+        "_cli": {"schema": "aibench.cli-output/1", "exit_code": 2},
+    }
+    assert "Traceback" not in result.output
+
+
+    malformed.write_text(
+        json.dumps(
+            {
+                "resourceSpans": [
+                    {
+                        "scopeSpans": [
+                            {
+                                "spans": [
+                                    {
+                                        "traceId": "a" * 32,
+                                        "spanId": "b" * 16,
+                                        "attributes": [
+                                            {
+                                                "key": "nested",
+                                                "value": {
+                                                    "kvlistValue": {
+                                                        "values": [
+                                                            {
+                                                                "key": [],
+                                                                "value": {"stringValue": "x"},
+                                                            }
+                                                        ]
+                                                    }
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = cli.invoke(app, ["traces", "import", run_id, str(malformed), "--json", *ws])
+    assert result.exit_code == 2, result.output
+    document = json.loads(result.stdout)
+    assert document["status"] == "error" and document["exit_code"] == 2
+    assert "string key" in document["message"]
+    assert "Traceback" not in result.output
+
+
+def test_trace_file_preflight_rejects_oversized_file_before_open(tmp_path: Path) -> None:
+    path = tmp_path / "oversized.json"
+    path.write_bytes(b"x" * 1_000)
+
+    class NoOpenPath:
+        name = path.name
+
+        def stat(self):
+            return path.stat()
+
+        def open(self, *_args: object, **_kwargs: object):
+            raise AssertionError("oversized trace should be rejected before opening")
+
+    with pytest.raises(TraceFormatError, match="exceeds the 100-byte limit"):
+        _read_trace_file(NoOpenPath(), 100)  # type: ignore[arg-type]
+
+
+def test_trace_file_read_stops_at_one_byte_over_the_limit() -> None:
+    import io
+    from types import SimpleNamespace
+
+    class TrackingReader(io.BytesIO):
+        bytes_read = 0
+
+        def read(self, size: int = -1) -> bytes:
+            data = super().read(size)
+            self.bytes_read += len(data)
+            return data
+
+    source = TrackingReader(b"x" * 1_000)
+
+    class GrowingPath:
+        name = "growing.json"
+
+        def stat(self):
+            return SimpleNamespace(st_size=100)  # it grows after the preflight check
+
+        def open(self, *_args: object, **_kwargs: object):
+            return source
+
+    with pytest.raises(TraceFormatError, match="exceeds the 100-byte limit"):
+        _read_trace_file(GrowingPath(), 100)  # type: ignore[arg-type]
+
+    assert source.bytes_read == 101
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"resourceSpans": [None]},
+        {"resourceSpans": [{"scopeSpans": [None]}]},
+        {"resourceSpans": [{"scopeSpans": [{"spans": [None]}]}]},
+        {
+            "resourceSpans": [
+                {
+                    "scopeSpans": [
+                        {
+                            "spans": [
+                                {
+                                    "traceId": "a" * 32,
+                                    "spanId": "b" * 16,
+                                    "attributes": [
+                                        {
+                                            "key": "nested",
+                                            "value": {
+                                                "kvlistValue": {
+                                                    "values": [
+                                                        {
+                                                            "key": [],
+                                                            "value": {"stringValue": "x"},
+                                                        }
+                                                    ]
+                                                }
+                                            },
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {"resourceSpans": "invalid"},
+        {"resourceSpans": None},
+    ],
+)
+def test_nested_otlp_shape_errors_use_trace_format_error(document: dict[str, Any]) -> None:
+    with pytest.raises(TraceFormatError):
+        parse_otlp(json.dumps(document).encode())
+
+
+@pytest.mark.parametrize("field", ["arrayValue", "kvlistValue"])
+def test_otlp_anyvalue_rejects_falsey_non_object_containers(field: str) -> None:
+    span = _span("span")
+    span["attributes"] = [{"key": "nested", "value": {field: []}}]
+    with pytest.raises(TraceFormatError, match=f"{field} must be an object"):
+        parse_otlp(_document([span]))
 
 
 def _document(spans: list[dict[str, Any]]) -> bytes:

@@ -29,15 +29,19 @@ From the repository root, create a separate environment (the `.venv` directory i
 
 ```text
 python -m venv plugins/ragas/.venv
-plugins/ragas/.venv/Scripts/pip install -e . -e plugins/ragas  # Windows
-plugins/ragas/.venv/bin/pip install -e . -e plugins/ragas      # Linux/macOS
+plugins/ragas/.venv/Scripts/python.exe -m pip install --upgrade "pip>=26.2.1,<27"  # Windows
+plugins/ragas/.venv/Scripts/python.exe -m pip install -e . -e plugins/ragas         # Windows
+plugins/ragas/.venv/bin/python -m pip install --upgrade 'pip>=26.2.1,<27'           # Linux/macOS
+plugins/ragas/.venv/bin/python -m pip install -e . -e plugins/ragas                # Linux/macOS
 ```
 
 Ragas has a substantial dependency tree. Keep it out of the core environment. The plugin
 also keeps the Ragas 0.4.3-era LangChain/Instructor client APIs in their tested major
 ranges, because an unconstrained newer community package can remove imports Ragas still
-uses. The plugin worker receives a minimal environment, a private working directory and
-HOME, and only credentials explicitly passed with `--plugin-secret`.
+uses. Lower bounds for `langchain-openai`, `langgraph-sdk`, and `marshmallow` exclude the
+advisory-affected releases without leaving their compatible API ranges. The plugin worker
+receives a minimal environment, a private working directory and HOME, and only credentials
+explicitly passed with `--plugin-secret`.
 
 Ragas 0.4.3 eagerly imports its full metric catalogue. On a cold, loaded Windows host that
 import can take longer than aibench's default 120-second worker-startup bound; the adapter
@@ -137,3 +141,6 @@ not a general security sandbox; only install trusted packages and factories.
 The manifest declares `ragas.faithfulness@1`, `aibench-ragas`, semantic evaluator version
 `1.0.0`, `consumes="recorded_outputs"`, `uses_models=True`, credential/network
 requirements, no internal retries, concurrency one, and `requires_worker=True`.
+
+See [SECURITY.md](SECURITY.md) for the two narrowly scoped, unpatched Ragas dependency
+advisories and the code-path evidence reviewed by CI.

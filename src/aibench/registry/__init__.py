@@ -14,9 +14,10 @@ import os
 import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from aibench import __version__
 from aibench.core.errors import AibenchError, ConfigError, PolicyError
 from aibench.core.hashes import content_hash
 from aibench.core.models import (
@@ -34,9 +35,13 @@ from aibench.evaluators.worker_client import WorkerSpec, make_worker_factory
 from aibench.registry.discovery import (
     WORKER_TIMEOUT_SECONDS,
     ManifestLoad,
+    core_version,
+    dependency_lock_hash,
     discover_plugins,
     environment_site_paths,
     load_manifests,
+    plugin_paths_hash,
+    worker_python_identity,
 )
 from aibench.security.secrets import resolve_secret
 
@@ -174,23 +179,34 @@ class EvaluatorRegistry:
                 resolve_secret(ref, os.environ)  # fail now, not as an error on every case
             except ConfigError as exc:
                 raise RegistryError(f"plugin secret {name}: {exc}") from exc
+        resolved_extra_paths = tuple(Path(os.path.abspath(path)) for path in extra_paths)
         try:
             site_paths = environment_site_paths(python, timeout=startup_timeout_seconds)
         except OSError as exc:
             raise RegistryError(str(exc)) from exc
+        environment_lock_hash = dependency_lock_hash(site_paths)
+        extra_paths_identity = plugin_paths_hash(resolved_extra_paths)
+        runtime_identity = worker_python_identity(python, timeout=startup_timeout_seconds)
         loads = []
         for plugin in discover_plugins(paths=site_paths):
             loaded = load_manifests(
                 plugin,
                 python=python,
-                extra_paths=extra_paths,
+                extra_paths=resolved_extra_paths,
                 timeout=startup_timeout_seconds,
             )
+            if loaded.error:
+                loaded = replace(
+                    loaded, error=_core_mismatch(plugin.name, site_paths, loaded.error)
+                )
             loads.append(loaded)
             spec = WorkerSpec(
                 python=python,
                 target=plugin.target,
-                extra_paths=tuple(extra_paths),
+                extra_paths=resolved_extra_paths,
+                dependency_lock_hash=environment_lock_hash,
+                extra_paths_hash=extra_paths_identity,
+                python_runtime_identity=runtime_identity,
                 secret_env=dict(secret_env or {}),
                 startup_timeout_seconds=startup_timeout_seconds,
             )
@@ -368,3 +384,16 @@ def applicability_problems(
                 f"does not expose it (output_binding.{name} is not declared)"
             )
     return problems
+
+
+def _core_mismatch(plugin: str, site_paths: Sequence[Path], error: str) -> str:
+    """A plugin that fails to load in an environment holding a different aibench than this
+    one: say so first, since that is the likely cause and `/plugins install` fixes it (it
+    installs this version's aibench beside the plugin)."""
+    installed = core_version(site_paths)
+    if installed is None or installed == __version__:
+        return error
+    return (
+        f"its environment has BenchCraft {installed}, not {__version__}; "
+        f"`/plugins install {plugin}` updates it ({error})"
+    )

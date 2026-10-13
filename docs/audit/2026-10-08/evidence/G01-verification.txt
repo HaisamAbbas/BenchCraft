@@ -1,0 +1,22 @@
+G01 verification
+================
+
+Behavior
+--------
+- Root `--config` explicitly selects the project config instead of auto-discovery.
+- Root `--policy` overrides the selected project config, and a command-local `--policy`
+  overrides the root default.
+- Root `--json` reaches nested commands with a JSON mode, including command groups.
+- Root `--non-interactive` prevents chat/setup prompts and selects the headless benchmark
+  path even when a terminal is available. Connect refuses missing interactive values, and
+  plugin installation requires explicit `--yes` instead of prompting or proceeding silently.
+
+Validation
+----------
+- `tests/test_cli_global_options.py tests/test_cli_project.py`: 22 passed, including all eight
+  global-option tests.
+- Earlier related global/app/project batch: 27 passed before the two additional connect/plugin
+  prompt regressions were added.
+- `.venv/Scripts/mypy.exe src/aibench`: no issues in 143 source files.
+- `.venv/Scripts/ruff.exe check src tests plugins`: passed.
+- `git diff --check`: passed.

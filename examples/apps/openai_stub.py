@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+import time
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -82,6 +83,94 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_stream(self, request: dict[str, Any]) -> None:
+        response = complete(request)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+        def event(value: dict[str, Any]) -> None:
+            body = json.dumps(value, ensure_ascii=False).encode("utf-8")
+            self.wfile.write(b"data: " + body + b"\n\n")
+            self.wfile.flush()
+
+        choice = response["choices"][0]
+        message = choice["message"]
+        event(
+            {
+                "id": response["id"],
+                "model": response["model"],
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+            }
+        )
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            split = max(1, len(content) // 2)
+            for part in (content[:split], content[split:]):
+                if part:
+                    time.sleep(0.01)
+                    event(
+                        {
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {"content": part},
+                                    "finish_reason": None,
+                                }
+                            ]
+                        }
+                    )
+        for call in message.get("tool_calls", []):
+            arguments = call["function"]["arguments"]
+            split = max(1, len(arguments) // 2)
+            for index, fragment in enumerate((arguments[:split], arguments[split:])):
+                if index:
+                    time.sleep(0.01)
+                event(
+                    {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            **(
+                                                {"id": call["id"], "type": call["type"]}
+                                                if index == 0
+                                                else {}
+                                            ),
+                                            "function": {
+                                                **(
+                                                    {"name": call["function"]["name"]}
+                                                    if index == 0
+                                                    else {}
+                                                ),
+                                                "arguments": fragment,
+                                            },
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None,
+                            }
+                        ]
+                    }
+                )
+        event(
+            {
+                "choices": [
+                    {"index": 0, "delta": {}, "finish_reason": choice["finish_reason"]}
+                ]
+            }
+        )
+        options = request.get("stream_options") or {}
+        if isinstance(options, dict) and options.get("include_usage") is True:
+            event({"choices": [], "usage": response["usage"]})
+        if request.get("drop_done_marker") is not True:
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
     def do_GET(self) -> None:
         if self.path == "/v1/models":
             self._send(200, {"object": "list", "data": [{"id": MODEL, "object": "model"}]})
@@ -101,12 +190,19 @@ class Handler(BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.calls["chat"] += 1
             self.server.requests.append(
-                {"body": request, "authorization": self.headers.get("Authorization")}
+                {
+                    "body": request,
+                    "authorization": self.headers.get("Authorization"),
+                    "accept": self.headers.get("Accept"),
+                }
             )
         if not isinstance(request.get("messages"), list):
             self._send(400, {"error": {"message": "messages must be a list"}})
             return
-        self._send(200, complete(request))
+        if request.get("stream") is True:
+            self._send_stream(request)
+        else:
+            self._send(200, complete(request))
 
 
 def make_server(host: str = "127.0.0.1", port: int = 8767) -> StubServer:

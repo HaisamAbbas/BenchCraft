@@ -32,14 +32,21 @@ rebuilt from storage without loading any evaluator (11-G1).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import platform
 import random
+import shutil
 import socket
+import stat
+import subprocess
 import sys
+import sysconfig
+import threading
 import time
 import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -48,24 +55,39 @@ from aibench.core.hashes import bytes_hash, content_hash
 from aibench.core.models import (
     ApplicationSpec,
     Approval,
+    CliTransport,
+    ContainerTransport,
     EffectLevel,
     ExecutionResult,
     ExecutionStatus,
+    PythonTransport,
     RedactionClass,
     ResetPolicy,
     RunManifest,
     WorkItem,
     WorkItemState,
+    deep_unfreeze,
 )
-from aibench.core.plans import ExecutablePlan
+from aibench.core.plans import CaseSelection, ExecutablePlan
 from aibench.engine.budget import BudgetLedger
-from aibench.engine.cache import application_code_identity
-from aibench.engine.compile import CompiledRun, PlanInvalid, PolicyDenied, load_plan
+from aibench.engine.cache import (
+    application_code_identity,
+    application_resume_identity_problem,
+)
+from aibench.engine.compile import (
+    CompiledRun,
+    PlanInvalid,
+    PolicyDenied,
+    analyze_plan,
+    compiled_from,
+    load_plan,
+)
 from aibench.engine.engine import (
     RunController,
     RunEngine,
     RunOutcome,
     RunState,
+    StoredCaseMap,
     evaluation_key,
     execution_key,
     parse_work_item_key,
@@ -77,9 +99,15 @@ from aibench.registry import (
     BindingValidationError,
     EvaluatorRegistry,
     RegistryError,
+    ResolvedMetric,
+    dependency_lock_hash,
+    plugin_paths_hash,
+    worker_python_identity,
 )
-from aibench.runners import LoadedApplication, create_runner, reset_hook
+from aibench.registry.discovery import environment_paths
+from aibench.runners import BaseRunner, LoadedApplication, create_runner, reset_hook
 from aibench.security.policy import ExecutionPolicy, evaluator_denials, plan_denials
+from aibench.services.distributed import CoordinatorRunner
 from aibench.services.scoring import (
     ScoringReport,
     declared_dependency_identity,
@@ -87,9 +115,17 @@ from aibench.services.scoring import (
     score_recorded_run,
 )
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
-from aibench.storage.repositories import RunLease, Storage, WorkItemSettlement
+from aibench.storage.repositories import RunControlState, RunLease, Storage, WorkItemSettlement
 
 LEASE_TTL_SECONDS = 60.0  # a lease not heartbeated for this long belongs to a dead session
+MAX_RUNTIME_BINARY_BYTES = 256 * 1024 * 1024
+MAX_GIT_DIFF_BYTES = 64 * 1024 * 1024
+GIT_DIFF_CHUNK_BYTES = 64 * 1024
+MAX_GIT_UNTRACKED_LIST_BYTES = 8 * 1024 * 1024
+MAX_GIT_UNTRACKED_FILES = 2_000
+MAX_GIT_UNTRACKED_BYTES = 64 * 1024 * 1024
+GIT_METADATA_TIMEOUT_SECONDS = 3.0
+WORK_ITEM_COMMIT_BATCH_SIZE = 500
 # A run in any of these states can be continued by a new session. A run left
 # `cancelling` by a session that died is continued only to finish its cancellation.
 RESUMABLE_STATES = {
@@ -116,6 +152,34 @@ class RunError(AibenchError):
     """A run cannot be started or resumed as asked."""
 
 
+class RunControlError(RunError):
+    """A durable run-control request is invalid for the current run state."""
+
+
+def request_run_control(
+    storage: Storage, run_id: str, action: str, *, requested_by: str
+) -> RunControlState:
+    """Persist an external last-writer-wins desired state for a live/resumable run."""
+    desired = {"pause": "paused", "resume": "running", "cancel": "cancelled"}.get(action)
+    if desired is None:
+        raise RunControlError(f"unknown run-control action {action!r}")
+    record = storage.get_run(run_id)
+    if record is None:
+        raise RunControlError(f"no run committed with run_id={run_id!r}")
+    if record.manifest.parameters.get("mode") != "manual_plan":
+        raise RunControlError(f"run {run_id} was not created from a plan")
+    try:
+        return storage.set_run_control_state(
+            run_id,
+            desired_state=desired,
+            action=action,
+            requested_by=requested_by,
+            allowed_run_statuses=frozenset(RESUMABLE_STATES),
+        )
+    except (KeyError, ValueError) as exc:
+        raise RunControlError(str(exc)) from exc
+
+
 def _approval_scope(run_id: str, manifest: RunManifest, policy_hash: str) -> str:
     return content_hash(
         {
@@ -128,6 +192,472 @@ def _approval_scope(run_id: str, manifest: RunManifest, policy_hash: str) -> str
     )
 
 
+def _runtime_environment_identity() -> dict[str, str]:
+    """Host runtime facts that must stay stable across sessions of one run."""
+    return {
+        "python": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "python_cache_tag": str(sys.implementation.cache_tag or ""),
+        "platform": sys.platform,
+        "platform_abi": sysconfig.get_platform(),
+    }
+
+
+def _git_tracked_diff_identity(
+    base_dir: Path, environment: dict[str, str]
+) -> tuple[str, str] | None:
+    """Stream a bounded diff hash without retaining user file contents in memory."""
+    try:
+        process = subprocess.Popen(
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "diff",
+                "--binary",
+                "--no-ext-diff",
+                "--no-textconv",
+                "HEAD",
+                "--",
+            ],
+            cwd=base_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+        )
+    except OSError:
+        return None
+    stdout = process.stdout
+    if stdout is None:
+        process.kill()
+        process.wait()
+        return None
+
+    digest = hashlib.sha256()
+    result: dict[str, int | bool] = {"bytes": 0, "too_large": False, "read_error": False}
+
+    def consume_diff() -> None:
+        try:
+            while chunk := stdout.read(GIT_DIFF_CHUNK_BYTES):
+                size = int(result["bytes"]) + len(chunk)
+                if size > MAX_GIT_DIFF_BYTES:
+                    result["too_large"] = True
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                    return
+                digest.update(chunk)
+                result["bytes"] = size
+        except OSError:
+            result["read_error"] = True
+
+    reader = threading.Thread(target=consume_diff, name="aibench-git-diff", daemon=True)
+    reader.start()
+    try:
+        return_code = process.wait(timeout=GIT_METADATA_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        process.wait()
+        reader.join(timeout=3)
+        if reader.is_alive():
+            stdout.close()
+            reader.join(timeout=1)
+        return None
+    reader.join(timeout=3)
+    if reader.is_alive():
+        try:
+            process.kill()
+        except OSError:
+            pass
+        stdout.close()
+        reader.join(timeout=1)
+        return None
+    stdout.close()
+    if return_code != 0 or result["too_large"] or result["read_error"]:
+        return None
+    diff_bytes = int(result["bytes"])
+    return "clean" if diff_bytes == 0 else "dirty", f"sha256:{digest.hexdigest()}"
+
+
+def _git_untracked_files_identity(
+    base_dir: Path, environment: dict[str, str]
+) -> tuple[int, str] | None:
+    """Hash bounded, non-ignored untracked files below the local application root."""
+    try:
+        process = subprocess.Popen(
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                ".",
+            ],
+            cwd=base_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+        )
+    except OSError:
+        return None
+    stdout = process.stdout
+    if stdout is None:
+        process.kill()
+        process.wait()
+        return None
+
+    result: dict[str, int | bool | bytes] = {
+        "bytes": 0,
+        "too_large": False,
+        "read_error": False,
+        "data": b"",
+    }
+
+    def capture_names() -> None:
+        captured = bytearray()
+        try:
+            while chunk := stdout.read(GIT_DIFF_CHUNK_BYTES):
+                size = int(result["bytes"]) + len(chunk)
+                if size > MAX_GIT_UNTRACKED_LIST_BYTES:
+                    result["too_large"] = True
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                    return
+                captured.extend(chunk)
+                result["bytes"] = size
+        except OSError:
+            result["read_error"] = True
+        result["data"] = bytes(captured)
+
+    reader = threading.Thread(target=capture_names, name="aibench-git-untracked-list", daemon=True)
+    reader.start()
+    try:
+        return_code = process.wait(timeout=GIT_METADATA_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        process.wait()
+        reader.join(timeout=3)
+        if reader.is_alive():
+            stdout.close()
+            reader.join(timeout=1)
+        return None
+    reader.join(timeout=3)
+    if reader.is_alive():
+        try:
+            process.kill()
+        except OSError:
+            pass
+        stdout.close()
+        reader.join(timeout=1)
+        return None
+    stdout.close()
+    if return_code != 0 or result["too_large"] or result["read_error"]:
+        return None
+
+    names = bytes(result["data"])
+    if names and not names.endswith(b"\0"):
+        return None
+    relative_names = names[:-1].split(b"\0") if names else []
+    if len(relative_names) > MAX_GIT_UNTRACKED_FILES:
+        return None
+
+    digest = hashlib.sha256()
+    total_bytes = 0
+    for raw_name in relative_names:
+        try:
+            relative = Path(os.fsdecode(raw_name))
+            if (
+                relative.is_absolute()
+                or relative.drive
+                or not relative.parts
+                or any(part in ("", ".", "..") for part in relative.parts)
+            ):
+                return None
+            candidate = base_dir
+            for index, part in enumerate(relative.parts):
+                candidate = candidate / part
+                info = candidate.lstat()
+                if stat.S_ISLNK(info.st_mode) or int(
+                    getattr(info, "st_file_attributes", 0)
+                ) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+                    return None
+                if index < len(relative.parts) - 1 and not stat.S_ISDIR(info.st_mode):
+                    return None
+            if not stat.S_ISREG(info.st_mode):
+                return None
+            file_descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(file_descriptor, "rb") as source:
+                opened_info = os.fstat(source.fileno())
+                if not stat.S_ISREG(opened_info.st_mode) or opened_info.st_size != info.st_size:
+                    return None
+                digest.update(len(raw_name).to_bytes(8, "big"))
+                digest.update(raw_name)
+                digest.update(stat.S_IMODE(opened_info.st_mode).to_bytes(4, "big"))
+                digest.update(opened_info.st_size.to_bytes(8, "big"))
+                read_bytes = 0
+                while chunk := source.read(GIT_DIFF_CHUNK_BYTES):
+                    read_bytes += len(chunk)
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_GIT_UNTRACKED_BYTES:
+                        return None
+                    digest.update(chunk)
+                final_info = os.fstat(source.fileno())
+                if (
+                    read_bytes != opened_info.st_size
+                    or final_info.st_size != opened_info.st_size
+                    or final_info.st_mtime_ns != opened_info.st_mtime_ns
+                ):
+                    return None
+        except (OSError, OverflowError, ValueError):
+            return None
+    return len(relative_names), f"sha256:{digest.hexdigest()}"
+
+
+def _application_vcs_identity(spec: ApplicationSpec, base_dir: Path) -> dict[str, Any]:
+    """Return non-secret Git revision/dirty-state metadata for a local app source tree."""
+    if not isinstance(spec.transport, PythonTransport | CliTransport):
+        return {"kind": "unavailable", "reason": "application_not_local"}
+    if not any((parent / ".git").exists() for parent in (base_dir, *base_dir.parents)):
+        return {"kind": "unavailable", "reason": "not_git_repository"}
+
+    environment = {
+        **os.environ,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
+        environment.pop(name, None)
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=base_dir,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=GIT_METADATA_TIMEOUT_SECONDS,
+            env=environment,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"kind": "unavailable", "reason": "git_metadata_unavailable"}
+    commit = revision.stdout.strip()
+    if (
+        revision.returncode != 0
+        or len(commit) not in (40, 64)
+        or any(character not in "0123456789abcdefABCDEF" for character in commit)
+    ):
+        return {"kind": "unavailable", "reason": "git_revision_unavailable"}
+
+    diff_identity = _git_tracked_diff_identity(base_dir, environment)
+    tracked_worktree, tracked_diff_hash = diff_identity or ("unknown", None)
+    untracked_identity = _git_untracked_files_identity(base_dir, environment)
+    untracked_file_count, untracked_files_hash = untracked_identity or (None, None)
+    return {
+        "kind": "git",
+        "commit": commit.lower(),
+        "tracked_worktree": tracked_worktree,
+        "tracked_diff_hash": tracked_diff_hash,
+        "untracked_file_count": untracked_file_count,
+        "untracked_files_hash": untracked_files_hash,
+    }
+
+
+def _application_identity_basis(
+    spec: ApplicationSpec,
+    identity: dict[str, Any],
+    environment_identity: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Describe the evidence a user must trust when inspecting this run."""
+    if spec.revision or spec.environment_digest:
+        basis: dict[str, Any] = {
+            "kind": "owner_declared",
+            "revision": spec.revision,
+            "environment_digest": spec.environment_digest,
+            "local_source_digest": identity.get("code"),
+        }
+        if isinstance(spec.transport, ContainerTransport):
+            basis["image"] = spec.transport.image
+        if (
+            environment_identity
+            and environment_identity.get("kind") == "python"
+            and not environment_identity.get("dependencies")
+            and not spec.environment_digest
+        ):
+            basis["resume_requirement"] = (
+                "environment_digest for untracked Python runtime/import paths"
+            )
+        if (
+            environment_identity
+            and environment_identity.get("kind") == "cli_executable"
+            and not spec.environment_digest
+        ):
+            basis["resume_requirement"] = "environment_digest for installed CLI dependencies"
+        return basis
+    if isinstance(spec.transport, ContainerTransport) and not spec.transport.mounts:
+        return {"kind": "container_image_digest", "image": spec.transport.image}
+    if environment_identity and environment_identity.get("kind") == "cli_executable":
+        return {
+            "kind": "local_source_and_cli_executable_hash",
+            "local_source_digest": identity.get("code"),
+            "executable": environment_identity.get("executable"),
+            "executable_digest": environment_identity.get("binary"),
+            "resume_requirement": "environment_digest for installed CLI dependencies",
+        }
+    if identity.get("code") is not None:
+        basis = {"kind": "local_source_content_hash", "digest": identity["code"]}
+        if (
+            environment_identity
+            and environment_identity.get("kind") == "python"
+            and not environment_identity.get("dependencies")
+            and not spec.environment_digest
+        ):
+            basis["resume_requirement"] = (
+                "environment_digest for untracked Python runtime/import paths"
+            )
+        return basis
+    return {"kind": "owner_identity_required_before_resume"}
+
+
+def _application_environment_identity(
+    spec: ApplicationSpec,
+    base_dir: Path,
+    environ: dict[str, str] | None,
+) -> dict[str, Any] | None:
+    """Inventory the interpreter runtime and installed distributions for Python apps."""
+    transport = spec.transport
+    if not isinstance(transport, PythonTransport | CliTransport):
+        return None
+    cwd = base_dir / transport.cwd if transport.cwd else base_dir
+    program = transport.python if isinstance(transport, PythonTransport) else transport.argv[0]
+    configured = Path(program)
+    if configured.is_absolute() or len(configured.parts) > 1:
+        executable = configured if configured.is_absolute() else cwd / configured
+        executable = Path(os.path.abspath(executable))
+        if not executable.is_file():
+            return {
+                "kind": "python" if _is_python_executable(executable) else "cli_executable",
+                "executable": str(executable),
+                "binary": None,
+                "runtime": None,
+                "dependencies": None,
+            }
+    else:
+        base_env = environ if environ is not None else os.environ
+        path = transport.env.get("PATH")
+        if path is None and "PATH" in transport.inherit_env:
+            path = base_env.get("PATH")
+        if "PATH" in transport.secret_env:
+            found = None
+        else:
+            found = shutil.which(program, path=path)
+        if found is None:
+            return {
+                "kind": "python" if _is_python_executable(configured) else "cli_executable",
+                "executable": None,
+                "binary": None,
+                "runtime": None,
+                "dependencies": None,
+            }
+        executable = Path(os.path.abspath(found))
+
+    is_python = isinstance(transport, PythonTransport) or _is_python_executable(executable)
+    binary_digest = _runtime_binary_digest(executable)
+    if not is_python:
+        return {
+            "kind": "cli_executable",
+            "executable": str(executable),
+            "binary": binary_digest,
+            "runtime": None,
+            "dependencies": None,
+        }
+
+    runtime = worker_python_identity(executable)
+    effective_env = environ if environ is not None else os.environ
+    custom_user_base = transport.env.get("PYTHONUSERBASE")
+    if custom_user_base is None and "PYTHONUSERBASE" in transport.inherit_env:
+        custom_user_base = effective_env.get("PYTHONUSERBASE")
+    opaque_user_base = "PYTHONUSERBASE" in transport.secret_env
+    custom_python_home = transport.env.get("PYTHONHOME")
+    if custom_python_home is None and "PYTHONHOME" in transport.inherit_env:
+        custom_python_home = effective_env.get("PYTHONHOME")
+    opaque_python_home = "PYTHONHOME" in transport.secret_env
+    user_environment: dict[str, str] = {}
+    opaque_user_home = False
+    for name in ("HOME", "USERPROFILE"):
+        if name in transport.secret_env:
+            opaque_user_home = True
+        elif name in transport.env:
+            user_environment[name] = transport.env[name]
+        elif name in transport.inherit_env and name in effective_env:
+            user_environment[name] = effective_env[name]
+    try:
+        site_paths, import_paths, import_paths_trackable = environment_paths(
+            executable, user_environment=user_environment
+        )
+        dependency_versions = dependency_lock_hash(site_paths)
+        import_source_hash = (
+            plugin_paths_hash(
+                [path for path in import_paths if path.exists()],
+                max_bytes=512 * 1024 * 1024,
+                max_entries=100_000,
+            )
+            if import_paths_trackable
+            else None
+        )
+        dependencies = (
+            content_hash(
+                {
+                    "versions": dependency_versions,
+                    "import_roots": [path.as_posix() for path in import_paths],
+                    "imported_source": import_source_hash,
+                }
+            )
+            if import_paths_trackable
+            and import_source_hash is not None
+            and dependency_versions is not None
+            and custom_user_base is None
+            and not opaque_user_base
+            and custom_python_home is None
+            and not opaque_python_home
+            and not opaque_user_home
+            else None
+        )
+    except (OSError, ValueError):
+        dependencies = None
+    return {
+        "kind": "python",
+        "executable": str(executable),
+        "binary": binary_digest,
+        "runtime": runtime,
+        "dependencies": dependencies,
+    }
+
+
+def _is_python_executable(path: Path) -> bool:
+    name = path.name.casefold()
+    return name.startswith(("python", "pypy"))
+
+
+def _runtime_binary_digest(executable: Path) -> str | None:
+    try:
+        if executable.stat().st_size > MAX_RUNTIME_BINARY_BYTES:
+            return None
+        return bytes_hash(executable.read_bytes())
+    except OSError:
+        return None
+
+
 def create_run(
     compiled: CompiledRun,
     *,
@@ -136,16 +666,76 @@ def create_run(
     granted_by: str,
     run_id: str | None = None,
     run_seed: int | None = None,
+    parent_run_id: str | None = None,
     experiment_context: dict[str, Any] | None = None,
+    environ: dict[str, str] | None = None,
+    distributed_workers: dict[str, Any] | None = None,
 ) -> str:
     spec = compiled.application.spec
+    application_identity = application_code_identity(
+        spec,
+        compiled.application.base_dir,
+        environ if environ is not None else os.environ,
+    )
+    application_environment_identity = _application_environment_identity(
+        spec, compiled.application.base_dir, environ
+    )
+    application_vcs_identity = _application_vcs_identity(spec, compiled.application.base_dir)
+    owner_identity_declared = bool(spec.revision or spec.environment_digest)
+    vcs_error = application_vcs_identity.get("reason") in {
+        "git_metadata_unavailable",
+        "git_revision_unavailable",
+    }
+    if not owner_identity_declared and (
+        vcs_error
+        or (
+            application_vcs_identity.get("kind") == "git"
+            and (
+                application_vcs_identity.get("tracked_diff_hash") is None
+                or application_vcs_identity.get("untracked_files_hash") is None
+            )
+        )
+    ):
+        raise RunError(
+            "cannot safely start this local application because its Git revision, tracked changes, "
+            "or untracked files could not be fingerprinted; install Git, reduce local changes, or declare "
+            "an application revision/environment_digest"
+        )
     run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
     if not run_id or len(run_id) > 120:
         raise RunError("run_id must be a non-empty value of at most 120 characters")
+    if parent_run_id is not None:
+        if parent_run_id == run_id:
+            raise RunError("a run cannot be its own parent")
+        if storage.get_run(parent_run_id) is None:
+            raise RunError(f"parent run {parent_run_id!r} does not exist")
     if run_seed is not None and (
         isinstance(run_seed, bool) or not isinstance(run_seed, int) or not 0 <= run_seed < 2**31
     ):
         raise RunError("run_seed must be an integer between 0 and 2^31-1")
+    if distributed_workers is not None:
+        token_env = distributed_workers.get("token_env")
+        if (
+            not isinstance(token_env, str)
+            or not token_env
+            or any(
+                not (character.isascii() and (character.isalnum() or character == "_"))
+                for character in token_env
+            )
+        ):
+            raise RunError("distributed worker token_env must be an environment variable name")
+        if type(distributed_workers.get("workers")) is not int or not (
+            1 <= distributed_workers["workers"] <= 64
+        ):
+            raise RunError("distributed worker count must be between 1 and 64")
+        if type(distributed_workers.get("listen_port")) is not int or not (
+            0 <= distributed_workers["listen_port"] <= 65535
+        ):
+            raise RunError("distributed worker listener port must be between 0 and 65535")
+        if type(distributed_workers.get("startup_timeout_seconds")) not in (int, float) or not (
+            1 <= distributed_workers["startup_timeout_seconds"] <= 3600
+        ):
+            raise RunError("distributed worker startup timeout must be between 1 and 3600 seconds")
     existing_run = storage.get_run(run_id)
     if existing_run is not None:
         expected_app_hash = content_hash(spec.model_dump(mode="json"))
@@ -154,8 +744,17 @@ def create_run(
             existing_run.manifest.dataset_hash != compiled.dataset.content_hash
             or existing_run.manifest.application_hash != expected_app_hash
             or existing_run.manifest.plan_hash != compiled.plan_hash
+            or parameters.get("application_code_identity") != application_identity
+            or parameters.get("application_environment_identity")
+            != application_environment_identity
+            or (
+                "application_vcs_identity" in parameters
+                and parameters.get("application_vcs_identity") != application_vcs_identity
+            )
             or (run_seed is not None and existing_run.manifest.seed != run_seed)
+            or existing_run.manifest.parent_run_id != parent_run_id
             or parameters.get("experiment_context") != experiment_context
+            or parameters.get("distributed_workers") != distributed_workers
         ):
             raise RunError(f"run id {run_id!r} already belongs to different frozen content")
         _ensure_run_work_items(compiled, storage, run_id)
@@ -179,7 +778,9 @@ def create_run(
                     "plan_id": compiled.plan.plan_id,
                     "cases": len(compiled.cases),
                     "repetitions": compiled.plan.repetitions,
+                    "warmup_repetitions": compiled.plan.warmup_repetitions,
                     "metrics": len(compiled.metrics),
+                    "parent_run_id": parent_run_id,
                 },
             )
         return run_id
@@ -232,6 +833,7 @@ def create_run(
         application_hash=content_hash(spec.model_dump(mode="json")),
         plan_hash=compiled.plan_hash,
         application_id=spec.application_id,
+        parent_run_id=parent_run_id,
         dependency_lock_hash=dependency_lock_hash,
         plugin_hashes={
             m.manifest.evaluator_id: f"{m.manifest.plugin_id}=={m.manifest.plugin_version}"
@@ -246,6 +848,12 @@ def create_run(
             "application_base_dir": str(compiled.application.base_dir),
             "policy": compiled.policy.model_dump(mode="json"),
             "policy_hash": compiled.policy_hash,
+            "application_code_identity": application_identity,
+            "application_environment_identity": application_environment_identity,
+            "application_vcs_identity": application_vcs_identity,
+            "application_identity_basis": _application_identity_basis(
+                spec, application_identity, application_environment_identity
+            ),
             "scoring_id": f"engine-{run_id}",
             "binding_hashes": [m.binding_hash for m in compiled.metrics],
             # State between cases (§7): how and when the application is reset.
@@ -255,13 +863,18 @@ def create_run(
                 "mode": reset_mode(spec, world is not None),
             },
             "test_world": world_params,
+            **(
+                {"distributed_workers": distributed_workers}
+                if distributed_workers is not None
+                else {}
+            ),
             "metric_profiles": profiles,
             **(
                 {"experiment_context": experiment_context} if experiment_context is not None else {}
             ),
         },
         seed=(run_seed if run_seed is not None else random.SystemRandom().randrange(2**31)),
-        environment={"python": platform.python_version(), "platform": sys.platform},
+        environment=_runtime_environment_identity(),
     )
     storage.commit_run(manifest, status="created")
     storage.commit_approval(
@@ -280,18 +893,140 @@ def create_run(
             "plan_id": compiled.plan.plan_id,
             "cases": len(compiled.cases),
             "repetitions": compiled.plan.repetitions,
+            "warmup_repetitions": compiled.plan.warmup_repetitions,
             "metrics": len(compiled.metrics),
+            "parent_run_id": parent_run_id,
         },
     )
     return run_id
 
 
+def compile_retry_run(
+    parent_run_id: str,
+    case_ids: list[str] | tuple[str, ...],
+    repetitions: int,
+    *,
+    storage: Storage,
+    artifacts: ArtifactStore,
+    current_policy: ExecutionPolicy,
+    trusted_local: bool = False,
+) -> CompiledRun:
+    """Compile a bounded child plan from a parent's frozen benchmark inputs.
+
+    The parent must be terminal so its work graph cannot change under a concurrent resume.
+    Re-reading the dataset while compiling the child verifies that case data still has the
+    parent's content hash, while revalidating current application/evaluator implementations
+    and permissions allows a retry after a fix. Test-world seed content must still match the
+    verified seed artifact frozen with the parent.
+    """
+    parent = storage.get_run(parent_run_id)
+    if parent is None:
+        raise RunError(f"no run committed with run_id={parent_run_id!r}")
+    if parent.status in RESUMABLE_STATES:
+        raise RunError(
+            f"run {parent_run_id!r} is {parent.status}; finish or resume it before retrying"
+        )
+    params = deep_unfreeze(parent.manifest.parameters) or {}
+    if params.get("mode") != "manual_plan" or not params.get("plan_artifact_id"):
+        raise RunError("only plan-based benchmark runs can be retried")
+
+    selected = tuple(case_ids)
+    if not selected:
+        raise RunError("retry needs at least one selected case")
+    if len(set(selected)) != len(selected):
+        raise RunError("retry case IDs must be unique")
+    if not 1 <= repetitions <= 100:
+        raise RunError("retry repetitions must be between 1 and 100")
+
+    planned_case_ids: set[str] = set()
+    for item in storage.list_work_items(parent_run_id):
+        if item.kind != "execution":
+            continue
+        try:
+            case_id, _, _ = parse_work_item_key(item.task_key, "execution")
+        except ValueError as exc:
+            raise RunError(f"parent run has an invalid execution work item: {exc}") from exc
+        planned_case_ids.add(case_id)
+    outside_scope = sorted(set(selected) - planned_case_ids)
+    if outside_scope:
+        raise RunError(
+            "retry cases were not selected by the parent run: " + ", ".join(outside_scope)
+        )
+
+    try:
+        plan = _frozen_plan(storage, artifacts, parent.manifest)
+        plan_dir = Path(str(params["plan_dir"])).resolve()
+        parent_policy = ExecutionPolicy.model_validate(params["policy"])
+    except (AibenchError, KeyError, OSError, ValueError) as exc:
+        raise RunError(
+            f"cannot prepare retry from the parent's frozen plan and policy: {exc}"
+        ) from exc
+
+    child_plan = plan.model_copy(
+        update={
+            "selection": CaseSelection(case_ids=selected),
+            "repetitions": repetitions,
+            "warmup_repetitions": plan.warmup_repetitions,
+        }
+    )
+    try:
+        active_policy = current_policy.with_trusted_local(trusted_local)
+        if active_policy != parent_policy:
+            # A child is a new authorization decision. Require both the policy frozen
+            # with its parent and today's active policy to allow the dispatch, while
+            # retaining the parent's (possibly narrower) policy in the child manifest.
+            compiled_from(analyze_plan(child_plan, plan_dir, policy=active_policy))
+        analysis = analyze_plan(child_plan, plan_dir, policy=parent_policy)
+    except OSError as exc:
+        raise RunError(f"cannot reload the parent's dataset and application: {exc}") from exc
+    if analysis.dataset is None or analysis.dataset.content_hash != parent.manifest.dataset_hash:
+        raise RunError(
+            "the parent's dataset changed or is unavailable; refusing to retry different cases"
+        )
+    parent_world_id, _ = _frozen_world_seed(storage, artifacts, parent.manifest)
+    frozen_world = params.get("test_world") or {}
+    if analysis.world is not None and (
+        analysis.world.world_id != parent_world_id
+        or analysis.world.seed_hash != frozen_world.get("seed_hash")
+    ):
+        raise RunError(
+            "the current test world seed differs from the parent's frozen seed; "
+            "refusing to retry with different world state"
+        )
+    if analysis.world is None and parent_world_id is not None:
+        raise RunError("the parent's frozen test world is missing from the retry plan")
+    return compiled_from(analysis)
+
+
 def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str) -> None:
     """Idempotently materialize a plan's work graph, including after interrupted creation."""
+
+    batch: list[WorkItem] = []
+
+    def append(item: WorkItem) -> None:
+        batch.append(item)
+        if len(batch) == WORK_ITEM_COMMIT_BATCH_SIZE:
+            storage.commit_work_items(batch)
+            batch.clear()
+
     for case in compiled.cases:
+        for repetition in range(
+            compiled.plan.repetitions,
+            compiled.plan.repetitions + compiled.plan.warmup_repetitions,
+        ):
+            exec_key = execution_key(case.case_id, repetition)
+            append(
+                WorkItem(
+                    work_item_id=f"{run_id}:{exec_key}",
+                    run_id=run_id,
+                    task_key=exec_key,
+                    kind="execution",
+                    warmup=True,
+                )
+            )
         for repetition in range(compiled.plan.repetitions):
             exec_key = execution_key(case.case_id, repetition)
-            storage.commit_work_item(
+            append(
                 WorkItem(
                     work_item_id=f"{run_id}:{exec_key}",
                     run_id=run_id,
@@ -301,7 +1036,7 @@ def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str)
             )
             for metric in compiled.metrics:
                 eval_key = evaluation_key(case.case_id, repetition, metric.binding_hash)
-                storage.commit_work_item(
+                append(
                     WorkItem(
                         work_item_id=f"{run_id}:{eval_key}",
                         run_id=run_id,
@@ -310,6 +1045,8 @@ def _ensure_run_work_items(compiled: CompiledRun, storage: Storage, run_id: str)
                         dependency_keys=(exec_key,),
                     )
                 )
+    if batch:
+        storage.commit_work_items(batch)
 
 
 # --------------------------------------------------------------------------- execute / resume
@@ -379,6 +1116,122 @@ def _frozen_application(
     return spec
 
 
+def _verify_application_resume_identity(
+    manifest: RunManifest,
+    spec: ApplicationSpec,
+    *,
+    status: str,
+    environ: dict[str, str] | None,
+) -> None:
+    """Fail before recovery or dispatch if this run no longer describes one app build."""
+    baseline = manifest.parameters.get("application_code_identity")
+    if baseline is None:
+        if status == "created":
+            # Old, never-started runs can safely begin with the current source: no observation
+            # has yet been attributed to them.
+            return
+        raise RunError(
+            "this run has no frozen application source/environment identity, so it cannot be "
+            "resumed safely; create a new run"
+        )
+
+    base_dir = Path(manifest.parameters["application_base_dir"])
+    current = application_code_identity(
+        spec,
+        base_dir,
+        environ if environ is not None else os.environ,
+    )
+    current_environment_identity = _application_environment_identity(spec, base_dir, environ)
+    if current != baseline:
+        raise RunError(
+            "the application's source, inherited environment, secrets, or aibench version "
+            "changed since this run was created; restore the original identity or create a new "
+            "run"
+        )
+    frozen_environment_identity = manifest.parameters.get("application_environment_identity")
+    if current_environment_identity != frozen_environment_identity:
+        raise RunError(
+            "the application's Python interpreter or installed dependencies changed since this "
+            "run was created; restore the original environment or create a new run"
+        )
+
+    frozen_vcs_identity = manifest.parameters.get("application_vcs_identity")
+    if frozen_vcs_identity and frozen_vcs_identity.get("kind") == "git":
+        if (
+            frozen_vcs_identity.get("tracked_diff_hash") is None
+            or frozen_vcs_identity.get("untracked_files_hash") is None
+        ):
+            if not (spec.revision or spec.environment_digest):
+                raise RunError(
+                    "cannot safely resume because the application's tracked or untracked Git files "
+                    "could not be fingerprinted; create a new run"
+                )
+        else:
+            current_vcs_identity = _application_vcs_identity(spec, base_dir)
+            if current_vcs_identity != frozen_vcs_identity:
+                raise RunError(
+                    "the application's Git commit or local working tree changed since this run "
+                    "was created; restore the original identity or create a new run"
+                )
+
+    frozen_environment = dict(manifest.environment or {})
+    runtime = _runtime_environment_identity()
+    changed_runtime = sorted(
+        name
+        for name, frozen_value in frozen_environment.items()
+        if name in runtime and runtime[name] != frozen_value
+    )
+    if changed_runtime:
+        raise RunError(
+            "the benchmark host runtime changed since this run was created "
+            f"({', '.join(changed_runtime)}); restore the original runtime or create a new run"
+        )
+
+    if status != "created":
+        python_environment_unverifiable = (
+            current_environment_identity is not None
+            and current_environment_identity.get("kind") == "python"
+            and not spec.environment_digest
+            and (
+                not current_environment_identity.get("binary")
+                or not current_environment_identity.get("runtime")
+                or not current_environment_identity.get("dependencies")
+            )
+        )
+        cli_environment_unverifiable = (
+            isinstance(spec.transport, CliTransport)
+            and not spec.revision
+            and not spec.environment_digest
+            and (
+                not current_environment_identity
+                or not current_environment_identity.get("executable")
+                or not current_environment_identity.get("binary")
+            )
+        )
+        cli_dependencies_unverifiable = (
+            current_environment_identity is not None
+            and current_environment_identity.get("kind") == "cli_executable"
+            and not spec.environment_digest
+        )
+        if (
+            python_environment_unverifiable
+            or cli_environment_unverifiable
+            or cli_dependencies_unverifiable
+        ):
+            raise RunError(
+                "cannot safely resume this application because its executable, runtime, or "
+                "installed dependencies could not be fully fingerprinted; declare an "
+                "`environment_digest` (updated whenever the runtime or dependencies change) or "
+                "create a new run"
+            )
+        problem = application_resume_identity_problem(spec, base_dir, current)
+        if problem:
+            raise RunError(
+                "cannot safely resume this run because "
+                f"{problem}; create a new run after recording an application revision"
+            )
+
+
 def _frozen_registry(
     plan: ExecutablePlan,
     manifest: RunManifest,
@@ -437,9 +1290,7 @@ def _recover_in_flight(
         settlements.append(WorkItemSettlement(item.task_key, running, state, error))
         notes.append(f"{item.task_key}: {note}")
 
-    for item in storage.list_work_items(run_id):
-        if item.state is not WorkItemState.RUNNING:
-            continue
+    for item in storage.iter_work_items(run_id, state=WorkItemState.RUNNING):
         case_id, repetition, binding_key = parse_work_item_key(item.task_key, item.kind)
         if item.kind == "execution":
             attempt = storage.get_execution_attempt(
@@ -523,13 +1374,23 @@ def _replay_prior_spend(
 def _pid_alive(pid: int) -> bool:
     if sys.platform == "win32":
         import ctypes
+        from ctypes import wintypes
 
         kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
             return False
         try:
-            code = ctypes.c_ulong()
+            code = wintypes.DWORD()
             kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
             return code.value == 259  # STILL_ACTIVE
         finally:
@@ -571,6 +1432,7 @@ async def execute_run(
     artifacts: ArtifactStore,
     controller: RunController | None = None,
     environ: dict[str, str] | None = None,
+    on_worker_ready: Callable[[dict[str, Any]], None] | None = None,
 ) -> RunOutcome:
     record = storage.get_run(run_id)
     if record is None:
@@ -612,7 +1474,14 @@ async def execute_run(
     ended = False
     try:
         outcome = await _execute_leased(
-            run_id, record.manifest, storage, artifacts, controller, environ, owner
+            run_id,
+            record.manifest,
+            storage,
+            artifacts,
+            controller,
+            environ,
+            owner,
+            on_worker_ready,
         )
         ended = True
         return outcome
@@ -641,7 +1510,12 @@ async def _execute_leased(
     controller: RunController | None,
     environ: dict[str, str] | None,
     owner: str,
+    on_worker_ready: Callable[[dict[str, Any]], None] | None = None,
 ) -> RunOutcome:
+    controller = controller or RunController()
+    control = storage.get_run_control_state(run_id)
+    if control is not None and control.desired_state == "cancelled":
+        controller.cancel()
     current = storage.get_run(run_id)
     if current is None or current.status not in RESUMABLE_STATES:
         # Another session finished it between our first check and taking the lease.
@@ -658,12 +1532,27 @@ async def _execute_leased(
         run_id, manifest, params["policy_hash"]
     ):
         raise PolicyDenied(["no approval is recorded for this run's frozen scope"])
-    _, metrics = _frozen_registry(plan, manifest, policy, spec)
+    control = storage.get_run_control_state(run_id)
+    if control is not None and control.desired_state == "cancelled":
+        controller.cancel()
+    if controller.cancelled:
+        metrics: list[ResolvedMetric] = []
+    else:
+        _, metrics = _frozen_registry(plan, manifest, policy, spec)
 
-    cases = {c.case_id: c for c in storage.list_cases(manifest.dataset_hash)}
-    needed = {parse_work_item_key(w.task_key, w.kind)[0] for w in storage.list_work_items(run_id)}
-    if not needed <= set(cases):
+    needed = {parse_work_item_key(w.task_key, w.kind)[0] for w in storage.iter_work_items(run_id)}
+    ordered_case_ids: list[str] = []
+    if needed:
+        for case_id in storage.iter_case_ids(manifest.dataset_hash):
+            if case_id in needed:
+                ordered_case_ids.append(case_id)
+                needed.remove(case_id)
+                if not needed:
+                    break
+    if needed:
         raise RunError("stored Goldens are missing for some of this run's cases")
+    cases = StoredCaseMap(storage, manifest.dataset_hash, ordered_case_ids)
+    ordered_case_ids.clear()
 
     ledger = BudgetLedger(plan.budgets)
     _replay_prior_spend(storage, run_id, ledger, params["scoring_id"])  # before recovery
@@ -671,17 +1560,77 @@ async def _execute_leased(
     for _ in range(uncommitted):
         ledger.record_prior_application(None)
 
-    pending_exec = any(
-        w.kind == "execution" and w.state is WorkItemState.PENDING
-        for w in storage.list_work_items(run_id)
+    pending_exec = (
+        storage.count_work_items(run_id, kind="execution", state=WorkItemState.PENDING) > 0
     )
-    runner = None
-    if pending_exec:
-        runner = create_runner(
-            LoadedApplication(spec=spec, base_dir=Path(params["application_base_dir"])),
-            trusted_local=policy.allow_trusted_local,
-            environ=environ if environ is not None else dict(os.environ),
-        )
+    # A run that only settles stored observations/evaluations does not create a mixed app
+    # revision. Check the live app identity exactly when further application dispatch is due.
+    if pending_exec and current.status != "cancelling" and not controller.cancelled:
+        try:
+            _verify_application_resume_identity(
+                manifest,
+                spec,
+                status=current.status,
+                environ=environ,
+            )
+        except RunError:
+            control = storage.get_run_control_state(run_id)
+            if control is None or control.desired_state != "cancelled":
+                raise
+            controller.cancel()
+    control = storage.get_run_control_state(run_id)
+    if control is not None and control.desired_state == "cancelled":
+        controller.cancel()
+    runner: BaseRunner | None = None
+    if pending_exec and not controller.cancelled:
+        distributed_options = params.get("distributed_workers")
+        if distributed_options is not None:
+            if not isinstance(distributed_options, Mapping):
+                raise RunError("the run's distributed worker configuration is invalid")
+            distributed_options = deep_unfreeze(distributed_options)
+            if not isinstance(distributed_options, dict):
+                raise RunError("the run's distributed worker configuration is invalid")
+            reset = params.get("reset") or {"mode": "none"}
+            if reset.get("mode") != "none":
+                raise RunError(
+                    "coordinator API v1 cannot run this application because the frozen plan "
+                    "requires per-case or per-episode reset; reset support must preserve each "
+                    "reset-and-invoke pair on the same worker"
+                )
+            token_env = distributed_options.get("token_env")
+            token = (environ if environ is not None else os.environ).get(str(token_env), "")
+            if not token:
+                raise RunError(f"coordinator token environment variable {token_env!r} is not set")
+            if f"env:{token_env}" not in policy.allowed_secret_refs:
+                raise PolicyDenied(
+                    [
+                        (
+                            f"coordinator token env:{token_env} is not an approved secret; "
+                            "add it to allowed_secret_refs"
+                        )
+                    ]
+                )
+            runner = CoordinatorRunner(
+                spec,
+                run_id=run_id,
+                options={
+                    **distributed_options,
+                    "trust_local_app": policy.allow_trusted_local,
+                },
+                token=token,
+                cancel=controller.abort_event,
+                stop_startup=lambda: controller.stopping,
+                on_ready=on_worker_ready,
+                event_sink=lambda event_type, payload: storage.append_run_event(
+                    run_id, event_type, payload
+                ),
+            )
+        else:
+            runner = create_runner(
+                LoadedApplication(spec=spec, base_dir=Path(params["application_base_dir"])),
+                trusted_local=policy.allow_trusted_local,
+                environ=environ if environ is not None else dict(os.environ),
+            )
     world_id, seed = _frozen_world_seed(storage, artifacts, manifest)
     reset = params.get("reset") or {"mode": "none"}
     world = params.get("test_world") or {}
@@ -696,7 +1645,7 @@ async def _execute_leased(
             "world_seed_hash": world.get("seed_hash"),
             "policy_hash": params["policy_hash"],
         }
-        if plan.cache.executions
+        if plan.cache.executions and not controller.cancelled
         else None
     )
     engine = RunEngine(
@@ -711,19 +1660,53 @@ async def _execute_leased(
         world_seed=seed,
         execution_cache=execution_cache,
         evaluation_cache_policy=params["policy_hash"] if plan.cache.evaluations else None,
-        cases={cid: case for cid, case in cases.items() if cid in needed},  # dataset order
+        cases=cases,
         metrics=metrics,
         dependency_lock_hash=manifest.dependency_lock_hash,
         scoring_id=params["scoring_id"],
         ledger=ledger,
-        controller=controller or RunController(),
+        controller=controller,
         rng=random.Random(manifest.seed),
         heartbeat=lambda: storage.heartbeat_run_lease(run_id, owner, time.time()),
+        run_control=lambda: storage.get_run_control_state(run_id),
+        _session_started=ledger.started,
     )
     return await engine.execute()
 
 
 # --------------------------------------------------------------------------- status / rescore
+
+
+def _detached_worker_view(
+    event: dict[str, Any] | None,
+    *,
+    worker_lease: str | None,
+    lease_owner: tuple[str, int] | None,
+) -> dict[str, Any] | None:
+    if event is None:
+        return None
+    event_type = event["event_type"]
+    if event_type == "detached_worker_launch_failed":
+        state = "failed"
+    elif event_type == "detached_worker_launching":
+        state = "launching"
+    else:
+        pid = event["payload"].get("pid")
+        host = event["payload"].get("host")
+        owns_lease = isinstance(pid, int) and lease_owner == (host, pid)
+        if owns_lease and worker_lease == "stale":
+            state = "stale"
+        elif owns_lease:
+            state = "running"
+        elif host == socket.gethostname() and isinstance(pid, int):
+            state = "running" if _pid_alive(pid) else "exited"
+        else:
+            state = "unknown"
+    details = {key: value for key, value in event["payload"].items() if key != "host"}
+    pid = event["payload"].get("pid")
+    host = event["payload"].get("host")
+    owns_lease = isinstance(pid, int) and lease_owner == (host, pid)
+    return {"state": state, "owns_lease": owns_lease, **details}
 
 
 def _evaluation_identity(task_key: str) -> tuple[str, int, str | None]:
@@ -769,6 +1752,31 @@ class _EvaluationStates:
         return self._by_binding.get(identity)
 
 
+SAME_ANSWER_MIN_CASES = 3
+
+
+def same_answer_warning(storage: Storage, run_id: str) -> str | None:
+    """Every case got the same answer. An application failing quietly looks like a clean run:
+    LightRAG with its embedding server down answered "No relevant context found for the
+    query." to all 15 questions, with HTTP 200, and every execution counted as a success."""
+    latest: dict[tuple[str, int], Any] = {}
+    for attempt in storage.list_execution_attempts(run_id):  # oldest first
+        if attempt.status is ExecutionStatus.OK and not attempt.warmup:
+            latest[(attempt.case_id, attempt.repetition_id)] = attempt.output
+    if len({case for case, _ in latest}) < SAME_ANSWER_MIN_CASES:
+        return None
+    answers = {json.dumps(output, sort_keys=True, default=str) for output in latest.values()}
+    if len(answers) != 1:
+        return None
+    output = next(iter(latest.values()))
+    shown = output if isinstance(output, str) else json.dumps(output, default=str)
+    shown = shown.strip() if len(shown) <= 120 else shown[:117].rstrip() + "..."
+    return (
+        f"every case got the same answer ({len(latest)} answers): {shown!r}; the application "
+        "may be failing without reporting an error (a backend it needs is down?)"
+    )
+
+
 def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
     record = storage.get_run(run_id)
     if record is None:
@@ -779,6 +1787,20 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
     )
     items = storage.list_work_items(run_id)
     counts = work_counts(storage, run_id)
+    control = storage.get_run_control_state(run_id)
+    detached_event = next(
+        (
+            event
+            for event in reversed(events)
+            if event["event_type"]
+            in (
+                "detached_worker_launching",
+                "detached_worker_started",
+                "detached_worker_launch_failed",
+            )
+        ),
+        None,
+    )
     blocked = [
         {"task_key": w.task_key, "state": w.state.value, "reason": w.last_error}
         for w in items
@@ -815,15 +1837,36 @@ def run_status(storage: Storage, run_id: str) -> dict[str, Any]:
                 evaluation.get("succeeded", 0) + len(settled) - len(newly_failed)
             )
             counts["evaluation"] = {k: v for k, v in evaluation.items() if v}
+    # Why the last session stopped early, if it said (storage failure, lease lost).
+    warnings = list(last_session["payload"].get("warnings") or []) if last_session else []
+    if record.status in _FINISHED and (same := same_answer_warning(storage, run_id)):
+        warnings.append(same)
+    lease_row = storage.conn.execute(
+        "SELECT host, pid FROM run_leases WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    lease_owner = (lease_row["host"], int(lease_row["pid"])) if lease_row else None
+    worker_lease = lease_state(storage, run_id)
     return {
         "run_id": run_id,
         "status": record.status,
         "counts": counts,
         "needs_attention": blocked,
         "budget": last_session["payload"].get("budget") if last_session else None,
-        # Why the last session stopped early, if it said (storage failure, lease lost).
-        "warnings": list(last_session["payload"].get("warnings") or []) if last_session else [],
+        "warnings": warnings,
         "last_event_sequence": events[-1]["sequence"] if events else 0,
+        "supervision": {
+            "worker_lease": worker_lease,
+            "control": {
+                "desired_state": control.desired_state if control else "running",
+                "sequence": control.sequence if control else 0,
+                "updated_at": control.updated_at if control else None,
+            },
+            "detached_worker": _detached_worker_view(
+                detached_event,
+                worker_lease=worker_lease,
+                lease_owner=lease_owner,
+            ),
+        },
     }
 
 
@@ -881,6 +1924,10 @@ async def evaluate_run(
         model_timeout_seconds=plan.model_evaluation_timeout_seconds,
         application=application,
         carry_forward=carry_forward,
+        budgets=plan.budgets,
+        quotas=plan.quotas,
+        retry=plan.retry,
+        gates=plan.gates,
     )
 
 

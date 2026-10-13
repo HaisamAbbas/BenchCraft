@@ -82,7 +82,17 @@ def sanitize_value(value: Any) -> Any:
     if isinstance(value, str):
         return sanitize(value)
     if isinstance(value, Mapping):
-        return {sanitize(str(key)): sanitize_value(item) for key, item in value.items()}
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            safe_key = sanitize(str(key))
+            if safe_key in result:
+                base = safe_key
+                suffix = 2
+                while safe_key in result:
+                    safe_key = f"{base} ({suffix})"
+                    suffix += 1
+            result[safe_key] = sanitize_value(item)
+        return result
     if isinstance(value, (list, tuple)):
         return [sanitize_value(item) for item in value]
     return value

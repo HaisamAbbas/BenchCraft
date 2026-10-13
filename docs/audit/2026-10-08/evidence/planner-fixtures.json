@@ -1,0 +1,3236 @@
+{
+  "schema": "aibench.planner-benchmark/1",
+  "fixture_set": "planner-fixtures-v1",
+  "planner": "template",
+  "overall": {
+    "fixtures": 40,
+    "selection_precision": {
+      "value": 1.0,
+      "numerator": 17,
+      "denominator": 17,
+      "wilson95": [
+        0.8157,
+        1.0
+      ]
+    },
+    "selection_recall": {
+      "value": 0.8095,
+      "numerator": 17,
+      "denominator": 21,
+      "wilson95": [
+        0.6,
+        0.9233
+      ]
+    },
+    "gap_precision": {
+      "value": 0.7857,
+      "numerator": 22,
+      "denominator": 28,
+      "wilson95": [
+        0.6046,
+        0.8979
+      ]
+    },
+    "gap_recall": {
+      "value": 1.0,
+      "numerator": 22,
+      "denominator": 22,
+      "wilson95": [
+        0.8513,
+        1.0
+      ]
+    },
+    "unnecessary_evaluator_rate": {
+      "value": 0.0,
+      "numerator": 0,
+      "denominator": 17,
+      "wilson95": [
+        0.0,
+        0.1843
+      ]
+    },
+    "first_pass_valid": {
+      "value": 1.0,
+      "numerator": 37,
+      "denominator": 37,
+      "wilson95": [
+        0.9059,
+        1.0
+      ]
+    },
+    "repaired_valid": {
+      "value": 0.0,
+      "numerator": 0,
+      "denominator": 37,
+      "wilson95": [
+        0.0,
+        0.0941
+      ]
+    },
+    "invalid_rejection": {
+      "value": 1.0,
+      "numerator": 3,
+      "denominator": 3,
+      "wilson95": [
+        0.4385,
+        1.0
+      ]
+    },
+    "unsupported_selections": 0,
+    "fallbacks": 0,
+    "fallbacks_on_executable_fixtures": 0
+  },
+  "development_families": {
+    "fixtures": 23,
+    "selection_precision": {
+      "value": 1.0,
+      "numerator": 13,
+      "denominator": 13,
+      "wilson95": [
+        0.7719,
+        1.0
+      ]
+    },
+    "selection_recall": {
+      "value": 1.0,
+      "numerator": 13,
+      "denominator": 13,
+      "wilson95": [
+        0.7719,
+        1.0
+      ]
+    },
+    "gap_precision": {
+      "value": 1.0,
+      "numerator": 14,
+      "denominator": 14,
+      "wilson95": [
+        0.7847,
+        1.0
+      ]
+    },
+    "gap_recall": {
+      "value": 1.0,
+      "numerator": 14,
+      "denominator": 14,
+      "wilson95": [
+        0.7847,
+        1.0
+      ]
+    },
+    "unnecessary_evaluator_rate": {
+      "value": 0.0,
+      "numerator": 0,
+      "denominator": 13,
+      "wilson95": [
+        0.0,
+        0.2281
+      ]
+    },
+    "first_pass_valid": {
+      "value": 1.0,
+      "numerator": 20,
+      "denominator": 20,
+      "wilson95": [
+        0.8389,
+        1.0
+      ]
+    },
+    "repaired_valid": {
+      "value": 0.0,
+      "numerator": 0,
+      "denominator": 20,
+      "wilson95": [
+        0.0,
+        0.1611
+      ]
+    },
+    "invalid_rejection": {
+      "value": 1.0,
+      "numerator": 3,
+      "denominator": 3,
+      "wilson95": [
+        0.4385,
+        1.0
+      ]
+    },
+    "unsupported_selections": 0,
+    "fallbacks": 0,
+    "fallbacks_on_executable_fixtures": 0
+  },
+  "holdout_families": {
+    "fixtures": 17,
+    "selection_precision": {
+      "value": 1.0,
+      "numerator": 4,
+      "denominator": 4,
+      "wilson95": [
+        0.5101,
+        1.0
+      ]
+    },
+    "selection_recall": {
+      "value": 0.5,
+      "numerator": 4,
+      "denominator": 8,
+      "wilson95": [
+        0.2152,
+        0.7848
+      ]
+    },
+    "gap_precision": {
+      "value": 0.5714,
+      "numerator": 8,
+      "denominator": 14,
+      "wilson95": [
+        0.3259,
+        0.7862
+      ]
+    },
+    "gap_recall": {
+      "value": 1.0,
+      "numerator": 8,
+      "denominator": 8,
+      "wilson95": [
+        0.6756,
+        1.0
+      ]
+    },
+    "unnecessary_evaluator_rate": {
+      "value": 0.0,
+      "numerator": 0,
+      "denominator": 4,
+      "wilson95": [
+        0.0,
+        0.4899
+      ]
+    },
+    "first_pass_valid": {
+      "value": 1.0,
+      "numerator": 17,
+      "denominator": 17,
+      "wilson95": [
+        0.8157,
+        1.0
+      ]
+    },
+    "repaired_valid": {
+      "value": 0.0,
+      "numerator": 0,
+      "denominator": 17,
+      "wilson95": [
+        0.0,
+        0.1843
+      ]
+    },
+    "invalid_rejection": {
+      "value": null,
+      "numerator": 0,
+      "denominator": 0,
+      "wilson95": null
+    },
+    "unsupported_selections": 0,
+    "fallbacks": 0,
+    "fallbacks_on_executable_fixtures": 0
+  },
+  "by_family": {
+    "agent": {
+      "fixtures": 3,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2,
+        "wilson95": [
+          0.3424,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2,
+        "wilson95": [
+          0.3424,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 3,
+        "denominator": 3,
+        "wilson95": [
+          0.4385,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 3,
+        "wilson95": [
+          0.0,
+          0.5615
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "blackbox": {
+      "fixtures": 2,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2,
+        "wilson95": [
+          0.3424,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 2,
+        "wilson95": [
+          0.0,
+          0.6576
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "chatbot": {
+      "fixtures": 4,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 3,
+        "denominator": 3,
+        "wilson95": [
+          0.4385,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 3,
+        "denominator": 3,
+        "wilson95": [
+          0.4385,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 4,
+        "denominator": 4,
+        "wilson95": [
+          0.5101,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 4,
+        "denominator": 4,
+        "wilson95": [
+          0.5101,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 3,
+        "wilson95": [
+          0.0,
+          0.5615
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 4,
+        "denominator": 4,
+        "wilson95": [
+          0.5101,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 4,
+        "wilson95": [
+          0.0,
+          0.4899
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "classification": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "coding": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "cost": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "expectations": {
+      "fixtures": 2,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2,
+        "wilson95": [
+          0.3424,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 2,
+        "wilson95": [
+          0.0,
+          0.6576
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "extraction": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "format": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "misleading": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "misleading_dependency": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "multi_turn": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "multilingual": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "gap_precision": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "multimodal": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "gap_precision": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "negation": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "paraphrase": {
+      "fixtures": 3,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 0.3333,
+        "numerator": 1,
+        "denominator": 3,
+        "wilson95": [
+          0.0615,
+          0.7923
+        ]
+      },
+      "gap_precision": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 2,
+        "wilson95": [
+          0.0,
+          0.6576
+        ]
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 3,
+        "denominator": 3,
+        "wilson95": [
+          0.4385,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 3,
+        "wilson95": [
+          0.0,
+          0.5615
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "partial": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "partial_telemetry": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "policy": {
+      "fixtures": 2,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2,
+        "wilson95": [
+          0.3424,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2,
+        "wilson95": [
+          0.3424,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2,
+        "wilson95": [
+          0.3424,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 2,
+        "wilson95": [
+          0.0,
+          0.6576
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "rag": {
+      "fixtures": 2,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 4,
+        "denominator": 4,
+        "wilson95": [
+          0.5101,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 4,
+        "denominator": 4,
+        "wilson95": [
+          0.5101,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 4,
+        "wilson95": [
+          0.0,
+          0.4899
+        ]
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 2,
+        "denominator": 2,
+        "wilson95": [
+          0.3424,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 2,
+        "wilson95": [
+          0.0,
+          0.6576
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "rag_text": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "retriever_disabled": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "safety": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "security": {
+      "fixtures": 3,
+      "selection_precision": {
+        "value": 1.0,
+        "numerator": 3,
+        "denominator": 3,
+        "wilson95": [
+          0.4385,
+          1.0
+        ]
+      },
+      "selection_recall": {
+        "value": 1.0,
+        "numerator": 3,
+        "denominator": 3,
+        "wilson95": [
+          0.4385,
+          1.0
+        ]
+      },
+      "gap_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unnecessary_evaluator_rate": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 3,
+        "wilson95": [
+          0.0,
+          0.5615
+        ]
+      },
+      "first_pass_valid": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "repaired_valid": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "invalid_rejection": {
+        "value": 1.0,
+        "numerator": 3,
+        "denominator": 3,
+        "wilson95": [
+          0.4385,
+          1.0
+        ]
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "summarization": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "unmapped": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    },
+    "voice": {
+      "fixtures": 1,
+      "selection_precision": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "selection_recall": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "gap_precision": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "gap_recall": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "unnecessary_evaluator_rate": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "first_pass_valid": {
+        "value": 1.0,
+        "numerator": 1,
+        "denominator": 1,
+        "wilson95": [
+          0.2065,
+          1.0
+        ]
+      },
+      "repaired_valid": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 1,
+        "wilson95": [
+          0.0,
+          0.7935
+        ]
+      },
+      "invalid_rejection": {
+        "value": null,
+        "numerator": 0,
+        "denominator": 0,
+        "wilson95": null
+      },
+      "unsupported_selections": 0,
+      "fallbacks": 0,
+      "fallbacks_on_executable_fixtures": 0
+    }
+  },
+  "targets": [
+    {
+      "measure": "selection_precision",
+      "target": ">= 0.9",
+      "observed": 1.0,
+      "status": "met"
+    },
+    {
+      "measure": "selection_recall",
+      "target": ">= 0.85",
+      "observed": 0.8095,
+      "status": "not met"
+    },
+    {
+      "measure": "first_pass_valid",
+      "target": ">= 0.95",
+      "observed": 1.0,
+      "status": "met"
+    },
+    {
+      "measure": "invalid_rejection",
+      "target": ">= 1.0",
+      "observed": 1.0,
+      "status": "met"
+    },
+    {
+      "measure": "unsupported_selections",
+      "target": "<= 0.0",
+      "observed": 0,
+      "status": "met"
+    }
+  ],
+  "review": {
+    "reviewed_fixtures": 0,
+    "fixtures": 40,
+    "reviewers": [],
+    "status": "unverified: no fixture has been reviewed",
+    "notes": "Annotations were written by the implementing AI agent for Prompt 12, not by people. No fixture has been reviewed. \u00a723 asks for at least two human reviewers on a subset, with disagreements adjudicated; that has not happened. Held-out families were written after the template planner and were not used to change it."
+  },
+  "warnings": [],
+  "limitations": [
+    "gap and unnecessary-evaluator scoring use the concepts the planner assigns to its own objectives",
+    "fixture results, not evidence of broad generalization (\u00a723)",
+    "targets are engineering targets to revise before testing, not claims of success",
+    "catalog evaluators are manifests only; no metric was computed"
+  ],
+  "fixtures": [
+    {
+      "id": "chatbot_refs",
+      "family": "chatbot",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "chatbot_no_refs",
+      "family": "chatbot",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "correctness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "correctness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "chatbot_partial_refs",
+      "family": "partial",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "rag_declared",
+      "family": "rag",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness",
+          "groundedness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness",
+          "groundedness"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "catalog.grounded@1.0.0",
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "rag_reference_context_only",
+      "family": "misleading",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "rag_judges_not_permitted",
+      "family": "policy",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "rag_native_only",
+      "family": "policy",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "agent_declared",
+      "family": "agent",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.tool_calls@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "agent_blackbox",
+      "family": "agent",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "tool_use"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "tool_use"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "agent_no_expected_tools",
+      "family": "agent",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "tool_use"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "tool_use"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "blackbox_latency_errors",
+      "family": "blackbox",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "blackbox_correctness_no_refs",
+      "family": "blackbox",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "correctness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "correctness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "format_without_schema",
+      "family": "format",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "format"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "format"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "expectations_rule",
+      "family": "expectations",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "expectations"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "expectations"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "catalog.refund_rule@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "expectations_missing",
+      "family": "expectations",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "expectations"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "expectations"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "voice_turn_taking_unmapped",
+      "family": "unmapped",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "rag_agent_combined",
+      "family": "rag",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "groundedness",
+          "tool_use"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "groundedness",
+          "tool_use"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "catalog.grounded@1.0.0",
+          "native.tool_calls@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "duplicate_objectives",
+      "family": "chatbot",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "over_broad_request",
+      "family": "chatbot",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [
+          "format",
+          "groundedness",
+          "tool_use"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [
+          "format",
+          "groundedness",
+          "tool_use"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "security_cli_not_trusted",
+      "family": "security",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": false
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "executable": false,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "security_remote_http_denied",
+      "family": "security",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": false
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "executable": false,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "security_effectful_app",
+      "family": "security",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": false
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "executable": false,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "voice_declared_no_audio",
+      "family": "voice",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "retriever_disabled_runtime",
+      "family": "retriever_disabled",
+      "holdout": false,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "paraphrase_made_up",
+      "family": "paraphrase",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "groundedness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": false
+    },
+    {
+      "id": "paraphrase_right_answer",
+      "family": "paraphrase",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": false
+    },
+    {
+      "id": "paraphrase_apis",
+      "family": "paraphrase",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.tool_calls@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "multilingual_spanish",
+      "family": "multilingual",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": false
+    },
+    {
+      "id": "structured_extraction",
+      "family": "extraction",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "format"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "format"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "code_assistant_tests",
+      "family": "coding",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "summarization_source",
+      "family": "summarization",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "classification_labels",
+      "family": "classification",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "safety_refusals",
+      "family": "safety",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "misleading_dependency_name",
+      "family": "misleading_dependency",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "partial_telemetry_tools",
+      "family": "partial_telemetry",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "tool_use"
+        ],
+        "gaps": [],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.tool_calls@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "negated_latency",
+      "family": "negation",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [
+          "native.exact_match@1.0.0"
+        ],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": false
+    },
+    {
+      "id": "rag_cli_text_mode",
+      "family": "rag_text",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "groundedness"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "multi_turn_memory",
+      "family": "multi_turn",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": true
+    },
+    {
+      "id": "image_captions",
+      "family": "multimodal",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [
+          "correctness"
+        ],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": false
+    },
+    {
+      "id": "budget_objective",
+      "family": "cost",
+      "holdout": true,
+      "review": "unreviewed",
+      "expected": {
+        "select": [],
+        "gaps": [],
+        "acceptable": [],
+        "executable": true
+      },
+      "fell_back": false,
+      "observed": {
+        "select": [],
+        "gaps": [
+          "unmapped"
+        ],
+        "executable": true,
+        "forbidden_selected": [],
+        "metrics": [],
+        "repairs": 0,
+        "fallback": null
+      },
+      "correct": false
+    }
+  ]
+}

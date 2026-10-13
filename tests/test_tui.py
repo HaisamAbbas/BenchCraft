@@ -20,6 +20,7 @@ from aibench.planning.planner import ModelReply
 from aibench.sessions.controller import SessionController
 from aibench.tui.app import ChatApp, SlashCompleter, key_bindings
 from aibench.tui.commands import COMMANDS, Commands
+from aibench.tui.render import report as render_report
 from aibench.tui.render import status_line
 from tests.chat_server_support import chat_server, text_stream, tool_stream
 from tests.session_support import (
@@ -107,11 +108,14 @@ def test_slash_commands_use_real_session_services_and_cover_the_contract(tmp_pat
 
         failures = await commands.run("/failures")
         budget = await commands.run("/budget")
-        report = await commands.run("/report")
+        report = await commands.run("/report --group-by group_id")
         sessions = await commands.run("/sessions")
         assert failures.kind == "failures" and failures.data["run_id"] == run_id
         assert budget.kind == "budget" and budget.data["run_id"] == run_id
         assert report.kind == "report" and report.data["run_id"] == run_id
+        assert report.data["segments"][0]["field"] == "group_id"
+        assert report.data["cost"]["planner"]["accounting"] == "no_calls"
+        assert report.data["cost"]["workflow"]["total_cost_usd"] is None
         assert sessions.kind == "sessions" and sessions.data["sessions"]
 
         # Explicit cancellation returns before the slow application call is done.
@@ -140,6 +144,28 @@ def test_slash_commands_use_real_session_services_and_cover_the_contract(tmp_pat
         ctl.storage.db.close()
         for controller in created:
             controller.storage.db.close()
+
+
+def test_interactive_slash_commands_keep_assistant_provider_and_judge(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "answer"})
+    config = OpenAICompatibleConfig(base_url="http://127.0.0.1:8080/v1", model="assistant")
+    provider = OpenAICompatibleProvider(config)
+    try:
+        chat = ChatApp(ctl, provider=provider, console=Console(file=io.StringIO()))
+        assert chat.commands.provider is provider
+        assert chat.commands.judge == (
+            {
+                "kind": "openai_compatible",
+                "base_url": config.base_url,
+                "model": config.model,
+                "api_key_env": "AIBENCH_JUDGE_KEY",
+            },
+            {},
+        )
+    finally:
+        provider.close()
+        ctl.storage.db.close()
 
 
 def test_compare_slash_command_uses_session_owned_stored_runs(tmp_path: Path) -> None:
@@ -685,3 +711,130 @@ def test_only_the_commands_that_can_take_minutes_run_in_the_background() -> None
         "",
     ):
         assert not is_long_command(text), text
+
+
+def test_human_comparison_explains_an_undetermined_regression_rule() -> None:
+    from aibench.tui.render import comparison
+
+    output = io.StringIO()
+    comparison(
+        Console(file=output, width=160, highlight=False),
+        {
+            "status": "qualified",
+            "qualified": True,
+            "regression_gate": {
+                "status": "undetermined",
+                "rules": [
+                    {
+                        "rule": "application.latency_p95_ms",
+                        "status": "undetermined",
+                        "observed": None,
+                        "maximum": 10,
+                        "reason": "complete_successful_latency_measurements_required",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert "reason: complete successful latency measurements required" in output.getvalue()
+
+
+def test_human_comparison_shows_richer_application_performance() -> None:
+    from aibench.tui.render import comparison
+
+    output = io.StringIO()
+    comparison(
+        Console(file=output, width=160, highlight=False),
+        {
+            "status": "qualified",
+            "application_performance": {
+                side: {
+                    "latency_statistics": {"p95_ms": 95, "p99_ms": 99, "stddev_ms": 8},
+                    "retry_inclusive_latency": {"p95_ms": 140},
+                    "throughput": {"successful_requests_per_second": 12.5},
+                    "warmup_latency_statistics": {"p95_ms": 40},
+                    "streaming_performance": {
+                        "requests": 2,
+                        "time_to_first_token_ms": {"p50_ms": 20, "p95_ms": 30},
+                        "inter_token_latency_ms": {"mean_ms": 8},
+                        "output_tokens_per_second": {"p50": 40},
+                        "integrity": {"complete": 2, "incomplete": 0},
+                    },
+                }
+                for side in ("baseline", "current")
+            },
+        },
+    )
+
+    shown = output.getvalue()
+    assert "p95/p99 95/99 ms" in shown
+    assert "retry-inclusive p95 140 ms" in shown
+    assert "throughput 12.5 req/s" in shown
+    assert "warmup p95 40 ms" in shown
+    assert "streaming: TTFT p50/p95 20/30 ms" in shown
+    assert "inter-token mean 8 ms" in shown
+    assert "output 40 tokens/s median" in shown
+
+
+def test_human_report_shows_segment_counts_and_metric_outcomes() -> None:
+    output = io.StringIO()
+    render_report(
+        Console(file=output, force_terminal=False, width=160),
+        {
+            "run_id": "run-1",
+            "status": "completed",
+            "provisional": False,
+            "partial": False,
+            "basis": "stored facts only",
+            "gates": [],
+            "metrics": [],
+            "application": {
+                "completed": 1,
+                "planned": 1,
+                "recorded": 1,
+                "failed": 0,
+                "error_like_answers": {"count": 0, "case_ids": []},
+            },
+            "latency_ms": {"successful_requests": 1, "p50_ms": 12, "p95_ms": 12},
+            "cost": {},
+            "non_passing_cases": {"total": 0, "first": []},
+            "segments": [
+                {
+                    "field": "metadata.language",
+                    "category_count": 1,
+                    "selected_cases": 1,
+                    "groups": [
+                        {
+                            "label": "en",
+                            "case_count": 1,
+                            "application": {
+                                "planned_requests": 1,
+                                "completed_requests": 1,
+                                "failed_requests": 0,
+                            },
+                            "scoring_passes": [
+                                {
+                                    "kind": "engine",
+                                    "metrics": [
+                                        {
+                                            "metric": "native.exact_match@1.0.0",
+                                            "summary": {
+                                                "selected": 1,
+                                                "decisions": {"pass": 1},
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    shown = output.getvalue()
+    assert "segment metadata.language: 1 value(s) across 1 selected case(s)" in shown
+    assert "en: 1 case(s), application completed 1/1" in shown
+    assert "native.exact_match@1.0.0 pass 1/1" in shown

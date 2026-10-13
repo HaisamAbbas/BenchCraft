@@ -220,6 +220,9 @@ def _items(
         cases.setdefault(case.case_id, []).append(case)
     items, executions, skipped = [], {}, {}
     for execution in select_final_executions(storage.list_execution_attempts(run_id)):
+        if execution.warmup:
+            skipped[f"{execution.case_id}:r{execution.repetition_id}"] = "warmup_not_uploaded"
+            continue
         if execution.repetition_id != 0:
             skipped[f"{execution.case_id}:r{execution.repetition_id}"] = "repetition_not_uploaded"
             continue

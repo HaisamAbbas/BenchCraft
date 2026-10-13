@@ -13,14 +13,16 @@ What a report states, and on which basis:
   back to the stored results themselves, and say so.
 - **Denominators.** The engine pass counts every planned (case, repetition) item as
   selected; unfinished items are `pending`, so a partial snapshot cannot look better than
-  the finished run. A rescoring pass scored the run's recorded executions, and says that is
-  its basis.
+  the finished run. A rescoring pass retains that selected work, including unavailable
+  items without recorded executions. Legacy runs use final recorded executions.
 - **Application failures** (the app did not produce a usable output) are separate from
   **evaluator failures** (a metric could not be computed). Neither is a low score.
-- **Latency** is the wall time of successful final attempts, p50/p95 by nearest rank.
-  Failed and timed-out requests are counted separately, never mixed into the percentiles.
+- **Latency** reports successful final-attempt p50/p95/p99, mean, dispersion and observed
+  throughput. Retry-inclusive lifecycle latency and warmup samples are separate summaries;
+  failed and timed-out attempts are counted separately.
 - **Cost** is observed spend plus how complete the accounting is. A total is given only
-  when every call reported its cost; otherwise the known amount is a lower bound.
+  when every call reported its cost; otherwise the known amount is a lower bound. Planner
+  calls attributed from sessions contribute their reported tokens, but no dollar estimate.
 - **Gates** are the plan's predeclared release gates, decided only for a finished run.
 - **Evidence** lists non-passing cases with sanitized, truncated excerpts and references.
   Raw evaluator outputs and traces stay in the artifact store; the report names them by
@@ -33,6 +35,7 @@ import json
 import math
 import os
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -44,16 +47,28 @@ from aibench.core.models import (
     EvaluatorManifest,
     ExecutionResult,
     ExecutionStatus,
+    UsageRole,
+    WorkItem,
     WorkItemState,
     deep_unfreeze,
 )
-from aibench.core.plans import ExecutablePlan, ReleaseGate
+from aibench.core.plans import ExecutablePlan, LoadProfile, ReleaseGate
 from aibench.engine.engine import parse_work_item_key, was_dispatched, work_counts
 from aibench.reporting.aggregation import MetricSummary, reason_code, summarize
 from aibench.reporting.render import render
 from aibench.security.redaction import sanitize
+from aibench.services.performance import (
+    nearest_rank,
+    phase_throughput,
+    retry_inclusive_latency,
+    stream_performance_summary,
+    successful_latency_values,
+    summarize_latency,
+)
+from aibench.services.phase_accounting import recovered_uncommitted_execution_items
 from aibench.services.runs import _FINISHED, RunError, _frozen_application, _frozen_plan
-from aibench.services.scoring import select_final_executions
+from aibench.services.scoring import rescore_selected_count, select_final_executions
+from aibench.services.segment_analysis import build_segment_analysis, validate_group_by
 from aibench.services.suspect_answers import looks_like_error
 from aibench.services.traces import traces_summary
 from aibench.storage.artifacts import ArtifactStore
@@ -62,6 +77,8 @@ from aibench.storage.repositories import Storage
 REPORT_SCHEMA = "aibench.report/1"
 EXCERPT_CHARS = 300
 FORMATS = {"json": "json", "markdown": "md", "html": "html"}
+CI_FORMATS = {"junit": "xml", "sarif": "sarif"}
+REPORT_FORMATS = {**FORMATS, **CI_FORMATS}
 _UNHEALTHY = ("failed", "blocked", "cancelled", "unknown_effect")
 
 
@@ -82,11 +99,68 @@ def excerpt(value: Any, limit: int = EXCERPT_CHARS) -> str | None:
 def percentile(values: list[float], p: float) -> float | None:
     """Nearest-rank percentile: the smallest value with at least p% of values at or below
     it. No interpolation, so the result is always an observed value."""
-    if not values:
+    return nearest_rank(values, p)
+
+
+def _offered_load_summary(
+    profile: LoadProfile | None,
+    events: list[dict[str, Any]],
+    planned_measurements: int | None,
+) -> dict[str, Any] | None:
+    if profile is None:
         return None
-    ordered = sorted(values)
-    rank = max(1, math.ceil(p / 100 * len(ordered)))
-    return ordered[rank - 1]
+    dispatches = [
+        event["payload"]
+        for event in events
+        if event["event_type"] == "load_profile_dispatch"
+    ]
+    result: dict[str, Any] = {
+        "mode": profile.mode,
+        "configuration": profile.model_dump(mode="json"),
+        "scope": "first measured attempts only; warmups and retries are not rate scheduled",
+        "planned_first_attempts": planned_measurements,
+        "observed_dispatches": len(dispatches),
+        "unobserved_planned_dispatches": (
+            None
+            if planned_measurements is None
+            else max(0, planned_measurements - len(dispatches))
+        ),
+        "dispatch_lag_definition": (
+            "time between scheduled arrival and handing a measured request to its runner; "
+            "includes application reset time, but excludes downstream worker queueing, network "
+            "delay, and application-observed start latency"
+        ),
+    }
+    if profile.mode == "closed_loop":
+        result["enabled"] = False
+        result["dispatch_lag_ms"] = None
+        return result
+
+    lag_ms = [
+        max(0.0, float(payload["dispatch_lag_seconds"])) * 1000
+        for payload in dispatches
+        if isinstance(payload.get("dispatch_lag_seconds"), (int, float))
+        and math.isfinite(float(payload["dispatch_lag_seconds"]))
+    ]
+    result["enabled"] = True
+    result["sessions_with_dispatches"] = _offered_load_session_count(events)
+    result["dispatch_lag_ms"] = {
+        **summarize_latency(lag_ms),
+        "late_dispatches": sum(value > 0 for value in lag_ms),
+        "definition": "nearest-rank summaries of non-negative coordinator dispatch lag",
+    }
+    return result
+
+
+def _offered_load_session_count(events: list[dict[str, Any]]) -> int:
+    session = -1
+    sessions: set[int] = set()
+    for event in events:
+        if event["event_type"] == "run_session_started":
+            session += 1
+        elif event["event_type"] == "load_profile_dispatch":
+            sessions.add(max(session, 0))
+    return len(sessions)
 
 
 # --------------------------------------------------------------------------- profiles
@@ -233,7 +307,12 @@ def _pass_cost(attempts: list[EvaluationResult]) -> dict[str, Any]:
             continue
         if isinstance(resources.get("tokens"), dict) and resources["tokens"]:
             tokens += sum(v for v in resources["tokens"].values() if isinstance(v, int))
-        else:
+        reported_unknown = resources.get("calls_with_unknown_tokens")
+        if type(reported_unknown) is int and reported_unknown >= 0:
+            # New evaluator protocol reports token completeness per provider call, including
+            # retries. Older evaluators have only the result-level fallback above.
+            unknown_tokens += reported_unknown
+        elif not (isinstance(resources.get("tokens"), dict) and resources["tokens"]):
             unknown_tokens += 1
     return _cost_block(len(called), known, unknown, tokens=tokens, unknown_tokens=unknown_tokens)
 
@@ -257,6 +336,7 @@ def _cost_block(
         # A total exists only when calls were made and every one reported its cost.
         "total_cost_usd": round(known, 6) if calls and unknown == 0 else None,
         "accounting": completeness,
+        "unquantified_usage_events": 0,
     }
     if tokens is not None:
         block["reported_tokens"] = tokens
@@ -264,11 +344,137 @@ def _cost_block(
     return block
 
 
+def _combine_cost_blocks(blocks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Combine committed evaluator-pass usage without dropping retries or rescoring spend."""
+    calls = sum(int(block.get("calls") or 0) for block in blocks)
+    unknown = sum(int(block.get("calls_with_unknown_cost") or 0) for block in blocks)
+    known = sum(float(block.get("known_cost_usd") or 0.0) for block in blocks)
+    combined = _cost_block(
+        calls,
+        known,
+        unknown,
+        tokens=sum(int(block.get("reported_tokens") or 0) for block in blocks),
+        unknown_tokens=sum(int(block.get("calls_with_unknown_tokens") or 0) for block in blocks),
+    )
+    combined["unquantified_usage_events"] = sum(
+        int(block.get("unquantified_usage_events") or 0) for block in blocks
+    )
+    if combined["unquantified_usage_events"]:
+        combined["accounting"] = "unknown"
+        combined["total_cost_usd"] = None
+    return combined
+
+
+def _planner_cost(storage: Storage, run_id: str, *, granted_by: str | None) -> dict[str, Any]:
+    events = [
+        event for event in storage.list_usage_events(run_id) if event.role is UsageRole.PLANNER
+    ]
+    if not events:
+        if granted_by and granted_by.startswith("session "):
+            return {
+                "accounting": "not_attributed",
+                "note": "legacy session run has no durable planner-usage event",
+            }
+        return _cost_block(0, 0.0, 0, tokens=0)
+
+    calls = sum(max(0, event.calls) for event in events if event.calls is not None)
+    known = 0.0
+    unknown = 0
+    tokens = 0
+    unknown_tokens = 0
+    unquantified_usage_events = 0
+    for event in events:
+        if event.calls is None:
+            unquantified_usage_events += 1
+            if event.cost is not None and math.isfinite(event.cost):
+                known += float(event.cost)
+            reported_tokens = deep_unfreeze(event.tokens)
+            if isinstance(reported_tokens, dict):
+                tokens += sum(
+                    value for value in reported_tokens.values() if type(value) is int and value >= 0
+                )
+            if event.calls_without_tokens is not None:
+                unknown_tokens += event.calls_without_tokens
+            continue
+        event_calls = max(0, event.calls)
+        if event.cost is None or not math.isfinite(event.cost):
+            unknown += event_calls
+        else:
+            known += float(event.cost)
+        reported_tokens = deep_unfreeze(event.tokens)
+        if isinstance(reported_tokens, dict):
+            tokens += sum(
+                value for value in reported_tokens.values() if type(value) is int and value >= 0
+            )
+            unknown_tokens += (
+                event.calls_without_tokens
+                if event.calls_without_tokens is not None
+                else (event_calls if not reported_tokens else 0)
+            )
+        else:
+            unknown_tokens += (
+                event.calls_without_tokens
+                if event.calls_without_tokens is not None
+                else event_calls
+            )
+    block = _cost_block(calls, known, unknown, tokens=tokens, unknown_tokens=unknown_tokens)
+    block["unquantified_usage_events"] = unquantified_usage_events
+    if unquantified_usage_events:
+        block["accounting"] = "unknown"
+        block["total_cost_usd"] = None
+    return block
+
+
+def _workflow_cost(roles: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    calls = sum(int(block.get("calls") or 0) for block in roles.values())
+    unquantified_usage_events = sum(
+        int(block.get("unquantified_usage_events") or 0) for block in roles.values()
+    )
+    unknown_cost_calls = sum(
+        int(block.get("calls_with_unknown_cost") or 0) for block in roles.values()
+    )
+    known = sum(float(block.get("known_cost_usd") or 0.0) for block in roles.values())
+    unknown_components = sorted(
+        name for name, block in roles.items() if block.get("accounting") == "not_attributed"
+    )
+    if unknown_components:
+        accounting = "not_attributed"
+    elif unquantified_usage_events:
+        accounting = "unknown"
+    elif calls == 0:
+        accounting = "no_calls"
+    elif unknown_cost_calls == 0:
+        accounting = "complete"
+    elif unknown_cost_calls == calls:
+        accounting = "unknown"
+    else:
+        accounting = "partial"
+    return {
+        "calls": calls,
+        "calls_with_known_cost": calls - unknown_cost_calls,
+        "calls_with_unknown_cost": unknown_cost_calls,
+        "known_cost_usd": round(known, 6),
+        "total_cost_usd": round(known, 6)
+        if calls
+        and not unknown_cost_calls
+        and not unknown_components
+        and not unquantified_usage_events
+        else None,
+        "accounting": accounting,
+        "unknown_components": unknown_components,
+        "unquantified_usage_events": unquantified_usage_events,
+    }
+
+
 def _application_section(
     storage: Storage,
     run_id: str,
     planned_executions: int | None,
+    planned_measurements: int | None,
+    planned_warmups: int | None,
+    work_items: list[WorkItem],
     concurrency: int | None,
+    load_profile: LoadProfile | None,
     events: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[ExecutionResult]]:
     attempts = storage.list_execution_attempts(run_id)
@@ -280,22 +486,41 @@ def _application_section(
         if e["event_type"] == "recovered"
     )
     finals = select_final_executions(attempts)
+    warmup_finals = [e for e in finals if e.warmup]
+    measurement_finals = [e for e in finals if not e.warmup]
+    warmup_attempts = [a for a in attempts if a.warmup and was_dispatched(a)]
+    recovered_items = recovered_uncommitted_execution_items(events, work_items)
+    warmup_uncommitted = sum(item.warmup for item in recovered_items)
+    unclassified_uncommitted = max(0, uncommitted - len(recovered_items))
+    retry_incomplete_items: set[tuple[str, int, bool]] = set()
+    for item in recovered_items:
+        try:
+            case_id, repetition, _ = parse_work_item_key(item.task_key, item.kind)
+        except ValueError:
+            continue
+        retry_incomplete_items.add((case_id, repetition, item.warmup))
     status = Counter(e.status.value for e in finals)
     error_kinds = Counter(e.error_kind.value for e in finals if e.error_kind is not None)
     cache_hits = sum(1 for e in finals if e.cache)
-    ok_wall = [
-        float(w)
-        for e in finals
-        if e.status is ExecutionStatus.OK
-        and not e.cache  # a cached output is not a fresh latency measurement (§14)
-        and isinstance(w := (deep_unfreeze(e.timing) or {}).get("wall_ms"), (int, float))
-    ]
-    timeouts = sum(
-        1 for e in finals if e.error_kind is not None and e.error_kind.value == "timeout"
+    ok_wall = successful_latency_values(measurement_finals, warmup=False)
+    warmup_wall = successful_latency_values(warmup_finals, warmup=True)
+    expected_measurement_latency = sum(
+        e.status is ExecutionStatus.OK and not e.cache for e in measurement_finals
     )
+    expected_warmup_latency = sum(
+        e.status is ExecutionStatus.OK and not e.cache for e in warmup_finals
+    )
+    measurement_timeouts = sum(
+        1
+        for e in measurement_finals
+        if e.error_kind is not None and e.error_kind.value == "timeout"
+    )
+    measurement_failed = sum(e.status is not ExecutionStatus.OK for e in measurement_finals)
     failed = sum(1 for e in finals if e.status is not ExecutionStatus.OK)
     error_like = sorted(
-        e.case_id for e in finals if e.status is ExecutionStatus.OK and looks_like_error(e.output)
+        e.case_id
+        for e in measurement_finals
+        if e.status is ExecutionStatus.OK and looks_like_error(e.output)
     )
     dispatched = [a for a in attempts if was_dispatched(a)]
     known = sum(float(a.cost) for a in dispatched if a.cost is not None)
@@ -310,6 +535,7 @@ def _application_section(
         "error_kinds": dict(sorted(error_kinds.items())),
         "attempts": len(attempts),
         "uncommitted_dispatches": uncommitted,
+        "unclassified_uncommitted_dispatches": unclassified_uncommitted,
         "retried_items": sum(1 for e in finals if e.attempt_id > 1),
         # Answers that read like the application failing while reporting success (see
         # services.suspect_answers): every metric would score an error message.
@@ -318,18 +544,52 @@ def _application_section(
         "latency": {
             "definition": (
                 "wall time of the final attempt of each successful request, measured by the "
-                "runner around the invocation; p50/p95 by nearest rank. Failed and timed-out "
-                "requests are excluded from the percentiles and counted separately. Cache "
-                "hits are excluded: a cached output is not a fresh measurement."
+                "runner around the invocation for measured requests only; warmups, failed and "
+                "timed-out requests are excluded from nearest-rank percentiles. Cache hits are "
+                "excluded: a cached output is not a fresh measurement."
             ),
+            **summarize_latency(ok_wall),
             "successful_requests": len(ok_wall),
-            "p50_ms": percentile(ok_wall, 50),
-            "p95_ms": percentile(ok_wall, 95),
-            "min_ms": min(ok_wall) if ok_wall else None,
-            "max_ms": max(ok_wall) if ok_wall else None,
-            "excluded_failures": failed - timeouts,
-            "excluded_timeouts": timeouts,
+            "eligible_successful_requests": expected_measurement_latency,
+            "missing_measurements": expected_measurement_latency - len(ok_wall),
+            "excluded_failures": measurement_failed - measurement_timeouts,
+            "excluded_timeouts": measurement_timeouts,
             "concurrency": concurrency,
+            "dispersion_definition": (
+                "stddev is population standard deviation; IQR is nearest-rank p75 minus p25"
+            ),
+            "warmup": {
+                **summarize_latency(warmup_wall),
+                "eligible_successful_requests": expected_warmup_latency,
+                "missing_measurements": expected_warmup_latency - len(warmup_wall),
+                "definition": "successful final uncached warmup attempts, summarized separately",
+            },
+            "retry_inclusive": retry_inclusive_latency(
+                dispatched,
+                measurement_finals,
+                warmup=False,
+                incomplete_items=retry_incomplete_items,
+                phase_attribution_incomplete=bool(unclassified_uncommitted),
+            ),
+            "streaming": stream_performance_summary(measurement_finals, warmup=False),
+            "warmup_streaming": stream_performance_summary(warmup_finals, warmup=True),
+            "throughput": phase_throughput(
+                dispatched,
+                measurement_finals,
+                warmup=False,
+                uncommitted_dispatches=sum(not item.warmup for item in recovered_items),
+                phase_attribution_incomplete=bool(unclassified_uncommitted),
+            ),
+            "offered_load": _offered_load_summary(
+                load_profile, events, planned_measurements
+            ),
+            "warmup_throughput": phase_throughput(
+                dispatched,
+                warmup_finals,
+                warmup=True,
+                uncommitted_dispatches=warmup_uncommitted,
+                phase_attribution_incomplete=bool(unclassified_uncommitted),
+            ),
             "cache": (
                 f"{cache_hits} cached execution(s) excluded from latency"
                 if cache_hits
@@ -337,6 +597,50 @@ def _application_section(
             ),
         },
         "cost": _cost_block(len(dispatched) + uncommitted, known, unknown),
+        "measurement": {
+            "planned": planned_measurements,
+            "recorded": len(measurement_finals),
+            "not_recorded": (
+                None
+                if planned_measurements is None
+                else planned_measurements - len(measurement_finals)
+            ),
+            "completed": sum(e.status is ExecutionStatus.OK for e in measurement_finals),
+            "failed": sum(e.status is not ExecutionStatus.OK for e in measurement_finals),
+        },
+        "warmup": {
+            "planned": planned_warmups,
+            "recorded": len(warmup_finals),
+            "not_recorded": (
+                None if planned_warmups is None else planned_warmups - len(warmup_finals)
+            ),
+            "completed": sum(e.status is ExecutionStatus.OK for e in warmup_finals),
+            "failed": sum(e.status is not ExecutionStatus.OK for e in warmup_finals),
+            "attempts": len(warmup_attempts),
+            "dispatched_calls": len(warmup_attempts) + warmup_uncommitted,
+            "uncommitted_dispatches": warmup_uncommitted,
+            "cost": _cost_block(
+                len(warmup_attempts) + warmup_uncommitted,
+                sum(float(a.cost) for a in warmup_attempts if a.cost is not None),
+                sum(a.cost is None for a in warmup_attempts) + warmup_uncommitted,
+            ),
+            "work_item_states": dict(
+                sorted(
+                    Counter(
+                        item.state.value
+                        for item in work_items
+                        if item.kind == "execution" and item.warmup
+                    ).items()
+                )
+            ),
+            "effect_states": dict(
+                sorted(
+                    Counter(
+                        e.effect_state.value for e in warmup_finals if e.effect_state is not None
+                    ).items()
+                )
+            ),
+        },
     }
     return section, finals
 
@@ -442,7 +746,7 @@ def _evidence(
             or r.status is ExecutionStatus.ERROR
         ):
             by_item[(r.case_id, r.repetition_id)].append(r)
-    executions = {(e.case_id, e.repetition_id): e for e in finals}
+    executions = {(e.case_id, e.repetition_id): e for e in finals if not e.warmup}
     for key, final in executions.items():
         if final.status is not ExecutionStatus.OK:
             by_item.setdefault(key, [])
@@ -514,9 +818,18 @@ def _raw_artifacts(storage: Storage, results: list[EvaluationResult]) -> dict[st
 
 
 def build_report(
-    storage: Storage, artifacts: ArtifactStore, run_id: str, *, include_content: bool = True
+    storage: Storage,
+    artifacts: ArtifactStore,
+    run_id: str,
+    *,
+    include_content: bool = True,
+    group_by: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The report document for `run_id`, from stored facts only."""
+    try:
+        group_fields = validate_group_by(group_by)
+    except ValueError as exc:
+        raise ReportError(str(exc)) from exc
     record = storage.get_run(run_id)
     if record is None:
         raise RunError(f"no run committed with run_id={run_id!r}")
@@ -524,7 +837,11 @@ def build_report(
     params = deep_unfreeze(manifest.parameters) or {}
     engine_run = params.get("mode") == "manual_plan"
     plan = _frozen_plan(storage, artifacts, manifest) if engine_run else None
-    spec = _frozen_application(storage, artifacts, manifest) if engine_run else None
+    spec = (
+        _frozen_application(storage, artifacts, manifest)
+        if engine_run or "application_artifact_id" in params
+        else None
+    )
     if spec is None and manifest.application_id:
         spec = storage.get_application(manifest.application_id)
     events = storage.list_run_events(run_id)
@@ -543,8 +860,20 @@ def build_report(
         )
 
     planned_exec = sum(1 for w in items if w.kind == "execution") if items else None
+    planned_measurements = (
+        sum(1 for w in items if w.kind == "execution" and not w.warmup) if items else planned_exec
+    )
+    planned_warmups = sum(1 for w in items if w.kind == "execution" and w.warmup) if items else 0
     application, finals = _application_section(
-        storage, run_id, planned_exec, plan.concurrency.application if plan else None, events
+        storage,
+        run_id,
+        planned_exec,
+        planned_measurements,
+        planned_warmups,
+        items,
+        plan.concurrency.application if plan else None,
+        plan.load_profile if plan else None,
+        events,
     )
     application["state"] = _state_section(params, events)
 
@@ -552,6 +881,16 @@ def build_report(
     all_attempts = storage.list_evaluation_attempts(run_id)
     engine_scoring = params.get("scoring_id")
     rescoring_profiles, pass_order = _rescoring_profiles(events)
+    rescore_counts = {
+        event["payload"]["scoring_id"]: event["payload"]["selected_count"]
+        for event in events
+        if event["event_type"] == "scoring_pass" and "selected_count" in event["payload"]
+    }
+    pass_accounting = {
+        event["payload"]["scoring_id"]: event["payload"]
+        for event in events
+        if event["event_type"] == "scoring_pass_completed"
+    }
     frozen = _profiles_from_manifest(params)
     planned_by_key: Counter[str] = Counter(
         str(parse_work_item_key(w.task_key, w.kind)[2]) for w in items if w.kind == "evaluation"
@@ -571,6 +910,7 @@ def build_report(
     )
 
     passes = []
+    segment_passes: list[dict[str, Any]] = []
     labels: dict[str, str] = {}
     metrics_by_binding: dict[int, dict[str, Any] | None] = {}
     derived = False
@@ -590,19 +930,23 @@ def build_report(
                 if not bound:
                     continue
                 profile = _derived_profile(bound)
+                profiles[binding_hash] = profile
                 derived = True
             if is_engine and items:
                 section = _metric_section(
                     profile, binding_hash, bound, planned_by_key.get(binding_hash[7:23])
                 )
-            elif items:
+            elif items or scoring_id in rescore_counts:
                 # A rescore of an engine run: every planned execution is selected, and one
                 # that never produced an execution is unavailable, not silently dropped.
                 section = _metric_section(
                     profile,
                     binding_hash,
                     bound,
-                    max(planned_exec or 0, len(bound)),
+                    max(
+                        rescore_counts.get(scoring_id, rescore_selected_count(items, len(finals))),
+                        len(bound),
+                    ),
                     missing="unavailable",
                 )
             else:
@@ -639,6 +983,20 @@ def build_report(
                 "evaluator_cost": _pass_cost(
                     [a for a in all_attempts if a.scoring_id == scoring_id]
                 ),
+                "budget": pass_accounting.get(scoring_id, {}).get("budget"),
+                "quotas": pass_accounting.get(scoring_id, {}).get("quotas"),
+                "stop_reason": pass_accounting.get(scoring_id, {}).get("stop_reason"),
+                "outcome": pass_accounting.get(scoring_id, {}).get("outcome"),
+                "exit_code": pass_accounting.get(scoring_id, {}).get("exit_code"),
+                "gates": pass_accounting.get(scoring_id, {}).get("gates"),
+            }
+        )
+        segment_passes.append(
+            {
+                "scoring_id": scoring_id,
+                "kind": "engine" if is_engine else "rescore",
+                "profiles": profiles,
+                "results": by_binding,
             }
         )
     if derived:
@@ -652,6 +1010,19 @@ def build_report(
     primary_pass = next((p for p in passes if p["scoring_id"] == primary), None)
     counts = work_counts(storage, run_id)
     approval = storage.get_approval(f"{run_id}:approval")
+    evaluator_cost = primary_pass["evaluator_cost"] if primary_pass else _cost_block(0, 0.0, 0)
+    planner_cost = _planner_cost(
+        storage,
+        run_id,
+        granted_by=approval.granted_by if approval else None,
+    )
+    workflow_cost = _workflow_cost(
+        {
+            "application": application["cost"],
+            "evaluator": _combine_cost_blocks([scoring["evaluator_cost"] for scoring in passes]),
+            "planner": planner_cost,
+        }
+    )
     report = {
         "schema": REPORT_SCHEMA,
         "generated_at": datetime.now(UTC).isoformat(),
@@ -659,6 +1030,7 @@ def build_report(
         "as_of_event_sequence": events[-1]["sequence"] if events else 0,
         "run": {
             "run_id": run_id,
+            "parent_run_id": manifest.parent_run_id,
             "status": record.status,
             "finished": finished,
             # 09 terms: provisional = may still change (not finished); partial = not every
@@ -680,6 +1052,8 @@ def build_report(
             "plugins": dict(sorted((deep_unfreeze(manifest.plugin_hashes) or {}).items())),
             "seed": manifest.seed,
             "repetitions": plan.repetitions if plan else None,
+            "warmup_repetitions": plan.warmup_repetitions if plan else 0,
+            "load_profile": plan.load_profile.model_dump(mode="json") if plan else None,
             "environment": deep_unfreeze(manifest.environment) or {},
             "approved_by": approval.granted_by if approval else None,
         },
@@ -700,16 +1074,12 @@ def build_report(
         "gates": gates,
         "cost": {
             "application": application["cost"],
-            "evaluator": (
-                primary_pass["evaluator_cost"] if primary_pass else _cost_block(0, 0.0, 0)
-            ),
+            "evaluator": evaluator_cost,
             "evaluator_scoring_id": primary,
-            "planner": {
-                "accounting": "not_attributed",
-                "note": "planning and conversation usage is recorded per session (/budget), "
-                "not per run",
-            },
-            "note": "observed spend only; estimates are never added to observed totals",
+            "planner": planner_cost,
+            "workflow": workflow_cost,
+            "note": "observed spend only; estimates are never added to observed totals; planner "
+            "dollars remain unknown unless the planner provider reports a price",
         },
         "evidence": {
             "content": "included" if include_content else "withheld",
@@ -721,6 +1091,15 @@ def build_report(
         },
         "notes": notes,
     }
+    if group_fields:
+        report["segments"] = build_segment_analysis(
+            group_fields,
+            cases=storage.list_cases(manifest.dataset_hash),
+            work_items=items,
+            executions=finals,
+            scoring_passes=segment_passes,
+            include_content=include_content,
+        )
     report["outcome"] = outcome_summary(report)
     return report
 
@@ -813,12 +1192,13 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
             )
     app = report["application"]
     items = report["evidence"]["items"]
-    return {
+    facts = {
         "run_id": run["run_id"],
         "status": run["status"],
         "provisional": run["provisional"],
         "partial": run["partial"],
         "as_of_event_sequence": report["as_of_event_sequence"],
+        "warmup_repetitions": run.get("warmup_repetitions", 0),
         "basis": report["basis"],
         "provenance": {
             key: run[key]
@@ -851,13 +1231,45 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
                 "error_like_answers",
             )
         },
+        "measurement": app["measurement"],
+        "warmup": app["warmup"],
         "latency_ms": {
             k: app["latency"][k]
-            for k in ("p50_ms", "p95_ms", "successful_requests", "excluded_failures")
+            for k in (
+                "p50_ms",
+                "p95_ms",
+                "p99_ms",
+                "mean_ms",
+                "stddev_ms",
+                "iqr_ms",
+                "successful_requests",
+                "eligible_successful_requests",
+                "missing_measurements",
+                "excluded_failures",
+            )
         },
+        "retry_inclusive_latency_ms": app["latency"]["retry_inclusive"],
+        "throughput": app["latency"]["throughput"],
+        "warmup_latency_ms": app["latency"]["warmup"],
+        "warmup_throughput": app["latency"]["warmup_throughput"],
+        "streaming_performance": app["latency"]["streaming"],
+        "warmup_streaming_performance": app["latency"]["warmup_streaming"],
         "cost": {
             role: {
-                k: block.get(k) for k in ("calls", "known_cost_usd", "total_cost_usd", "accounting")
+                k: block.get(k)
+                for k in (
+                    "calls",
+                    "known_cost_usd",
+                    "total_cost_usd",
+                    "accounting",
+                    "calls_with_known_cost",
+                    "calls_with_unknown_cost",
+                    "reported_tokens",
+                    "calls_with_unknown_tokens",
+                    "unquantified_usage_events",
+                    "unknown_components",
+                    "note",
+                )
             }
             for role, block in report["cost"].items()
             if isinstance(block, dict)
@@ -869,3 +1281,43 @@ def report_facts(report: dict[str, Any], *, evidence_limit: int = 10) -> dict[st
         "outcome": report["outcome"],
         "notes": report["notes"],
     }
+    if report.get("segments"):
+        facts["segments"] = [
+            {
+                "field": field["field"],
+                "selected_cases": field["selected_cases"],
+                "category_count": field["category_count"],
+                "omitted_categories": field["omitted_categories"],
+                "groups": [
+                    {
+                        "label": group["label"],
+                        "case_count": group["case_count"],
+                        "application": {
+                            "planned_requests": group["application"]["planned_requests"],
+                            "completed_requests": group["application"]["completed_requests"],
+                            "failed_requests": group["application"]["failed_requests"],
+                            "latency_p50_ms": group["application"]["latency_ms"]["p50_ms"],
+                        },
+                        "scoring_passes": [
+                            {
+                                "kind": scoring["kind"],
+                                "metrics": [
+                                    {
+                                        "metric": metric["metric"],
+                                        "selected": metric["summary"]["selected"],
+                                        "completed": metric["summary"]["completed"],
+                                        "decisions": metric["summary"]["decisions"],
+                                        "value_summary": metric["summary"]["value_summary"],
+                                    }
+                                    for metric in scoring["metrics"]
+                                ],
+                            }
+                            for scoring in group["scoring_passes"]
+                        ],
+                    }
+                    for group in field["groups"][:10]
+                ],
+            }
+            for field in report["segments"]["fields"]
+        ]
+    return facts

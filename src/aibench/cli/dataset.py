@@ -1,22 +1,286 @@
-"""`aibench dataset validate PATH` (01-T4)."""
+"""Dataset import, validation, and inspection commands."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import cast
 
 import typer
-from rich.console import Console
 
 from aibench.cli import candidates as candidates_cli
+from aibench.cli import dataset_suites as dataset_suites_cli
 from aibench.cli import episodes as episodes_cli
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import ValidationError
+from aibench.datasets.diff import (
+    DEFAULT_DETAIL_LIMIT,
+    MAX_DETAIL_LIMIT,
+    DatasetDiffError,
+    diff_datasets,
+)
+from aibench.datasets.importers import DatasetFormat, DatasetImportError, import_dataset
 from aibench.datasets.ingest import ingest_dataset
+from aibench.datasets.transform import (
+    DatasetTransformError,
+    deduplicate_dataset,
+    split_dataset,
+)
 
-app = typer.Typer(help="Dataset validation and inspection commands.")
+app = typer.Typer(help="Import, validate, and inspect benchmark datasets.")
 console = Console()
 err_console = Console(stderr=True)
 app.add_typer(candidates_cli.app, name="candidates")
 app.add_typer(episodes_cli.app, name="episodes")
+app.add_typer(dataset_suites_cli.app, name="suites")
+
+
+@app.command("diff")
+def diff(
+    left: Path = typer.Argument(..., help="Earlier dataset JSONL file."),  # noqa: B008
+    right: Path = typer.Argument(..., help="Newer dataset JSONL file."),  # noqa: B008
+    limit: str = typer.Option(
+        str(DEFAULT_DETAIL_LIMIT),
+        "--limit",
+        help=f"Maximum case IDs shown per change category (0-{MAX_DETAIL_LIMIT}).",
+    ),
+    fail_on_change: bool = typer.Option(
+        False, "--fail-on-change", help="Exit 1 when cases were added, removed, or changed."
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print a machine-readable diff."),
+) -> None:
+    """Compare normalized cases by unique case_id without retaining them in memory."""
+    try:
+        detail_limit = int(limit)
+    except ValueError as exc:
+        raise error_exit(
+            "--limit must be an integer",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+    try:
+        result = diff_datasets(left, right, limit=detail_limit)
+    except (DatasetDiffError, ValidationError, OSError) as exc:
+        raise error_exit(
+            f"dataset diff failed: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+
+    has_changes = bool(result["summary"]["has_changes"])
+    exit_code = 1 if fail_on_change and has_changes else 0
+    if json_output:
+        console.print_json(data=result, cli_exit_code=exit_code)
+    else:
+        summary = result["summary"]
+        console.print(
+            f"dataset diff: {summary['added']} added, {summary['removed']} removed, "
+            f"{summary['changed']} changed, {summary['unchanged']} unchanged"
+        )
+        console.print(
+            f"  left:  {result['left']['dataset_id']} "
+            f"({result['left']['case_count']} cases, {result['left']['content_hash']})"
+        )
+        console.print(
+            f"  right: {result['right']['dataset_id']} "
+            f"({result['right']['case_count']} cases, {result['right']['content_hash']})"
+        )
+        for label, detail_key, omitted_key in (
+            ("added", "added_case_ids", "added_omitted"),
+            ("removed", "removed_case_ids", "removed_omitted"),
+            ("changed", "changed_case_ids", "changed_omitted"),
+        ):
+            case_ids = result["details"][detail_key]
+            if case_ids:
+                escaped_ids = ", ".join(
+                    json.dumps(case_id, ensure_ascii=True) for case_id in case_ids
+                )
+                console.print(f"  {label} case IDs: {escaped_ids}", markup=False)
+            omitted = result["details"][omitted_key]
+            if omitted:
+                console.print(f"  {label}: {omitted} additional case ID(s) omitted")
+    if exit_code:
+        raise typer.Exit(code=exit_code)
+
+
+@app.command("deduplicate")
+def deduplicate(
+    source: Path = typer.Argument(..., help="Input JSONL dataset."),  # noqa: B008
+    output: Path = typer.Argument(..., help="New deduplicated JSONL output path."),  # noqa: B008
+    on_conflict: str = typer.Option(
+        "error",
+        "--on-conflict",
+        help="How to resolve the same case_id with different content: error, first, or last.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print a machine-readable summary."),
+) -> None:
+    """Remove duplicate case IDs after validating and normalizing every record."""
+    try:
+        result = deduplicate_dataset(source, output, on_conflict=on_conflict)
+    except (DatasetTransformError, ValidationError, OSError) as exc:
+        raise error_exit(
+            f"dataset deduplication failed: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(
+            f"deduplicated {result['input_case_count']} case(s) to "
+            f"{result['output_case_count']} ({result['duplicates_removed']} removed)",
+            markup=False,
+        )
+        console.print(f"  output: {result['output']}", markup=False)
+        console.print(f"  content hash: {result['content_hash']}", markup=False)
+        if result["conflicting_duplicate_count"]:
+            console.print(
+                f"  conflicting duplicate records resolved: "
+                f"{result['conflicting_duplicate_count']} ({on_conflict})",
+                markup=False,
+            )
+        for warning in result["warnings"]:
+            console.print(f"  warning: {warning}", markup=False)
+        if result["warnings_truncated"]:
+            console.print("  warning list truncated", markup=False)
+        if result["temporary_cleanup_warning"]:
+            console.print(
+                "  warning: output was published but its temporary link could not be removed",
+                markup=False,
+            )
+
+
+@app.command("split")
+def split(
+    source: Path = typer.Argument(..., help="Input JSONL dataset."),  # noqa: B008
+    output_dir: Path = typer.Argument(..., help="New output directory for train/validation/test."),  # noqa: B008
+    train: str = typer.Option("0.8", "--train", help="Requested train fraction."),
+    validation: str = typer.Option("0.1", "--validation", help="Requested validation fraction."),
+    test: str = typer.Option("0.1", "--test", help="Requested test fraction."),
+    seed: str = typer.Option("0", "--seed", help="Integer seed for deterministic grouping."),
+    json_output: bool = typer.Option(False, "--json", help="Print a machine-readable summary."),
+) -> None:
+    """Create deterministic train, validation, and test JSONL datasets."""
+    try:
+        result = split_dataset(
+            source,
+            output_dir,
+            train=train,
+            validation=validation,
+            test=test,
+            seed=seed,
+        )
+    except (DatasetTransformError, ValidationError, OSError) as exc:
+        raise error_exit(
+            f"dataset split failed: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(
+            f"split {result['input_case_count']} case(s) across "
+            f"{result['group_count']} group(s) with seed {result['seed']}",
+            markup=False,
+        )
+        console.print(f"  output: {result['output']}", markup=False)
+        for name, detail in result["splits"].items():
+            console.print(
+                f"  {name}: {detail['case_count']} cases, {detail['group_count']} groups, "
+                f"{detail['content_hash']}",
+                markup=False,
+            )
+        for warning in result["warnings"]:
+            console.print(f"  warning: {warning}", markup=False)
+        if result["warnings_truncated"]:
+            console.print("  warning list truncated", markup=False)
+        if result["temporary_directory_cleanup_warning"]:
+            console.print(
+                f"  warning: staging directory could not be removed: "
+                f"{result['temporary_directory']}",
+                markup=False,
+            )
+
+
+@app.command("import")
+def import_data(
+    source: Path = typer.Argument(..., help="CSV, JSON array, JSONL, or Parquet source."),  # noqa: B008
+    output: Path = typer.Argument(..., help="New canonical JSONL dataset path."),  # noqa: B008
+    format: str = typer.Option(
+        "auto", "--format", help="Source format: auto, jsonl, json, csv, or parquet."
+    ),
+    dataset_id: str | None = typer.Option(None, "--dataset-id", help="Manifest dataset identity."),
+    split: str | None = typer.Option(None, "--split", help="Optional split label."),
+    trust_parquet: bool = typer.Option(
+        False,
+        "--trust-parquet",
+        help=(
+            "Acknowledge that Parquet pages are decompressed before row-size checks; "
+            "use only for trusted files."
+        ),
+    ),
+    field_mappings: list[str] = typer.Option(  # noqa: B008
+        [],
+        "--map",
+        help="Map a canonical case field to a source field, e.g. --map input=prompt (repeatable).",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Print a machine-readable summary."),
+) -> None:
+    """Validate records against the BenchCraft case schema and write canonical JSONL."""
+    if format not in {"auto", "jsonl", "json", "csv", "parquet"}:
+        raise error_exit(
+            f"unsupported dataset format: {format}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        )
+    try:
+        result = import_dataset(
+            source,
+            output,
+            source_format=cast(DatasetFormat, format),
+            dataset_id=dataset_id,
+            split=split,
+            field_mappings=tuple(field_mappings),
+            trust_parquet=trust_parquet,
+        )
+    except (DatasetImportError, ValidationError, OSError, RecursionError) as exc:
+        raise error_exit(
+            f"dataset import failed: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
+
+    if json_output:
+        console.print_json(data=result)
+    else:
+        console.print(
+            f"imported {result['case_count']} case(s) as {result['dataset_id']} "
+            f"to {result['output']}"
+        )
+        console.print(f"  format: {result['format']}")
+        console.print(f"  content hash: {result['content_hash']}")
+        if result["duplicate_case_ids"]:
+            console.print(f"  [yellow]duplicate case IDs:[/yellow] {result['duplicate_case_ids']}")
+        for warning in result["warnings"]:
+            console.print(f"  [yellow]warning:[/yellow] {warning}")
+        if result["warnings_truncated"]:
+            console.print("  [yellow]warning list truncated[/yellow]")
 
 
 @app.command("validate")
@@ -33,8 +297,13 @@ def validate(
         # stays bounded-memory regardless of dataset size (see `ingest_dataset` docstring).
         report = ingest_dataset(path, retain_cases=False)
     except ValidationError as exc:
-        err_console.print(f"[red]invalid dataset:[/red] {exc}")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            f"invalid dataset: {exc}",
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
 
     case_count = report.manifest.case_count if report.manifest else 0
 
@@ -50,7 +319,7 @@ def validate(
             "duplicate_case_ids": sorted(set(report.duplicate_case_ids)),
             "dedup_disk_backed": report.dedup_disk_backed,
         }
-        console.print_json(data=payload)
+        console.print_json(data=payload, cli_exit_code=0 if report.is_valid else 2)
     else:
         console.print(f"[bold]{path}[/bold]")
         console.print(f"  cases: {case_count}")

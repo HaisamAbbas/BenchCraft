@@ -98,6 +98,27 @@ def recording_judge() -> RecordingJudge:
     return RecordingJudge()
 
 
+class UsageRecordingJudge(RecordingJudge):
+    """Records all calls on one shared judge instance and reports unknown spend."""
+
+    counts_own_usage = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tokens: dict[str, int] = {}
+
+    @property
+    def calls_without_tokens(self) -> int:
+        return self.calls
+
+    def cost(self) -> None:
+        return None
+
+
+def usage_recording_judge() -> UsageRecordingJudge:
+    return UsageRecordingJudge()
+
+
 class PlanlessJudge(AgreeingJudge):
     """Finds no plan in any trace (every `plan` list empty), as for an agent that records
     no planning or reasoning; otherwise agrees."""
@@ -126,7 +147,9 @@ class ScatteredJudge(AgreeingJudge):
 
     def generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
         answer = super().generate(prompt, schema)
-        if isinstance(answer, BaseModel) and isinstance(getattr(answer, "score", None), (int, float)):
+        if isinstance(answer, BaseModel) and isinstance(
+            getattr(answer, "score", None), (int, float)
+        ):
             answer = answer.model_copy(update={"score": float(self.SCORES[self.scored % 3])})
             self.scored += 1
         return answer

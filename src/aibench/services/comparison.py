@@ -45,6 +45,7 @@ from aibench.core.models import (
     deep_unfreeze,
 )
 from aibench.core.plans import ExecutablePlan
+from aibench.engine.engine import parse_work_item_key, was_dispatched
 from aibench.reporting.aggregation import reason_code
 from aibench.reporting.statistics import (
     ComparisonSide,
@@ -56,6 +57,16 @@ from aibench.reporting.statistics import (
     compare_numeric_metric,
     summarize_judge_stability,
 )
+from aibench.services.performance import (
+    nearest_rank,
+    phase_throughput,
+    retry_inclusive_latency,
+    stream_performance_summary,
+    successful_latency_values,
+    summarize_latency,
+)
+from aibench.services.phase_accounting import recovered_uncommitted_execution_items
+from aibench.services.scoring import select_final_executions
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import Storage
 
@@ -663,6 +674,7 @@ def _plan_facts(
     raw, problem, raw_digest = _artifact_json(storage, artifacts, artifact_id)
     warnings: list[dict[str, Any]] = []
     repetitions: int | None = None
+    warmup_repetitions: int | None = None
     selection_digest: str | None = None
     source = "unknown"
     artifact_expected = isinstance(artifact_id, str) and bool(artifact_id)
@@ -696,6 +708,7 @@ def _plan_facts(
         else:
             plan_content_verified = True
             repetitions = plan.repetitions
+            warmup_repetitions = plan.warmup_repetitions
             source = "frozen_plan_artifact"
             selection_digest = _digest(plan.selection.model_dump(mode="json"))
 
@@ -717,6 +730,12 @@ def _plan_facts(
             if observed_repetitions == expected:
                 repetitions = max(observed_repetitions) + 1
                 source = "observed_work_items"
+    if warmup_repetitions is None and not artifact_expected:
+        candidate = params.get("warmup_repetitions", 0)
+        if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate >= 0:
+            warmup_repetitions = candidate
+        else:
+            warmup_repetitions = 0
 
     # Without a frozen plan, an inferred repetition count is useful context but
     # cannot satisfy a strict comparison's repetition-policy identity.
@@ -729,6 +748,7 @@ def _plan_facts(
     return (
         {
             "repetitions": repetitions,
+            "warmup_repetitions": warmup_repetitions,
             "selection_digest": selection_digest,
             "source": source,
             "verified": verified,
@@ -939,6 +959,7 @@ def _run_facts(
         int(item.task_key.partition(":r")[2].partition(":")[0])
         for item in work_items
         if item.kind in {"execution", "evaluation"}
+        and not item.warmup
         and ":r" in item.task_key
         and item.task_key.partition(":r")[2].partition(":")[0].isdigit()
     }
@@ -955,7 +976,9 @@ def _run_facts(
         storage,
         artifacts,
         manifest,
-        observed_repetitions=observed_reps | {r.repetition_id for r in results},
+        observed_repetitions=observed_reps
+        | {r.repetition_id for r in results}
+        | {r.repetition_id for r in executions if not r.warmup},
         declared_repetitions=declared_reps,
     )
     if plan_warnings:
@@ -1757,6 +1780,7 @@ def _global_identity(
         and not baseline.plan.get("warnings")
         and not current.plan.get("warnings")
         and baseline.plan.get("repetitions") == current.plan.get("repetitions")
+        and baseline.plan.get("warmup_repetitions") == current.plan.get("warmup_repetitions")
         and baseline.plan.get("selection_digest") == current.plan.get("selection_digest")
     )
     plan_check = _check(
@@ -1875,21 +1899,17 @@ def _global_identity(
 def _parse_work_keys(run: _RunFacts) -> dict[str, set[PairKey]]:
     by_binding: dict[str, set[PairKey]] = defaultdict(set)
     for item in run.work_items:
-        if item.kind != "evaluation" or not item.task_key.startswith("eval:"):
+        if item.kind != "evaluation":
             continue
-        # Case IDs are user-defined and may contain colons (including ``:r``).
-        # Decode the generated repetition and binding suffixes from the right edge;
-        # splitting the whole key on ``:`` would silently pair the wrong case.
-        body = item.task_key[len("eval:") :]
-        case_and_repetition, separator, binding_key = body.rpartition(":")
-        if not separator or not case_and_repetition or not binding_key:
+        try:
+            case_id, repetition, binding_key = parse_work_item_key(item.task_key, item.kind)
+        except ValueError:
             continue
-        case_id, repetition_separator, repetition_text = case_and_repetition.rpartition(":r")
-        if not repetition_separator or not case_id or not repetition_text.isdecimal():
+        if not binding_key:
             continue
         # Work-item keys retain a short binding prefix.  Keep it as the map key;
         # _selected_keys matches it to the full frozen binding hash.
-        by_binding[binding_key].add(PairKey(case_id, int(repetition_text)))
+        by_binding[binding_key].add(PairKey(case_id, repetition))
     return by_binding
 
 
@@ -1897,13 +1917,36 @@ def _selected_keys(run: _RunFacts, spec: _MetricSpec) -> set[PairKey]:
     keys: set[PairKey] = set()
     matched_work = False
     work_map = _parse_work_keys(run)
+    metric_hash = spec.binding_hash.removeprefix("sha256:")
     for binding, values in work_map.items():
-        if binding == spec.binding_hash or spec.binding_hash.startswith(binding) or binding.startswith(spec.binding_hash):
+        binding_hash = binding.removeprefix("sha256:")
+        if (
+            binding_hash == metric_hash
+            or metric_hash.startswith(binding_hash)
+            or binding_hash.startswith(metric_hash)
+        ):
             keys.update(values)
             matched_work = True
     for result in spec.results:
         keys.add(PairKey(result.case_id, result.repetition_id))
     if not matched_work:
+        # New rescore bindings need the same selected executions, including work
+        # that never produced an output. Workspace case catalogs contain other
+        # runs' selections and cannot replace the frozen work graph.
+        execution_work: set[PairKey] = set()
+        for item in run.work_items:
+            if item.kind != "execution":
+                continue
+            if item.warmup:
+                continue
+            try:
+                case_id, repetition, _ = parse_work_item_key(item.task_key, item.kind)
+            except ValueError:
+                continue
+            execution_work.add(PairKey(case_id, repetition))
+        if execution_work:
+            keys.update(execution_work)
+            return keys
         final: dict[tuple[str, int], ExecutionResult] = {}
         for execution in run.executions:
             key = (execution.case_id, execution.repetition_id)
@@ -2178,6 +2221,8 @@ def _judge_observations(
     # repetition units.
     final: dict[tuple[str, int], ExecutionResult] = {}
     for execution in run.executions:
+        if execution.warmup:
+            continue
         unit_key = (execution.case_id, execution.repetition_id)
         old = final.get(unit_key)
         if old is None or execution.attempt_id > old.attempt_id:
@@ -2422,6 +2467,17 @@ def compare_runs(
         raise ComparisonError("bootstrap_replicates must be an integer")
     if bootstrap_replicates < 1:
         raise ComparisonError("bootstrap_replicates must be at least 1")
+
+    baseline_alias: str | None = None
+    explicit_alias = baseline_run_id.startswith("@")
+    alias_candidate = baseline_run_id[1:].strip() if explicit_alias else baseline_run_id
+    if explicit_alias or storage.get_run(baseline_run_id) is None:
+        named = storage.get_baseline(alias_candidate.strip().casefold())
+        if named is not None:
+            baseline_alias = named.alias
+            baseline_run_id = named.run_id
+        elif explicit_alias:
+            raise ComparisonError(f"no named baseline promoted with alias={alias_candidate!r}")
 
     baseline = _run_facts(storage, artifacts, baseline_run_id, baseline_scoring_id)
     current = _run_facts(storage, artifacts, current_run_id, current_scoring_id)
@@ -2762,6 +2818,7 @@ def compare_runs(
         "claim_qualified": claim_qualified,
         "identity_qualified": qualified,
         "baseline_run_id": baseline_run_id,
+        "baseline_alias": baseline_alias,
         "current_run_id": current_run_id,
         "runs": {
             "baseline": {
@@ -2796,6 +2853,7 @@ def compare_runs(
             "metrics": [entry["identity_checks"] for entry in metric_entries],
         },
         "application_identity": global_checks["application"],
+        "application_performance": _application_performance(baseline, current),
         "global_checks": list(global_checks.values()),
         "warnings": sorted(warnings, key=lambda item: (item["scope"], item["code"])),
         "warning_codes": sorted({item["code"] for item in warnings}),
@@ -2866,12 +2924,161 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _nearest_rank_p95(values: list[float]) -> float | None:
+    return nearest_rank(values, 95)
+
+
+def _finite_float(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _application_performance_side(run: _RunFacts) -> dict[str, Any]:
+    """Summarize observed runtime signals using the report's measurement rules."""
+
+    finals = select_final_executions(run.executions)
+    latencies = successful_latency_values(finals, warmup=False)
+    expected_latency_requests = sum(
+        not execution.warmup
+        and execution.status is ExecutionStatus.OK
+        and not execution.cache
+        for execution in finals
+    )
+
+    dispatched = [execution for execution in run.executions if was_dispatched(execution)]
+    uncommitted = sum(
+        int(payload.get("uncommitted_dispatches", 0))
+        for event in run.events
+        if event.get("event_type") == "recovered"
+        and isinstance((payload := event.get("payload")), Mapping)
+        and isinstance(payload.get("uncommitted_dispatches", 0), int)
+        and not isinstance(payload.get("uncommitted_dispatches", 0), bool)
+        and payload.get("uncommitted_dispatches", 0) > 0
+    )
+    warmup_dispatches = [execution for execution in dispatched if execution.warmup]
+    warmup_finals = [execution for execution in finals if execution.warmup]
+    warmup_latencies = successful_latency_values(warmup_finals, warmup=True)
+    recovered_items = recovered_uncommitted_execution_items(run.events, run.work_items)
+    warmup_uncommitted = sum(item.warmup for item in recovered_items)
+    unclassified_uncommitted = max(0, uncommitted - len(recovered_items))
+    retry_incomplete_items: set[tuple[str, int, bool]] = set()
+    for item in recovered_items:
+        try:
+            case_id, repetition, _ = parse_work_item_key(item.task_key, item.kind)
+        except ValueError:
+            continue
+        retry_incomplete_items.add((case_id, repetition, item.warmup))
+    warmup_unknown_costs = (
+        sum(execution.cost is None for execution in warmup_dispatches) + warmup_uncommitted
+    )
+    warmup_calls = len(warmup_dispatches) + warmup_uncommitted
+    valid_costs = [
+        cost
+        for execution in dispatched
+        if (cost := _finite_float(execution.cost)) is not None and cost >= 0
+    ]
+    unknown_costs = len(dispatched) - len(valid_costs) + uncommitted
+    known_cost = sum(valid_costs)
+    calls = len(dispatched) + uncommitted
+    return {
+        "latency_p95_ms": _nearest_rank_p95(latencies),
+        "latency_statistics": summarize_latency(latencies),
+        "latency_successful_requests": len(latencies),
+        "latency_uncached_successful_requests": expected_latency_requests,
+        "latency_missing_measurements": expected_latency_requests - len(latencies),
+        "latency_definition": (
+            "nearest-rank percentiles of final successful uncached measured request wall times; "
+            "warmups, failed requests and cache hits are excluded"
+        ),
+        "unclassified_uncommitted_dispatches": unclassified_uncommitted,
+        "retry_inclusive_latency": retry_inclusive_latency(
+            dispatched,
+            finals,
+            warmup=False,
+            incomplete_items=retry_incomplete_items,
+            phase_attribution_incomplete=bool(unclassified_uncommitted),
+        ),
+        "throughput": phase_throughput(
+            dispatched,
+            finals,
+            warmup=False,
+            uncommitted_dispatches=sum(not item.warmup for item in recovered_items),
+            phase_attribution_incomplete=bool(unclassified_uncommitted),
+        ),
+        "warmup_latency_statistics": summarize_latency(warmup_latencies),
+        "streaming_performance": stream_performance_summary(finals, warmup=False),
+        "warmup_streaming_performance": stream_performance_summary(
+            warmup_finals, warmup=True
+        ),
+        "warmup_retry_inclusive_latency": retry_inclusive_latency(
+            dispatched,
+            finals,
+            warmup=True,
+            incomplete_items=retry_incomplete_items,
+            phase_attribution_incomplete=bool(unclassified_uncommitted),
+        ),
+        "warmup_throughput": phase_throughput(
+            dispatched,
+            finals,
+            warmup=True,
+            uncommitted_dispatches=warmup_uncommitted,
+            phase_attribution_incomplete=bool(unclassified_uncommitted),
+        ),
+        "total_cost_usd": round(known_cost, 6) if calls and unknown_costs == 0 else None,
+        "cost_dispatches": calls,
+        "cost_dispatches_with_unknown_cost": unknown_costs,
+        "warmup_dispatches": warmup_calls,
+        "warmup_uncommitted_dispatches": warmup_uncommitted,
+        "warmup_cost_usd": (
+            round(sum(float(e.cost) for e in warmup_dispatches if e.cost is not None), 6)
+            if warmup_calls and warmup_unknown_costs == 0
+            else None
+        ),
+        "warmup_cost_calls_with_unknown_cost": warmup_unknown_costs,
+        "warmup_work_item_states": dict(
+            sorted(
+                Counter(
+                    item.state.value
+                    for item in run.work_items
+                    if item.kind == "execution" and item.warmup
+                ).items()
+            )
+        ),
+        "warmup_effect_states": dict(
+            sorted(
+                Counter(
+                    execution.effect_state.value
+                    for execution in warmup_finals
+                    if execution.effect_state is not None
+                ).items()
+            )
+        ),
+        "cost_accounting": (
+            "complete" if calls and unknown_costs == 0 else "partial" if calls else "none"
+        ),
+    }
+
+
+def _application_performance(baseline: _RunFacts, current: _RunFacts) -> dict[str, Any]:
+    return {
+        "basis": "committed execution attempts and recovery events",
+        "baseline": _application_performance_side(baseline),
+        "current": _application_performance_side(current),
+    }
+
+
 def comparison_exit_code(report: Mapping[str, Any]) -> int:
     """Map a comparison document to the shared comparison exit codes.
 
-    ``2`` is reserved for a blocked strict comparison, ``1`` for a qualified
-    comparison whose declared paired-coverage gate fails, and ``0`` otherwise
-    (including an explicitly exploratory diagnostic).
+    ``2`` is reserved for a blocked strict comparison, ``3`` for an explicitly
+    requested regression policy with incomplete measurements, and ``1`` for a
+    qualified comparison whose coverage or regression gate fails. ``0`` means
+    all requested gates passed (or the comparison is exploratory).
     """
 
     if report.get("status") == "blocked" and report.get("mode") == "strict":
@@ -2881,6 +3088,12 @@ def comparison_exit_code(report: Mapping[str, Any]) -> int:
         if not isinstance(gate, Mapping):
             gate = report.get("coverage_gate")
         if isinstance(gate, Mapping) and gate.get("passed") is False:
+            return 1
+    regression_gate = report.get("regression_gate")
+    if isinstance(regression_gate, Mapping):
+        if regression_gate.get("status") == "undetermined":
+            return 3
+        if regression_gate.get("status") == "fail":
             return 1
     return 0
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -54,6 +54,17 @@ class WorkItemSettlement:
 
 
 @dataclass(frozen=True)
+class DatasetSuiteRecord:
+    suite_name: str
+    suite_version: str
+    dataset_content_hash: str
+    dataset_path: str
+    case_count: int
+    description: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class CandidateTransition:
     candidate: DatasetCandidate
     from_status: CandidateStatus
@@ -64,6 +75,11 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _sqlite_casefold(value: object) -> str | None:
+    """Unicode-aware text folding for literal run-history searches."""
+    return value.casefold() if isinstance(value, str) else None
+
+
 @dataclass(frozen=True)
 class RunLease:
     run_id: str
@@ -72,6 +88,14 @@ class RunLease:
     pid: int
     acquired_at: float  # epoch seconds
     heartbeat_at: float
+
+
+@dataclass(frozen=True)
+class RunControlState:
+    run_id: str
+    desired_state: str
+    sequence: int
+    updated_at: str
 
 
 class LeaseHeld(ConflictError):
@@ -158,6 +182,23 @@ class RunRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class RunBaseline:
+    alias: str
+    run_id: str
+    approved_by: str
+    promoted_at: str
+
+
+@dataclass(frozen=True)
+class BaselinePromotion:
+    alias: str
+    run_id: str
+    previous_run_id: str | None
+    approved_by: str
+    promoted_at: str
+
+
 class Storage:
     """Facade over one `Database` connection exposing typed repository methods."""
 
@@ -219,9 +260,77 @@ class Storage:
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
-    def commit_cases(
-        self, dataset_content_hash: str, cases: Iterable[BenchmarkCase]
-    ) -> int:
+    def register_dataset_suite(
+        self,
+        *,
+        suite_name: str,
+        suite_version: str,
+        dataset_content_hash: str,
+        dataset_path: str,
+        case_count: int,
+        description: str,
+    ) -> bool:
+        """Register one immutable dataset suite version, idempotently."""
+        identity = {
+            "suite_name": suite_name,
+            "suite_version": suite_version,
+            "dataset_content_hash": dataset_content_hash,
+            "dataset_path": dataset_path,
+            "case_count": case_count,
+            "description": description,
+        }
+        record_hash = _hash_of(json.dumps(identity, sort_keys=True, separators=(",", ":")))
+        return _commit_idempotent_composite(
+            self.conn,
+            table="dataset_suites",
+            pk_cols=("suite_name", "suite_version"),
+            pk_values=(suite_name, suite_version),
+            compare_col="record_hash",
+            compare_value=record_hash,
+            insert_sql="""
+                INSERT INTO dataset_suites
+                    (suite_name, suite_version, dataset_content_hash, dataset_path,
+                     case_count, description, record_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            params=(
+                suite_name,
+                suite_version,
+                dataset_content_hash,
+                dataset_path,
+                case_count,
+                description,
+                record_hash,
+                _now(),
+            ),
+        )
+
+    def get_dataset_suite(self, suite_name: str, suite_version: str) -> DatasetSuiteRecord | None:
+        row = self.conn.execute(
+            "SELECT suite_name, suite_version, dataset_content_hash, dataset_path, case_count, "
+            "description, created_at FROM dataset_suites WHERE suite_name = ? "
+            "AND suite_version = ?",
+            (suite_name, suite_version),
+        ).fetchone()
+        return DatasetSuiteRecord(**dict(row)) if row is not None else None
+
+    def list_dataset_suites(self, suite_name: str | None = None) -> list[DatasetSuiteRecord]:
+        if suite_name is None:
+            rows = self.conn.execute(
+                "SELECT suite_name, suite_version, dataset_content_hash, dataset_path, "
+                "case_count, description, created_at FROM dataset_suites "
+                "ORDER BY suite_name, suite_version"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT suite_name, suite_version, dataset_content_hash, dataset_path, "
+                "case_count, description, created_at FROM dataset_suites WHERE suite_name = ? "
+                "ORDER BY suite_version",
+                (suite_name,),
+            ).fetchall()
+        return [DatasetSuiteRecord(**dict(row)) for row in rows]
+
+    def commit_cases(self, dataset_content_hash: str, cases: Iterable[BenchmarkCase]) -> int:
         """Idempotent per (dataset_content_hash, case_id, source_line): re-committing the
         identical case is a no-op; a mismatched case at the same key raises `ConflictError`
         for that case (any earlier cases in this call are already committed and retained —
@@ -264,6 +373,36 @@ class Storage:
             (dataset_content_hash,),
         ).fetchall()
         return [BenchmarkCase.model_validate_json(row["data"]) for row in rows]
+
+    def iter_case_ids(self, dataset_content_hash: str) -> Iterator[str]:
+        """Yield distinct case IDs in first-seen order without loading case bodies."""
+        cursor = self.conn.execute(
+            "SELECT case_id FROM cases WHERE dataset_content_hash = ? "
+            "GROUP BY case_id ORDER BY MIN(source_line)",
+            (dataset_content_hash,),
+        )
+        for row in cursor:
+            yield str(row["case_id"])
+
+    def get_case(self, dataset_content_hash: str, case_id: str) -> BenchmarkCase | None:
+        """Load one frozen Golden. If legacy storage contains duplicate IDs, preserve the
+        old dict-building behavior by returning the last source-line occurrence."""
+        stored = self.get_case_with_size(dataset_content_hash, case_id)
+        return stored[0] if stored is not None else None
+
+    def get_case_with_size(
+        self, dataset_content_hash: str, case_id: str
+    ) -> tuple[BenchmarkCase, int] | None:
+        """Load one Golden and its stored UTF-8 JSON size for byte-budgeted caches."""
+        row = self.conn.execute(
+            "SELECT data, length(CAST(data AS BLOB)) AS size_bytes FROM cases "
+            "WHERE dataset_content_hash = ? AND case_id = ? "
+            "ORDER BY source_line DESC LIMIT 1",
+            (dataset_content_hash, case_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return BenchmarkCase.model_validate_json(row["data"]), int(row["size_bytes"])
 
     # ---------------------------------------------------------------- candidate generation / review
 
@@ -341,8 +480,13 @@ class Storage:
                 self.conn.execute(
                     "INSERT INTO candidate_events (event_id, candidate_id, kind, data, created_at) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (event.event_id, event.candidate_id, event.kind, event.model_dump_json(),
-                     event.created_at.isoformat()),
+                    (
+                        event.event_id,
+                        event.candidate_id,
+                        event.kind,
+                        event.model_dump_json(),
+                        event.created_at.isoformat(),
+                    ),
                 )
             self.conn.execute("COMMIT")
             return existing is None
@@ -420,15 +564,25 @@ class Storage:
                 self.conn.execute(
                     "UPDATE candidate_cases SET status = ?, content_hash = ?, data = ?, updated_at = ? "
                     "WHERE candidate_id = ? AND status = ?",
-                    (candidate.status.value, digest, data, _now(), candidate.candidate_id,
-                     transition.from_status.value),
+                    (
+                        candidate.status.value,
+                        digest,
+                        data,
+                        _now(),
+                        candidate.candidate_id,
+                        transition.from_status.value,
+                    ),
                 )
                 self.conn.execute(
                     "INSERT INTO candidate_events (event_id, candidate_id, kind, data, created_at) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (transition.event.event_id, transition.event.candidate_id,
-                     transition.event.kind, transition.event.model_dump_json(),
-                     transition.event.created_at.isoformat()),
+                    (
+                        transition.event.event_id,
+                        transition.event.candidate_id,
+                        transition.event.kind,
+                        transition.event.model_dump_json(),
+                        transition.event.created_at.isoformat(),
+                    ),
                 )
             self.conn.execute("COMMIT")
         except BaseException:
@@ -769,9 +923,7 @@ class Storage:
         )
 
     def get_plan(self, plan_id: str) -> EvaluationPlan | None:
-        row = self.conn.execute(
-            "SELECT data FROM plans WHERE plan_id = ?", (plan_id,)
-        ).fetchone()
+        row = self.conn.execute("SELECT data FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
         return EvaluationPlan.model_validate_json(row["data"]) if row else None
 
     # ---------------------------------------------------------------- runs
@@ -823,8 +975,7 @@ class Storage:
 
     def get_run(self, run_id: str) -> RunRecord | None:
         row = self.conn.execute(
-            "SELECT data, status, created_at, committed_at, updated_at FROM runs "
-            "WHERE run_id = ?",
+            "SELECT data, status, created_at, committed_at, updated_at FROM runs WHERE run_id = ?",
             (run_id,),
         ).fetchone()
         if row is None:
@@ -838,18 +989,71 @@ class Storage:
         )
 
     def list_runs(self, *, status: str | None = None, limit: int = 100) -> list[RunRecord]:
+        return self.search_runs(status=status, limit=limit)
+
+    def search_runs(
+        self,
+        *,
+        status: str | None = None,
+        query: str | None = None,
+        tag: str | None = None,
+        baseline: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunRecord]:
+        """Search committed run identity and annotations in stable newest-first pages."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("run list limit must be between 1 and 1000")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("run list offset must be a non-negative integer")
+        # Every SQLite rowid-backed table has fewer than 2**63 rows, so a larger offset
+        # cannot match anything and must not be bound as an overflowing SQLite integer.
+        if offset > 2**63 - 1:
+            return []
+        conditions: list[str] = []
+        values: list[object] = []
         if status is not None:
-            rows = self.conn.execute(
-                "SELECT data, status, created_at, committed_at, updated_at FROM runs "
-                "WHERE status = ? ORDER BY created_at DESC LIMIT ?",
-                (status, limit),
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT data, status, created_at, committed_at, updated_at FROM runs "
-                "ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            conditions.append("r.status = ?")
+            values.append(status)
+        if query:
+            self.conn.create_function("ai_casefold", 1, _sqlite_casefold, deterministic=True)
+            escaped = (
+                query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            ).casefold()
+            pattern = f"%{escaped}%"
+            conditions.append(
+                "(ai_casefold(r.run_id) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.status) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.dataset_hash) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.application_hash) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.plan_hash) LIKE ? ESCAPE '\\' "
+                "OR ai_casefold(r.data) LIKE ? ESCAPE '\\' "
+                "OR EXISTS (SELECT 1 FROM datasets d WHERE d.content_hash = r.dataset_hash "
+                "AND ai_casefold(d.dataset_id) LIKE ? ESCAPE '\\') "
+                "OR EXISTS (SELECT 1 FROM run_notes n WHERE n.run_id = r.run_id "
+                "AND ai_casefold(n.note) LIKE ? ESCAPE '\\') "
+                "OR EXISTS (SELECT 1 FROM run_tags t WHERE t.run_id = r.run_id "
+                "AND ai_casefold(t.tag) LIKE ? ESCAPE '\\') "
+                "OR EXISTS (SELECT 1 FROM run_baselines b WHERE b.run_id = r.run_id "
+                "AND ai_casefold(b.alias) LIKE ? ESCAPE '\\'))"
+            )
+            values.extend([pattern] * 10)
+        if tag is not None:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM run_tags t WHERE t.run_id = r.run_id AND t.tag = ?)"
+            )
+            values.append(tag)
+        if baseline is not None:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM run_baselines b WHERE b.run_id = r.run_id AND b.alias = ?)"
+            )
+            values.append(baseline)
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = self.conn.execute(
+            "SELECT r.data, r.status, r.created_at, r.committed_at, r.updated_at "
+            "FROM runs r" + where + " ORDER BY r.created_at DESC, r.run_id DESC LIMIT ? OFFSET ?",
+            (*values, limit, offset),
+        ).fetchall()
         return [
             RunRecord(
                 manifest=RunManifest.model_validate_json(row["data"]),
@@ -861,43 +1065,191 @@ class Storage:
             for row in rows
         ]
 
+    def list_run_metadata(self, run_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+        ids = list(dict.fromkeys(run_ids))
+        metadata: dict[str, dict[str, Any]] = {
+            run_id: {"tags": [], "note": None, "baselines": []} for run_id in ids
+        }
+        if not ids:
+            return metadata
+        # Keep below SQLite's traditional 999 bind-parameter limit so pages of 1000
+        # remain portable to installations that do not use a newer, raised limit.
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            for row in self.conn.execute(
+                f"SELECT run_id, tag FROM run_tags WHERE run_id IN ({placeholders}) ORDER BY tag",
+                chunk,
+            ):
+                metadata[row["run_id"]]["tags"].append(row["tag"])
+            for row in self.conn.execute(
+                f"SELECT run_id, note FROM run_notes WHERE run_id IN ({placeholders})", chunk
+            ):
+                metadata[row["run_id"]]["note"] = row["note"]
+            for row in self.conn.execute(
+                f"SELECT run_id, alias FROM run_baselines WHERE run_id IN ({placeholders}) "
+                "ORDER BY alias",
+                chunk,
+            ):
+                metadata[row["run_id"]]["baselines"].append(row["alias"])
+        return metadata
+
+    def add_run_tag(self, run_id: str, tag: str) -> bool:
+        if self.get_run(run_id) is None:
+            raise KeyError(f"no run committed with run_id={run_id!r}")
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO run_tags (run_id, tag, created_at) VALUES (?, ?, ?)",
+            (run_id, tag, _now()),
+        )
+        return cur.rowcount > 0
+
+    def remove_run_tag(self, run_id: str, tag: str) -> bool:
+        if self.get_run(run_id) is None:
+            raise KeyError(f"no run committed with run_id={run_id!r}")
+        cur = self.conn.execute("DELETE FROM run_tags WHERE run_id = ? AND tag = ?", (run_id, tag))
+        return cur.rowcount > 0
+
+    def set_run_note(self, run_id: str, note: str | None) -> bool:
+        if self.get_run(run_id) is None:
+            raise KeyError(f"no run committed with run_id={run_id!r}")
+        if note is None:
+            cur = self.conn.execute("DELETE FROM run_notes WHERE run_id = ?", (run_id,))
+            return cur.rowcount > 0
+        cur = self.conn.execute(
+            "INSERT INTO run_notes (run_id, note, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(run_id) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at "
+            "WHERE run_notes.note <> excluded.note",
+            (run_id, note, _now()),
+        )
+        return cur.rowcount > 0
+
+    def get_baseline(self, alias: str) -> RunBaseline | None:
+        row = self.conn.execute(
+            "SELECT alias, run_id, approved_by, promoted_at FROM run_baselines WHERE alias = ?",
+            (alias,),
+        ).fetchone()
+        return RunBaseline(**dict(row)) if row is not None else None
+
+    def list_baselines(self) -> list[RunBaseline]:
+        rows = self.conn.execute(
+            "SELECT alias, run_id, approved_by, promoted_at FROM run_baselines ORDER BY alias"
+        ).fetchall()
+        return [RunBaseline(**dict(row)) for row in rows]
+
+    def promote_baseline(
+        self, alias: str, run_id: str, approved_by: str
+    ) -> tuple[RunBaseline, bool]:
+        """Atomically move a named baseline and append its promotion audit record."""
+        if self.get_run(run_id) is None:
+            raise KeyError(f"no run committed with run_id={run_id!r}")
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            old = self.conn.execute(
+                "SELECT run_id FROM run_baselines WHERE alias = ?", (alias,)
+            ).fetchone()
+            previous_run_id = old["run_id"] if old is not None else None
+            if (
+                old is not None
+                and previous_run_id == run_id
+                and self.conn.execute(
+                    "SELECT approved_by FROM run_baselines WHERE alias = ?", (alias,)
+                ).fetchone()["approved_by"]
+                == approved_by
+            ):
+                self.conn.execute("COMMIT")
+                current = self.get_baseline(alias)
+                assert current is not None
+                return current, False
+            promoted_at = _now()
+            self.conn.execute(
+                "INSERT INTO baseline_promotions "
+                "(alias, run_id, previous_run_id, approved_by, promoted_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (alias, run_id, previous_run_id, approved_by, promoted_at),
+            )
+            self.conn.execute(
+                "INSERT INTO run_baselines (alias, run_id, approved_by, promoted_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(alias) DO UPDATE SET "
+                "run_id = excluded.run_id, approved_by = excluded.approved_by, "
+                "promoted_at = excluded.promoted_at",
+                (alias, run_id, approved_by, promoted_at),
+            )
+            self.conn.execute("COMMIT")
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+        current = self.get_baseline(alias)
+        assert current is not None
+        return current, True
+
+    def list_baseline_promotions(self, alias: str) -> list[BaselinePromotion]:
+        rows = self.conn.execute(
+            "SELECT alias, run_id, previous_run_id, approved_by, promoted_at "
+            "FROM baseline_promotions WHERE alias = ? ORDER BY promotion_id DESC",
+            (alias,),
+        ).fetchall()
+        return [BaselinePromotion(**dict(row)) for row in rows]
+
     # ---------------------------------------------------------------- work items
 
     def commit_work_item(self, item: WorkItem) -> bool:
-        """Idempotent under `work_item_id` (identical retry is a no-op, mismatched content
-        under the same `work_item_id` is a `ConflictError`). A *different* `work_item_id`
-        reusing the same `(run_id, task_key)` — the actual "unique logical task key" the
-        ticket describes — is rejected by the table's own UNIQUE constraint, which is left
-        to raise `sqlite3.IntegrityError` rather than being silently swallowed by an
-        `INSERT OR IGNORE`, which would have hidden a genuine double-scheduling bug."""
-        data = item.model_dump_json()
-        digest = _hash_of(data)
-        return _commit_idempotent(
-            self.conn,
-            table="work_items",
-            pk_col="work_item_id",
-            pk_value=item.work_item_id,
-            compare_col="content_hash",
-            compare_value=digest,
-            insert_sql="""
-                INSERT INTO work_items
-                    (work_item_id, run_id, task_key, kind, state, attempt, content_hash,
-                     data, committed_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            params=(
-                item.work_item_id,
-                item.run_id,
-                item.task_key,
-                item.kind,
-                item.state.value,
-                item.attempt,
-                digest,
-                data,
-                _now(),
-                _now(),
-            ),
-        )
+        """Commit one item with the same conflict checks as the bounded bulk path."""
+        return self.commit_work_items((item,))[0]
+
+    def commit_work_items(self, items: Iterable[WorkItem]) -> list[bool]:
+        """Atomically commit a bounded batch of work items.
+
+        Each result is True for a new row and False for an identical retry. Reusing a
+        work_item_id with changed content is a ConflictError. Reusing a logical
+        (run_id, task_key) under another ID still raises SQLite's unique-key error.
+        Callers must cap batch size so recovery and the writer lock stay bounded.
+        """
+        results: list[bool] = []
+        now = _now()
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            for item in items:
+                data = item.model_dump_json()
+                digest = _hash_of(data)
+                existing = self.conn.execute(
+                    "SELECT content_hash FROM work_items WHERE work_item_id = ?",
+                    (item.work_item_id,),
+                ).fetchone()
+                if existing is not None:
+                    if existing[0] != digest:
+                        raise ConflictError(
+                            "work_items[(work_item_id="
+                            f"{item.work_item_id!r})] already committed with different "
+                            f"content_hash: existing={existing[0]!r} new={digest!r}"
+                        )
+                    results.append(False)
+                    continue
+                self.conn.execute(
+                    """
+                    INSERT INTO work_items
+                        (work_item_id, run_id, task_key, kind, state, attempt, content_hash,
+                         data, committed_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item.work_item_id,
+                        item.run_id,
+                        item.task_key,
+                        item.kind,
+                        item.state.value,
+                        item.attempt,
+                        digest,
+                        data,
+                        now,
+                        now,
+                    ),
+                )
+                results.append(True)
+            self.conn.execute("COMMIT")
+            return results
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
 
     def transition_work_item(
         self,
@@ -985,6 +1337,69 @@ class Storage:
         return updated
 
     # ---------------------------------------------------------------- run events
+
+    def get_run_control_state(self, run_id: str) -> RunControlState | None:
+        row = self.conn.execute(
+            "SELECT desired_state, sequence, updated_at FROM run_control_state WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return RunControlState(run_id, row[0], int(row[1]), row[2])
+
+    def set_run_control_state(
+        self,
+        run_id: str,
+        *,
+        desired_state: str,
+        action: str,
+        requested_by: str,
+        allowed_run_statuses: frozenset[str],
+    ) -> RunControlState:
+        """Persist a last-writer-wins control request and its audit event atomically."""
+        if desired_state not in {"running", "paused", "cancelled"}:
+            raise ValueError(f"invalid desired run control state {desired_state!r}")
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            run = self.conn.execute(
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if run is None:
+                raise KeyError(f"no run committed with run_id={run_id!r}")
+            if run[0] not in allowed_run_statuses:
+                raise ValueError(
+                    f"run {run_id!r} is {run[0]}; it no longer accepts control requests"
+                )
+            current = self.conn.execute(
+                "SELECT desired_state, sequence FROM run_control_state WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if current is not None and current[0] == "cancelled" and desired_state != "cancelled":
+                raise ValueError(f"run {run_id!r} has a durable cancel request and cannot resume")
+            sequence = (int(current[1]) if current is not None else 0) + 1
+            updated_at = _now()
+            self.conn.execute(
+                "INSERT INTO run_control_state (run_id, desired_state, sequence, updated_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET "
+                "desired_state = excluded.desired_state, sequence = excluded.sequence, "
+                "updated_at = excluded.updated_at",
+                (run_id, desired_state, sequence, updated_at),
+            )
+            self._insert_run_event(
+                run_id,
+                "run_control_requested",
+                {
+                    "action": action,
+                    "desired_state": desired_state,
+                    "control_sequence": sequence,
+                    "requested_by": requested_by,
+                },
+            )
+            self.conn.execute("COMMIT")
+            return RunControlState(run_id, desired_state, sequence, updated_at)
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
 
     def append_run_event(self, run_id: str, event_type: str, payload: dict[str, object]) -> int:
         """Append an event with the next per-run sequence number; returns that number."""
@@ -1105,9 +1520,7 @@ class Storage:
             raise ConflictError(f"no remote job {job_id!r}")
 
     def get_remote_job(self, job_id: str) -> dict[str, Any] | None:
-        row = self.conn.execute(
-            "SELECT * FROM remote_jobs WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        row = self.conn.execute("SELECT * FROM remote_jobs WHERE job_id = ?", (job_id,)).fetchone()
         return self._remote_job(row) if row else None
 
     def list_remote_jobs(self, run_id: str | None = None) -> list[dict[str, Any]]:
@@ -1217,11 +1630,198 @@ class Storage:
         ).fetchone()
         return WorkItem.model_validate_json(row["data"]) if row else None
 
-    def list_work_items(self, run_id: str) -> list[WorkItem]:
+    def list_work_items(
+        self,
+        run_id: str,
+        *,
+        kind: str | None = None,
+        state: WorkItemState | None = None,
+    ) -> list[WorkItem]:
+        clauses = ["run_id = ?"]
+        params: list[object] = [run_id]
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if state is not None:
+            clauses.append("state = ?")
+            params.append(state.value)
         rows = self.conn.execute(
-            "SELECT data FROM work_items WHERE run_id = ?", (run_id,)
+            f"SELECT data FROM work_items WHERE {' AND '.join(clauses)}", params
         ).fetchall()
         return [WorkItem.model_validate_json(row["data"]) for row in rows]
+
+    def iter_work_items(
+        self,
+        run_id: str,
+        *,
+        kind: str | None = None,
+        state: WorkItemState | None = None,
+        page_size: int = 500,
+    ) -> Iterable[WorkItem]:
+        """Stream a run's work items in bounded pages ordered by their stable row IDs."""
+        if not 1 <= page_size <= 500:
+            raise ValueError("work-item page size must be between 1 and 500")
+        clauses = ["run_id = ?", "rowid > ?"]
+        base_params: list[object] = [run_id]
+        if kind is not None:
+            clauses.append("kind = ?")
+            base_params.append(kind)
+        if state is not None:
+            clauses.append("state = ?")
+            base_params.append(state.value)
+        after_row_id = 0
+        while True:
+            rows = self.conn.execute(
+                f"SELECT rowid AS row_id, data FROM work_items WHERE {' AND '.join(clauses)} "
+                "ORDER BY rowid LIMIT ?",
+                (*base_params[:1], after_row_id, *base_params[1:], page_size),
+            ).fetchall()
+            if not rows:
+                return
+            after_row_id = int(rows[-1]["row_id"])
+            for row in rows:
+                yield WorkItem.model_validate_json(row["data"])
+
+    def list_work_items_by_task_keys(self, run_id: str, task_keys: Iterable[str]) -> list[WorkItem]:
+        """Load a bounded set of work items by their stable logical keys."""
+        keys = tuple(dict.fromkeys(task_keys))
+        if not keys:
+            return []
+        if len(keys) > 500:
+            raise ValueError("a work-item lookup batch cannot exceed 500 task keys")
+        placeholders = ", ".join("?" for _ in keys)
+        rows = self.conn.execute(
+            f"SELECT data FROM work_items WHERE run_id = ? AND task_key IN ({placeholders})",
+            (run_id, *keys),
+        ).fetchall()
+        return [WorkItem.model_validate_json(row["data"]) for row in rows]
+
+    def list_ready_evaluation_work_items(
+        self, run_id: str, *, after_row_id: int = 0, limit: int = 500
+    ) -> list[tuple[int, WorkItem]]:
+        """Fetch a page of pending evaluations whose execution dependency is terminal."""
+        if not 1 <= limit <= 500:
+            raise ValueError("evaluation work-item page size must be between 1 and 500")
+        rows = self.conn.execute(
+            """
+            SELECT evaluation.rowid AS row_id, evaluation.data AS data
+            FROM work_items AS evaluation
+            WHERE evaluation.run_id = ?
+              AND evaluation.kind = 'evaluation'
+              AND evaluation.state = ?
+              AND evaluation.rowid > ?
+              AND EXISTS (
+                  SELECT 1 FROM work_items AS execution
+                  WHERE execution.run_id = evaluation.run_id
+                    AND execution.task_key = json_extract(evaluation.data, '$.dependency_keys[0]')
+                    AND execution.state IN (?, ?, ?, ?, ?)
+              )
+            ORDER BY evaluation.rowid
+            LIMIT ?
+            """,
+            (
+                run_id,
+                WorkItemState.PENDING.value,
+                after_row_id,
+                WorkItemState.SUCCEEDED.value,
+                WorkItemState.FAILED.value,
+                WorkItemState.BLOCKED.value,
+                WorkItemState.CANCELLED.value,
+                WorkItemState.UNKNOWN_EFFECT.value,
+                limit,
+            ),
+        ).fetchall()
+        return [(int(row["row_id"]), WorkItem.model_validate_json(row["data"])) for row in rows]
+
+    def get_work_item_state_by_task_key(self, run_id: str, task_key: str) -> WorkItemState | None:
+        row = self.conn.execute(
+            "SELECT state FROM work_items WHERE run_id = ? AND task_key = ?",
+            (run_id, task_key),
+        ).fetchone()
+        return WorkItemState(row["state"]) if row else None
+
+    def count_work_items(
+        self,
+        run_id: str,
+        *,
+        kind: str | None = None,
+        state: WorkItemState | None = None,
+    ) -> int:
+        clauses = ["run_id = ?"]
+        params: list[object] = [run_id]
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if state is not None:
+            clauses.append("state = ?")
+            params.append(state.value)
+        row = self.conn.execute(
+            f"SELECT COUNT(*) AS count FROM work_items WHERE {' AND '.join(clauses)}", params
+        ).fetchone()
+        return int(row["count"])
+
+    def count_dashboard_source_rows(self, run_id: str, dataset_hash: str, *, limit: int) -> int:
+        """Count materialized rows with indexed scans capped at `limit + 1` per table."""
+        if limit < 0:
+            raise ValueError("dashboard source-row limit cannot be negative")
+        cap = limit + 1
+        row = self.conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM work_items WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM execution_attempts WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM evaluation_attempts WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM metric_results WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM run_events WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM trace_observations WHERE run_id = ? LIMIT ?))
+              + (SELECT COUNT(*) FROM
+                    (SELECT 1 FROM cases WHERE dataset_content_hash = ? LIMIT ?)) AS total
+            """,
+            (
+                run_id,
+                cap,
+                run_id,
+                cap,
+                run_id,
+                cap,
+                run_id,
+                cap,
+                run_id,
+                cap,
+                run_id,
+                cap,
+                dataset_hash,
+                cap,
+            ),
+        ).fetchone()
+        return int(row["total"])
+
+    def work_item_counts(self, run_id: str) -> dict[str, dict[str, int]]:
+        """Return run work totals without decoding and retaining every work-item record."""
+        rows = self.conn.execute(
+            "SELECT kind, state, COUNT(*) AS count FROM work_items "
+            "WHERE run_id = ? GROUP BY kind, state",
+            (run_id,),
+        ).fetchall()
+        counts: dict[str, dict[str, int]] = {}
+        for row in rows:
+            counts.setdefault(str(row["kind"]), {})[str(row["state"])] = int(row["count"])
+        return counts
+
+    def pending_evaluation_binding_keys(self, run_id: str) -> set[str]:
+        """Return the compact binding suffixes needed to open pending evaluation scorers."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT substr(task_key, -16) AS binding_key FROM work_items "
+            "WHERE run_id = ? AND kind = 'evaluation' AND state = ?",
+            (run_id, WorkItemState.PENDING.value),
+        ).fetchall()
+        return {str(row["binding_key"]) for row in rows}
 
     # ---------------------------------------------------------------- execution attempts
 
@@ -1260,7 +1860,19 @@ class Storage:
         ).fetchone()
         return ExecutionResult.model_validate_json(row["data"]) if row else None
 
-    def list_execution_attempts(self, run_id: str, case_id: str | None = None) -> list[ExecutionResult]:
+    def get_latest_execution_attempt(
+        self, run_id: str, case_id: str, repetition_id: int
+    ) -> ExecutionResult | None:
+        row = self.conn.execute(
+            "SELECT data FROM execution_attempts WHERE run_id = ? AND case_id = ? "
+            "AND repetition_id = ? ORDER BY attempt_id DESC LIMIT 1",
+            (run_id, case_id, repetition_id),
+        ).fetchone()
+        return ExecutionResult.model_validate_json(row["data"]) if row else None
+
+    def list_execution_attempts(
+        self, run_id: str, case_id: str | None = None
+    ) -> list[ExecutionResult]:
         if case_id is not None:
             rows = self.conn.execute(
                 "SELECT data FROM execution_attempts WHERE run_id = ? AND case_id = ?",

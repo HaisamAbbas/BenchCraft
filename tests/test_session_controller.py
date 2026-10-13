@@ -4,15 +4,20 @@ headless commands, against a real instrumented application and the real engine."
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 from pathlib import Path
 
+from rich.console import Console
 from typer.testing import CliRunner
 
 from aibench.cli.main import app
+from aibench.core.plans import ReleaseGate
 from aibench.core.sessions import ActionKind, ActionState, PlanPatch
 from aibench.engine.compile import compile_plan, load_policy
 from aibench.services.runs import run_status
 from aibench.sessions.controller import SessionController
+from aibench.tui.render import draft as render_draft
 from tests.session_support import SessionHarness
 
 FOUR = {"a": "hi", "b": "hi", "c": "hi", "d": "hi"}
@@ -47,6 +52,118 @@ def test_a_session_run_is_the_headless_run_of_the_same_reviewed_plan(tmp_path: P
     assert ctl.run_events(run_id, after=events[-2]["sequence"]) == events[-1:]  # replay
     approval = ctl.storage.get_approval(f"{run_id}:approval")
     assert approval.granted_by == f"session {ctl.session_id}, action act-1 (user)"
+    ctl.storage.db.close()
+
+
+def test_session_draft_stores_displays_clears_and_executes_release_gates(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(
+        {},
+        rows=[{"case_id": "wrong", "input": "hi", "expected_output": "no"}],
+        objectives=("answers are correct",),
+    )
+    gate = ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.995)
+    applied = ctl.apply_patch(PlanPatch(gates=(gate,)), expected_revision=1)
+    assert applied.status == "applied", applied.problems
+    state = ctl.state()
+    assert state["choices"]["gates"] == [
+        {
+            "gate_id": "correctness",
+            "metric": "native.exact_match@1.0.0",
+            "occurrence": 0,
+            "min_pass_rate": 0.995,
+            "min_completed_coverage": None,
+        }
+    ]
+    assert state["draft"]["metrics"][0]["binding"] == 0
+    assert state["draft"]["gates"] == [
+        {**gate.model_dump(mode="json"), "metric": "native.exact_match@1.0.0"}
+    ]
+    output = io.StringIO()
+    render_draft(Console(file=output, force_terminal=False), state["draft"])
+    assert "metric binding 0 (native.exact_match@1.0.0)" in output.getvalue()
+    assert "release gate correctness on native.exact_match@1.0.0: pass rate >= 99.5%" in output.getvalue()
+    plan_path = ctl.directory / applied.decision.plan_file
+    assert json.loads(plan_path.read_text(encoding="utf-8"))["gates"] == [
+        gate.model_dump(mode="json")
+    ]
+
+    async def run() -> str:
+        action = await ctl.start_run(action_id="gate-run", expected_revision=2)
+        assert action.state is ActionState.DONE
+        assert action.run_id is not None
+        await ctl.wait_for_run(action.run_id)
+        return action.run_id
+
+    run_id = asyncio.run(run())
+    report = ctl.report(run_id)
+    assert report["gates"][0]["status"] == "fail"
+    assert report["outcome"]["gates_failed"] == ["correctness"]
+
+    cleared = ctl.apply_patch(PlanPatch(gates=()), expected_revision=2)
+    assert cleared.status == "applied"
+    assert ctl.state()["choices"]["gates"] == []
+    assert json.loads((ctl.directory / cleared.decision.plan_file).read_text(encoding="utf-8"))[
+        "gates"
+    ] == []
+    ctl.storage.db.close()
+
+
+def test_release_gate_follows_metric_identity_when_bindings_shift(tmp_path: Path) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session(
+        {"a": "hi"},
+        objectives=("answers are correct",),
+    )
+    added_metric = ctl.apply_patch(
+        PlanPatch(
+            add_objectives=("valid JSON format",),
+            params={"native.json_schema": {"schema": {"type": "object"}}},
+        ),
+        expected_revision=1,
+    )
+    assert added_metric.status == "applied", added_metric.problems
+    before = ctl.state()["draft"]["metrics"]
+    assert len(before) == 2, before
+    gate = ReleaseGate(gate_id="relevance", binding=1, min_pass_rate=0.8)
+    added = ctl.apply_patch(PlanPatch(gates=(gate,)), expected_revision=2)
+    assert added.status == "applied", added.problems
+    gated = ctl.state()
+    stable_metric = gated["choices"]["gates"][0]["metric"]
+    assert stable_metric == before[1]["metric"]
+
+    shifted = ctl.apply_patch(
+        PlanPatch(remove_objectives=("answers are correct",)), expected_revision=3
+    )
+    assert shifted.status == "applied", shifted.problems
+    current = ctl.state()
+    assert current["draft"]["metrics"][0]["metric"] == stable_metric
+    assert current["draft"]["gates"][0]["binding"] == 0
+    assert current["choices"]["gates"][0]["metric"] == stable_metric
+    ctl.storage.db.close()
+
+
+def test_removing_a_gated_metric_requires_removing_or_retargeting_its_gate(
+    tmp_path: Path,
+) -> None:
+    h = SessionHarness(tmp_path)
+    ctl = h.open_session({"a": "hi"}, objectives=("answers are correct",))
+    gate = ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.8)
+    added = ctl.apply_patch(PlanPatch(gates=(gate,)), expected_revision=1)
+    assert added.status == "applied", added.problems
+
+    rejected = ctl.apply_patch(
+        PlanPatch(remove_objectives=("answers are correct",)), expected_revision=2
+    )
+    assert rejected.status == "rejected"
+    assert "no longer present" in " ".join(rejected.problems)
+    assert ctl.session.revision == 2
+
+    changed = ctl.apply_patch(
+        PlanPatch(remove_objectives=("answers are correct",), gates=()), expected_revision=2
+    )
+    assert changed.status == "applied", changed.problems
+    assert ctl.state()["choices"]["gates"] == []
     ctl.storage.db.close()
 
 
@@ -121,7 +238,7 @@ def test_pause_resume_and_cancel_go_through_run_control(tmp_path: Path) -> None:
         await asyncio.sleep(0.6)
         assert h.count() == paused_at  # nothing new dispatched while paused
         resume = await ctl.control_run(ActionKind.RESUME_RUN, action_id="act-resume")
-        assert resume.state is ActionState.DONE
+        assert resume.state is ActionState.DONE, resume.reason
         await h.wait_for_invocations(paused_at + 1)
         cancel = await ctl.control_run(ActionKind.CANCEL_RUN, action_id="act-cancel")
         assert cancel.state is ActionState.DONE
@@ -146,7 +263,11 @@ def test_pause_resume_and_cancel_go_through_run_control(tmp_path: Path) -> None:
 def test_reopening_never_restarts_a_run_and_resume_continues_it(tmp_path: Path) -> None:
     h = SessionHarness(tmp_path)
     slow = {c: "slow 0.4" for c in ("a", "b", "c", "d")}
-    ctl = h.open_session(slow, objectives=("catch wrong answers",))
+    ctl = h.open_session(
+        slow,
+        objectives=("catch wrong answers",),
+        environment_digest="session-controller-test-runtime-v1",
+    )
 
     async def leave() -> str:
         start = await ctl.start_run(action_id="act-start", expected_revision=1)
@@ -164,7 +285,7 @@ def test_reopening_never_restarts_a_run_and_resume_continues_it(tmp_path: Path) 
         await asyncio.sleep(0.3)
         assert h.count() == done_before  # opening the session started nothing
         resume = await reopened.control_run(ActionKind.RESUME_RUN, action_id="act-resume")
-        assert resume.state is ActionState.DONE
+        assert resume.state is ActionState.DONE, resume.reason
         outcome = await reopened.wait_for_run(run_id)
         assert outcome is not None and outcome.state.value == "completed"
 

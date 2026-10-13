@@ -48,6 +48,12 @@ This creates a 10-case local project with a fixture app and opens the benchmark
 conversation. Later, `benchcraft --continue` (or `-c`) reopens the session you last worked in;
 `--resume SESSION_ID` opens a particular one. See [docs/quickstart.md](docs/quickstart.md)
 and, for what is and isn't supported, [docs/support.md](docs/support.md).
+Report latency, throughput, retries, and warmup definitions are documented in
+[performance measurements](docs/performance-measurements.md).
+
+For a local read-only browser view of stored runs, sessions, evidence summaries and run
+comparisons, use `aibench dashboard`; see [the dashboard guide](docs/dashboard.md) for its
+loopback-only access boundary.
 
 To connect a configured JSON HTTP endpoint without its repository, see the bounded
 `aibench connect http` flow in the quickstart; setup does not contact the endpoint.

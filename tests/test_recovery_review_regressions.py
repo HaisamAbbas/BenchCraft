@@ -54,7 +54,11 @@ def test_a_dead_cancelling_run_finishes_its_cancellation(tmp_path: Path) -> None
     """Review #2: a run left `cancelling` by a dead session was stuck; continuing it now
     finishes the cancellation, and the note says so (it is never un-cancelled)."""
     h = SessionHarness(tmp_path)
-    ctl = h.open_session({c: "slow 0.4" for c in "abcd"}, objectives=("catch wrong answers",))
+    ctl = h.open_session(
+        {c: "slow 0.4" for c in "abcd"},
+        objectives=("catch wrong answers",),
+        environment_digest="recovery-review-test-runtime-v1",
+    )
 
     async def start() -> str:
         action = await ctl.start_run(action_id="act-1", expected_revision=1)

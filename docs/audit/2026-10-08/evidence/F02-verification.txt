@@ -1,0 +1,26 @@
+F02 verification
+================
+
+Broader regression batch (before the final worker-interpreter identity addition):
+  uv run pytest tests/test_rescore_carry_forward.py tests/test_rescore_budgets.py tests/test_rescore_selection.py tests/test_scoring_service.py tests/test_reports.py tests/test_comparison_service.py tests/test_caches.py tests/test_registry.py
+  125 passed in 174.83s
+
+Final targeted regression batch (after all F02 changes):
+  uv run pytest tests/test_registry.py tests/test_rescore_carry_forward.py tests/test_caches.py
+  41 passed in 29.44s
+
+Static checks after all F02 changes:
+  uv run ruff check src tests
+  All checks passed.
+
+  uv run mypy src/aibench
+  Success: no issues found in 140 source files.
+
+  git diff --check
+  Passed; Git emitted only line-ending normalization warnings for existing mixed-ending files.
+
+Independent review:
+  Final review reported no findings.
+
+Note: one interpreter-probe test failed during an earlier run launched alongside other
+`uv` processes. It passed alone and in the final targeted batch.

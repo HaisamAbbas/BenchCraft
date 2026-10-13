@@ -57,6 +57,12 @@ from aibench.core.models import (
 from aibench.datasets.ingest import ingest_dataset
 from aibench.observations.otel import Span, Trace, normalize
 from aibench.security.endpoints import origin_of
+from aibench.security.http import (
+    BOUNDED_ACCEPT_ENCODING,
+    ResponseEncodingError,
+    ResponseTooLarge,
+    read_limited_response,
+)
 from aibench.security.policy import ExecutionPolicy, egress_denials
 from aibench.security.secrets import Redactor, resolve_secret
 from aibench.services.scoring import select_final_executions
@@ -117,6 +123,7 @@ class LangfuseClient:
             follow_redirects=False,
             trust_env=False,
             timeout=config.timeout_seconds,
+            headers={"Accept-Encoding": BOUNDED_ACCEPT_ENCODING},
             transport=transport,
         )
 
@@ -125,20 +132,26 @@ class LangfuseClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         try:
-            response = self.client.request(method, path, **kwargs)
+            with self.client.stream(method, path, **kwargs) as response:
+                raw = read_limited_response(response, MAX_RESPONSE_BYTES)
+                status = response.status_code
         except httpx.TimeoutException as exc:
             raise ConnectorError(f"Langfuse {method} {path}: timed out (outcome unknown)") from exc
         except httpx.HTTPError as exc:
             raise ConnectorError(self.redactor.text(f"Langfuse {method} {path}: {exc}")) from exc
-        if len(response.content) > MAX_RESPONSE_BYTES:
+        except ResponseTooLarge as exc:
             raise ConnectorError(
                 f"Langfuse {method} {path}: response over {MAX_RESPONSE_BYTES} bytes"
-            )
-        if response.status_code >= 300:
-            detail = self.redactor.text(response.text[:300])
-            raise ConnectorError(f"Langfuse {method} {path}: HTTP {response.status_code}: {detail}")
+            ) from exc
+        except ResponseEncodingError as exc:
+            raise ConnectorError(
+                f"Langfuse {method} {path}: response could not be decoded"
+            ) from exc
+        if status >= 300:
+            detail = self.redactor.text(raw.decode("utf-8", errors="replace")[:300])
+            raise ConnectorError(f"Langfuse {method} {path}: HTTP {status}: {detail}")
         try:
-            return response.json()
+            return json.loads(raw)
         except ValueError as exc:
             raise ConnectorError(f"Langfuse {method} {path}: the response is not JSON") from exc
 

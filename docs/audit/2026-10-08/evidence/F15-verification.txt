@@ -1,0 +1,32 @@
+F15 streamed resource-limit verification
+========================================
+
+Final affected HTTP, trace, connector, and retry integration batch:
+  tests/test_http_response_limits.py
+  tests/test_trace_import.py
+  tests/test_langfuse_connector.py
+  tests/test_openai_provider.py
+  tests/test_openai_provider_stream.py
+  tests/test_provider_retries.py
+  tests/test_chat_traces.py
+  69 passed in 74.04s.
+
+The focused limit regressions cover:
+  - exact-limit and oversized HTTP bodies, including gzip/deflate expansion capped during
+    decompression;
+  - success and error bodies for Langfuse and the OpenAI-compatible provider;
+  - a file over the artifact limit rejected before opening, and a file that grows after
+    preflight stopped at exactly max_bytes + 1;
+  - oversized 429 responses retain status-based retries in both OpenAI provider modes;
+  - both HTTP clients advertise only gzip/deflate, the encodings supported by the bounded reader;
+  - SSE LF, CRLF, and bare-CR delimiters, and partial streamed text remains immediately
+    visible so a connection cut does not retry and duplicate already-delivered text.
+
+Static checks:
+  Ruff on src and tests: passed.
+  MYPYPATH=src .venv/Scripts/mypy src/aibench
+  Success: no issues found in 142 source files.
+  git diff --check: passed.
+
+Independent review: no findings. The reviewer checked bounded compressed decoding,
+SSE compatibility, retry and response cleanup, trace-file bounds, and the advertised encodings.

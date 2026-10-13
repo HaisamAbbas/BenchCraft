@@ -279,7 +279,17 @@ Gates: 20-G1, 20-G2, 20-G3 are NOT APPLICABLE while deferred, and are not report
 
 ## Prompt 21 — Optional dashboard and curated plugin catalog
 
-Not started. No tickets were opened, and nothing was implemented or claimed.
+| Ticket | Description | Status | Evidence |
+|---|---|---|---|
+| 21-T1 | Small API/UI for sessions, runs, evidence and comparisons over shared stored-result services; local-only by default | DONE (local read-only scope) | `src/aibench/cli/dashboard.py`, `src/aibench/services/dashboard.py`, `docs/dashboard.md`; `tests/test_cli_dashboard.py` |
+| 21-T2 | Curated versioned plugin manifests with compatibility, provenance, license and permission metadata | TODO | Not implemented; outside the completed G22 dashboard subrequirement |
+| 21-T3 | Catalog compatibility, revocation/disable lifecycle, audit records and optional MCP exposure | TODO | Not implemented; depends on a governed catalog design |
+| 21-T4 | Ensure dashboard cannot bypass CLI gates, mutate frozen runs or leak secrets; preserve CLI-only installation | PARTIAL | Dashboard endpoints are read-only, local-origin checked and content-withheld; no hosted/remote auth mode or MCP surface is implemented |
+
+Prompt 21 remains PARTIAL. Dashboard-only gates 21-G1 and 21-G3 pass for local scope;
+21-G2 and the catalog portion of 21-G4 remain open. See
+`docs/engineering/reports/21.md`; no catalog metadata can execute or install packages
+because catalog discovery and installation were not implemented.
 
 ## Prompt 22 — End-to-end acceptance and ticket-value audit
 

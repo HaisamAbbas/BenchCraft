@@ -1,0 +1,25 @@
+﻿F17 verification
+================
+
+Behavior
+--------
+- A first smoke records the application in the existing first-seen catalog if needed.
+- Every smoke run writes the exact `ApplicationSpec` bytes to the verified artifact store and
+  adds `application_artifact_id` to its manifest. Later specs with the same application ID
+  do not replace the catalog record or conflict with it.
+- Scoring reads the referenced frozen spec, and reports use it to expose the correct revision
+  and app contract. Legacy runs without a frozen-spec reference keep their existing catalog
+  fallback.
+
+Validation
+----------
+- Revision-specific CLI smoke/report/score regression: passed in isolation.
+- `tests/test_cli_app.py tests/test_execution_service.py tests/test_cli_score.py tests/test_reports.py tests/test_report_review_regressions.py`: 48 passed.
+- `.venv/Scripts/mypy.exe src/aibench`: no issues in 142 source files.
+- `.venv/Scripts/ruff.exe check src tests plugins`: passed.
+- `git diff --check`: passed.
+
+The regression verifies two revisions under one application ID, distinct manifest hashes,
+separate frozen artifacts with the expected revisions, an unchanged first-seen catalog,
+revision-correct report metadata, successful scoring under each compatible contract, and
+refusal to apply a new-only tool-events metric to the old revision.

@@ -17,19 +17,20 @@ import json
 import re
 from typing import Any
 
-from aibench.security.redaction import sanitize
+from aibench.security.redaction import sanitize, sanitize_value
 
 EVIDENCE_LIMIT = 50  # items shown in Markdown/HTML; the JSON report has all of them
 
 
 def render(report: dict[str, Any], fmt: str) -> str:
+    if fmt not in ("json", "markdown", "html"):
+        raise ValueError(f"unknown report format {fmt!r}")
+    safe_report = sanitize_value(report)
     if fmt == "json":
-        return json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        return json.dumps(safe_report, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     if fmt == "markdown":
-        return _markdown(report)
-    if fmt == "html":
-        return _html(report)
-    raise ValueError(f"unknown report format {fmt!r}")
+        return _markdown(safe_report)
+    return _html(safe_report)
 
 
 # --------------------------------------------------------------------------- numbers
@@ -96,12 +97,87 @@ def _number(value: Any, unit: str = "") -> str:
     return f"{text}{unit}"
 
 
+def _throughput_text(summary: dict[str, Any]) -> str:
+    if not summary.get("phase_attribution_complete", True):
+        return "unavailable (recovered dispatch phase is unknown)"
+    rate = summary.get("successful_requests_per_second")
+    if rate is None:
+        if summary.get("missing_dispatch_timestamps") or summary.get("missing_final_timestamps"):
+            return "unavailable (dispatch or completion timestamps are incomplete)"
+        return "unavailable (no positive observed phase duration)"
+    return (
+        f"{_number(rate, ' requests/s')} over "
+        f"{_number(summary.get('wall_seconds'), ' s')} observed phase time"
+    )
+
+
+def _offered_load_text(summary: dict[str, Any]) -> str:
+    if not summary.get("enabled"):
+        return "closed loop; requests dispatch when an application slot is free"
+    config = summary.get("configuration") or {}
+    if summary.get("mode") == "open_loop":
+        target = f"fixed {_number(config.get('requests_per_second'), ' requests/s')}"
+    else:
+        target = (
+            f"ramp {_number(config.get('start_requests_per_second'), ' requests/s')} to "
+            f"{_number(config.get('end_requests_per_second'), ' requests/s')} over "
+            f"{_number(config.get('ramp_duration_seconds'), ' s')}, then hold"
+        )
+    lag = summary.get("dispatch_lag_ms") or {}
+    return (
+        f"{target}; {summary.get('observed_dispatches', 0)} first-attempt dispatch(es), "
+        f"coordinator lag p95 {_number(lag.get('p95_ms'), ' ms')}"
+    )
+
+
+def _retry_inclusive_text(summary: dict[str, Any]) -> str:
+    if not summary.get("phase_attribution_complete", True):
+        return "unavailable (recovered dispatch phase is unknown)"
+    return (
+        f"p50 {_number(summary.get('p50_ms'), ' ms')}, "
+        f"p95 {_number(summary.get('p95_ms'), ' ms')}, "
+        f"over {summary.get('samples', 0)} measured request(s); "
+        f"{summary.get('missing_measurements', 0)} incomplete lifecycle measurement(s)"
+    )
+
+
+def _streaming_text(summary: dict[str, Any]) -> str:
+    if not summary.get("requests"):
+        return "no streaming requests recorded"
+    ttft = summary.get("time_to_first_token_ms") or {}
+    gaps = summary.get("inter_token_latency_ms") or {}
+    gap_means = gaps.get("request_mean_ms") or {}
+    token_rate = summary.get("output_tokens_per_second") or {}
+    integrity = summary.get("integrity") or {}
+    return (
+        f"TTFT p50/p95 {_number(ttft.get('p50_ms'))}/{_number(ttft.get('p95_ms'))} ms; "
+        f"inter-token gap mean {_number(gaps.get('mean_ms'))} ms "
+        f"(request-mean p50 {_number(gap_means.get('p50_ms'))} ms); "
+        f"output {_number(token_rate.get('p50'))} tokens/s median; "
+        f"stream integrity {integrity.get('complete', 0)} complete, "
+        f"{integrity.get('incomplete', 0)} incomplete, {integrity.get('unknown', 0)} unknown"
+    )
+
+
 def _usd(block: dict[str, Any]) -> str:
     accounting = block.get("accounting")
     if accounting == "no_calls":
         return "no calls"
     if accounting == "not_attributed":
-        return "not attributed to runs"
+        missing = ", ".join(block.get("unknown_components", [])) or "some usage"
+        known = block.get("known_cost_usd")
+        if known is not None and block.get("calls_with_known_cost", 0) > 0:
+            return (
+                f"at least USD {known:.6g} observed; {missing} cost is not attributed to runs"
+            )
+        return f"not attributed to runs ({missing})"
+    if block.get("unquantified_usage_events"):
+        known = block.get("known_cost_usd", 0.0)
+        observed = f"at least USD {known:.6g} observed; " if known > 0 else ""
+        return (
+            f"unknown: {observed}"
+            f"{block['unquantified_usage_events']} usage event(s) have no reported call count"
+        )
     known = block["known_cost_usd"]
     counted = fraction(block["calls_with_known_cost"], block["calls"])
     if block.get("total_cost_usd") is not None:
@@ -120,13 +196,38 @@ def _value_summary(summary: dict[str, Any]) -> str:
     if "mean" in values:
         if values["n"] == 0:
             return "no completed values"
+        case_min = values.get("case_mean_min", values["min"])
+        case_max = values.get("case_mean_max", values["max"])
+        repetition_weighted = values.get("repetition_weighted_mean")
+        diagnostic = (
+            f"; repetition-weighted mean {_number(repetition_weighted)} across "
+            f"{values['n']} completed repetition(s)"
+            if repetition_weighted is not None
+            else ""
+        )
         return (
-            f"mean {_number(values['mean'])} (min {_number(values['min'])}, "
-            f"max {_number(values['max'])}) across {values['n']} completed"
+            f"case-macro mean {_number(values['mean'])} (case means {_number(case_min)} to "
+            f"{_number(case_max)}) across {values.get('case_count', values['n'])} completed "
+            f"case(s){diagnostic}"
         )
     if "counts" in values:
         return ", ".join(f"{k}: {v}" for k, v in values["counts"].items()) or "none"
     return "reported per case (not aggregated)"
+
+
+def _segment_metrics_text(scoring_passes: list[dict[str, Any]]) -> str:
+    summaries = []
+    for scoring in scoring_passes:
+        for metric in scoring["metrics"]:
+            summary = metric["summary"]
+            decisions = summary["decisions"]
+            summaries.append(
+                f"{scoring['kind']} {metric['metric']}: pass "
+                f"{fraction(decisions.get('pass', 0), summary['selected'])}; "
+                f"completed {fraction(summary['completed'], summary['selected'])}; "
+                f"{_value_summary(summary)}"
+            )
+    return "; ".join(summaries) if summaries else "no metric results"
 
 
 def _rule(rule: dict[str, Any] | None) -> str:
@@ -163,6 +264,7 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         ("Policy", run["policy_hash"] or "unknown"),
         ("Evaluator plugins", ", ".join(f"{k}: {v}" for k, v in run["plugins"].items()) or "none"),
         ("Repetitions", _number(run["repetitions"])),
+        ("Warmup repetitions", _number(run.get("warmup_repetitions", 0))),
         ("Seed", _number(run["seed"])),
         ("Environment", ", ".join(f"{k} {v}" for k, v in run["environment"].items())),
         ("Approved by", run["approved_by"] or "unknown"),
@@ -261,6 +363,22 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
     application = [
         ("Planned executions", _number(app["planned"])),
         ("Recorded", _number(app["recorded"])),
+        (
+            "Measurement requests",
+            (
+                f"{app['measurement']['completed']} completed, "
+                f"{app['measurement']['failed']} failed of {app['measurement']['planned']} planned"
+            ),
+        ),
+        (
+            "Warmup requests",
+            (
+                f"{app['warmup']['completed']} completed, {app['warmup']['failed']} failed "
+                f"of {app['warmup']['planned']} planned; "
+                f"{app['warmup']['cost']['calls']} dispatched, "
+                f"{_usd(app['warmup']['cost'])}"
+            ),
+        ),
         ("Completed", fraction(app["completed"], app["planned"] or app["recorded"])),
         (
             "Application failures",
@@ -285,11 +403,32 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
             "Successful-request latency",
             (
                 f"p50 {_number(latency['p50_ms'], ' ms')}, "
-                f"p95 {_number(latency['p95_ms'], ' ms')} "
-                f"over {latency['successful_requests']} successful requests; excluded: "
+                f"p95 {_number(latency['p95_ms'], ' ms')}, "
+                f"p99 {_number(latency['p99_ms'], ' ms')} "
+                f"over {latency['samples']} timed successful requests; excluded: "
                 f"{latency['excluded_failures']} failed, "
                 f"{latency['excluded_timeouts']} timed out; "
+                f"mean {_number(latency['mean_ms'], ' ms')}, "
+                f"population stddev {_number(latency['stddev_ms'], ' ms')}, "
+                f"IQR {_number(latency['iqr_ms'], ' ms')}; "
                 f"concurrency {_number(latency['concurrency'])}"
+            ),
+        ),
+        (
+            "Measured throughput",
+            _throughput_text(latency["throughput"]),
+        ),
+        (
+            "Retry-inclusive request latency",
+            _retry_inclusive_text(latency["retry_inclusive"]),
+        ),
+        (
+            "Warmup latency",
+            (
+                f"p50 {_number(latency['warmup']['p50_ms'], ' ms')}, "
+                f"p95 {_number(latency['warmup']['p95_ms'], ' ms')}, "
+                f"p99 {_number(latency['warmup']['p99_ms'], ' ms')} "
+                f"over {latency['warmup']['samples']} successful uncached warmup(s)"
             ),
         ),
         ("Latency definition", latency["definition"]),
@@ -297,11 +436,52 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         ("Imported traces", _traces_text(report.get("traces"))),
         ("Cache", _cache_text(report.get("cache"))),
     ]
+    offered_load = latency.get("offered_load")
+    if isinstance(offered_load, dict):
+        application.append(("Offered load", _offered_load_text(offered_load)))
+    if latency["streaming"].get("requests"):
+        application.append(("Streaming performance", _streaming_text(latency["streaming"])))
+    if latency["warmup_streaming"].get("requests"):
+        application.append(
+            ("Warmup streaming performance", _streaming_text(latency["warmup_streaming"]))
+        )
+    segments = []
+    for field_summary in (report.get("segments") or {}).get("fields", []):
+        rows = []
+        for group in field_summary["groups"]:
+            app_data = group["application"]
+            app_text = (
+                f"completed {fraction(app_data['completed_requests'], app_data['planned_requests'])}; "
+                f"failed {app_data['failed_requests']}; latency p50/p95 "
+                f"{_number(app_data['latency_ms']['p50_ms'])}/"
+                f"{_number(app_data['latency_ms']['p95_ms'])} ms"
+            )
+            rows.append(
+                [
+                    group["label"],
+                    str(group["case_count"]),
+                    app_text,
+                    _segment_metrics_text(group["scoring_passes"]),
+                ]
+            )
+        segments.append(
+            {
+                "field": field_summary["field"],
+                "max_groups": field_summary["max_groups"],
+                "rows": rows,
+                "selected_cases": field_summary["selected_cases"],
+                "category_count": field_summary["category_count"],
+                "omitted_categories": field_summary["omitted_categories"],
+                "omitted_cases": field_summary["omitted_cases"],
+                "basis": field_summary["basis"],
+            }
+        )
     cost = report["cost"]
     costs = [
         ("Application", _usd(cost["application"])),
         (f"Evaluator (scoring pass {cost['evaluator_scoring_id']})", _usd(cost["evaluator"])),
         ("Planner", _usd(cost["planner"])),
+        ("Whole workflow", _usd(cost["workflow"])),
     ]
     evidence = []
     for item in report["evidence"]["items"][:EVIDENCE_LIMIT]:
@@ -350,6 +530,7 @@ def _rows(report: dict[str, Any]) -> dict[str, Any]:
         "gates": gates,
         "passes": passes,
         "application": application,
+        "segments": segments,
         "costs": costs,
         "cost_note": cost["note"],
         "evidence": evidence,
@@ -435,6 +616,21 @@ def _markdown(report: dict[str, Any]) -> str:
     lines += ["", "## Application", ""] + _md_table(
         ["Item", "Value"], [list(a) for a in r["application"]]
     )
+    if r["segments"]:
+        lines += ["", "## Segment analysis", ""]
+        for segment in r["segments"]:
+            lines += [f"### Grouped by {md(segment['field'])}", ""]
+            if segment["omitted_categories"]:
+                lines.append(
+                    f"Showing up to {segment['max_groups']} groups; omitted "
+                    f"{segment['omitted_categories']} categories covering "
+                    f"{segment['omitted_cases']} case(s)."
+                )
+                lines.append("")
+            lines += _md_table(
+                ["Segment", "Selected cases", "Application", "Metrics"], segment["rows"]
+            )
+            lines += ["", md(segment["basis"]), ""]
     lines += ["", "## Cost", ""] + _md_table(["Role", "Observed"], [list(c) for c in r["costs"]])
     lines += ["", md(r["cost_note"]), "", "## Case evidence", "", md(r["evidence_note"]), ""]
     if not r["evidence"]:
@@ -532,6 +728,22 @@ def _html(report: dict[str, Any]) -> str:
         parts.append("</ul>")
     parts.append("<h2>Application</h2>")
     parts.append(_html_table(["Item", "Value"], [list(a) for a in r["application"]]))
+    if r["segments"]:
+        parts.append("<h2>Segment analysis</h2>")
+        for segment in r["segments"]:
+            parts.append(f"<h3>Grouped by {h(segment['field'])}</h3>")
+            if segment["omitted_categories"]:
+                parts.append(
+                    f'<p class="muted">Showing up to {segment["max_groups"]} groups; omitted '
+                    f"{segment['omitted_categories']} categories covering "
+                    f"{segment['omitted_cases']} case(s).</p>"
+                )
+            parts.append(
+                _html_table(
+                    ["Segment", "Selected cases", "Application", "Metrics"], segment["rows"]
+                )
+            )
+            parts.append(f'<p class="muted">{h(segment["basis"])}</p>')
     parts.append("<h2>Cost</h2>")
     parts.append(_html_table(["Role", "Observed"], [list(c) for c in r["costs"]]))
     parts.append(f'<p class="muted">{h(r["cost_note"])}</p>')

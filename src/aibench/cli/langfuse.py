@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.connectors.langfuse import (
     CONTRACT,
     ConnectorRefused,
@@ -43,12 +44,18 @@ def _call(action: Callable[[], dict[str, Any]], json_output: bool) -> None:
     try:
         summary = action()
     except ConnectorRefused as exc:
-        for denial in exc.denials:
-            err_console.print(f"[red]refused: {escape(denial)}[/red]")
-        raise typer.Exit(code=4) from exc
+        raise error_exit(
+            "Langfuse operation refused by policy",
+            exit_code=4,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+            details=list(exc.denials),
+        ) from exc
     except AibenchError as exc:
-        err_console.print(f"[red]{escape(str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     if json_output:
         console.print_json(data=summary)
         return
@@ -59,8 +66,13 @@ def _call(action: Callable[[], dict[str, Any]], json_output: bool) -> None:
 def _workspace(workspace: Path | None) -> tuple[Storage, ArtifactStore]:
     ws = Workspace.at(workspace or Path.cwd())
     if not ws.db_path.is_file():
-        err_console.print(f"[red]no aibench workspace at {escape(str(ws.root))}[/red]")
-        raise typer.Exit(code=2)
+        raise error_exit(
+            f"no aibench workspace at {ws.root}",
+            exit_code=2,
+            json_output=False,
+            console=console,
+            err_console=err_console,
+        )
     return Storage(Database.open_workspace(ws)), ArtifactStore(ws.artifacts_dir)
 
 

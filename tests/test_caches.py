@@ -5,6 +5,7 @@ invocation log counts every call."""
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,22 @@ def test_a_repeat_run_is_served_from_the_cache_and_labelled(tmp_path: Path) -> N
     assert report["application"]["attempts"] == 2  # recorded, but no call was made
 
 
+def test_warmups_bypass_execution_cache_while_measurements_use_it(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    _run(h)
+    assert h.count() == 2
+
+    second = _run(h, warmup_repetitions=1)
+    assert h.count() == 4  # two warmup calls; both measured calls came from cache
+    storage, _ = h.storage()
+    try:
+        attempts = storage.list_execution_attempts(second)
+    finally:
+        storage.db.close()
+    assert sum(attempt.warmup and not attempt.cache for attempt in attempts) == 2
+    assert sum(not attempt.warmup and bool(attempt.cache) for attempt in attempts) == 2
+
+
 @pytest.mark.parametrize(
     ("change", "execution_hits", "evaluation_hits"),
     [
@@ -135,6 +152,18 @@ def test_a_changed_plugin_version_invalidates_evaluations(
     h = Harness(tmp_path)
     _run(h)
     upgraded = ExactMatch.manifest.model_copy(update={"plugin_version": "9.9.9"})
+    monkeypatch.setattr(ExactMatch, "manifest", upgraded)
+    assert _hits(h, _run(h)) == ({"a", "b"}, set())
+
+
+def test_a_changed_package_version_invalidates_evaluations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.evaluators.native import ExactMatch
+
+    h = Harness(tmp_path)
+    _run(h)
+    upgraded = ExactMatch.manifest.model_copy(update={"package_version": "9.9.9"})
     monkeypatch.setattr(ExactMatch, "manifest", upgraded)
     assert _hits(h, _run(h)) == ({"a", "b"}, set())
 
@@ -290,6 +319,46 @@ def test_code_in_a_configured_python_import_path_participates_in_identity(
     after = application_code_identity(spec, base, {})
 
     assert before["code"] != after["code"]
+
+
+def test_source_symlinks_fail_closed_for_code_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aibench.core.models import ApplicationSpec, CliTransport
+    from aibench.engine import cache
+    from aibench.engine.cache import CodeUnreadable, code_files
+
+    root = tmp_path / "app"
+    root.mkdir()
+    target = tmp_path / "linked_source.py"
+    target.write_text("VALUE = 'before'\n", encoding="utf-8")
+    link = root / "linked_source.py"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        # Windows workers may not have symlink privileges. Simulate the filesystem entry so
+        # the fail-closed path still runs on those hosts.
+        original_is_symlink = Path.is_symlink
+        monkeypatch.setattr(
+            cache.os,
+            "walk",
+            lambda _root: [(str(root), [], ["linked_source.py", "main.py"])],
+        )
+        monkeypatch.setattr(
+            Path,
+            "is_symlink",
+            lambda path: path == link or original_is_symlink(path),
+        )
+    (root / "main.py").write_text("from linked_source import VALUE\n", encoding="utf-8")
+    spec = ApplicationSpec(
+        application_id="symlink-app",
+        runner="cli",
+        target="main.py",
+        transport=CliTransport(argv=(sys.executable, "main.py")),
+    )
+
+    with pytest.raises(CodeUnreadable, match="symlink"):
+        code_files(spec, root)
 
 
 def test_container_cache_requires_revision_when_host_mounts_are_mutable(

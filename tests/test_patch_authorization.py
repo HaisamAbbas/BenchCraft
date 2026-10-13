@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 from aibench.conversation.agent import ConversationAgent, patch_problems
-from aibench.core.plans import PluginEnvironmentRef
+from aibench.core.plans import PluginEnvironmentRef, ReleaseGate
 from aibench.core.sessions import PlanPatch
 from aibench.planning.catalog import concepts_in
 from tests.deepeval_support import PLUGIN_ENV, requires_plugin_env
@@ -167,6 +167,599 @@ def test_ordinary_negative_wording_around_a_request_is_not_a_refusal() -> None:
         "Add answers are correct; it does not need to be polite.",
     ):
         assert patch_problems(patch, "Add answers are correct", message) == [], message
+
+
+def test_release_gate_patch_requires_user_stated_metric_and_threshold_semantics() -> None:
+    gate = ReleaseGate(
+        gate_id="correctness-pass-rate", binding=0, min_pass_rate=0.9
+    )
+    patch = PlanPatch(gates=(gate,))
+    message = "Add a 90% pass-rate release gate for correctness."
+    bindings = {0: ("native.exact_match", "exact match", "correctness")}
+
+    assert patch_problems(
+        patch,
+        "Add a 90% pass-rate release gate",
+        message,
+        metric_bindings=bindings,
+    ) == []
+    assert patch_problems(
+        patch,
+        "Add a 90% pass-rate release gate",
+        "Add a 90% pass-rate release gate for latency.",
+        metric_bindings=bindings,
+    ) == [
+        (
+            "release gate metric 'native.exact_match' and its threshold must appear together in "
+            "one unambiguous part of the user's message"
+        )
+    ]
+    assert any(
+        "does not specify a passing-rate" in problem
+        for problem in patch_problems(
+            patch,
+            "Add a 90% gate",
+            "Add a 90% gate for correctness.",
+            metric_bindings=bindings,
+        )
+    )
+
+
+def test_release_gate_patch_preserves_existing_gates_and_requires_clear_request() -> None:
+    existing = ReleaseGate(gate_id="old", binding=0, min_pass_rate=0.8)
+    added = ReleaseGate(gate_id="new", binding=1, min_completed_coverage=1.0)
+    patch = PlanPatch(gates=(existing, added))
+    message = "Add a 100% completed-coverage gate for relevance."
+    assert patch_problems(
+        patch,
+        message,
+        message,
+        metric_bindings={1: ("native.non_empty", "relevance")},
+        existing_gates=(existing,),
+    ) == []
+
+    removal = PlanPatch(gates=())
+    assert patch_problems(
+        removal,
+        "remove all release gates",
+        "remove all release gates",
+        existing_gates=(existing,),
+    ) == []
+    assert patch_problems(
+        removal,
+        "remove all release gates",
+        "remove all release gates",
+        existing_gates=(existing,),
+    ) == []
+    assert any(
+        "does not ask to remove or replace" in problem
+        for problem in patch_problems(
+            removal,
+            "set the objective",
+            "set the objective",
+            existing_gates=(existing,),
+        )
+    )
+
+
+def test_each_gate_threshold_is_grounded_with_its_own_metric() -> None:
+    patch = PlanPatch(
+        gates=(
+            ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.5),
+            ReleaseGate(gate_id="format", binding=1, min_completed_coverage=0.9),
+        )
+    )
+    message = "90% pass-rate for correctness and 50% completed coverage for format."
+    problems = patch_problems(
+        patch,
+        message,
+        message,
+        metric_bindings={
+            0: ("native.exact_match", "correctness"),
+            1: ("native.json_schema", "format"),
+        },
+    )
+    assert any("0.5 is not stated with its metric" in problem for problem in problems)
+    assert any("0.9 is not stated with its metric" in problem for problem in problems)
+
+    swapped = PlanPatch(
+        gates=(
+            ReleaseGate(
+                gate_id="correctness",
+                binding=0,
+                min_pass_rate=0.5,
+                min_completed_coverage=0.9,
+            ),
+        )
+    )
+    same_metric = "Require 90% pass-rate with 50% completed coverage for correctness."
+    swapped_problems = patch_problems(
+        swapped,
+        same_metric,
+        same_metric,
+        metric_bindings={0: ("native.exact_match", "correctness")},
+    )
+    assert any("minimum pass rate 0.5" in problem for problem in swapped_problems)
+    assert any("completed coverage 0.9" in problem for problem in swapped_problems)
+
+
+def test_retaining_a_gate_id_does_not_implicitly_remove_one_of_its_thresholds() -> None:
+    existing = ReleaseGate(gate_id="correctness", binding=0, min_completed_coverage=1.0)
+    patch = PlanPatch(
+        gates=(
+            ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),
+            ReleaseGate(gate_id="relevance", binding=1, min_pass_rate=0.8),
+        )
+    )
+    message = "Add a 90% pass-rate gate for correctness and an 80% pass-rate gate for relevance."
+    problems = patch_problems(
+        patch,
+        message,
+        message,
+        metric_bindings={0: ("native.exact_match", "correctness"), 1: ("native.non_empty", "relevance")},
+        existing_gates=(existing,),
+    )
+    assert any("removing the existing coverage threshold" in problem for problem in problems)
+
+    kept = PlanPatch(
+        gates=(
+            ReleaseGate(
+                gate_id="correctness",
+                binding=0,
+                min_pass_rate=0.9,
+                min_completed_coverage=1.0,
+            ),
+        )
+    )
+    add_threshold = "Add a 90% pass-rate threshold for correctness and keep the current coverage."
+    assert patch_problems(
+        kept,
+        add_threshold,
+        add_threshold,
+        metric_bindings={0: ("native.exact_match", "correctness")},
+        existing_gates=(existing,),
+    ) == []
+
+
+def test_retargeting_a_gate_id_to_another_metric_requires_explicit_retargeting() -> None:
+    existing = ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9)
+    patch = PlanPatch(
+        gates=(ReleaseGate(gate_id="correctness", binding=1, min_pass_rate=0.9),)
+    )
+    message = "Add the format metric with a 90% pass-rate gate."
+    problems = patch_problems(
+        patch,
+        message,
+        message,
+        metric_bindings={0: ("native.exact_match", "correctness"), 1: ("native.json_schema", "format")},
+        existing_gates=(existing,),
+    )
+    assert any("retargeting release gate" in problem for problem in problems)
+
+
+def test_threshold_removal_must_refer_to_the_gate_whose_threshold_is_dropped() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.8, min_completed_coverage=1),
+        ReleaseGate(gate_id="format", binding=1, min_pass_rate=0.7, min_completed_coverage=1),
+    )
+    patch = PlanPatch(
+        gates=(
+            ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.8),
+            ReleaseGate(gate_id="format", binding=1, min_pass_rate=0.7),
+        )
+    )
+    message = "Keep the correctness gate and remove the coverage threshold for format."
+    problems = patch_problems(
+        patch,
+        message,
+        message,
+        metric_bindings={0: ("native.exact_match", "correctness"), 1: ("native.json_schema", "format")},
+        existing_gates=existing,
+    )
+    assert len(problems) == 1
+    assert "removing the existing coverage threshold from gate 'correctness'" in problems[0]
+
+
+def test_threshold_removal_between_gates_on_one_metric_requires_the_gate_id() -> None:
+    existing = (
+        ReleaseGate(
+            gate_id="correctness-pass",
+            binding=0,
+            min_pass_rate=0.9,
+            min_completed_coverage=0.8,
+        ),
+        ReleaseGate(
+            gate_id="correctness-coverage",
+            binding=0,
+            min_pass_rate=0.9,
+            min_completed_coverage=1.0,
+        ),
+    )
+    message = "Remove the coverage threshold from the correctness-coverage gate."
+    metrics = {0: ("native.exact_match", "correctness")}
+    wrong_gate = PlanPatch(
+        gates=(
+            ReleaseGate(gate_id="correctness-pass", binding=0, min_pass_rate=0.9),
+            existing[1],
+        )
+    )
+    rejected = patch_problems(
+        wrong_gate,
+        message,
+        message,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert any(
+        "removing the existing coverage threshold from gate 'correctness-pass'" in problem
+        for problem in rejected
+    )
+
+    requested_gate = PlanPatch(
+        gates=(
+            existing[0],
+            ReleaseGate(
+                gate_id="correctness-coverage",
+                binding=0,
+                min_pass_rate=0.9,
+            ),
+        )
+    )
+    assert patch_problems(
+        requested_gate,
+        message,
+        message,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    ) == []
+
+
+def test_removing_a_gate_requires_naming_that_gate_and_threshold_removal_is_not_gate_removal() -> None:
+    existing = ReleaseGate(
+        gate_id="correctness",
+        binding=0,
+        min_pass_rate=0.8,
+        min_completed_coverage=1.0,
+    )
+    removal = PlanPatch(gates=())
+    wrong_gate = patch_problems(
+        removal,
+        "Remove the format gate",
+        "Remove the format gate",
+        metric_bindings={0: ("native.exact_match", "correctness")},
+        existing_gates=(existing,),
+    )
+    assert any("does not identify release gate 'correctness'" in problem for problem in wrong_gate)
+
+    threshold_only = "Remove the coverage threshold for correctness."
+    not_a_gate_removal = patch_problems(
+        removal,
+        threshold_only,
+        threshold_only,
+        metric_bindings={0: ("native.exact_match", "correctness")},
+        existing_gates=(existing,),
+    )
+    assert any("does not ask to remove or replace" in problem for problem in not_a_gate_removal)
+
+    threshold_only_gate_removal = "Remove the coverage threshold from the correctness gate."
+    rejected_gate_removal = patch_problems(
+        removal,
+        threshold_only_gate_removal,
+        threshold_only_gate_removal,
+        metric_bindings={0: ("native.exact_match", "correctness")},
+        existing_gates=(existing,),
+    )
+    assert rejected_gate_removal
+
+
+def test_gate_removals_are_scoped_to_the_gate_named_in_the_removal_clause() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),
+        ReleaseGate(gate_id="format", binding=1, min_completed_coverage=1.0),
+    )
+    message = "Keep the correctness gate and remove the format gate."
+    problems = patch_problems(
+        PlanPatch(gates=()),
+        message,
+        message,
+        metric_bindings={0: ("native.exact_match", "correctness"), 1: ("native.json_schema", "format")},
+        existing_gates=existing,
+    )
+    assert any("does not identify release gate 'correctness'" in problem for problem in problems)
+
+
+def test_overlapping_gate_ids_match_only_the_complete_named_gate() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),
+        ReleaseGate(gate_id="correctness-coverage", binding=0, min_completed_coverage=1.0),
+    )
+    message = "Remove the correctness-coverage gate."
+    retained = PlanPatch(gates=(existing[0],))
+    assert patch_problems(
+        retained,
+        message,
+        message,
+        metric_bindings={0: ("native.exact_match", "correctness")},
+        existing_gates=existing,
+    ) == []
+
+
+def test_gate_retargeting_does_not_confuse_a_source_metric_with_an_overlapping_gate_id() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),
+        ReleaseGate(gate_id="correctness-coverage", binding=0, min_completed_coverage=1.0),
+    )
+    message = "Move the correctness-coverage gate from correctness to format."
+    wrong_patch = PlanPatch(
+        gates=(
+            ReleaseGate(gate_id="correctness", binding=1, min_pass_rate=0.9),
+            existing[1],
+        )
+    )
+    problems = patch_problems(
+        wrong_patch,
+        message,
+        message,
+        metric_bindings={
+            0: ("native.exact_match", "correctness"),
+            1: ("native.json_schema", "format"),
+        },
+        existing_gates=existing,
+    )
+    assert any("retargeting release gate 'correctness'" in problem for problem in problems)
+
+
+def test_all_gates_in_a_preservation_clause_does_not_authorize_removal() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),
+        ReleaseGate(gate_id="format", binding=1, min_completed_coverage=1.0),
+    )
+    message = "Keep all other gates and remove the format gate."
+    problems = patch_problems(
+        PlanPatch(gates=()),
+        message,
+        message,
+        metric_bindings={
+            0: ("native.exact_match", "correctness"),
+            1: ("native.json_schema", "format"),
+        },
+        existing_gates=existing,
+    )
+    assert any("does not identify release gate 'correctness'" in problem for problem in problems)
+
+
+def test_remove_all_except_clause_preserves_the_named_gate() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),
+        ReleaseGate(gate_id="format", binding=1, min_completed_coverage=1.0),
+    )
+    message = "Remove all gates except the correctness gate."
+    metrics = {
+        0: ("native.exact_match", "correctness"),
+        1: ("native.json_schema", "format"),
+    }
+    rejected = patch_problems(
+        PlanPatch(gates=()),
+        message,
+        message,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert any("does not identify release gate 'correctness'" in problem for problem in rejected)
+
+    remove_only_format = PlanPatch(gates=(existing[0],))
+    assert patch_problems(
+        remove_only_format,
+        message,
+        message,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    ) == []
+
+
+def test_negated_remove_all_request_does_not_authorize_clearing_gates() -> None:
+    existing = (ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),)
+    message = "Do not remove all release gates."
+    problems = patch_problems(
+        PlanPatch(gates=()),
+        message,
+        message,
+        metric_bindings={0: ("native.exact_match", "correctness")},
+        existing_gates=existing,
+    )
+    assert problems
+
+
+def test_remove_all_scope_is_limited_by_its_metric_or_gate_target() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),
+        ReleaseGate(gate_id="format", binding=1, min_completed_coverage=1.0),
+    )
+    metrics = {
+        0: ("native.exact_match", "correctness"),
+        1: ("native.json_schema", "format"),
+    }
+    message = "Remove all gates for correctness."
+    remove_both = patch_problems(
+        PlanPatch(gates=()),
+        message,
+        message,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert any("does not identify release gate 'format'" in problem for problem in remove_both)
+
+    remove_only_correctness = PlanPatch(gates=(existing[1],))
+    assert patch_problems(
+        remove_only_correctness,
+        message,
+        message,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    ) == []
+
+    both_scopes = "Remove all gates for correctness. Remove all gates for format."
+    assert patch_problems(
+        PlanPatch(gates=()),
+        both_scopes,
+        both_scopes,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    ) == []
+
+    threshold_only = "Remove all thresholds from the correctness gate."
+    rejected_threshold_clear = patch_problems(
+        PlanPatch(gates=()),
+        threshold_only,
+        threshold_only,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert rejected_threshold_clear
+
+
+def test_gate_removal_does_not_confuse_shared_metric_or_threshold_words_with_gate_ids() -> None:
+    existing = (
+        ReleaseGate(
+            gate_id="correctness-pass",
+            binding=0,
+            min_pass_rate=0.9,
+            min_completed_coverage=0.8,
+        ),
+        ReleaseGate(
+            gate_id="correctness-coverage",
+            binding=0,
+            min_pass_rate=0.9,
+            min_completed_coverage=1.0,
+        ),
+    )
+    metrics = {0: ("native.exact_match", "correctness")}
+    ambiguous = "Remove the correctness gate."
+    ambiguous_problems = patch_problems(
+        PlanPatch(gates=()),
+        ambiguous,
+        ambiguous,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert ambiguous_problems
+
+    threshold_only = "Drop coverage from the correctness-coverage gate."
+    threshold_problems = patch_problems(
+        PlanPatch(gates=()),
+        threshold_only,
+        threshold_only,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert threshold_problems
+
+
+def test_a_shared_objective_alias_does_not_select_an_ambiguous_metric_binding() -> None:
+    metrics = {
+        0: ("native.exact_match", "correctness", "answers are correct"),
+        1: ("deepeval.g_eval", "correctness", "answers are correct"),
+    }
+    message = "Add a 90% pass-rate gate for correctness."
+    for binding in (0, 1):
+        patch = PlanPatch(
+            gates=(
+                ReleaseGate(gate_id=f"correctness-{binding}", binding=binding, min_pass_rate=0.9),
+            )
+        )
+        assert patch_problems(patch, message, message, metric_bindings=metrics)
+
+
+def test_gate_retargeting_checks_the_requested_direction() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness", binding=0, min_pass_rate=0.9),
+        ReleaseGate(gate_id="format", binding=1, min_pass_rate=0.7),
+    )
+    message = "Keep the correctness gate unchanged and move the format gate to correctness."
+    metrics = {
+        0: ("native.exact_match", "correctness"),
+        1: ("native.json_schema", "format"),
+    }
+    wrong_direction = PlanPatch(
+        gates=(
+            ReleaseGate(gate_id="correctness", binding=1, min_pass_rate=0.9),
+            existing[1],
+        )
+    )
+    wrong = patch_problems(
+        wrong_direction,
+        message,
+        message,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert any("requires an explicit retarget request" in problem for problem in wrong)
+
+    requested_direction = PlanPatch(
+        gates=(
+            existing[0],
+            ReleaseGate(gate_id="format", binding=0, min_pass_rate=0.7),
+        )
+    )
+    assert patch_problems(
+        requested_direction,
+        message,
+        message,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    ) == []
+
+
+def test_explicit_gate_ids_disambiguate_gates_on_the_same_metric() -> None:
+    existing = (
+        ReleaseGate(gate_id="correctness-pass-rate", binding=0, min_pass_rate=0.9),
+        ReleaseGate(gate_id="correctness-coverage", binding=0, min_completed_coverage=1.0),
+    )
+    metrics = {
+        0: ("native.exact_match", "correctness"),
+        1: ("native.json_schema", "format"),
+    }
+    remove_pass_rate = "Remove the correctness-pass-rate gate."
+    wrong_removal = patch_problems(
+        PlanPatch(gates=()),
+        remove_pass_rate,
+        remove_pass_rate,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert any("does not identify release gate 'correctness-coverage'" in p for p in wrong_removal)
+
+    move_pass_rate = "Move the correctness-pass-rate gate from correctness to format."
+    wrong_retarget = patch_problems(
+        PlanPatch(
+            gates=(
+                ReleaseGate(gate_id="correctness-pass-rate", binding=0, min_pass_rate=0.9),
+                ReleaseGate(gate_id="correctness-coverage", binding=1, min_completed_coverage=1.0),
+            )
+        ),
+        move_pass_rate,
+        move_pass_rate,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    )
+    assert any(
+        "retargeting release gate 'correctness-coverage'" in p for p in wrong_retarget
+    )
+
+    move_coverage = "Move the correctness-coverage gate from correctness to format."
+    accepted_retarget = PlanPatch(
+        gates=(
+            existing[0],
+            ReleaseGate(gate_id="correctness-coverage", binding=1, min_completed_coverage=1.0),
+        )
+    )
+    assert patch_problems(
+        accepted_retarget,
+        move_coverage,
+        move_coverage,
+        metric_bindings=metrics,
+        existing_gates=existing,
+    ) == []
 
 
 def test_a_quote_spanning_several_sentences_is_checked_from_where_it_starts() -> None:

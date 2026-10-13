@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.engine.compile import load_policy
 from aibench.security.policy import ExecutionPolicy
@@ -50,8 +51,9 @@ _JSON = typer.Option(False, "--json", help="Machine-readable output.")
 def _open(workspace: Path | None) -> tuple[Storage, ArtifactStore]:
     ws = Workspace.at(workspace or Path.cwd())
     if not ws.db_path.is_file():
-        err_console.print(f"[red]no aibench workspace at {escape(str(ws.root))}[/red]")
-        raise typer.Exit(code=2)
+        raise error_exit(
+            f"no aibench workspace at {ws.root}", exit_code=2, json_output=False, console=console, err_console=err_console
+        )
     return Storage(Database.open_workspace(ws)), ArtifactStore(ws.artifacts_dir)
 
 
@@ -59,8 +61,9 @@ def _policy(path: Path) -> ExecutionPolicy:
     try:
         return load_policy(path)
     except AibenchError as exc:
-        err_console.print(f"[red]{escape(str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            str(exc), exit_code=2, json_output=False, console=console, err_console=err_console
+        ) from exc
 
 
 def _run(
@@ -72,13 +75,23 @@ def _run(
     try:
         job = asyncio.run(action(storage, artifacts))
     except RemoteJobRefused as exc:
-        for denial in exc.denials:
-            err_console.print(f"[red]refused: {escape(denial)}[/red]")
-        raise typer.Exit(code=4) from exc
+        raise error_exit(
+            "remote job refused by policy",
+            exit_code=4,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+            details=list(exc.denials),
+        ) from exc
     except (AibenchError, KeyError, ValueError) as exc:
         # A malformed worker or service reply is reported, not shown as a traceback.
-        err_console.print(f"[red]{escape(type(exc).__name__ + ': ' + str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            type(exc).__name__ + ": " + str(exc),
+            exit_code=2,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+        ) from exc
     finally:
         storage.db.close()
     if json_output:
@@ -122,11 +135,13 @@ def submit_command(
     try:
         parsed = json.loads(criteria.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        err_console.print(f"[red]cannot read criteria: {escape(str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            f"cannot read criteria: {exc}", exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     if not isinstance(parsed, list):
-        err_console.print("[red]--criteria must be a JSON list[/red]")
-        raise typer.Exit(code=2)
+        raise error_exit(
+            "--criteria must be a JSON list", exit_code=2, json_output=json_output, console=console, err_console=err_console
+        )
     loaded = _policy(policy)
     config = RemoteConfig(plugin_env.absolute(), base_url, api_key)
     _run(

@@ -4,6 +4,12 @@ duplicate or corrupt anything on the reopen itself."""
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
+import time
+from pathlib import Path
+
 from aibench.core.models import (
     ExecutionResult,
     ExecutionStatus,
@@ -49,7 +55,9 @@ def test_committed_execution_attempts_survive_restart(tmp_path) -> None:
     db1 = Database.open_workspace(ws)
     storage1 = Storage(db1)
     storage1.commit_run(
-        RunManifest(run_id="r1", dataset_hash="sha256:d", application_hash="sha256:a", plan_hash="sha256:p")
+        RunManifest(
+            run_id="r1", dataset_hash="sha256:d", application_hash="sha256:a", plan_hash="sha256:p"
+        )
     )
     storage1.commit_execution_attempt(
         ExecutionResult(
@@ -107,6 +115,62 @@ def test_retrying_a_commit_after_restart_does_not_duplicate_it(tmp_path) -> None
     db2.close()
 
 
+def test_killed_process_rolls_back_uncommitted_work_item_batch(tmp_path: Path) -> None:
+    """An abrupt process exit inside a batch must not expose a partial batch."""
+    ws = Workspace.at(tmp_path)
+    db = Database.open_workspace(ws)
+    storage = Storage(db)
+    storage.commit_run(
+        RunManifest(
+            run_id="r1", dataset_hash="sha256:d", application_hash="sha256:a", plan_hash="sha256:p"
+        )
+    )
+    db.close()
+
+    marker = tmp_path / "batch-open"
+    script = tmp_path / "commit_batch.py"
+    script.write_text(
+        textwrap.dedent(
+            f"""
+            import sys, time
+            sys.path.insert(0, {str(Path(__file__).resolve().parents[1] / "src")!r})
+            from pathlib import Path
+            from aibench.core.models import WorkItem
+            from aibench.storage.db import Database
+            from aibench.storage.repositories import Storage
+
+            db = Database.open(Path({str(ws.db_path)!r}))
+            storage = Storage(db)
+
+            def items():
+                yield WorkItem(work_item_id="w1", run_id="r1", task_key="exec:c1", kind="execution")
+                Path({str(marker)!r}).write_text("inserted first row", encoding="utf-8")
+                time.sleep(3600)  # parent terminates while the transaction is open
+                yield WorkItem(work_item_id="w2", run_id="r1", task_key="exec:c2", kind="execution")
+
+            storage.commit_work_items(items())
+            """
+        ),
+        encoding="utf-8",
+    )
+    child = subprocess.Popen([sys.executable, str(script)])
+    deadline = time.monotonic() + 30
+    try:
+        while not marker.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert marker.exists(), f"child exited before entering its open batch (exit={child.poll()})"
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=10)
+
+    recovered_db = Database.open_workspace(ws)
+    recovered = Storage(recovered_db)
+    assert recovered.get_work_item_by_task_key("r1", "exec:c1") is None
+    assert recovered.get_work_item_by_task_key("r1", "exec:c2") is None
+    recovered_db.close()
+
+
 def test_multiple_restarts_are_stable(tmp_path) -> None:
     ws = Workspace.at(tmp_path)
     for i in range(5):
@@ -124,9 +188,7 @@ def test_multiple_restarts_are_stable(tmp_path) -> None:
 
     db = Database.open_workspace(ws)
     storage = Storage(db)
-    assert {r.manifest.run_id for r in storage.list_runs(limit=10)} == {
-        f"r{i}" for i in range(5)
-    }
+    assert {r.manifest.run_id for r in storage.list_runs(limit=10)} == {f"r{i}" for i in range(5)}
     db.close()
 
 

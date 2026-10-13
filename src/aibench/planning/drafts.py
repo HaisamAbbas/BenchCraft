@@ -43,6 +43,7 @@ from aibench.core.plans import (
     ConcurrencyLimits,
     ExecutablePlan,
     PluginEnvironmentRef,
+    ReleaseGate,
     RetryPolicy,
 )
 from aibench.core.sessions import PendingQuestion
@@ -105,6 +106,9 @@ class DraftProposal(FrozenModel):
 class SpendEstimate(FrozenModel):
     selected_cases: int
     repetitions: int
+    warmup_repetitions: int = 0
+    measurement_executions: int = 0
+    warmup_executions: int = 0
     executions: int
     application_calls_upper_bound: int  # with every retry the retry policy allows
     evaluations: int
@@ -149,6 +153,7 @@ class PlanDraft(FrozenModel):
     estimate: SpendEstimate | None
     profile_hash: str
     dataset_hash: str
+    gates: tuple[ReleaseGate, ...] = ()
     scope: str = (
         "planned from the declared application config, dataset field counts and installed "
         "evaluator manifests; no source code was read and no hidden labels were used"
@@ -184,6 +189,7 @@ class DraftContext:
     user_params: dict[str, dict[str, object]] = field(default_factory=dict)
     user_rules: dict[str, DecisionRule] = field(default_factory=dict)
     test_world: str | None = None  # the user's selection; validated by the execution gate
+    gates: tuple[ReleaseGate, ...] = ()  # user-declared gates; the planner cannot invent them
 
 
 @dataclass
@@ -223,15 +229,18 @@ def build_plan(proposal: DraftProposal, ctx: DraftContext) -> ExecutablePlan:
         retry=ctx.retry,
         budgets=ctx.budgets,
         plugin_environments=ctx.plugin_environments,
+        gates=ctx.gates,
         test_world=ctx.test_world,
     )
 
 
 def estimate_spend(plan: ExecutablePlan, analysis: PlanAnalysis) -> SpendEstimate:
     selected = len(analysis.cases)
-    executions = selected * plan.repetitions
+    measurement_executions = selected * plan.repetitions
+    warmup_executions = selected * plan.warmup_repetitions
+    executions = measurement_executions + warmup_executions
     model_metrics = sum(1 for m in analysis.metrics if m.manifest.uses_models)
-    evaluations = executions * len(analysis.metrics)
+    evaluations = measurement_executions * len(analysis.metrics)
     budgets = plan.budgets
     app_rate, eval_rate = (
         budgets.estimated_cost_per_application_call_usd,
@@ -252,10 +261,13 @@ def estimate_spend(plan: ExecutablePlan, analysis: PlanAnalysis) -> SpendEstimat
     return SpendEstimate(
         selected_cases=selected,
         repetitions=plan.repetitions,
+        warmup_repetitions=plan.warmup_repetitions,
+        measurement_executions=measurement_executions,
+        warmup_executions=warmup_executions,
         executions=executions,
         application_calls_upper_bound=executions * plan.retry.max_attempts,
         evaluations=evaluations,
-        model_evaluations=executions * model_metrics,
+        model_evaluations=measurement_executions * model_metrics,
         estimated_cost_usd=cost,
         cost_basis=basis,
     )
@@ -477,6 +489,7 @@ def draft_document(
         planner=planner,
         objectives=proposal.objectives,
         rationale=proposal.metrics,
+        gates=validation.plan.gates,
         gaps=proposal.gaps,
         pending_questions=pending_questions(proposal, ctx.revision),
         findings=tuple(f.as_dict() for f in validation.findings),

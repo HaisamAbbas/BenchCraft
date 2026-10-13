@@ -9,6 +9,7 @@ import queue
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -29,11 +30,24 @@ STARTUP_SECONDS = 45.0
 class _Terminal:
     """Bare `aibench` in a real pseudo-console, read on a background thread."""
 
-    def __init__(self, project: Path, dimensions: tuple[int, int] = (40, 120)) -> None:
+    def __init__(
+        self,
+        project: Path,
+        dimensions: tuple[int, int] = (40, 120),
+        *,
+        env_overrides: Mapping[str, str] | None = None,
+    ) -> None:
         from winpty import PtyProcess
 
         source_root = Path(__file__).resolve().parents[1] / "src"
         env = os.environ.copy()
+        # Most ConPTY checks assert the capable composer, so do not let inherited
+        # terminal preferences silently select a different prompt contract.
+        env["TERM"] = "xterm-256color"
+        env["COLORTERM"] = "truecolor"
+        env.pop("NO_COLOR", None)
+        if env_overrides:
+            env.update(env_overrides)
         env["PYTHONPATH"] = str(source_root) + os.pathsep + env.get("PYTHONPATH", "")
         self.process = PtyProcess.spawn(
             [sys.executable, "-m", "aibench"], cwd=str(project), env=env, dimensions=dimensions
@@ -149,6 +163,23 @@ def test_slash_menu_opens_in_a_short_terminal(tmp_path: Path) -> None:
         terminal.expect("explain benchmark tasks and commands")  # /help, first in the menu
         assert not terminal.shows("Window too small")
         terminal.process.write("")
+        terminal.exit()
+    finally:
+        terminal.close()
+
+
+def test_dumb_terminal_keeps_plain_chat_commands_usable(tmp_path: Path) -> None:
+    """TERM=dumb uses prompt_toolkit's plain fallback instead of the composer processor."""
+    terminal = _Terminal(
+        _project(tmp_path), env_overrides={"TERM": "dumb", "COLORTERM": ""}
+    )
+    try:
+        terminal.expect("Type /help for commands", timeout=STARTUP_SECONDS)
+        # The plain fallback has no composer placeholder. Wait for the command response so
+        # this absence check runs only after the prompt has consumed terminal input.
+        terminal.send("/help")
+        terminal.expect("Anything else is a message")
+        assert not terminal.shows("Ask BenchCraft to do anything")
         terminal.exit()
     finally:
         terminal.close()

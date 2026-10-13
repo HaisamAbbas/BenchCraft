@@ -1,0 +1,32 @@
+F08 project_root verification
+=============================
+
+Related CLI/config/run regression batch:
+  uv run pytest tests/test_cli_chat.py tests/test_cli_project.py tests/test_config.py tests/test_cli_run.py -q
+  44 passed in 38.82s
+
+Nested project root, chat, doctor, configured run, and policy containment:
+  uv run pytest tests/test_cli_project.py::test_nested_project_root_works_in_chat_and_doctor_without_widening_policy -q
+  1 passed in 3.23s
+
+Absolute CLI override coverage:
+  Included in tests/test_cli_chat.py::test_project_settings_use_resolved_project_root_and_keep_absolute_overrides.
+  Passed in the related CLI/config/run regression batch.
+
+Resume/recovery compatibility for F04's fail-closed identity checks:
+  uv run pytest tests/test_engine.py tests/test_engine_faults.py tests/test_storage_failures.py tests/test_agent_worlds.py tests/test_cli_run.py -q
+  46 passed in 92.96s.
+
+Static checks:
+  uv run ruff check src/aibench/cli/chat.py tests/test_cli_chat.py tests/test_cli_project.py tests/test_cli_run.py
+  All checks passed.
+
+  uv run mypy src/aibench
+  Success: no issues found in 140 source files.
+
+  git diff --check
+  Passed.
+
+Independent review:
+  No actionable findings. Nested path resolution and data_roots enforcement remain intact;
+  test-only runtime pins/revisions cover controlled interrupted-run fixtures.

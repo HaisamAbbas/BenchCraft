@@ -135,7 +135,8 @@ class ArenaJudge(DeepEvalBaseLLM):
         if schema is Steps:
             return Steps(steps=["Compare the answers by the criteria."])
         if schema is RewrittenReason:
-            return RewrittenReason(rewritten_reason="the better answer by the criteria")
+            # As real judges write it: the answers under the names in the prompt, "$name$".
+            return RewrittenReason(rewritten_reason="$baseline$ and $current$ compared")
         if schema is Winner:
             # The contestants appear under masked names, each followed by its answer.
             names = [m for m in _CONTESTANT.finditer(prompt)]

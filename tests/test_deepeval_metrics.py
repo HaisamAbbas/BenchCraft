@@ -107,7 +107,7 @@ def test_every_metric_is_discovered_with_an_honest_manifest(registry: EvaluatorR
     for name in ALL_METRICS:
         manifest, _ = registry.resolve(f"deepeval.{name}@1")
         assert manifest.requires_worker and manifest.plugin_id == "aibench-deepeval"
-        assert manifest.plugin_version == "0.2.0rc14" and manifest.package_version == "4.2.5"
+        assert manifest.plugin_version == "0.2.0rc25" and manifest.package_version == "4.2.5"
         assert manifest.direction.value == "higher" and manifest.value_kind == "scalar"
         assert manifest.concepts and set(manifest.concepts) <= set(CONCEPTS), name
         judged = "judge" in manifest.parameters_schema["properties"]
@@ -376,8 +376,12 @@ class _JudgeServer(ThreadingHTTPServer):
         garbled_first: int = 0,
         reasoning_required: bool | dict[str, Any] = False,
         reported_cost: float | None = None,
+        upstream_failed_first: int = 0,
     ) -> None:
         super().__init__(("127.0.0.1", 0), _JudgeHandler)
+        # The first requests fail as OpenRouter reports a failure of the provider it routed
+        # to: HTTP 400 "Provider returned error".
+        self.upstream_failed_first = upstream_failed_first
         self.status = status
         # A reasoning model: it needs this many tokens for thinking before it writes the JSON,
         # and a request that allows fewer gets an empty, cut-off reply (finish_reason "length").
@@ -423,6 +427,21 @@ class _JudgeHandler(BaseHTTPRequestHandler):
         return
 
     def do_POST(self) -> None:
+        if self.server.upstream_failed_first > 0:
+            self.server.upstream_failed_first -= 1
+            self.server.requests.append(
+                {"body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))}
+            )
+            data = (
+                b'{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":'
+                b'"The request was rejected.","provider_name":"SailResearch"}}}'
+            )
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.server.out_of_credit:
             self.server.requests.append(
                 {"body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))}
@@ -654,9 +673,9 @@ def test_openai_compatible_judge_waits_out_a_rate_limit_and_still_scores(
     assert result.status is ExecutionStatus.OK and result.value.value == 1.0
     limited = [r for r in server.requests[:3]]
     assert len(limited) == 3 and len(server.requests) > 3
-    # Only answered calls are counted as the judge's calls and tokens.
+    # Every response is a known call; refused responses do not provide token usage.
     answered = len(server.requests) - 3
-    assert result.resources["model_calls"] == answered
+    assert result.resources["model_calls"] == len(server.requests)
     assert result.resources["tokens"]["input"] == 100 * answered
 
 
@@ -860,6 +879,19 @@ def test_a_call_that_keeps_trickling_bytes_still_ends_at_its_deadline(
     assert len(server.requests) >= 2  # a timed-out call is asked again before giving up
 
 
+def test_a_failure_of_the_provider_openrouter_routed_to_is_asked_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenRouter reports a failure of the provider it routed to as HTTP 400 "Provider
+    returned error"; the next attempt may go to another provider. Any other 400 is final."""
+    result, server, _ = _openai_compatible_score(
+        tmp_path, monkeypatch, 200, upstream_failed_first=1
+    )
+    assert result.status is ExecutionStatus.OK, result.reason
+    first, second = server.requests[0]["body"], server.requests[1]["body"]
+    assert first == second  # the same request, asked again
+
+
 def test_a_compressed_reply_is_read_on_the_blocking_path_too() -> None:
     """OpenRouter compresses its replies. The judge's blocking path (`generate`) reads a
     reply in pieces against its deadline and rebuilt it with `Content-Encoding: gzip` still
@@ -1056,16 +1088,20 @@ def test_metrics_scored_on_a_share_pass_only_when_nothing_is_broken() -> None:
     """Verified on real data: one bad turn in two scored 0.5, six identical tool calls scored
     0.6 for loop detection, and an agent that deleted .env with a forbidden tool scored 0.5;
     each passed at the 0.5 pass mark. Where one breach is a failure, the pass mark is 1.0;
-    every other metric keeps 0.5."""
+    every other metric with a numeric threshold keeps 0.5."""
     strict = plugin_python(
         "import json; from aibench_deepeval import EVALUATORS;"
         "print(json.dumps({e.manifest.evaluator_id: e.manifest.default_rule.threshold"
-        " for e in EVALUATORS if e.manifest.default_rule.threshold is not None}))"
+        " for e in EVALUATORS if e.manifest.default_rule is not None"
+        " and e.manifest.default_rule.threshold is not None}))"
     )
-    assert {name for name, mark in strict.items() if mark != 0.5} == {
+    strict_metrics = {
         "deepeval.tool_permission",
         "deepeval.agent_loop_detection",
         "deepeval.role_adherence",
         "deepeval.turn_faithfulness",
     }
-    assert all(strict[name] == 1.0 for name in strict if strict[name] != 0.5)
+    assert all(strict[name] == 1.0 for name in strict_metrics)
+    assert strict["deepeval.diarization_error_rate"] == 0.2
+    exceptions = strict_metrics | {"deepeval.diarization_error_rate"}
+    assert all(mark == 0.5 for name, mark in strict.items() if name not in exceptions)

@@ -19,6 +19,7 @@ from aibench.core.models import (
     BenchmarkCase,
     DatasetManifest,
     Decision,
+    EffectState,
     EvaluationResult,
     ExecutionResult,
     ExecutionStatus,
@@ -31,6 +32,10 @@ from aibench.core.models import (
 )
 from aibench.core.plans import ExecutablePlan
 from aibench.services.comparison import ComparisonError, compare_runs, comparison_exit_code
+from aibench.services.regression_policy import (
+    evaluate_regression_policy,
+    parse_regression_policy,
+)
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.db import Database
 from aibench.storage.repositories import Storage
@@ -178,6 +183,12 @@ def _seed_run(
     result_execution_ids: dict[tuple[str, int], str] | None = None,
     missing_execution_keys: set[tuple[str, int]] | None = None,
     cached_pass_ids: set[str] | None = None,
+    timings: dict[tuple[str, int], dict[str, Any]] | None = None,
+    costs: dict[tuple[str, int], float | None] | None = None,
+    cached_execution_keys: set[tuple[str, int]] | None = None,
+    warmup_repetitions: int = 0,
+    warmup_costs: dict[tuple[str, int], float | None] | None = None,
+    warmup_timings: dict[tuple[str, int], dict[str, Any]] | None = None,
 ) -> tuple[str, str]:
     scoring_id = scoring_id or f"engine-{run_id}"
     binding, metric_profile = profile or _profile()
@@ -199,6 +210,7 @@ def _seed_run(
         dataset="dataset.jsonl",
         application="application.json",
         repetitions=repetitions,
+        warmup_repetitions=warmup_repetitions,
     )
     plan_bytes = plan.model_dump_json().encode("utf-8")
     plan_ref = _TEST_ARTIFACTS.write_bytes(plan_bytes, mime_type="application/json")
@@ -212,6 +224,7 @@ def _seed_run(
             parameters={
                 "scoring_id": scoring_id,
                 "repetitions": repetitions,
+                "warmup_repetitions": warmup_repetitions,
                 "plan_artifact_id": plan_ref.artifact_id,
                 "metric_profiles": {binding: metric_profile},
             },
@@ -219,6 +232,10 @@ def _seed_run(
         status="completed",
     )
     execution_ids = execution_ids or {}
+    timings = timings or {}
+    costs = costs or {}
+    warmup_costs = warmup_costs or {}
+    warmup_timings = warmup_timings or {}
     for case in cases:
         for repetition in range(repetitions):
             key = (case.case_id, repetition)
@@ -232,6 +249,9 @@ def _seed_run(
                     attempt_id=0,
                     status=ExecutionStatus.OK,
                     output=f"answer {case.case_id}",
+                    timing=timings.get(key, {}),
+                    cost=costs.get(key),
+                    cache={"key": "test-cache"} if key in (cached_execution_keys or set()) else None,
                 )
             )
             storage.commit_work_item(
@@ -249,6 +269,33 @@ def _seed_run(
                     run_id=run_id,
                     task_key=f"eval:{case.case_id}:r{repetition}:{binding[7:23]}",
                     kind="evaluation",
+                    state=WorkItemState.SUCCEEDED,
+                )
+            )
+        for warmup_index in range(warmup_repetitions):
+            repetition_id = repetitions + warmup_index
+            storage.commit_execution_attempt(
+                ExecutionResult(
+                    execution_id=f"{run_id}:{case.case_id}:warmup{warmup_index}:a0",
+                    run_id=run_id,
+                    case_id=case.case_id,
+                    repetition_id=repetition_id,
+                    attempt_id=0,
+                    warmup=True,
+                    status=ExecutionStatus.OK,
+                    output=f"warmup {case.case_id}",
+                    timing=warmup_timings.get((case.case_id, warmup_index), {}),
+                    cost=warmup_costs.get((case.case_id, warmup_index)),
+                    effect_state=EffectState.COMPLETED,
+                )
+            )
+            storage.commit_work_item(
+                WorkItem(
+                    work_item_id=f"{run_id}:exec:{case.case_id}:r{repetition_id}",
+                    run_id=run_id,
+                    task_key=f"exec:{case.case_id}:r{repetition_id}",
+                    kind="execution",
+                    warmup=True,
                     state=WorkItemState.SUCCEEDED,
                 )
             )
@@ -372,10 +419,30 @@ def test_compatible_runs_pair_case_repetition_and_report_macro_groups(tmp_path: 
         repetitions=2,
         values=_values(("a1", 0, 2), ("a1", 1, 3), ("b1", 0, 4), ("b1", 1, 8)),
     )
+    storage.promote_baseline("production", "baseline", "release-manager")
 
     report = compare_runs(storage, ArtifactStore(tmp_path / "artifacts"), "baseline", "current", bootstrap_replicates=100)
+    aliased = compare_runs(
+        storage,
+        ArtifactStore(tmp_path / "artifacts"),
+        "@production",
+        "current",
+        bootstrap_replicates=100,
+    )
+    named = compare_runs(
+        storage,
+        ArtifactStore(tmp_path / "artifacts"),
+        "Production",
+        "current",
+        bootstrap_replicates=100,
+    )
 
     assert report["status"] == "qualified"
+    assert aliased["baseline_run_id"] == "baseline"
+    assert aliased["baseline_alias"] == "production"
+    assert aliased["qualified"] is True
+    assert named["baseline_run_id"] == "baseline"
+    assert named["baseline_alias"] == "production"
     assert report["qualified"] is True
     assert report["execution_identity"]["classification"] == "fresh_or_unknown_execution_identity"
     assert report["identity_checks"]["application"]["compatible"] is False
@@ -1063,5 +1130,174 @@ def test_comparison_validates_inputs_and_missing_runs() -> None:
     storage = Storage(Database.open_in_memory())
     with pytest.raises(ComparisonError):
         compare_runs(storage, None, "missing", "also-missing")
+    with pytest.raises(ComparisonError, match="no named baseline"):
+        compare_runs(storage, None, "@missing", "also-missing")
     with pytest.raises(ComparisonError):
         compare_runs(storage, None, "b", "c", mode="qualified")  # type: ignore[arg-type]
+
+
+def test_comparison_reports_performance_and_applies_predeclared_regression_policy(
+    tmp_path: Path,
+) -> None:
+    storage = Storage(Database.open_in_memory())
+    cases = _cases("a1", "b1")
+    _seed_run(
+        storage,
+        "baseline",
+        cases=cases,
+        values=_values(("a1", 0, 1), ("b1", 0, 1)),
+        timings={
+            ("a1", 0): {
+                "wall_ms": 100,
+                "started_at": "2024-01-01T00:00:00Z",
+                "finished_at": "2024-01-01T00:00:00.100Z",
+                "streaming": {
+                    "time_to_first_token_ms": 22,
+                    "output_tokens": 12,
+                    "output_tokens_per_second": 24,
+                    "inter_token_latency_ms": {
+                        "samples": 3,
+                        "observed_intervals": 3,
+                        "mean_ms": 5,
+                        "p95_ms": 8,
+                        "samples_truncated": False,
+                    },
+                    "integrity": {"complete": True},
+                },
+            },
+            ("b1", 0): {
+                "wall_ms": 200,
+                "started_at": "2024-01-01T00:00:00.100Z",
+                "finished_at": "2024-01-01T00:00:00.300Z",
+            },
+        },
+        costs={("a1", 0): 0.1, ("b1", 0): 0.2},
+        warmup_repetitions=1,
+        warmup_costs={("a1", 0): 0.03, ("b1", 0): 0.04},
+        warmup_timings={
+            ("a1", 0): {
+                "wall_ms": 50,
+                "started_at": "2024-01-01T00:00:00Z",
+                "finished_at": "2024-01-01T00:00:00.050Z",
+                "streaming": {
+                    "time_to_first_token_ms": 11,
+                    "output_tokens": 4,
+                    "output_tokens_per_second": 16,
+                    "inter_token_latency_ms": {"samples": 2, "observed_intervals": 2},
+                    "integrity": {"complete": True},
+                },
+            },
+            ("b1", 0): {
+                "wall_ms": 50,
+                "started_at": "2024-01-01T00:00:00.050Z",
+                "finished_at": "2024-01-01T00:00:00.100Z",
+            },
+        },
+    )
+    _seed_run(
+        storage,
+        "current",
+        cases=cases,
+        application_hash="sha256:app-b-intentional-change",
+        values=_values(("a1", 0, 0.5), ("b1", 0, 0.5)),
+        timings={
+            ("a1", 0): {
+                "wall_ms": 180,
+                "started_at": "2024-01-01T00:00:01Z",
+                "finished_at": "2024-01-01T00:00:01.180Z",
+            },
+            ("b1", 0): {
+                "wall_ms": 280,
+                "started_at": "2024-01-01T00:00:01.180Z",
+                "finished_at": "2024-01-01T00:00:01.460Z",
+            },
+        },
+        costs={("a1", 0): 0.2, ("b1", 0): 0.35},
+        warmup_repetitions=1,
+        warmup_costs={("a1", 0): 0.05, ("b1", 0): 0.06},
+        warmup_timings={
+            ("a1", 0): {
+                "wall_ms": 60,
+                "started_at": "2024-01-01T00:00:01Z",
+                "finished_at": "2024-01-01T00:00:01.060Z",
+            },
+            ("b1", 0): {
+                "wall_ms": 70,
+                "started_at": "2024-01-01T00:00:01.060Z",
+                "finished_at": "2024-01-01T00:00:01.130Z",
+            },
+        },
+    )
+
+    report = compare_runs(
+        storage,
+        ArtifactStore(tmp_path / "artifacts"),
+        "baseline",
+        "current",
+        bootstrap_replicates=100,
+    )
+    performance = report["application_performance"]
+    assert report["status"] == "qualified"
+    assert performance["baseline"]["latency_p95_ms"] == 200
+    assert performance["current"]["latency_p95_ms"] == 280
+    assert performance["baseline"]["total_cost_usd"] == 0.37
+    assert performance["current"]["total_cost_usd"] == 0.66
+    assert performance["baseline"]["warmup_dispatches"] == 2
+    assert performance["baseline"]["warmup_cost_usd"] == 0.07
+    assert performance["current"]["warmup_cost_usd"] == 0.11
+    assert performance["baseline"]["warmup_effect_states"] == {"completed": 2}
+    assert performance["baseline"]["latency_statistics"]["p99_ms"] == 200
+    assert performance["baseline"]["latency_statistics"]["stddev_ms"] == 50
+    assert performance["baseline"]["retry_inclusive_latency"]["p50_ms"] == 100
+    assert performance["baseline"]["throughput"]["successful_requests_per_second"] == 6.667
+    assert performance["baseline"]["warmup_latency_statistics"]["p99_ms"] == 50
+    assert performance["baseline"]["warmup_retry_inclusive_latency"]["p50_ms"] == 50
+    assert performance["current"]["warmup_throughput"]["successful_requests_per_second"] == 15.385
+    assert performance["baseline"]["streaming_performance"]["requests"] == 1
+    assert performance["baseline"]["streaming_performance"]["time_to_first_token_ms"]["p50_ms"] == 22
+    assert performance["baseline"]["streaming_performance"]["inter_token_latency_ms"]["mean_ms"] == 5
+    assert performance["baseline"]["warmup_streaming_performance"]["requests"] == 1
+
+    policy = parse_regression_policy(
+        {
+            "schema": "aibench.regression-policy/1",
+            "metric_rules": [{"metric_id": "native.exact_match", "max_degradation": 0.4}],
+            "max_latency_p95_increase_ms": 79,
+            "max_application_cost_increase_usd": 0.28,
+        }
+    )
+    report["regression_gate"] = evaluate_regression_policy(report, policy)
+    gate = report["regression_gate"]
+    assert gate["status"] == "fail"
+    assert gate["rules"][0]["observed"] == pytest.approx(0.5), json.dumps(
+        gate["rules"], indent=2
+    )
+    assert gate["rules"][1]["observed"] == 80
+    assert gate["rules"][2]["observed"] == pytest.approx(0.29)
+    assert comparison_exit_code(report) == 1
+
+
+def test_regression_policy_requires_complete_performance_measurements() -> None:
+    policy = parse_regression_policy(
+        {
+            "schema": "aibench.regression-policy/1",
+            "max_application_cost_increase_usd": 0,
+        }
+    )
+    report = {
+        "status": "qualified",
+        "qualified": True,
+        "overall_coverage_gate": {"passed": True},
+        "application_performance": {
+            "baseline": {"total_cost_usd": 0.1},
+            "current": {"total_cost_usd": None},
+        },
+    }
+
+    report["regression_gate"] = evaluate_regression_policy(report, policy)
+
+    assert report["regression_gate"]["status"] == "undetermined"
+    assert report["regression_gate"]["rules"][0]["reason"] == (
+        "complete_baseline_and_current_measurements_required"
+    )
+    assert comparison_exit_code(report) == 3

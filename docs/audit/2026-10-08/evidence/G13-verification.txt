@@ -1,0 +1,21 @@
+G13: structured progress and durable logs
+
+Final focused CLI, global-option, output-contract, and supervision regression batch:
+  uv run pytest tests/test_cli_runs.py tests/test_cli_run.py tests/test_run_supervision.py tests/test_cli_global_options.py tests/test_cli_output_contract.py -q
+  56 passed
+
+Static checks:
+  uv run ruff check src tests plugins
+  All checks passed
+  uv run mypy src/aibench
+  Success: no issues found in 151 source files
+  git diff --check
+  Passed (Git printed only LF-to-CRLF working-copy notices)
+
+CLI help smoke checks:
+  uv run benchcraft run --help
+  uv run benchcraft runs events --help
+  Both passed; `runs events --after` advertises the SQLite signed 64-bit upper bound.
+
+The final independent review reported no remaining actionable findings
+(G13-review.md).

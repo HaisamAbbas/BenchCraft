@@ -20,6 +20,11 @@ select the episode's declared test world. The existing run engine
 then resets before each episode, keeps the conversation state between turns, blocks later
 turns after a failed/interrupted earlier turn, and does not retry episode turns.
 
+Evaluators that require `episode.turns` receive at most 50 recorded turns and 7 MiB of
+worker-JSON evidence. When a prefix exceeds either bound, its evaluation is recorded as
+not-applicable (`episode_too_many_turns` or `episode_too_large`) before the worker is called;
+the application run itself still proceeds normally.
+
 The example app is a deterministic local test world. Its output includes captured `world_state`
 from the fixture, and `native.final_state` checks each turn independently. Its scripted user
 turns and their seeds are identified in the sidecar manifest. The fixture does not contact a

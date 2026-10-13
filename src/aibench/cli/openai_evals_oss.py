@@ -11,9 +11,10 @@ import json
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.engine.compile import load_policy
 from aibench.runners import load_application
@@ -61,8 +62,9 @@ def run_command(
         loaded = load_application(app_file)
         loaded_policy = load_policy(policy)
     except (AibenchError, ValueError, TypeError) as exc:
-        err_console.print(f"[red]{escape(str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     ws = Workspace.at(workspace or Path.cwd())
     ws.ensure_directories()
     storage = Storage(Database.open_workspace(ws))
@@ -82,12 +84,18 @@ def run_command(
             )
         )
     except PolicyRefused as exc:
-        for denial in exc.denials:
-            err_console.print(f"[red]refused: {escape(denial)}[/red]")
-        raise typer.Exit(code=4) from exc
+        raise error_exit(
+            "delegated evaluation refused by policy",
+            exit_code=4,
+            json_output=json_output,
+            console=console,
+            err_console=err_console,
+            details=list(exc.denials),
+        ) from exc
     except (DelegatedSuiteError, AibenchError) as exc:
-        err_console.print(f"[red]{escape(str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     finally:
         storage.db.close()
     data = report.as_dict()

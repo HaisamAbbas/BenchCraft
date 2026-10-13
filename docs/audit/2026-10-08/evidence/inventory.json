@@ -1,0 +1,1563 @@
+{
+  "files": [
+    {
+      "file": "src/aibench/userconfig.py",
+      "lines": 225,
+      "functions": 12
+    },
+    {
+      "file": "src/aibench/__init__.py",
+      "lines": 3,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/__main__.py",
+      "lines": 4,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/cli/app.py",
+      "lines": 225,
+      "functions": 8
+    },
+    {
+      "file": "src/aibench/cli/benchmark.py",
+      "lines": 212,
+      "functions": 2
+    },
+    {
+      "file": "src/aibench/cli/cache.py",
+      "lines": 61,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/cli/candidates.py",
+      "lines": 329,
+      "functions": 8
+    },
+    {
+      "file": "src/aibench/cli/chat.py",
+      "lines": 702,
+      "functions": 21
+    },
+    {
+      "file": "src/aibench/cli/connect.py",
+      "lines": 249,
+      "functions": 4
+    },
+    {
+      "file": "src/aibench/cli/dataset.py",
+      "lines": 75,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/cli/episodes.py",
+      "lines": 51,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/cli/experiments.py",
+      "lines": 217,
+      "functions": 10
+    },
+    {
+      "file": "src/aibench/cli/inspect.py",
+      "lines": 226,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/cli/integrations.py",
+      "lines": 44,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/cli/langfuse.py",
+      "lines": 164,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/cli/main.py",
+      "lines": 142,
+      "functions": 4
+    },
+    {
+      "file": "src/aibench/cli/openai_evals_api.py",
+      "lines": 212,
+      "functions": 9
+    },
+    {
+      "file": "src/aibench/cli/openai_evals_oss.py",
+      "lines": 108,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/cli/plan.py",
+      "lines": 542,
+      "functions": 15
+    },
+    {
+      "file": "src/aibench/cli/project.py",
+      "lines": 597,
+      "functions": 17
+    },
+    {
+      "file": "src/aibench/cli/report.py",
+      "lines": 93,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/cli/run.py",
+      "lines": 342,
+      "functions": 12
+    },
+    {
+      "file": "src/aibench/cli/runs.py",
+      "lines": 96,
+      "functions": 4
+    },
+    {
+      "file": "src/aibench/cli/score.py",
+      "lines": 328,
+      "functions": 10
+    },
+    {
+      "file": "src/aibench/cli/sessions.py",
+      "lines": 211,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/cli/traces.py",
+      "lines": 93,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/cli/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/config/model.py",
+      "lines": 68,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/config/resolve.py",
+      "lines": 141,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/config/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/connectors/langfuse.py",
+      "lines": 583,
+      "functions": 20
+    },
+    {
+      "file": "src/aibench/connectors/__init__.py",
+      "lines": 1,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/conversation/agent.py",
+      "lines": 2102,
+      "functions": 80
+    },
+    {
+      "file": "src/aibench/conversation/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/core/errors.py",
+      "lines": 40,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/core/hashes.py",
+      "lines": 23,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/core/models.py",
+      "lines": 1405,
+      "functions": 25
+    },
+    {
+      "file": "src/aibench/core/plans.py",
+      "lines": 202,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/core/schema_export.py",
+      "lines": 42,
+      "functions": 2
+    },
+    {
+      "file": "src/aibench/core/sessions.py",
+      "lines": 265,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/core/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/datasets/candidates.py",
+      "lines": 539,
+      "functions": 17
+    },
+    {
+      "file": "src/aibench/datasets/episodes.py",
+      "lines": 123,
+      "functions": 2
+    },
+    {
+      "file": "src/aibench/datasets/ingest.py",
+      "lines": 272,
+      "functions": 9
+    },
+    {
+      "file": "src/aibench/datasets/normalize.py",
+      "lines": 241,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/datasets/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/engine/budget.py",
+      "lines": 205,
+      "functions": 15
+    },
+    {
+      "file": "src/aibench/engine/cache.py",
+      "lines": 322,
+      "functions": 9
+    },
+    {
+      "file": "src/aibench/engine/compile.py",
+      "lines": 742,
+      "functions": 28
+    },
+    {
+      "file": "src/aibench/engine/engine.py",
+      "lines": 1085,
+      "functions": 55
+    },
+    {
+      "file": "src/aibench/engine/quota.py",
+      "lines": 93,
+      "functions": 8
+    },
+    {
+      "file": "src/aibench/engine/retry.py",
+      "lines": 125,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/engine/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/evaluators/agent.py",
+      "lines": 393,
+      "functions": 10
+    },
+    {
+      "file": "src/aibench/evaluators/native.py",
+      "lines": 179,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/evaluators/protocol.py",
+      "lines": 315,
+      "functions": 23
+    },
+    {
+      "file": "src/aibench/evaluators/schema_worker.py",
+      "lines": 24,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/evaluators/validation.py",
+      "lines": 129,
+      "functions": 7
+    },
+    {
+      "file": "src/aibench/evaluators/worker_client.py",
+      "lines": 474,
+      "functions": 19
+    },
+    {
+      "file": "src/aibench/evaluators/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/experiments/service.py",
+      "lines": 1474,
+      "functions": 33
+    },
+    {
+      "file": "src/aibench/inspection/candidates.py",
+      "lines": 373,
+      "functions": 7
+    },
+    {
+      "file": "src/aibench/inspection/dataset_summary.py",
+      "lines": 152,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/inspection/probe.py",
+      "lines": 69,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/inspection/profile.py",
+      "lines": 312,
+      "functions": 11
+    },
+    {
+      "file": "src/aibench/inspection/source.py",
+      "lines": 917,
+      "functions": 30
+    },
+    {
+      "file": "src/aibench/inspection/__init__.py",
+      "lines": 63,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/observations/otel.py",
+      "lines": 428,
+      "functions": 16
+    },
+    {
+      "file": "src/aibench/observations/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/planning/benchmark.py",
+      "lines": 631,
+      "functions": 15
+    },
+    {
+      "file": "src/aibench/planning/catalog.py",
+      "lines": 420,
+      "functions": 8
+    },
+    {
+      "file": "src/aibench/planning/drafts.py",
+      "lines": 495,
+      "functions": 10
+    },
+    {
+      "file": "src/aibench/planning/openai_provider.py",
+      "lines": 368,
+      "functions": 13
+    },
+    {
+      "file": "src/aibench/planning/opportunities.py",
+      "lines": 285,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/planning/planner.py",
+      "lines": 405,
+      "functions": 16
+    },
+    {
+      "file": "src/aibench/planning/service.py",
+      "lines": 311,
+      "functions": 10
+    },
+    {
+      "file": "src/aibench/planning/template.py",
+      "lines": 219,
+      "functions": 4
+    },
+    {
+      "file": "src/aibench/planning/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/quickstart/__init__.py",
+      "lines": 56,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/registry/discovery.py",
+      "lines": 159,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/registry/eval_worker.py",
+      "lines": 132,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/registry/worker.py",
+      "lines": 35,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/registry/__init__.py",
+      "lines": 389,
+      "functions": 19
+    },
+    {
+      "file": "src/aibench/reporting/aggregation.py",
+      "lines": 180,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/reporting/render.py",
+      "lines": 550,
+      "functions": 16
+    },
+    {
+      "file": "src/aibench/reporting/statistics.py",
+      "lines": 1087,
+      "functions": 32
+    },
+    {
+      "file": "src/aibench/reporting/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/runners/base.py",
+      "lines": 361,
+      "functions": 27
+    },
+    {
+      "file": "src/aibench/runners/bindings.py",
+      "lines": 289,
+      "functions": 13
+    },
+    {
+      "file": "src/aibench/runners/cli_runner.py",
+      "lines": 495,
+      "functions": 23
+    },
+    {
+      "file": "src/aibench/runners/container_runner.py",
+      "lines": 239,
+      "functions": 16
+    },
+    {
+      "file": "src/aibench/runners/http_runner.py",
+      "lines": 501,
+      "functions": 23
+    },
+    {
+      "file": "src/aibench/runners/openai_runner.py",
+      "lines": 129,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/runners/process_tree.py",
+      "lines": 272,
+      "functions": 8
+    },
+    {
+      "file": "src/aibench/runners/python_runner.py",
+      "lines": 108,
+      "functions": 7
+    },
+    {
+      "file": "src/aibench/runners/python_shim.py",
+      "lines": 97,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/runners/__init__.py",
+      "lines": 114,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/security/endpoints.py",
+      "lines": 94,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/security/policy.py",
+      "lines": 276,
+      "functions": 13
+    },
+    {
+      "file": "src/aibench/security/redaction.py",
+      "lines": 88,
+      "functions": 4
+    },
+    {
+      "file": "src/aibench/security/secrets.py",
+      "lines": 102,
+      "functions": 7
+    },
+    {
+      "file": "src/aibench/security/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/services/applications.py",
+      "lines": 74,
+      "functions": 1
+    },
+    {
+      "file": "src/aibench/services/arena.py",
+      "lines": 103,
+      "functions": 4
+    },
+    {
+      "file": "src/aibench/services/calibration.py",
+      "lines": 230,
+      "functions": 7
+    },
+    {
+      "file": "src/aibench/services/candidates.py",
+      "lines": 237,
+      "functions": 7
+    },
+    {
+      "file": "src/aibench/services/case_pools.py",
+      "lines": 253,
+      "functions": 10
+    },
+    {
+      "file": "src/aibench/services/comparison.py",
+      "lines": 2894,
+      "functions": 69
+    },
+    {
+      "file": "src/aibench/services/delegated.py",
+      "lines": 509,
+      "functions": 19
+    },
+    {
+      "file": "src/aibench/services/execution.py",
+      "lines": 209,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/services/golden.py",
+      "lines": 248,
+      "functions": 12
+    },
+    {
+      "file": "src/aibench/services/integrations.py",
+      "lines": 214,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/services/plugins.py",
+      "lines": 499,
+      "functions": 17
+    },
+    {
+      "file": "src/aibench/services/releases.py",
+      "lines": 108,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/services/remote_jobs.py",
+      "lines": 824,
+      "functions": 32
+    },
+    {
+      "file": "src/aibench/services/reports.py",
+      "lines": 871,
+      "functions": 22
+    },
+    {
+      "file": "src/aibench/services/runs.py",
+      "lines": 967,
+      "functions": 26
+    },
+    {
+      "file": "src/aibench/services/scoring.py",
+      "lines": 1032,
+      "functions": 33
+    },
+    {
+      "file": "src/aibench/services/suspect_answers.py",
+      "lines": 54,
+      "functions": 3
+    },
+    {
+      "file": "src/aibench/services/traces.py",
+      "lines": 173,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/services/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/sessions/controller.py",
+      "lines": 1668,
+      "functions": 69
+    },
+    {
+      "file": "src/aibench/sessions/drafting.py",
+      "lines": 326,
+      "functions": 13
+    },
+    {
+      "file": "src/aibench/sessions/store.py",
+      "lines": 442,
+      "functions": 32
+    },
+    {
+      "file": "src/aibench/sessions/summary.py",
+      "lines": 135,
+      "functions": 6
+    },
+    {
+      "file": "src/aibench/sessions/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/storage/artifacts.py",
+      "lines": 265,
+      "functions": 11
+    },
+    {
+      "file": "src/aibench/storage/db.py",
+      "lines": 107,
+      "functions": 12
+    },
+    {
+      "file": "src/aibench/storage/migrations.py",
+      "lines": 652,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/storage/repositories.py",
+      "lines": 1547,
+      "functions": 79
+    },
+    {
+      "file": "src/aibench/storage/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/tui/app.py",
+      "lines": 805,
+      "functions": 46
+    },
+    {
+      "file": "src/aibench/tui/banner.py",
+      "lines": 148,
+      "functions": 5
+    },
+    {
+      "file": "src/aibench/tui/commands.py",
+      "lines": 544,
+      "functions": 31
+    },
+    {
+      "file": "src/aibench/tui/composer.py",
+      "lines": 169,
+      "functions": 9
+    },
+    {
+      "file": "src/aibench/tui/render.py",
+      "lines": 766,
+      "functions": 33
+    },
+    {
+      "file": "src/aibench/tui/reply.py",
+      "lines": 182,
+      "functions": 10
+    },
+    {
+      "file": "src/aibench/tui/themes.py",
+      "lines": 211,
+      "functions": 4
+    },
+    {
+      "file": "src/aibench/tui/__init__.py",
+      "lines": 0,
+      "functions": 0
+    },
+    {
+      "file": "src/aibench/quickstart/files/support_app.py",
+      "lines": 83,
+      "functions": 2
+    },
+    {
+      "file": "plugins/deepeval/src/aibench_deepeval/arena.py",
+      "lines": 197,
+      "functions": 4
+    },
+    {
+      "file": "plugins/deepeval/src/aibench_deepeval/conversational.py",
+      "lines": 468,
+      "functions": 11
+    },
+    {
+      "file": "plugins/deepeval/src/aibench_deepeval/dag.py",
+      "lines": 521,
+      "functions": 21
+    },
+    {
+      "file": "plugins/deepeval/src/aibench_deepeval/faithfulness.py",
+      "lines": 195,
+      "functions": 4
+    },
+    {
+      "file": "plugins/deepeval/src/aibench_deepeval/judges.py",
+      "lines": 587,
+      "functions": 25
+    },
+    {
+      "file": "plugins/deepeval/src/aibench_deepeval/metrics.py",
+      "lines": 820,
+      "functions": 18
+    },
+    {
+      "file": "plugins/deepeval/src/aibench_deepeval/_version.py",
+      "lines": 3,
+      "functions": 0
+    },
+    {
+      "file": "plugins/deepeval/src/aibench_deepeval/__init__.py",
+      "lines": 30,
+      "functions": 0
+    },
+    {
+      "file": "plugins/openai_evals_api/src/aibench_openai_evals_api/contract.py",
+      "lines": 176,
+      "functions": 7
+    },
+    {
+      "file": "plugins/openai_evals_api/src/aibench_openai_evals_api/criterion.py",
+      "lines": 80,
+      "functions": 1
+    },
+    {
+      "file": "plugins/openai_evals_api/src/aibench_openai_evals_api/worker.py",
+      "lines": 208,
+      "functions": 7
+    },
+    {
+      "file": "plugins/openai_evals_api/src/aibench_openai_evals_api/_version.py",
+      "lines": 1,
+      "functions": 0
+    },
+    {
+      "file": "plugins/openai_evals_api/src/aibench_openai_evals_api/__init__.py",
+      "lines": 9,
+      "functions": 0
+    },
+    {
+      "file": "plugins/openai_evals_oss/src/aibench_openai_evals_oss/bridge.py",
+      "lines": 140,
+      "functions": 6
+    },
+    {
+      "file": "plugins/openai_evals_oss/src/aibench_openai_evals_oss/replay.py",
+      "lines": 178,
+      "functions": 5
+    },
+    {
+      "file": "plugins/openai_evals_oss/src/aibench_openai_evals_oss/upstream.py",
+      "lines": 176,
+      "functions": 10
+    },
+    {
+      "file": "plugins/openai_evals_oss/src/aibench_openai_evals_oss/_version.py",
+      "lines": 1,
+      "functions": 0
+    },
+    {
+      "file": "plugins/openai_evals_oss/src/aibench_openai_evals_oss/__init__.py",
+      "lines": 9,
+      "functions": 0
+    },
+    {
+      "file": "plugins/ragas/src/aibench_ragas/faithfulness.py",
+      "lines": 492,
+      "functions": 18
+    },
+    {
+      "file": "plugins/ragas/src/aibench_ragas/_version.py",
+      "lines": 3,
+      "functions": 0
+    },
+    {
+      "file": "plugins/ragas/src/aibench_ragas/__init__.py",
+      "lines": 12,
+      "functions": 0
+    }
+  ],
+  "file_count": 161,
+  "total_lines": 50214,
+  "commands": [
+    {
+      "command": "score",
+      "options": [
+        "run_id",
+        "--metrics",
+        "--workspace",
+        "--custom-evaluator",
+        "--trust-local-code",
+        "--plugin-env",
+        "--plugin-secret",
+        "--plugin-path",
+        "--plugin-startup-timeout",
+        "--json"
+      ]
+    },
+    {
+      "command": "inspect",
+      "options": [
+        "app_file",
+        "--dataset",
+        "--run",
+        "--workspace",
+        "--source",
+        "--policy",
+        "--probe",
+        "--out",
+        "--json"
+      ]
+    },
+    {
+      "command": "run",
+      "options": [
+        "target",
+        "--plan",
+        "--policy",
+        "--trust-local-app",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "resume",
+      "options": [
+        "run_id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "evaluate",
+      "options": [
+        "run_id",
+        "--plan",
+        "--policy",
+        "--workspace",
+        "--json",
+        "--only-unfinished"
+      ]
+    },
+    {
+      "command": "chat",
+      "options": [
+        "--project",
+        "--resume",
+        "--new",
+        "--app",
+        "--dataset",
+        "--policy",
+        "--trust-local-app",
+        "--provider-config",
+        "--send",
+        "--json",
+        "--objective",
+        "--continue",
+        "-c"
+      ]
+    },
+    {
+      "command": "init",
+      "options": [
+        "directory",
+        "--json"
+      ]
+    },
+    {
+      "command": "doctor",
+      "options": [
+        "--project",
+        "--provider-config",
+        "--json"
+      ]
+    },
+    {
+      "command": "benchmark",
+      "options": [
+        "app",
+        "--dataset",
+        "--objective",
+        "--out",
+        "--policy",
+        "--auto",
+        "--non-interactive",
+        "--trust-local-app",
+        "--provider-config",
+        "--revise",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "report",
+      "options": [
+        "run_id",
+        "--format",
+        "--out",
+        "--no-content",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "compare",
+      "options": [
+        "baseline",
+        "current",
+        "--baseline-scoring",
+        "--current-scoring",
+        "--mode",
+        "--min-paired-coverage",
+        "--bootstrap-replicates",
+        "--bootstrap-seed",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "setup",
+      "options": []
+    },
+    {
+      "command": "dataset",
+      "options": []
+    },
+    {
+      "command": "dataset validate",
+      "options": [
+        "path",
+        "--json"
+      ]
+    },
+    {
+      "command": "dataset candidates",
+      "options": []
+    },
+    {
+      "command": "dataset candidates generate",
+      "options": [
+        "sources",
+        "--provider-config",
+        "--split",
+        "--policy",
+        "--workspace",
+        "--max-candidates",
+        "--json"
+      ]
+    },
+    {
+      "command": "dataset candidates list",
+      "options": [
+        "pool_id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "dataset candidates show",
+      "options": [
+        "candidate_id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "dataset candidates review",
+      "options": [
+        "candidate_id",
+        "--reviewer",
+        "--decision",
+        "--note",
+        "--workspace"
+      ]
+    },
+    {
+      "command": "dataset candidates verify",
+      "options": [
+        "candidate_id",
+        "--actor",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "dataset candidates promote",
+      "options": [
+        "pool_id",
+        "output",
+        "--candidate",
+        "--actor",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "dataset episodes",
+      "options": []
+    },
+    {
+      "command": "dataset episodes validate",
+      "options": [
+        "dataset",
+        "manifest",
+        "--plan",
+        "--json"
+      ]
+    },
+    {
+      "command": "experiments",
+      "options": []
+    },
+    {
+      "command": "experiments create",
+      "options": [
+        "definition",
+        "--workspace",
+        "--policy",
+        "--trust-local-app"
+      ]
+    },
+    {
+      "command": "experiments run",
+      "options": [
+        "experiment_id",
+        "--workspace"
+      ]
+    },
+    {
+      "command": "experiments resume",
+      "options": [
+        "experiment_id",
+        "--add-trials",
+        "--workspace"
+      ]
+    },
+    {
+      "command": "experiments status",
+      "options": [
+        "experiment_id",
+        "--workspace"
+      ]
+    },
+    {
+      "command": "experiments report",
+      "options": [
+        "experiment_id",
+        "--workspace"
+      ]
+    },
+    {
+      "command": "experiments evaluate-holdout",
+      "options": [
+        "experiment_id",
+        "--workspace"
+      ]
+    },
+    {
+      "command": "experiments propose-adoption",
+      "options": [
+        "experiment_id",
+        "--workspace"
+      ]
+    },
+    {
+      "command": "runs",
+      "options": []
+    },
+    {
+      "command": "runs list",
+      "options": [
+        "--workspace",
+        "--status",
+        "--limit",
+        "--json"
+      ]
+    },
+    {
+      "command": "runs show",
+      "options": [
+        "run_id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "runs status",
+      "options": [
+        "run_id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "sessions",
+      "options": []
+    },
+    {
+      "command": "sessions list",
+      "options": [
+        "--workspace",
+        "--limit",
+        "--json"
+      ]
+    },
+    {
+      "command": "sessions show",
+      "options": [
+        "session_id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "sessions delete",
+      "options": [
+        "session_id",
+        "--workspace",
+        "--yes",
+        "--json"
+      ]
+    },
+    {
+      "command": "traces",
+      "options": []
+    },
+    {
+      "command": "traces import",
+      "options": [
+        "run_id",
+        "file",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "traces show",
+      "options": [
+        "run_id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "connect",
+      "options": []
+    },
+    {
+      "command": "connect http",
+      "options": [
+        "--project",
+        "--url",
+        "--dataset",
+        "--app-id",
+        "--input-path",
+        "--output-path",
+        "--input-field",
+        "--context-path",
+        "--context-text-path",
+        "--effects",
+        "--authorize-origin",
+        "--bearer-secret-ref",
+        "--max-calls"
+      ]
+    },
+    {
+      "command": "cache",
+      "options": []
+    },
+    {
+      "command": "cache list",
+      "options": [
+        "--kind",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "cache clear",
+      "options": [
+        "--kind",
+        "--workspace"
+      ]
+    },
+    {
+      "command": "openai-evals-oss",
+      "options": []
+    },
+    {
+      "command": "openai-evals-oss run",
+      "options": [
+        "app_file",
+        "--eval",
+        "--samples",
+        "--plugin-env",
+        "--policy",
+        "--params",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "openai-evals-api",
+      "options": []
+    },
+    {
+      "command": "openai-evals-api submit",
+      "options": [
+        "run_id",
+        "--criteria",
+        "--plugin-env",
+        "--policy",
+        "--base-url",
+        "--api-key",
+        "--allow-duplicate",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "openai-evals-api resume",
+      "options": [
+        "job_id",
+        "--policy",
+        "--resend",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "openai-evals-api status",
+      "options": [
+        "job_id",
+        "--policy",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "openai-evals-api cancel",
+      "options": [
+        "job_id",
+        "--policy",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "openai-evals-api fetch",
+      "options": [
+        "job_id",
+        "--policy",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "openai-evals-api jobs",
+      "options": [
+        "run_id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "langfuse",
+      "options": []
+    },
+    {
+      "command": "langfuse import-dataset",
+      "options": [
+        "dataset",
+        "--out",
+        "--host",
+        "--policy",
+        "--public-key",
+        "--secret-key",
+        "--json"
+      ]
+    },
+    {
+      "command": "langfuse import-traces",
+      "options": [
+        "run_id",
+        "--host",
+        "--policy",
+        "--public-key",
+        "--secret-key",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "langfuse export-scores",
+      "options": [
+        "run_id",
+        "--host",
+        "--policy",
+        "--public-key",
+        "--secret-key",
+        "--include-reasons",
+        "--scoring-id",
+        "--workspace",
+        "--json"
+      ]
+    },
+    {
+      "command": "langfuse status",
+      "options": [
+        "--json"
+      ]
+    },
+    {
+      "command": "integrations",
+      "options": []
+    },
+    {
+      "command": "integrations list",
+      "options": [
+        "--policy",
+        "--langfuse-host",
+        "--openai-base-url",
+        "--json"
+      ]
+    },
+    {
+      "command": "app",
+      "options": []
+    },
+    {
+      "command": "app describe",
+      "options": [
+        "app_file",
+        "--policy",
+        "--json"
+      ]
+    },
+    {
+      "command": "app smoke",
+      "options": [
+        "app_file",
+        "--dataset",
+        "--case",
+        "--limit",
+        "--workspace",
+        "--trust-local-app",
+        "--json"
+      ]
+    },
+    {
+      "command": "evaluators",
+      "options": []
+    },
+    {
+      "command": "evaluators list",
+      "options": [
+        "--custom-evaluator",
+        "--trust-local-code",
+        "--plugin-env",
+        "--plugin-secret",
+        "--plugin-path",
+        "--plugin-startup-timeout",
+        "--json"
+      ]
+    },
+    {
+      "command": "evaluators describe",
+      "options": [
+        "reference",
+        "--custom-evaluator",
+        "--trust-local-code",
+        "--plugin-env",
+        "--plugin-secret",
+        "--plugin-path",
+        "--plugin-startup-timeout"
+      ]
+    },
+    {
+      "command": "evaluators plugin",
+      "options": [
+        "name"
+      ]
+    },
+    {
+      "command": "evaluators calibrate",
+      "options": [
+        "--set",
+        "--out",
+        "--json"
+      ]
+    },
+    {
+      "command": "plan",
+      "options": [
+        "--app",
+        "--dataset",
+        "--objective",
+        "--out",
+        "--planner",
+        "--provider-config",
+        "--policy",
+        "--trust-local-app",
+        "--sample",
+        "--seed",
+        "--limit",
+        "--max-app-calls",
+        "--max-evaluator-calls",
+        "--plugin-env",
+        "--plugin-secret",
+        "--plugin-path",
+        "--params",
+        "--rule",
+        "--revise",
+        "--json"
+      ]
+    },
+    {
+      "command": "plan opportunities",
+      "options": [
+        "--app",
+        "--dataset",
+        "--objective",
+        "--policy",
+        "--trust-local-app",
+        "--plugin-env",
+        "--plugin-secret",
+        "--plugin-path",
+        "--params",
+        "--rule",
+        "--json"
+      ]
+    },
+    {
+      "command": "plan validate",
+      "options": [
+        "plan_file",
+        "--policy",
+        "--trust-local-app",
+        "--json"
+      ]
+    },
+    {
+      "command": "plan benchmark",
+      "options": [
+        "--fixtures",
+        "--planner",
+        "--provider-config",
+        "--policy",
+        "--out",
+        "--require-targets",
+        "--json"
+      ]
+    },
+    {
+      "command": "plugins",
+      "options": []
+    },
+    {
+      "command": "plugins list",
+      "options": [
+        "--json"
+      ]
+    },
+    {
+      "command": "plugins status",
+      "options": [
+        "--project",
+        "--json"
+      ]
+    },
+    {
+      "command": "plugins install",
+      "options": [
+        "name",
+        "--project",
+        "--judge-provider",
+        "--use-env",
+        "--yes",
+        "--json"
+      ]
+    }
+  ],
+  "largest_files": [
+    {
+      "file": "src/aibench/services/comparison.py",
+      "lines": 2894,
+      "functions": 69
+    },
+    {
+      "file": "src/aibench/conversation/agent.py",
+      "lines": 2102,
+      "functions": 80
+    },
+    {
+      "file": "src/aibench/sessions/controller.py",
+      "lines": 1668,
+      "functions": 69
+    },
+    {
+      "file": "src/aibench/storage/repositories.py",
+      "lines": 1547,
+      "functions": 79
+    },
+    {
+      "file": "src/aibench/experiments/service.py",
+      "lines": 1474,
+      "functions": 33
+    },
+    {
+      "file": "src/aibench/core/models.py",
+      "lines": 1405,
+      "functions": 25
+    },
+    {
+      "file": "src/aibench/reporting/statistics.py",
+      "lines": 1087,
+      "functions": 32
+    },
+    {
+      "file": "src/aibench/engine/engine.py",
+      "lines": 1085,
+      "functions": 55
+    },
+    {
+      "file": "src/aibench/services/scoring.py",
+      "lines": 1032,
+      "functions": 33
+    },
+    {
+      "file": "src/aibench/services/runs.py",
+      "lines": 967,
+      "functions": 26
+    }
+  ]
+}

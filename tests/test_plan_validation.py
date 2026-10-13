@@ -4,11 +4,13 @@ seeded sampling, aggregation semantics, DAG checks and budgets. All outside any 
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import aibench.engine.compile as compile_module
 from aibench.core.models import EvaluatorManifest, MetricBinding, MetricDirection
 from aibench.core.plans import CaseSelection, ExecutablePlan
 from aibench.engine.compile import (
@@ -16,6 +18,7 @@ from aibench.engine.compile import (
     analyze_plan,
     compile_plan,
     dag_problems,
+    freeze_plan,
     work_graph,
 )
 from aibench.security.policy import ExecutionPolicy
@@ -48,6 +51,19 @@ def _analyze(tmp_path: Path, plan: ExecutablePlan, **kwargs: Any) -> Any:
 
 def _kinds(analysis: Any) -> set[tuple[str, bool]]:
     return {(f.kind, f.blocking) for f in analysis.findings}
+
+
+def test_zero_warmup_preserves_legacy_frozen_plan_bytes() -> None:
+    plan = _plan()
+    expected = plan.model_dump(mode="json")
+    expected.pop("warmup_repetitions")
+    expected.pop("load_profile")
+    expected_bytes = json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
+
+    frozen, _ = freeze_plan(plan)
+    assert frozen == expected_bytes
+    warmed, _ = freeze_plan(plan.model_copy(update={"warmup_repetitions": 1}))
+    assert b'"warmup_repetitions":1' in warmed
 
 
 def test_unknown_evaluator_is_invalid_and_rejected_outside_any_model(tmp_path: Path) -> None:
@@ -193,6 +209,57 @@ def test_work_graph_is_a_dag_and_the_checker_finds_cycles_and_undefined_deps() -
     assert all(len(deps) == 1 for key, deps in graph.items() if key.startswith("eval:"))
     assert dag_problems({"x": ("y",), "y": ("x",)}) == ["dependency cycle through x"]
     assert dag_problems({"x": ("missing",)}) == ["x depends on undefined missing"]
+
+
+def test_plan_analysis_does_not_materialize_the_full_work_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden_graph(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("analysis must not allocate the case x repetition x metric graph")
+
+    monkeypatch.setattr(compile_module, "work_graph", forbidden_graph)
+    analysis = _analyze(tmp_path, _plan(repetitions=100))
+
+    assert analysis.executable
+    assert len(analysis.cases) == len(ROWS)
+
+
+def test_plan_analysis_streams_dataset_and_retains_only_selected_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_ingest = compile_module.ingest_dataset
+    reports: list[Any] = []
+
+    def observe_ingest(path: Path, **kwargs: Any) -> Any:
+        assert kwargs["retain_cases"] is False
+        assert callable(kwargs["case_consumer"])
+        report = original_ingest(path, **kwargs)
+        reports.append(report)
+        return report
+
+    monkeypatch.setattr(compile_module, "ingest_dataset", observe_ingest)
+    analysis = _analyze(tmp_path, _plan(selection={"case_ids": ["b"]}))
+
+    assert analysis.executable
+    assert [case.case_id for case in analysis.cases] == ["b"]
+    assert reports[0].cases == []
+    assert reports[0].cases_retained is False
+
+
+def test_implicit_work_graph_rejects_colliding_evaluation_key_suffixes() -> None:
+    prefix = "sha256:"
+    problems = compile_module._work_graph_definition_problems(
+        [prefix + "a" * 16 + "0" * 48, prefix + "a" * 16 + "1" * 48]
+    )
+
+    suffix = "a" * 16
+    first = prefix + suffix + "0" * 48
+    second = prefix + suffix + "1" * 48
+    expected = (
+        f"metric bindings produce the same evaluation work-item key suffix {suffix!r}: "
+        f"{first} and {second}"
+    )
+    assert problems == [expected]
 
 
 def test_budgets_that_cannot_cover_the_plan_are_reported(tmp_path: Path) -> None:

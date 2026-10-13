@@ -127,7 +127,9 @@ def test_the_100_case_workflow_survives_a_kill_finds_the_injected_failures_and_r
     interrupted_at = service.total_calls()
     assert 30 <= interrupted_at < 100
 
-    [run] = _json(cli.invoke(app, ["runs", "list", "--workspace", str(root), "--json"]).stdout)
+    listed = _json(cli.invoke(app, ["runs", "list", "--workspace", str(root), "--json"]).stdout)
+    runs = listed.get("data") if isinstance(listed, dict) and "data" in listed else listed
+    [run] = runs
     run_id = run["run_id"]
     status = _json(
         cli.invoke(app, ["runs", "status", run_id, "--workspace", str(root), "--json"]).stdout

@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from rich.console import Console
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.engine.compile import load_policy
 from aibench.services.integrations import integrations
@@ -35,8 +36,9 @@ def list_command(
     try:
         loaded = load_policy(policy) if policy else None
     except AibenchError as exc:
-        err_console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     found = integrations(loaded, langfuse_host=langfuse_host, openai_base_url=openai_base_url)
     if json_output:
         console.print_json(data={"integrations": found})

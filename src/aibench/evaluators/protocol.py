@@ -201,6 +201,7 @@ class UsageReport:
     calls: int | None = None  # None: the evaluator could not count its calls
     tokens: dict[str, int] = field(default_factory=dict)
     cost: float | None = None
+    calls_without_tokens: int | None = None
 
 
 class EvaluatorContext:
@@ -239,8 +240,11 @@ class EvaluatorContext:
         calls: int | None,
         tokens: Mapping[str, int] | None = None,
         cost: float | None = None,
+        calls_without_tokens: int | None = None,
     ) -> None:
-        self.usage.append(UsageReport(provider, calls, dict(tokens or {}), cost))
+        self.usage.append(
+            UsageReport(provider, calls, dict(tokens or {}), cost, calls_without_tokens)
+        )
 
 
 class Evaluator(abc.ABC):

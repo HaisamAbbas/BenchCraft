@@ -134,9 +134,12 @@ def session_plugins(
     refs: list[PluginEnvironmentRef] = []
     defaults: dict[str, dict[str, Any]] = {}
     for entry in configured_environments(project_root):
+        # Venv interpreters are symlinks to the base executable on POSIX. Keep the
+        # configured entrypoint itself so Python detects and uses that environment.
+        python = os.path.abspath(base / entry.python)
         refs.append(
             PluginEnvironmentRef(
-                python=str((base / entry.python).resolve()),
+                python=python,
                 paths=tuple(str((base / p).resolve()) for p in entry.paths),
                 secret_env=dict(entry.secret_env),
                 startup_timeout_seconds=entry.startup_timeout_seconds,
@@ -156,7 +159,7 @@ def plugin_status(project_root: Path, policy: ExecutionPolicy) -> list[dict[str,
     rows = []
     for plugin in OPTIONAL_PLUGINS.values():
         entry = configured.get(plugin.name)
-        python = (base / entry.python).resolve() if entry else None
+        python = Path(os.path.abspath(base / entry.python)) if entry else None
         allowed_evaluators = any(
             fnmatchcase(f"{plugin.name}.x", pattern) for pattern in policy.allowed_evaluators
         )
@@ -169,7 +172,7 @@ def plugin_status(project_root: Path, policy: ExecutionPolicy) -> list[dict[str,
         else:
             state = "installed"
         if entry is not None:
-            if python not in {Path(p).resolve() for p in policy.allowed_plugin_environments}:
+            if python not in {Path(os.path.abspath(p)) for p in policy.allowed_plugin_environments}:
                 missing.append("allowed_plugin_environments does not list its interpreter")
             if not allowed_evaluators:
                 missing.append(f"allowed_evaluators does not include {plugin.evaluators}")
@@ -257,6 +260,7 @@ def _judge_label(judge: dict[str, Any] | None) -> str | None:
 
 
 JUDGE_KEY_ENV = "AIBENCH_JUDGE_KEY"
+_PLUGIN_PIP_REQUIREMENT = "pip>=26.2.1,<27"
 
 
 def judge_from_provider(
@@ -287,10 +291,12 @@ def _venv_python(root: Path) -> Path:
 
 
 def _relative_or_absolute(path: Path, base: Path) -> str:
+    absolute_path = Path(os.path.abspath(path))
+    absolute_base = Path(os.path.abspath(base))
     try:
-        return path.resolve().relative_to(base.resolve()).as_posix()
+        return absolute_path.relative_to(absolute_base).as_posix()
     except ValueError:
-        return str(path.resolve())
+        return str(absolute_path)
 
 
 def plan_install(
@@ -319,7 +325,8 @@ def plan_install(
         config = _read_json(path, "project config")
     create: Path | None = None
     if existing_python is not None:
-        python = existing_python.resolve()
+        # Preserve a venv's Python symlink; resolving it selects the base interpreter.
+        python = Path(os.path.abspath(existing_python))
         if not python.is_file():
             raise PluginInstallError(f"no interpreter at {python}")
     else:
@@ -360,10 +367,10 @@ def plan_install(
         policy = json.loads(json.dumps(current))
         interpreter = _relative_or_absolute(python, policy_path.parent)
         listed = {
-            (policy_path.parent / p).resolve()
+            Path(os.path.abspath(policy_path.parent / p))
             for p in policy.get("allowed_plugin_environments", [])
         }
-        if python.resolve() not in listed:
+        if python not in listed:
             policy.setdefault("allowed_plugin_environments", []).append(interpreter)
             changes.append(f"allowed_plugin_environments: + {interpreter}")
         evaluators = policy.get("allowed_evaluators", ["native.*"])
@@ -405,6 +412,19 @@ def install(plan: InstallPlan, progress: Callable[[str], None]) -> dict[str, Any
         if not plan.python.is_file():
             progress(f"creating {plan.create}")
             _run([sys.executable, "-m", "venv", str(plan.create)], progress)
+        progress("updating pip in the plugin environment")
+        _run(
+            [
+                str(plan.python),
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--disable-pip-version-check",
+                _PLUGIN_PIP_REQUIREMENT,
+            ],
+            progress,
+        )
         progress(f"installing {plan.plugin.distribution} and {plan.plugin.package}")
         _run(
             [
@@ -422,7 +442,11 @@ def install(plan: InstallPlan, progress: Callable[[str], None]) -> dict[str, Any
 
     registry = EvaluatorRegistry.with_native()
     loads = registry.load_plugin_environment(plan.python)
-    errors = [load.error for load in loads if load.error]
+    errors = [
+        load.error
+        for load in loads
+        if load.error and load.plugin.name == plan.plugin.name
+    ]
     if errors:
         raise PluginInstallError(f"the plugin environment does not load: {errors[0]}")
     found = sorted(

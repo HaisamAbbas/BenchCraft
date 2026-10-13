@@ -1,0 +1,69 @@
+# Sequential audit implementation
+
+The user authorized implementing every finding and recommended capability in
+[REPORT.md](REPORT.md), [findings.csv](findings.csv), and
+[feature-backlog.csv](feature-backlog.csv), with a separate verified commit and push per
+improvement. The audit and its original evidence are historical; current implementation
+state lives in [implementation-ledger.json](implementation-ledger.json).
+
+Author: `Haisam Abbas <HaisamAbbas@outlook.com>`.
+Delivery branch: `fix/plugin-core-match`, tracking `origin/fix/plugin-core-match`.
+
+Each item follows the same sequence:
+
+1. Implement its complete behavior and acceptance boundary.
+2. Run meaningful affected tests and relevant lint/type checks.
+3. Obtain an independent read-only review using the requested review-agent skill.
+4. Resolve actionable review findings and verify the resulting change.
+5. Commit, push without force, and verify the remote commit before beginning the next item.
+
+G22.1-G22.4 cover batched work persistence, bounded queue paging, coordinator-backed
+distributed workers, and open-loop/ramping load profiles. G22.5 adds image-first vision
+scoring with bounded inline image input and paired reviewed-case calibration across judge
+bindings; G22.6 adds a local read-only dashboard over shared stored-result services. Approved
+live cross-provider calibration, cross-host performance evidence, and broader modality support
+remain explicit limitations. No existing deferred label is treated as authorization to omit a
+feature selected by the user.
+
+G22.17 extends the dashboard with opt-in remote binding that requires TLS 1.2 or newer and a
+random bearer token sourced from an environment variable. The loopback-only default remains
+unchanged; no separate-host reachability or browser-automation evidence is claimed.
+
+G22.18 streams case selection during JSONL validation, keeps deterministic samples in a sample-sized heap, and avoids building the complete planned work graph during analysis. Run and resume load case bodies through a SQLite-backed cache capped at 512 entries and 4 MiB of serialized JSON. The 1,000-case interrupt/resume workload used 13.2 MiB of traced Python allocations in 90.6 seconds; the earlier audit sample used 17.1 MiB in 64.6 seconds. The lower traced allocation came with higher elapsed time, and plans that select every case still retain the compiled selected-case snapshot. See the [G22.18 implementation](implementation/G22.18-streaming-compile-case-cache.md) and [read-only review](implementation/G22.18-streaming-compile-case-cache-review.md).
+
+G22.8 extends `deepeval.vision_g_eval` to score a recorded generated image beside the case
+image, task, and reviewed answer. Both images use the strict inline PNG/JPEG/WebP contract;
+remote paths and URLs remain rejected.
+
+G22.9 adds `deepeval.audio_g_eval` for text or generated-audio output against one bounded
+inline WAV/MP3 case. It validates supported WAV/MP3 framing before the isolated worker sends
+labeled `input_audio` parts to the explicitly configured judge. Built-in dataset rows are
+hard-capped at 1,000,000 bytes, so imported case audio has a lower practical limit than the
+per-audio evaluator cap; HTTP transport limits can be raised in application configuration.
+The G22.9 single-request audio task evaluator does not score turn timing or diarization.
+
+G22.10 adds `deepeval.video_frames_g_eval` for text or supplied sampled-frame output. Case input
+uses 2 to 8 strictly ordered timestamps and inline PNG/JPEG/WebP images, capped at 512 KiB per
+sequence to fit within the built-in 1,000,000-byte dataset row limit alongside task and
+reference text. Generated output allows 1 MiB per frame and 4 MiB per sequence. Frame order
+and timestamp labels are retained in the judge request; the configured HTTP response limit
+can be raised to carry maximum generated output. This scores only supplied samples; it does not
+decode raw video containers or score motion between samples.
+
+G22.11 adds seven local DeepEval voice metrics over stored, timestamped conversation turns. Inputs are inline bounded PCM WAV; the host rejects episode evidence over 50 turns or 7 MiB before worker dispatch. Responsiveness only reflects missing assistant audio in this stored format; the adapter does not capture live calls, measure live latency, detect reprompts, or score diarization. G22.12 adds DeepEval's five upstream multimodal image metrics (`image_coherence`, `image_helpfulness`, `image_reference`, `text_to_image`, and `image_editing`) over bounded inline PNG/JPEG/WebP evidence and an explicitly configured vision judge. Image evidence rejects URLs and paths, caps combined source/output data at 4 MiB, and records partial request/token accounting across retries and worker boundaries. G22.13 adds DeepEval's pinned MCP-Use, MCP Task Completion, and multi-turn MCP-Use metrics over a frozen inventory and recorded successful tool events. Typed MCP event provenance is required by default; untyped events need an explicit MCP-only opt-in, and missing or malformed episode telemetry is not applicable. The adapter does not contact live servers or score resource/prompt execution because stored events do not distinguish them. G22.14 adds `deepeval.transcription_accuracy_g_eval` over caller transcript text and recorded `provider_transcript` values using the pinned DeepEval 4.2.5 G-Eval API. All episode turns need a provider transcript; input is capped at 50 turns, 16,000 characters per transcript, and 1 MiB total. Audio is not submitted, and word error rate, acoustic diarization, and barge-in joining are not implemented. The dedicated upstream transcription metric is absent from the pinned DeepEval 4.2.5 package. The official latest 4.2.8 wheel inspected on 2026-10-12 (SHA-256 `1bc6ec6ad9f36427e5578a01b4a2aaa357d7ac51bb0cd726af7315304b0339f8`) also contains no `TranscriptionAccuracyMetric` symbol. Upstream docs describe it as text-only provider-transcript comparison, so it would not add audio evaluation. G22.19 is deferred pending a published, verifiable API; see [G22.19 release check](implementation/G22.19-upstream-audio-release-gate.md). G22.15 adds deterministic diarization error rate over recorded speaker annotations; it does not diarize audio. G22.16 adds local case-level WER/CER with bounded alignments, explicit normalization, and edit counts; reports average utterance rates and require a user-selected threshold. Upstream multimodal audio metrics remain unsupported. See [G22.11 implementation](implementation/G22.11-voice-metrics.md), [G22.12 implementation](implementation/G22.12-upstream-image-metrics.md), [G22.13 implementation](implementation/G22.13-upstream-mcp-metrics.md), and [G22.14 implementation](implementation/G22.14-transcription-accuracy.md), and [G22.15 implementation](implementation/G22.15-recorded-diarization.md), and [G22.16 implementation](implementation/G22.16-transcript-error-rates.md).
+
+G22.19 was checked against the official latest DeepEval release on 2026-10-12. The 4.2.8 wheel did not contain the documented transcription-accuracy class, and the current docs describe a text-only metric rather than audio scoring. No pin change was justified; the follow-on is deferred until a released API can be verified. The only remaining G22 closure items require a separate worker host for cross-host evidence and approved live-provider calibration. See the [G22.19 release check](implementation/G22.19-upstream-audio-release-gate.md).
+
+G23 adds source-turn planner usage attribution and combined workflow cost accounting. Reports
+retain separate application, primary evaluator-pass, and planner views while the workflow total
+includes every evaluator scoring pass. Planner dollar pricing and total-cost budget enforcement
+remain unsupported; partial, canceled, concurrent duplicate, and legacy usage states stay
+visible rather than being counted as complete.
+
+The implementation order follows the report's remediation sequence. F14 is a small
+prerequisite to obtain a clean type-check baseline; F03 and F05 then protect input
+isolation and fidelity before scoring, budgets, identities, and CLI features are extended.
+
+An item marked `verified` is ready for delivery. `delivered` requires a recorded commit and
+successful push; Git and the remote ref remain authoritative. Reviews and checks are saved
+under `evidence/`, and per-item implementation notes under `implementation/`.

@@ -94,7 +94,7 @@ def test_inspection_budgets_report_file_size_total_bytes_and_discovery_truncatio
 
     assert result.files_seen == 2
     assert result.files_read == 1
-    assert result.bytes_read == 5  # Windows writes the fixture's newline as CRLF.
+    assert result.bytes_read == len((root / "a.py").read_bytes())
     assert result.skipped["total_bytes_limit"] == 1
     assert result.skipped["file_limit"] >= 1
     assert result.skipped["discovery_limit"] >= 1

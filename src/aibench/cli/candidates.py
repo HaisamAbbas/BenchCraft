@@ -10,9 +10,10 @@ from uuid import uuid4
 
 import typer
 from pydantic import ValidationError as PydanticValidationError
-from rich.console import Console
 from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.config.resolve import load_mapping_file
 from aibench.core.errors import AibenchError
 from aibench.datasets.candidates import (
@@ -42,8 +43,9 @@ err_console = Console(stderr=True)
 
 
 def _fail(message: str, code: int = 2) -> typer.Exit:
-    err_console.print(f"[red]{escape(message)}[/red]")
-    return typer.Exit(code=code)
+    return error_exit(
+        message, exit_code=code, json_output=False, console=console, err_console=err_console
+    )
 
 
 def _open_storage(root: Path | None) -> tuple[Workspace, Storage]:

@@ -17,14 +17,18 @@ import asyncio
 import contextlib
 import json
 import math
+import random
+import re
 import time
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import ValidationError
+
 from aibench.core.errors import AibenchError
-from aibench.core.hashes import content_hash
+from aibench.core.hashes import bytes_hash, content_hash
 from aibench.core.models import (
     SCHEMA_VERSION,
     ApplicationSpec,
@@ -41,9 +45,14 @@ from aibench.core.models import (
     RedactionClass,
     UsageEvent,
     UsageRole,
+    WorkItem,
     deep_unfreeze,
 )
+from aibench.core.plans import BudgetLimits, ExecutablePlan, Quota, ReleaseGate, RetryPolicy
+from aibench.engine.budget import BudgetLedger
 from aibench.engine.cache import evaluation_from_cache, evaluation_key
+from aibench.engine.quota import QuotaGate
+from aibench.engine.retry import backoff_delay, classify_evaluation
 from aibench.evaluators.protocol import (
     EPISODE_TURNS,
     EXECUTION_TRACE,
@@ -67,6 +76,10 @@ DEFAULT_MODEL_EVALUATION_TIMEOUT_SECONDS = 600.0
 # Evaluator startup (prepare, and rebuilding a worker after a timeout) has its own bound, so
 # a slow framework import never eats into a case's evaluation budget.
 DEFAULT_PREPARE_TIMEOUT_SECONDS = 300.0
+# Conversation history is sent to evaluators as one bounded evidence object. Cap both its
+# length and serialized size before an isolated worker request is built.
+MAX_EVALUATOR_EPISODE_TURNS = 50
+MAX_EVALUATOR_EPISODE_BYTES = 7 * 1024 * 1024
 _VALUE_TYPES: dict[str, tuple[type, ...]] = {
     "boolean": (bool,),
     "scalar": (int, float),
@@ -102,6 +115,156 @@ class ScoringReport:
     # Results carried forward from earlier passes instead of evaluated again (see
     # `score_recorded_run(carry_forward=True)`).
     carried: int = 0
+    budget: dict[str, Any] = field(default_factory=dict)
+    quotas: list[dict[str, object]] = field(default_factory=list)
+    stop_reason: str | None = None
+    gates: list[dict[str, Any]] = field(default_factory=list)
+    outcome: dict[str, Any] = field(default_factory=dict)
+    exit_code: int = 0
+
+
+def scoring_pass_outcome(
+    summaries: Sequence[MetricSummary], gates: Sequence[ReleaseGate] = ()
+) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
+    """Shared automation result. A low score is complete; errors, missing work or
+    cancellation are incomplete. Release gates fail with exit 1 only after all work has
+    been evaluated. The returned exit code is shared by CLI and chat rescoring.
+    """
+    unhealthy = {
+        "no_metrics": int(not summaries),
+        "errors": sum(summary.errors for summary in summaries),
+        "cancelled": sum(summary.cancelled for summary in summaries),
+        "unavailable": sum(summary.unavailable for summary in summaries),
+        "pending": sum(summary.pending for summary in summaries),
+    }
+    unhealthy = {key: value for key, value in unhealthy.items() if value}
+    complete = not unhealthy
+    gate_results: list[dict[str, Any]] = []
+    for gate in gates:
+        summary = summaries[gate.binding] if gate.binding < len(summaries) else None
+        entry: dict[str, Any] = {
+            "gate_id": gate.gate_id,
+            "binding": gate.binding,
+            "min_pass_rate": gate.min_pass_rate,
+            "min_completed_coverage": gate.min_completed_coverage,
+            "denominator": "selected",
+        }
+        if summary is None:
+            gate_results.append(
+                {**entry, "status": "undecided", "reason": "no results for this binding"}
+            )
+        elif not complete:
+            gate_results.append(
+                {**entry, "status": "undecided", "reason": "the scoring pass is incomplete"}
+            )
+        elif summary.selected == 0:
+            gate_results.append(
+                {**entry, "selected": 0, "status": "fail", "reason": "no selected cases"}
+            )
+        else:
+            passes = summary.decisions.get("pass", 0)
+            failures = []
+            if gate.min_pass_rate is not None and passes / summary.selected < gate.min_pass_rate:
+                failures.append(f"pass rate {passes}/{summary.selected} below {gate.min_pass_rate}")
+            if (
+                gate.min_completed_coverage is not None
+                and summary.completed / summary.selected < gate.min_completed_coverage
+            ):
+                failures.append(
+                    f"completed coverage {summary.completed}/{summary.selected} below "
+                    f"{gate.min_completed_coverage}"
+                )
+            gate_results.append(
+                {
+                    **entry,
+                    "selected": summary.selected,
+                    "passes": passes,
+                    "completed": summary.completed,
+                    "pass_rate": round(passes / summary.selected, 6),
+                    "completed_coverage": summary.completed_coverage,
+                    "status": "fail" if failures else "pass",
+                    "reason": "; ".join(failures) or None,
+                }
+            )
+    failed = [gate["gate_id"] for gate in gate_results if gate["status"] == "fail"]
+    undecided = [gate["gate_id"] for gate in gate_results if gate["status"] == "undecided"]
+    outcome = {
+        "complete": complete,
+        "unhealthy_work": unhealthy,
+        "gates_failed": failed,
+        "gates_undecided": undecided,
+    }
+    exit_code = 3 if not complete else 1 if failed else 0
+    return outcome, gate_results, exit_code
+
+
+class RescoreDispatch:
+    """Serial stored-output dispatch using the engine's budget and quota primitives.
+
+    Every scoring pass has its own allowance, separate from the original run's spend.
+    Only work that reaches an evaluator is settled as spend; carried and inapplicable
+    results never reserve a call. Quota waits and retry backoff consume wall allowance.
+    """
+
+    def __init__(self, budgets: BudgetLimits, quotas: Sequence[Quota], retry: RetryPolicy) -> None:
+        self.ledger = BudgetLedger(budgets)
+        self.gates = [QuotaGate(quota) for quota in quotas]
+        self.retry = retry
+        self.rng = random.Random(0)
+        self.stop_reason: str | None = None
+
+    async def pause(self, seconds: float, cancel: asyncio.Event) -> None:
+        deadline = time.monotonic() + seconds
+        while not cancel.is_set() and time.monotonic() < deadline:
+            wall = self.ledger.limits.max_wall_seconds
+            if wall is not None and self.ledger.elapsed() >= wall:
+                return
+            try:
+                await asyncio.wait_for(cancel.wait(), min(0.1, deadline - time.monotonic()))
+            except TimeoutError:
+                pass
+
+    async def acquire(self, evaluator_id: str, cancel: asyncio.Event) -> str | None:
+        gates = [gate for gate in self.gates if gate.applies_to("evaluation", evaluator_id)]
+        while not cancel.is_set():
+            denial = self.ledger.reserve_evaluation()
+            if denial is not None:
+                self.stop_reason = self.stop_reason or denial
+                return f"not_evaluated:{denial}"
+            wait = max((gate.wait_seconds() for gate in gates), default=0.0)
+            if wait <= 0:
+                for gate in gates:
+                    gate.start()
+                return None
+            self.ledger.settle_evaluation(None)
+            await self.pause(wait, cancel)
+        return "cancelled"
+
+    def wall_denial(self) -> str | None:
+        wall = self.ledger.limits.max_wall_seconds
+        if wall is not None and self.ledger.elapsed() >= wall:
+            self.stop_reason = self.stop_reason or f"max_wall_seconds={wall} reached"
+            return f"not_evaluated:{self.stop_reason}"
+        return None
+
+    def finish(self, evaluator_id: str, result: EvaluationResult | None) -> None:
+        # An unexpected interruption after reservation may have reached the evaluator.
+        resources = dict(result.resources) if result is not None else {"latency_ms": 0}
+        self.ledger.settle_evaluation(resources)
+        status = (
+            re.search(
+                r"\b(?:HTTP(?:_status)?|status)[ :=]*(429|503)\b",
+                result.reason or "",
+                re.IGNORECASE,
+            )
+            if result
+            else None
+        )
+        for gate in self.gates:
+            if gate.applies_to("evaluation", evaluator_id):
+                gate.finish()
+                if status is not None:
+                    gate.backpressure(None)
 
 
 CARRIED_NOTE = (
@@ -125,20 +288,14 @@ def _configured_component(
     if not uses_models:
         return IdentityComponent(kind="not_used", verified=True)
     if selected:
-        return IdentityComponent(
-            kind="configured", digest=content_hash(selected), verified=True
-        )
+        return IdentityComponent(kind="configured", digest=content_hash(selected), verified=True)
     return IdentityComponent(kind="unknown", verified=False)
 
 
-def _rubric_component(
-    params: dict[str, Any], manifest: ResolvedMetric
-) -> IdentityComponent:
+def _rubric_component(params: dict[str, Any], manifest: ResolvedMetric) -> IdentityComponent:
     selected = {key: params[key] for key in _RUBRIC_CONFIG_KEYS if key in params}
     if selected:
-        return IdentityComponent(
-            kind="configured", digest=content_hash(selected), verified=True
-        )
+        return IdentityComponent(kind="configured", digest=content_hash(selected), verified=True)
     return IdentityComponent(
         kind="framework_internal",
         digest=content_hash(
@@ -175,9 +332,7 @@ def _instrumentation_component(
                 "runner": application.runner.value,
                 "requirements": requirements,
                 "input_binding": deep_unfreeze(application.input_binding) or {},
-                "output_binding": {
-                    field: output_binding.get(field) for field in execution_fields
-                },
+                "output_binding": {field: output_binding.get(field) for field in execution_fields},
                 "reset_policy": application.reset_policy.value,
                 "environment_digest": application.environment_digest,
             }
@@ -226,9 +381,7 @@ def evaluation_compatibility_identity(
         "required_fields": sorted(requirement.path for requirement in metric.requirements),
         "final_attempt_rule": FINAL_ATTEMPT_RULE,
     }
-    return EvaluationCompatibilityIdentity(
-        **identity, compatibility_hash=content_hash(identity)
-    )
+    return EvaluationCompatibilityIdentity(**identity, compatibility_hash=content_hash(identity))
 
 
 def declared_dependency_identity(metrics: Sequence[ResolvedMetric]) -> str | None:
@@ -242,9 +395,28 @@ def declared_dependency_identity(metrics: Sequence[ResolvedMetric]) -> str | Non
 
     entries = []
     for metric in metrics:
-        if not metric.manifest.uses_models:
-            continue
         worker_spec = getattr(metric.factory, "spec", None)
+        if not metric.manifest.uses_models and worker_spec is None:
+            continue
+        worker_lock_hash = getattr(worker_spec, "dependency_lock_hash", None)
+        worker_extra_paths = getattr(worker_spec, "extra_paths", ())
+        worker_extra_paths_hash = getattr(worker_spec, "extra_paths_hash", None)
+        worker_runtime_identity = getattr(worker_spec, "python_runtime_identity", None)
+        if worker_extra_paths and not worker_extra_paths_hash:
+            # Configured import roots are executable implementation inputs too.
+            return None
+        if worker_spec is not None and not worker_lock_hash:
+            # A worker path/target identifies where code runs, not its installed dependencies.
+            return None
+        if worker_spec is not None and not worker_runtime_identity:
+            # The same venv path can be upgraded to a different Python runtime in place.
+            return None
+        if (
+            worker_spec is None
+            and metric.manifest.uses_models
+            and not (metric.manifest.package_name and metric.manifest.package_version)
+        ):
+            return None
         environment = None
         if worker_spec is not None:
             environment = {
@@ -259,10 +431,87 @@ def declared_dependency_identity(metrics: Sequence[ResolvedMetric]) -> str | Non
                 "plugin_version": metric.manifest.plugin_version,
                 "package_name": metric.manifest.package_name,
                 "package_version": metric.manifest.package_version,
+                "worker_dependency_lock_hash": worker_lock_hash,
+                "worker_extra_paths_hash": worker_extra_paths_hash,
+                "worker_python_runtime_identity": worker_runtime_identity,
                 "environment": environment,
             }
         )
     return content_hash(sorted(entries, key=lambda item: item["metric_id"])) if entries else None
+
+
+def _verified_producer_identity(
+    result: EvaluationResult,
+    earlier_by_id: Mapping[str, EvaluationResult],
+    seen: frozenset[str] = frozenset(),
+) -> EvaluationCompatibilityIdentity | None:
+    """Resolve and validate the identity of the evaluator that produced a stored value.
+
+    Earlier carry-forward records created before producer identity was recorded link to a
+    source result; follow that chain instead of trusting their pass's possibly relabelled
+    compatibility identity. Missing, malformed, incomplete or cyclic lineage fails closed.
+    """
+    if result.result_id in seen:
+        return None
+    provenance = deep_unfreeze(result.provenance) or {}
+    raw_identity: Mapping[str, Any] | None = None
+    if "carried_forward" in provenance:
+        lineage = provenance["carried_forward"]
+        if not isinstance(lineage, Mapping):
+            return None
+        producer = lineage.get("producer_compatibility")
+        if isinstance(producer, Mapping):
+            raw_identity = producer
+        else:
+            source_id = lineage.get("source_result_id")
+            source = earlier_by_id.get(source_id) if isinstance(source_id, str) else None
+            if source is None:
+                return None
+            identity = _verified_producer_identity(source, earlier_by_id, seen | {result.result_id})
+            claimed_hash = lineage.get("producer_compatibility_hash")
+            if identity is None or (
+                claimed_hash is not None and claimed_hash != identity.compatibility_hash
+            ):
+                return None
+            return identity
+    else:
+        candidate = provenance.get("compatibility")
+        if isinstance(candidate, Mapping):
+            raw_identity = candidate
+    if not isinstance(raw_identity, Mapping):
+        return None
+    try:
+        identity = EvaluationCompatibilityIdentity.model_validate(raw_identity)
+    except ValidationError:
+        return None
+    # The historical record stores the canonical content hash without the schema marker
+    # and hash fields themselves. Verify it before relying on its claimed producer identity.
+    payload = {
+        key: value
+        for key, value in raw_identity.items()
+        if key not in {"schema_version", "compatibility_hash"}
+    }
+    if content_hash(payload) != identity.compatibility_hash:
+        return None
+    if not all(
+        component.verified
+        for component in (identity.judge, identity.rubric, identity.instrumentation)
+    ):
+        return None
+    return identity
+
+
+def _carry_identity_is_complete(
+    identity: EvaluationCompatibilityIdentity, *, requires_dependency_identity: bool
+) -> bool:
+    """Only reuse values when every relevant producer component has a known identity."""
+    return (
+        bool(identity.plugin_id and identity.plugin_version)
+        and identity.judge.verified
+        and identity.rubric.verified
+        and identity.instrumentation.verified
+        and (not requires_dependency_identity or identity.dependency_lock_hash is not None)
+    )
 
 
 def metric_profiles(
@@ -300,6 +549,15 @@ def select_final_executions(executions: Sequence[ExecutionResult]) -> list[Execu
         if key not in final or execution.attempt_id > final[key].attempt_id:
             final[key] = execution
     return [final[key] for key in sorted(final)]
+
+
+def rescore_selected_count(items: Sequence[WorkItem], recorded_count: int) -> int:
+    """Keep every frozen execution item selected, including work that never ran.
+
+    Legacy runs without a work graph use final recorded executions. The observed count
+    also prevents dropping historical outputs whose work records are unavailable.
+    """
+    return max(sum(item.kind == "execution" and not item.warmup for item in items), recorded_count)
 
 
 def decide(
@@ -358,6 +616,29 @@ def _application_for_scoring(
     return spec
 
 
+def _plan_for_scoring(
+    storage: Storage, artifacts: ArtifactStore, record: Any
+) -> ExecutablePlan | None:
+    """Direct scoring inherits verified frozen bounds when the run has a plan."""
+    params = deep_unfreeze(record.manifest.parameters) or {}
+    if "plan_artifact_id" not in params:
+        return None
+    artifact_id = params.get("plan_artifact_id")
+    if not isinstance(artifact_id, str) or not artifact_id:
+        raise ScoringError("the run's frozen plan artifact reference is invalid")
+    ref = storage.get_artifact(artifact_id)
+    if ref is None:
+        raise ScoringError("the run's frozen plan artifact is missing")
+    try:
+        raw = artifacts.read_bytes(ref)
+        plan = ExecutablePlan.model_validate_json(raw)
+    except Exception as exc:
+        raise ScoringError("the run's frozen plan artifact failed verification") from exc
+    if bytes_hash(raw) != record.manifest.plan_hash:
+        raise ScoringError("the run's frozen plan does not match its manifest")
+    return plan
+
+
 async def score_recorded_run(
     *,
     storage: Storage,
@@ -371,6 +652,10 @@ async def score_recorded_run(
     cancel: asyncio.Event | None = None,
     application: ApplicationSpec | None = None,
     carry_forward: bool = False,
+    budgets: BudgetLimits | None = None,
+    quotas: Sequence[Quota] | None = None,
+    retry: RetryPolicy | None = None,
+    gates: Sequence[ReleaseGate] = (),
 ) -> ScoringReport:
     """`application` overrides the catalog lookup (the engine passes the run's frozen spec).
 
@@ -386,12 +671,37 @@ async def score_recorded_run(
     if application is None:
         application = _application_for_scoring(storage, artifacts, record)
     resolved = registry.validate(bindings, application=application)  # raises on any problem
+    frozen = (
+        _plan_for_scoring(storage, artifacts, record)
+        if budgets is None or quotas is None or retry is None
+        else None
+    )
+    limits = budgets if budgets is not None else frozen.budgets if frozen else BudgetLimits()
+    if (
+        limits.max_cost_usd is not None
+        and limits.estimated_cost_per_evaluation_usd is None
+        and any(metric.manifest.uses_models for metric in resolved)
+    ):
+        raise ScoringError(
+            "max_cost_usd with model-backed evaluators needs estimated_cost_per_evaluation_usd "
+            "(unknown costs are never counted as zero)"
+        )
+    dispatch = RescoreDispatch(
+        limits,
+        quotas if quotas is not None else frozen.quotas if frozen else (),
+        retry if retry is not None else frozen.retry if frozen else RetryPolicy(max_attempts=1),
+    )
     # A direct rescore may use a different plugin environment from the original run.
     # Freeze the identity of the metrics/environment actually resolved for this pass.
     dependency_lock_hash = declared_dependency_identity(resolved)
 
-    executions = select_final_executions(storage.list_execution_attempts(run_id))
-    if not executions:
+    executions = [
+        execution
+        for execution in select_final_executions(storage.list_execution_attempts(run_id))
+        if not execution.warmup
+    ]
+    selected_count = rescore_selected_count(storage.list_work_items(run_id), len(executions))
+    if not selected_count:
         raise ScoringError(f"run {run_id!r} has no recorded executions to score")
     cases: dict[str, list[BenchmarkCase]] = {}
     stored_cases = storage.list_cases(record.manifest.dataset_hash)
@@ -416,6 +726,12 @@ async def score_recorded_run(
                 "carry_forward_unfinished" if carry_forward else "explicit_stored_output_rescore"
             ),
             "independent_judge_repeat": "not_proven",
+            "selected_count": selected_count,
+            "release_gates": [gate.model_dump(mode="json") for gate in gates],
+            "budget_scope": "this_scoring_pass",
+            "budgets": limits.model_dump(mode="json"),
+            "quotas": [gate.quota.model_dump(mode="json") for gate in dispatch.gates],
+            "retry": dispatch.retry.model_dump(mode="json"),
         },
     )
     for metric in resolved:
@@ -430,6 +746,7 @@ async def score_recorded_run(
             application=application,
             dependency_lock_hash=dependency_lock_hash,
             episodes=episodes,
+            dispatch=dispatch,
         )
         scorer.carry_from(earlier)
         metric_results = await scorer.score_all(executions, cases, report.warnings)
@@ -441,11 +758,17 @@ async def score_recorded_run(
                 manifest=metric.manifest,
                 binding_hash=metric.binding_hash,
                 params=deep_unfreeze(metric.binding.params) or {},
+                planned=selected_count,
+                missing="unavailable",
             )
         )
     # A pass is complete only after every resolved binding has returned.  The
     # marker lets a later comparison distinguish a finished rescore from a
     # process that crashed after writing the opening scoring_pass event.
+    report.outcome, report.gates, report.exit_code = scoring_pass_outcome(report.summaries, gates)
+    report.budget = dispatch.ledger.summary()
+    report.quotas = [gate.summary() for gate in dispatch.gates]
+    report.stop_reason = dispatch.stop_reason
     storage.append_run_event(
         run_id,
         "scoring_pass_completed",
@@ -453,6 +776,12 @@ async def score_recorded_run(
             "scoring_id": report.scoring_id,
             "result_count": len(report.results),
             "status": "completed",
+            "budget": report.budget,
+            "quotas": report.quotas,
+            "stop_reason": report.stop_reason,
+            "outcome": report.outcome,
+            "exit_code": report.exit_code,
+            "gates": report.gates,
         },
     )
     return report
@@ -460,7 +789,12 @@ async def score_recorded_run(
 
 def episode_prefixes(cases: Iterable[BenchmarkCase]) -> dict[str, tuple[BenchmarkCase, ...]]:
     """For each case in an episode (cases sharing a `group_id`), that episode's cases up to
-    and including it, in dataset order: the conversation a conversational metric scores."""
+    and including it, in dataset order: the conversation a conversational metric scores.
+
+    Prefix storage stays linear in the case count. Prefixes past the evaluator history limit
+    share one bounded sentinel; `_episode_turns` marks those outcomes not applicable before
+    assembling or dispatching their history.
+    """
     groups: dict[str, list[BenchmarkCase]] = {}
     prefixes: dict[str, tuple[BenchmarkCase, ...]] = {}
     for case in cases:
@@ -468,7 +802,12 @@ def episode_prefixes(cases: Iterable[BenchmarkCase]) -> dict[str, tuple[Benchmar
             continue
         group = groups.setdefault(case.group_id, [])
         group.append(case)
-        prefixes[case.case_id] = tuple(group)
+    for group in groups.values():
+        sentinel = tuple(group[: MAX_EVALUATOR_EPISODE_TURNS + 1])
+        for index, case in enumerate(group):
+            prefixes[case.case_id] = (
+                tuple(group[: index + 1]) if index < MAX_EVALUATOR_EPISODE_TURNS else sentinel
+            )
     return prefixes
 
 
@@ -503,6 +842,7 @@ class BindingScorer:
         application: ApplicationSpec | None = None,
         dependency_lock_hash: str | None = None,
         episodes: Mapping[str, tuple[BenchmarkCase, ...]] | None = None,
+        dispatch: RescoreDispatch | None = None,
     ) -> None:
         self.storage = storage
         # Only a metric that reads the conversation gets one assembled (`episode.turns`).
@@ -516,6 +856,7 @@ class BindingScorer:
         self.scoring_id = scoring_id
         self.metric = metric
         self.manifest = metric.manifest
+        self._worker_backed = getattr(metric.factory, "spec", None) is not None
         self.rule = rule_for(metric.binding, metric.manifest)
         self.compatibility = evaluation_compatibility_identity(
             metric,
@@ -529,17 +870,22 @@ class BindingScorer:
         self._cache_pending: dict[str, str] = {}
         self.cancel = cancel or asyncio.Event()
         self.prepare_error: str | None = None
+        self.dispatch = dispatch
+        self._opened = False
         self._evaluator: Evaluator | None = None
         # An evaluator that serves one request at a time (a worker process) takes cases
         # in turn, so each case's time limit counts its own turn, not the line.
         self._turn = asyncio.Lock()
         # Finished results of earlier passes to reuse, by (case, repetition); see `carry_from`.
-        self._carry: dict[tuple[str, int], EvaluationResult] = {}
+        self._carry: dict[
+            tuple[str, int], tuple[EvaluationResult, EvaluationCompatibilityIdentity]
+        ] = {}
 
     async def open(self) -> None:
         """Construct and prepare the evaluator. Construction and prepare() are evaluator
         code too: a failure there becomes a recorded error for every case it would have
         evaluated, never an aborted pass."""
+        self._opened = True
         try:
             self._evaluator = self.metric.factory()
             await asyncio.wait_for(
@@ -551,11 +897,19 @@ class BindingScorer:
 
     def carry_from(self, earlier: Sequence[EvaluationResult]) -> None:
         """Offer finished results of earlier passes (oldest first): one for the same case,
-        repetition, stored answer and metric settings is carried into this pass instead of
-        being evaluated again. A result that depends on an imported trace is never carried."""
+        repetition, stored answer, metric settings, and verified producer identity is carried
+        into this pass instead of being evaluated again. A result that depends on an imported
+        trace is never carried."""
         if self._traced:
             return
         manifest = self.manifest
+        earlier_by_id = {result.result_id: result for result in earlier}
+        current_identity = self.compatibility
+        if not _carry_identity_is_complete(
+            current_identity,
+            requires_dependency_identity=manifest.uses_models or self._worker_backed,
+        ):
+            return
         for old in earlier:
             if (
                 old.status is ExecutionStatus.OK
@@ -564,16 +918,21 @@ class BindingScorer:
                 and old.metric_version == manifest.version
                 and old.binding_hash == self.metric.binding_hash
             ):
-                self._carry[(old.case_id, old.repetition_id)] = old  # a later one replaces
+                producer = _verified_producer_identity(old, earlier_by_id)
+                if producer == current_identity:
+                    self._carry[(old.case_id, old.repetition_id)] = (old, producer)
+                    # A later compatible result replaces an older one; an incompatible result
+                    # cannot shadow an older value from this same implementation.
 
     def _carried(self, execution: ExecutionResult) -> EvaluationResult | None:
-        source = self._carry.get((execution.case_id, execution.repetition_id))
+        offered = self._carry.get((execution.case_id, execution.repetition_id))
         if (
-            source is None
+            offered is None
             or execution.status is not ExecutionStatus.OK
-            or source.execution_id != execution.execution_id
+            or offered[0].execution_id != execution.execution_id
         ):
             return None
+        source, producer = offered
         fresh = self._result(execution, EvaluationOutcome(ExecutionStatus.OK))
         copied = evaluation_from_cache(source, fresh, key=f"carried:{source.result_id}")
         provenance = deep_unfreeze(copied.provenance)
@@ -581,6 +940,7 @@ class BindingScorer:
         provenance["carried_forward"] = {
             "source_result_id": source.result_id,
             "source_scoring_id": source.scoring_id,
+            "producer_compatibility_hash": producer.compatibility_hash,
             "note": CARRIED_NOTE,
         }
         return copied.model_copy(
@@ -628,12 +988,18 @@ class BindingScorer:
         ):
             return None
         manifest = self.manifest
+        if not _carry_identity_is_complete(
+            self.compatibility,
+            requires_dependency_identity=manifest.uses_models or self._worker_backed,
+        ):
+            return None
         return evaluation_key(
             execution,
             candidates[0],
             binding_hash=self.metric.binding_hash,
             evaluator=f"{manifest.evaluator_id}@{manifest.version}",
             plugin=f"{manifest.plugin_id}=={manifest.plugin_version}",
+            compatibility_hash=self.compatibility.compatibility_hash,
             policy_hash=self.cache_policy_hash,
         )
 
@@ -672,7 +1038,9 @@ class BindingScorer:
         """Record an outcome produced outside this process (a remote job's result, 17-T2):
         the same attempt, provenance and final-result path as an evaluated one, without
         calling any evaluator."""
-        raw = self._serialize_raw(outcome) if outcome.status is not ExecutionStatus.SKIPPED else None
+        raw = (
+            self._serialize_raw(outcome) if outcome.status is not ExecutionStatus.SKIPPED else None
+        )
         result = self._result(execution, outcome, raw=raw)
         self.storage.commit_evaluation_attempt(result, attempt_number=result.attempt_number)
         self.finalize(result)
@@ -705,11 +1073,22 @@ class BindingScorer:
         cases: dict[str, list[BenchmarkCase]],
         warnings: list[str],
     ) -> list[EvaluationResult]:
-        await self.open()
+        if self.dispatch is None:
+            await self.open()
         results = []
         try:
             for execution in executions:
                 result = await self.score(execution, cases.get(execution.case_id, []))
+                if self.dispatch is not None:
+                    for attempt in range(1, self.dispatch.retry.max_attempts):
+                        verdict = classify_evaluation(result, self.manifest)
+                        if not verdict.retry or self.cancel.is_set():
+                            break
+                        await self.dispatch.pause(
+                            backoff_delay(self.dispatch.retry, attempt, self.dispatch.rng),
+                            self.cancel,
+                        )
+                        result = await self.score(execution, cases.get(execution.case_id, []))
                 self.finalize(result)
                 results.append(result)
         finally:
@@ -750,15 +1129,38 @@ class BindingScorer:
             tree, unusable = self._trace_for(execution)
             if unusable is not None:
                 return self._result(execution, EvaluationOutcome.not_applicable(unusable))
-            view = EvaluationView(
-                case=case, execution=execution, episode=view.episode, trace=tree
-            )
+            view = EvaluationView(case=case, execution=execution, episode=view.episode, trace=tree)
         for requirement in self.metric.requirements:
             state = view.state(requirement.path)
             if state == "missing" or (state == "empty" and requirement.non_empty):
                 return self._result(
                     execution, EvaluationOutcome.not_applicable(f"{state}:{requirement.path}")
                 )
+        if self.dispatch is not None:
+            denial = await self.dispatch.acquire(self.manifest.evaluator_id, self.cancel)
+            if denial is not None:
+                return self._result(
+                    execution,
+                    EvaluationOutcome(
+                        ExecutionStatus.CANCELLED
+                        if denial == "cancelled"
+                        else ExecutionStatus.SKIPPED,
+                        reason=denial,
+                    ),
+                )
+            result: EvaluationResult | None = None
+            try:
+                if not self._opened:
+                    await self.open()
+                result = await self._evaluate(self._evaluator, execution, view)
+                return result
+            finally:
+                self.dispatch.finish(self.manifest.evaluator_id, result)
+        return await self._evaluate(evaluator, execution, view)
+
+    async def _evaluate(
+        self, evaluator: Evaluator | None, execution: ExecutionResult, view: EvaluationView
+    ) -> EvaluationResult:
         if self.prepare_error is not None or evaluator is None:
             return self._result(
                 execution, EvaluationOutcome.error(self.prepare_error or "evaluator_unavailable")
@@ -776,7 +1178,9 @@ class BindingScorer:
         )
         # Held from the restart check to the end of the call, so a worker killed by one
         # case's timeout is restarted for the next case in line instead of failing it.
-        turn = self._turn if getattr(evaluator, "one_at_a_time", False) else contextlib.nullcontext()
+        turn = (
+            self._turn if getattr(evaluator, "one_at_a_time", False) else contextlib.nullcontext()
+        )
         async with turn:
             try:
                 await asyncio.wait_for(evaluator.ensure_ready(), self.prepare_timeout_seconds)
@@ -786,6 +1190,14 @@ class BindingScorer:
                     EvaluationOutcome.error(
                         f"evaluator_restart_failed:{type(exc).__name__}: {exc}"[:500]
                     ),
+                )
+            if self.cancel.is_set():
+                return self._result(
+                    execution, EvaluationOutcome(ExecutionStatus.CANCELLED, reason="cancelled")
+                )
+            if self.dispatch is not None and (denial := self.dispatch.wall_denial()):
+                return self._result(
+                    execution, EvaluationOutcome(ExecutionStatus.SKIPPED, reason=denial)
                 )
             started = time.perf_counter()
             try:
@@ -822,14 +1234,15 @@ class BindingScorer:
         prefix = self.episodes.get(case.case_id)
         if not prefix:
             return None, None
-        turns = []
+        if len(prefix) > MAX_EVALUATOR_EPISODE_TURNS:
+            return None, "episode_too_many_turns"
+        turns: list[dict[str, Any]] = []
+        payload_bytes = 2  # JSON array brackets.
         for turn_case in prefix:
             if turn_case.case_id == case.case_id:
                 recorded: ExecutionResult | None = execution
             else:
-                attempts = self.storage.list_execution_attempts(
-                    execution.run_id, turn_case.case_id
-                )
+                attempts = self.storage.list_execution_attempts(execution.run_id, turn_case.case_id)
                 same = [a for a in attempts if a.repetition_id == execution.repetition_id]
                 final = select_final_executions(same)
                 recorded = final[0] if final else None
@@ -845,6 +1258,16 @@ class BindingScorer:
                 if f"execution.{name}" in self._paths:
                     value = earlier.get(f"execution.{name}")
                     turn[name] = None if value is MISSING else value
+            try:
+                # Match the evaluator worker's json.dumps(request).encode("utf-8")
+                # representation so escaped Unicode and default separators count toward
+                # the pre-dispatch size bound.
+                encoded_turn = json.dumps(turn, allow_nan=False).encode("utf-8")
+            except (TypeError, ValueError):
+                return None, "episode_turn_not_serializable"
+            payload_bytes += len(encoded_turn) + (2 if turns else 0)
+            if payload_bytes > MAX_EVALUATOR_EPISODE_BYTES:
+                return None, "episode_too_large"
             turns.append(turn)
         return tuple(turns), None
 
@@ -959,6 +1382,20 @@ class BindingScorer:
                     tokens[name] = tokens.get(name, 0) + count
             if tokens:
                 resources["tokens"] = tokens  # absent means unknown, never zero
+            unknown_token_calls = 0
+            has_token_completeness_gap = False
+            for usage in ctx.usage:
+                if usage.calls_without_tokens is not None:
+                    unknown_token_calls += usage.calls_without_tokens
+                    has_token_completeness_gap = True
+                elif not usage.tokens:
+                    # Backward-compatible plugin reports have no per-call token field. Empty
+                    # token maps mean all known calls lack token usage; an uncounted report is
+                    # represented as one unquantified usage event in the summary.
+                    unknown_token_calls += usage.calls if type(usage.calls) is int else 1
+                    has_token_completeness_gap = True
+            if has_token_completeness_gap:
+                resources["calls_with_unknown_tokens"] = unknown_token_calls
         return resources
 
     def _result(
@@ -987,6 +1424,7 @@ class BindingScorer:
                         tokens=report.tokens or None,
                         calls=report.calls,
                         cost=report.cost,
+                        calls_without_tokens=report.calls_without_tokens,
                     )
                 )
         evidence = tuple(

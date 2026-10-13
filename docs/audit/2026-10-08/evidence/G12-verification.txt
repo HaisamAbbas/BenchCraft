@@ -1,0 +1,25 @@
+G12: configuration management
+
+Final affected configuration, setup, planning, project, and chat regression batch:
+  uv run pytest tests/test_config_cli.py tests/test_config.py tests/test_first_run_setup.py tests/test_cli_plan.py tests/test_planner_fixture_set.py tests/test_cli_project.py tests/test_cli_chat.py
+  102 passed
+
+Additional isolated CLI regressions after an interrupted repository-wide run:
+  uv run pytest tests/test_cli_chat_pty.py -q
+  5 passed
+  uv run pytest tests/test_cli_run.py -q
+  15 passed
+
+Final static checks:
+  uv run ruff check src tests plugins
+  All checks passed
+  uv run mypy src/aibench
+  Success: no issues found in 150 source files
+  git diff --check
+  Passed (Git printed only LF-to-CRLF working-copy notices)
+
+The repository-wide `uv run pytest` attempt was interrupted at 15% after concurrent test
+activity produced failures in the ConPTY and run CLI suites. Both suites passed when rerun
+individually; the final affected batch above also passed.
+
+Final independent review: no remaining actionable findings (G12-review.md).

@@ -875,18 +875,28 @@ def summarize_judge_stability(
         observed_pass_count = len(rows)
         this_expected_count = expected_count if key in denominator_keys else observed_pass_count
         observed_ids = {row.scoring_id for row in rows}
-        missing_ids = set(scoring_ids or ()) - observed_ids
-        if not scoring_ids:
-            missing_ids = {"" for _ in range(max(this_expected_count - observed_pass_count, 0))}
+        if scoring_ids is not None:
+            missing_passes: list[tuple[str | None, int | None]] = [
+                (scoring_id, None)
+                for scoring_id in scoring_ids
+                if scoring_id not in observed_ids
+            ]
+        else:
+            missing_passes = [
+                (None, ordinal)
+                for ordinal in range(1, max(this_expected_count - observed_pass_count, 0) + 1)
+            ]
         unit_missing: list[dict[str, Any]] = []
-        for scoring_id in sorted(missing_ids):
+        for scoring_id, missing_ordinal in missing_passes:
             detail = {
                 **key.as_dict(),
-                "scoring_id": scoring_id or None,
+                "scoring_id": scoring_id,
                 "reason": "not_observed",
                 "observed_pass_count": observed_pass_count,
                 "expected_pass_count": this_expected_count,
             }
+            if missing_ordinal is not None:
+                detail["missing_repeat_ordinal"] = missing_ordinal
             unit_missing.append(detail)
             if key in denominator_keys:
                 missing_repeats.append(detail)

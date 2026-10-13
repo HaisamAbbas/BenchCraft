@@ -19,6 +19,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from aibench.core.errors import ValidationError
 from aibench.core.hashes import content_hash
 from aibench.core.models import (
     ApplicationSpec,
@@ -31,7 +32,7 @@ from aibench.core.models import (
 )
 from aibench.runners.base import BaseRunner, InvocationContext, InvocationOutcome
 from aibench.runners.bindings import AppInputEnvelope
-from aibench.storage.artifacts import ArtifactStore
+from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.repositories import Storage
 
 SMOKE_RUN_PREFIX = "smoke-"
@@ -46,6 +47,7 @@ async def invoke_and_record(
     run_id: str,
     repetition_id: int = 0,
     attempt_id: int = 0,
+    warmup: bool = False,
     cancel: asyncio.Event | None = None,
 ) -> ExecutionResult:
     """One attempt: exactly one application invocation, never retried here."""
@@ -60,7 +62,9 @@ async def invoke_and_record(
     # The call was dispatched and answered: it is recorded even if the task is cancelled
     # while its captures are written off the loop, as it was when nothing awaited between
     # the answer and the commit. The write is bounded, so the cancel is only delayed.
-    record = asyncio.ensure_future(_record(outcome, ctx, storage=storage, artifacts=artifacts))
+    record = asyncio.ensure_future(
+        _record(outcome, ctx, storage=storage, artifacts=artifacts, warmup=warmup)
+    )
     try:
         return await asyncio.shield(record)
     except asyncio.CancelledError:
@@ -73,9 +77,10 @@ async def _record(
     *,
     storage: Storage,
     artifacts: ArtifactStore,
+    warmup: bool = False,
 ) -> ExecutionResult:
     trace_refs = await _commit_captures(outcome, ctx, storage=storage, artifacts=artifacts)
-    result = _to_result(outcome, ctx, trace_refs)
+    result = _to_result(outcome, ctx, trace_refs, warmup=warmup)
     storage.commit_execution_attempt(result)
     return result
 
@@ -114,7 +119,11 @@ def _write_verified(artifacts: ArtifactStore, capture: Any, ctx: InvocationConte
 
 
 def _to_result(
-    outcome: InvocationOutcome, ctx: InvocationContext, trace_refs: tuple[str, ...]
+    outcome: InvocationOutcome,
+    ctx: InvocationContext,
+    trace_refs: tuple[str, ...],
+    *,
+    warmup: bool = False,
 ) -> ExecutionResult:
     obs = outcome.observations
     completeness = dict(outcome.completeness)
@@ -127,6 +136,7 @@ def _to_result(
         case_id=ctx.case_id,
         repetition_id=ctx.repetition_id,
         attempt_id=ctx.attempt_id,
+        warmup=warmup,
         status=outcome.status,
         output=outcome.output,
         retrieved_context=obs.retrieved_context,
@@ -166,12 +176,23 @@ async def run_developer_smoke(
 ) -> SmokeReport:
     """Invoke each case once, in order, recording every attempt. The run is labelled
     `developer_smoke` in its manifest so it can never be mistaken for a planned benchmark."""
+    if len({case.case_id for case in cases}) != len(cases):
+        raise ValidationError("smoke case IDs must be unique")
     # A re-ingested dataset has a fresh `created_at`; the stored manifest for the same
     # content hash is the identity, so reuse it rather than conflict with it.
     if storage.get_dataset(dataset.content_hash) is None:
         storage.commit_dataset(dataset)
     storage.commit_cases(dataset.content_hash, cases)
-    storage.commit_application(spec)
+    # Keep the catalog's first-seen entry stable, like plan-based run creation, and freeze
+    # this smoke's actual application spec on the run so later edits remain scoreable.
+    if storage.get_application(spec.application_id) is None:
+        storage.commit_application(spec)
+    spec_ref = artifacts.write_bytes(
+        spec.model_dump_json().encode("utf-8"),
+        mime_type="application/json",
+        redaction=RedactionClass.NONE,
+    )
+    commit_verified_artifact(artifacts, storage, spec_ref)
     report = SmokeReport(run_id=f"{SMOKE_RUN_PREFIX}{uuid.uuid4().hex[:12]}")
     storage.commit_run(
         RunManifest(
@@ -183,6 +204,7 @@ async def run_developer_smoke(
             ),
             parameters={
                 "mode": "developer_smoke",
+                "application_artifact_id": spec_ref.artifact_id,
                 "scheduler": "none",
                 "retries": 0,
                 "evaluation": "none",

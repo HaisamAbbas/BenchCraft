@@ -23,6 +23,7 @@ planner calls, so planner stays at zero — measured, not assumed).
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -145,7 +146,7 @@ class BudgetLedger:
             return
         self._add_cost(self.evaluator, resources.get("cost"))
         tokens = resources.get("tokens")
-        if isinstance(tokens, dict) and tokens:
+        if isinstance(tokens, Mapping) and tokens:
             self.evaluator.tokens += sum(v for v in tokens.values() if isinstance(v, int))
         else:
             self.evaluator.unknown_token_calls += 1

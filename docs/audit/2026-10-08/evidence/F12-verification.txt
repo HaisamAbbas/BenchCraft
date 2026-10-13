@@ -1,0 +1,29 @@
+F12 numeric judge-repeat multiplicity verification
+==================================================
+
+Direct statistics suite:
+  PYTHONPATH=src .venv/Scripts/python -m pytest -q tests/test_comparison_statistics.py
+  29 passed.
+
+Related comparison/service/calibration batch:
+  tests/test_comparison_statistics.py
+  tests/test_comparison_service.py
+  tests/test_comparison_selection.py
+  tests/test_judge_calibration.py
+  tests/test_compare_judge.py
+  68 tests passed; one stale assertion expected exit 0 for a budget-limited incomplete
+  rescore. That F06 expectation was corrected; the exact comparison regression and all
+  statistics tests then passed together: 30 passed in 7.66s.
+
+Coverage includes zero, one, and multiple missing repeats for numeric expectations and
+explicit scoring IDs. The one-observed/five-expected numeric case reports four missing
+entries, each with a distinct ordinal and a null scoring ID. Explicit IDs and unexpected
+unit accounting remain intact.
+
+Static checks:
+  Ruff on changed statistics source and tests: passed.
+  MYPYPATH=src .venv/Scripts/mypy src/aibench
+  Success: no issues found in 141 source files.
+  git diff --check: passed.
+
+Final independent review: no findings.

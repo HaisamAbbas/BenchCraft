@@ -29,6 +29,7 @@ from aibench.security.policy import ExecutionPolicy, evaluator_denials
 
 CONCEPTS: dict[str, str] = {
     "correctness": "the answer matches the reviewed reference answer",
+    "transcription_error_rate": "the speech recognition transcript has few word or character edit errors against a reference",
     "groundedness": "the answer is supported by the passages the application actually retrieved",
     "format": "the output satisfies a declared structure, such as a JSON Schema",
     "tool_use": "the application called the expected tools",
@@ -61,6 +62,7 @@ CONCEPTS: dict[str, str] = {
     "turn_retrieval_precision": "each turn's relevant passages are ranked first",
     "turn_retrieval_recall": "each turn's passages support the expected outcome",
     "turn_retrieval_relevancy": "each turn's retrieved passages are relevant",
+    "speaker_diarization": "speaker activity, segmentation and turn attribution match the reference annotation",
     "agent_efficiency": "the agent reached its answer without unneeded steps",
     "plan_quality": "the plan the agent made for the task was sound",
     "plan_adherence": "the agent followed its own plan",
@@ -80,6 +82,15 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
         r"wrong",
         r"incorrect",
         r"(?:expected|reference) answers?",
+    ),
+    "transcription_error_rate": (
+        r"word error rate",
+        r"character error rate",
+        r"transcription accuracy",
+        r"\bwer\b",
+        r"\bcer\b",
+        r"\basr\b",
+        r"speech recognition accuracy",
     ),
     "groundedness": (
         r"faithful(ness)?",
@@ -169,6 +180,7 @@ _KEYWORDS: dict[str, tuple[str, ...]] = {
     "turn_retrieval_precision": (r"turn contextual precision",),
     "turn_retrieval_recall": (r"turn contextual recall",),
     "turn_retrieval_relevancy": (r"turn contextual relevan(?:ce|cy)",),
+    "speaker_diarization": (r"diari[sz]\w*", r"speaker attribution", r"who spoke when"),
     "agent_efficiency": (r"step efficiency", r"unnecessary steps", r"unneeded steps"),
     "plan_quality": (r"plan quality", r"(?:good|sound|reasonable) plans?"),
     "plan_adherence": (r"plan adherence", r"follows? (?:its|the|their) (?:own )?plan"),

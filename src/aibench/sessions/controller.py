@@ -32,6 +32,7 @@ import hashlib
 import json
 import shutil
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +42,8 @@ from aibench.core.errors import AibenchError, ConflictError
 from aibench.core.models import (
     Decision,
     ExecutionStatus,
+    UsageEvent,
+    UsageRole,
     WorkItemState,
     deep_unfreeze,
     utcnow,
@@ -509,7 +512,11 @@ class SessionController:
         task_key = f"{experiment_id}:holdout"
         current = self._live_experiments.get(task_key)
         if current is not None and not current.done():
-            return {"experiment_id": experiment_id, "status": "holdout_running", "already_running": True}
+            return {
+                "experiment_id": experiment_id,
+                "status": "holdout_running",
+                "already_running": True,
+            }
         from aibench.experiments.service import evaluate_protected_holdout
 
         task = asyncio.create_task(
@@ -548,7 +555,9 @@ class SessionController:
         enriches the same stored run; it does not restart the application.
         """
         runs = self.session_runs()
-        selected = run_id or (self.session.active_run_id if self.session.active_run_id in runs else None)
+        selected = run_id or (
+            self.session.active_run_id if self.session.active_run_id in runs else None
+        )
         if selected is None and runs:
             selected = runs[-1]
         if selected is None:
@@ -629,6 +638,7 @@ class SessionController:
                 "budgets": choices.budgets.model_dump(mode="json", exclude_none=True),
                 "params": {k: deep_unfreeze(v) for k, v in choices.params.items()},
                 "rules": {k: v.model_dump(mode="json") for k, v in choices.rules.items()},
+                "gates": [gate.model_dump(mode="json") for gate in choices.gates],
             },
             "draft": draft_summary(deep_unfreeze(decision.draft), decision.choices.test_world),
             "open_questions": [
@@ -665,7 +675,171 @@ class SessionController:
                 action_refs=action_refs,
             )
         )
+        self.record_planner_usage_for_turn(turn)
         return turn
+
+    def record_planner_usage_for_turn(self, turn: ConversationTurn) -> None:
+        """Attribute assistant usage by the originating user turn, not reply completion.
+
+        Replies can finish out of order while a run is completing. Each assistant turn is
+        therefore a separate immutable event, assigned to the next successful run-start
+        boundary by source-turn sequence. Re-scanning is safe: event IDs are deterministic,
+        and a late reply can still be assigned to the correct run without rewriting history.
+        """
+        turns = self.store.turns(self.session_id)
+        turn_by_id = {candidate.turn_id: candidate for candidate in turns}
+        replied_to = {
+            candidate.replies_to
+            for candidate in turns
+            if candidate.role == "assistant" and candidate.replies_to is not None
+        }
+        unresolved_messages = [
+            candidate
+            for candidate in turns
+            if candidate.role == "user"
+            and candidate.kind == "message"
+            and candidate.turn_id not in replied_to
+        ]
+        actions = [
+            action
+            for action in self.store.list_actions(self.session_id)
+            if action.kind is ActionKind.START_RUN
+            and action.state is ActionState.DONE
+            and action.run_id is not None
+        ]
+
+        boundaries: list[tuple[int, ActionRequest]] = []
+        for action in actions:
+            source_turn = turn_by_id.get(action.source_turn_id or "")
+            if source_turn is None:
+                # Typed commands may record their action refs on the command turn instead
+                # of putting a source_turn_id on the action request.
+                source_turn = next(
+                    (
+                        candidate
+                        for candidate in turns
+                        if action.action_id in candidate.action_refs and candidate.role == "user"
+                    ),
+                    None,
+                )
+            if source_turn is not None and source_turn.role == "user":
+                boundaries.append((source_turn.sequence, action))
+        boundaries.sort(
+            key=lambda boundary: (boundary[0], boundary[1].created_at, boundary[1].action_id)
+        )
+
+        # A run with no assistant-model call still needs a durable zero-call marker so its
+        # report can distinguish an observed CLI-only run from a legacy unattributed one.
+        for start_sequence, action in boundaries:
+            assert action.run_id is not None
+            if any(message.sequence <= start_sequence for message in unresolved_messages):
+                # An earlier conversation can still produce a start action. Wait for its
+                # reply before freezing this run's planner accounting as zero calls.
+                continue
+            marker_key = f"{self.session_id}\0{action.run_id}\0empty"
+            marker_id = f"planner:{hashlib.sha256(marker_key.encode()).hexdigest()}"
+            self.storage.commit_usage_event(
+                UsageEvent(
+                    usage_event_id=marker_id,
+                    run_id=action.run_id,
+                    role=UsageRole.PLANNER,
+                    tokens={"prompt_tokens": 0, "completion_tokens": 0},
+                    calls=0,
+                    calls_without_tokens=0,
+                    cost=None,
+                    recorded_at=action.created_at,
+                )
+            )
+
+        attempts: list[tuple[ConversationTurn, str, dict[str, Any], datetime]] = []
+        for assistant_turn in turns:
+            if assistant_turn.role != "assistant" or not assistant_turn.replies_to:
+                continue
+            source_turn = turn_by_id.get(assistant_turn.replies_to)
+            outcome = deep_unfreeze(assistant_turn.outcome) or {}
+            reported = outcome.get("usage") if isinstance(outcome, dict) else None
+            if source_turn is not None and isinstance(reported, dict):
+                attempts.append(
+                    (source_turn, assistant_turn.turn_id, reported, assistant_turn.created_at)
+                )
+            extra_attempts = outcome.get("planner_usage_attempts", [])
+            if source_turn is not None and isinstance(extra_attempts, list):
+                for extra in extra_attempts:
+                    if not isinstance(extra, dict):
+                        continue
+                    attempt_id = extra.get("attempt_id")
+                    extra_usage = extra.get("usage")
+                    recorded_at = extra.get("recorded_at")
+                    if not isinstance(attempt_id, str) or not isinstance(extra_usage, dict):
+                        continue
+                    if not isinstance(recorded_at, str):
+                        continue
+                    try:
+                        extra_recorded_at = datetime.fromisoformat(recorded_at)
+                    except ValueError:
+                        continue
+                    attempts.append(
+                        (source_turn, attempt_id, extra_usage, extra_recorded_at)
+                    )
+
+        for source_turn, attempt_id, reported, recorded_at in attempts:
+            if source_turn.role != "user":
+                continue
+            if any(message.sequence < source_turn.sequence for message in unresolved_messages):
+                # Do not freeze a later turn's attribution while an earlier message could
+                # still become a run-start boundary.
+                continue
+            target = next(
+                (boundary for boundary in boundaries if boundary[0] >= source_turn.sequence), None
+            )
+            if target is None:
+                # No successful run has claimed this planner turn yet. A later start will
+                # re-scan stored replies and assign it to that run.
+                continue
+            start_sequence, action = target
+            if any(
+                source_turn.sequence < message.sequence <= start_sequence
+                for message in unresolved_messages
+            ):
+                # A later unresolved message in this interval may become an earlier
+                # successful run boundary, changing which run owns this planner attempt.
+                continue
+            previous_sequence = max(
+                (sequence for sequence, _ in boundaries if sequence < start_sequence),
+                default=0,
+            )
+            if source_turn.sequence <= previous_sequence or action.run_id is None:
+                continue
+            calls_value = reported.get("model_calls")
+            if type(calls_value) is not int or calls_value < 0 or calls_value == 0:
+                continue
+            calls_without_usage = reported.get("calls_without_usage", 0)
+            if type(calls_without_usage) is not int or calls_without_usage < 0:
+                calls_without_usage = 0
+            prompt_tokens = reported.get("prompt_tokens", 0)
+            completion_tokens = reported.get("completion_tokens", 0)
+            if type(prompt_tokens) is not int or prompt_tokens < 0:
+                prompt_tokens = 0
+            if type(completion_tokens) is not int or completion_tokens < 0:
+                completion_tokens = 0
+            event_key = hashlib.sha256(
+                f"{self.session_id}\0{action.run_id}\0planner\0{attempt_id}".encode()
+            ).hexdigest()
+            self.storage.commit_usage_event(
+                UsageEvent(
+                    usage_event_id=f"planner:{event_key}",
+                    run_id=action.run_id,
+                    role=UsageRole.PLANNER,
+                    tokens={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                    },
+                    calls=calls_value,
+                    calls_without_tokens=calls_without_usage,
+                    cost=None,
+                    recorded_at=recorded_at,
+                )
+            )
 
     def delete(self) -> dict[str, Any]:
         """Delete this conversation (§14). Refused while one of its runs is active. The
@@ -714,6 +888,9 @@ class SessionController:
                 patch,
                 Path(session.project_root),
                 default_seed=_stable_seed(session.session_id),
+                metric_bindings=tuple(
+                    item["metric"] for item in deep_unfreeze(current.draft).get("rationale", [])
+                ),
             )
         except PatchRejected as exc:
             return PatchResult("rejected", session.revision, problems=exc.problems)
@@ -815,9 +992,7 @@ class SessionController:
             return PatchResult("rejected", session.revision, problems=problems)
         # The plan file names the dataset by path, so its hash is the same after the file's
         # cases changed; the draft's case counts and estimate are not. Compare the dataset too.
-        unchanged_dataset = draft.document.dataset_hash == (current.draft or {}).get(
-            "dataset_hash"
-        )
+        unchanged_dataset = draft.document.dataset_hash == (current.draft or {}).get("dataset_hash")
         if only_if_different and draft.plan_hash == current.plan_hash and unchanged_dataset:
             return None
         decision = DecisionRecord(
@@ -1071,6 +1246,7 @@ class SessionController:
                 storage=self.storage,
                 artifacts=self.artifacts,
                 granted_by=self._granted_by(action_id, action.source),
+                environ=self.environ,
             )
         except Exception as exc:  # noqa: BLE001 - any failure frees the slot and is reported
             self.store.claim_active_run(self.session_id, expected=slot, value=session.active_run_id)
@@ -1424,28 +1600,52 @@ class SessionController:
             "warnings": report.warnings,
             "application_invoked": False,
             "carried_forward": report.carried,
+            "budget": report.budget,
+            "quotas": report.quotas,
+            "stop_reason": report.stop_reason,
+            "outcome": report.outcome,
+            "gates": report.gates,
+            "exit_code": report.exit_code,
             "evaluated_now": len(report.results) - report.carried,
         }
 
-    def report(self, run_id: str | None = None, *, for_assistant: bool = False) -> dict[str, Any]:
+    def report(
+        self,
+        run_id: str | None = None,
+        *,
+        for_assistant: bool = False,
+        group_by: Sequence[str] = (),
+    ) -> dict[str, Any]:
         """The run's report document, from stored facts only (services.reports): nothing
         is rerun. The assistant gets case excerpts only when the policy shares content."""
         share = not for_assistant or self.policy().share_case_content_with_assistant
         return build_report(
-            self.storage, self.artifacts, self._run_id(run_id), include_content=share
+            self.storage,
+            self.artifacts,
+            self._run_id(run_id),
+            include_content=share,
+            group_by=group_by,
         )
 
     def report_facts(
-        self, run_id: str | None = None, *, for_assistant: bool = False
+        self,
+        run_id: str | None = None,
+        *,
+        for_assistant: bool = False,
+        group_by: Sequence[str] = (),
     ) -> dict[str, Any]:
         """The report's aggregates (`/report`, the assistant's `get_report`)."""
-        return report_facts(self.report(run_id, for_assistant=for_assistant))
+        return report_facts(self.report(run_id, for_assistant=for_assistant, group_by=group_by))
 
     def export_report(
-        self, run_id: str | None = None, formats: tuple[str, ...] = ("html", "json")
+        self,
+        run_id: str | None = None,
+        formats: tuple[str, ...] = ("html", "json"),
+        *,
+        group_by: Sequence[str] = (),
     ) -> dict[str, Any]:
         """Write the report files under `.aibench/reports/RUN_ID/` (sanitized content)."""
-        document = self.report(run_id)
+        document = self.report(run_id, group_by=group_by)
         run = document["run"]
         paths = export_report(
             document, list(formats), report_dir(self.workspace_root, run["run_id"])

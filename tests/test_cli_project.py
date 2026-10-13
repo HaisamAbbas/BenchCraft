@@ -4,8 +4,11 @@ the packaged quickstart; its application is a real subprocess."""
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -100,6 +103,91 @@ def test_doctor_flags_invalid_project_files(project: Path) -> None:
     assert dataset["status"] == "invalid"
 
 
+def test_doctor_reports_invalid_utf8_config_as_json(tmp_path: Path) -> None:
+    (tmp_path / "aibench.json").write_bytes(b"\xff\xfe")
+    result = cli.invoke(app, ["doctor", "--project", str(tmp_path), "--json"])
+    assert result.exit_code == 2, result.output
+    payload = _json(result.output)
+    [config] = [check for check in payload["checks"] if check["name"] == "config"]
+    assert config["status"] == "invalid"
+    assert "valid UTF-8" in config["detail"]
+    assert "Traceback" not in result.output
+    assert app.pretty_exceptions_show_locals is False
+
+
+def test_nested_project_root_works_in_chat_and_doctor_without_widening_policy(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "monorepo"
+    nested = parent / "subproject"
+    initialized = cli.invoke(app, ["init", str(nested)])
+    assert initialized.exit_code == 0, initialized.output
+
+    policy_path = nested / "policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy["data_roots"] = [str(nested.resolve())]
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    (parent / "aibench.json").write_text(
+        json.dumps(
+            {
+                "project_root": "subproject",
+                "application_target": "support.app.json",
+                "dataset_path": "dataset.jsonl",
+                "policy_path": "policy.json",
+                "plan_path": "plan.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    doctor = cli.invoke(app, ["doctor", "--project", str(parent), "--json"])
+    assert doctor.exit_code == 0, doctor.output
+    doctor_checks = {check["name"]: check for check in _json(doctor.output)["checks"]}
+    for name in ("application", "dataset", "plan"):
+        assert doctor_checks[name]["status"] == "ok", doctor_checks[name]
+    assert str(nested) in doctor_checks["application"]["detail"]
+
+    chat = cli.invoke(
+        app,
+        [
+            "chat",
+            "--project",
+            str(parent),
+            "--new",
+            "--send",
+            "/help",
+            "--json",
+        ],
+    )
+    assert chat.exit_code == 0, chat.output
+    assert json.loads(chat.stdout)["command"] == "/help"
+
+    escaped_dataset = parent / "escaped.jsonl"
+    escaped_dataset.write_text(
+        json.dumps(
+            {"case_id": "outside", "input": "hello", "expected_output": "answer"}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    plan_path = nested / "plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["dataset"] = "../escaped.jsonl"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    denied = cli.invoke(app, ["doctor", "--project", str(parent), "--json"])
+    assert denied.exit_code == 0, denied.output  # doctor reports policy denials as warnings
+    [plan_check] = [
+        check for check in _json(denied.output)["checks"] if check["name"].startswith("plan")
+    ]
+    assert plan_check["status"] == "warn"
+    assert "outside the policy's data_roots" in plan_check["detail"]
+
+    run = cli.invoke(app, ["run", str(parent), "--workspace", str(parent), "--json"])
+    assert run.exit_code == 4, run.output
+    assert "nothing was dispatched" in run.output
+    assert "outside the policy's data_roots" in run.output
+
+
 # --------------------------------------------------------------------------- plugins, compare
 
 
@@ -118,6 +206,42 @@ def test_compare_requires_a_real_workspace_before_reading_runs(tmp_path: Path) -
     )
     assert result.exit_code == 2
     assert _json(result.output)["status"] == "error"
+
+
+def test_compare_validates_regression_policy_and_requires_strict_mode(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        json.dumps({"schema": "aibench.regression-policy/1"}), encoding="utf-8"
+    )
+    invalid = cli.invoke(
+        app,
+        [
+            "compare",
+            "run-a",
+            "run-b",
+            "--regression-policy",
+            str(policy_path),
+            "--json",
+        ],
+    )
+    assert invalid.exit_code == 2
+    assert "at least one metric or performance tolerance" in _json(invalid.output)["message"]
+
+    exploratory = cli.invoke(
+        app,
+        [
+            "compare",
+            "run-a",
+            "run-b",
+            "--mode",
+            "exploratory",
+            "--regression-policy",
+            str(policy_path),
+            "--json",
+        ],
+    )
+    assert exploratory.exit_code == 2
+    assert "requires --mode strict" in _json(exploratory.output)["message"]
 
 
 # --------------------------------------------------------------------------- run, report
@@ -154,6 +278,85 @@ def test_run_resolves_the_plan_from_the_project_config(project: Path) -> None:
     assert "support-004" in report.output and "support-010" in report.output
     assert "retrieved (1 of 1): We ship to over 40 countries" in report.output
 
+    jsonl = cli.invoke(
+        app,
+        ["export", data["run_id"], "--workspace", str(project), "--out", "-"],
+    )
+    assert jsonl.exit_code == 0, jsonl.output
+    rows = [json.loads(line) for line in jsonl.output.splitlines()]
+    assert len(rows) == 10
+    assert len({(row["case_id"], row["repetition"]) for row in rows}) == 10
+    assert all(row["schema"] == "aibench.case-result/1" for row in rows)
+    assert all(row["case"]["input"] is not None for row in rows)
+    assert any(row["execution"]["status"] == "ok" for row in rows)
+    assert any(row["execution"]["status"] != "ok" for row in rows)
+    assert all(len(row["metrics"]) == 2 for row in rows)
+
+    withheld = cli.invoke(
+        app,
+        [
+            "export",
+            data["run_id"],
+            "--workspace",
+            str(project),
+            "--out",
+            "-",
+            "--no-content",
+        ],
+    )
+    assert withheld.exit_code == 0, withheld.output
+    withheld_rows = [json.loads(line) for line in withheld.output.splitlines()]
+    assert all(row["case"] is None and row["content"] == "withheld" for row in withheld_rows)
+    for row in withheld_rows:
+        execution = row["execution"]
+        if execution is not None:
+            assert execution["output"] is None
+            assert execution["error"] is None
+            assert execution["retrieved_context"] is None
+            assert execution["usage"] is None
+            assert execution["tool_events"] is None
+            assert execution["world_state"] is None
+        assert all(metric["value"] is None for metric in row["metrics"])
+        assert all(metric["uncertainty"] is None for metric in row["metrics"])
+
+    csv_export = cli.invoke(
+        app,
+        [
+            "export",
+            data["run_id"],
+            "--workspace",
+            str(project),
+            "--format",
+            "csv",
+            "--out",
+            "-",
+        ],
+    )
+    assert csv_export.exit_code == 0, csv_export.output
+    csv_rows = list(csv.DictReader(io.StringIO(csv_export.output)))
+    assert len(csv_rows) == 10
+    assert csv_rows[0]["schema"] == "aibench.case-result/1"
+    assert json.loads(csv_rows[0]["case"])["case_id"] == csv_rows[0]["case_id"]
+
+    output_path = project / "case-results.jsonl"
+    file_export = cli.invoke(
+        app,
+        [
+            "export",
+            data["run_id"],
+            "--workspace",
+            str(project),
+            "--out",
+            str(output_path),
+            "--json",
+        ],
+    )
+    assert file_export.exit_code == 0, file_export.output
+    summary = _json(file_export.output)
+    assert summary["rows"] == 10 and summary["content"] == "included"
+    assert summary["_cli"]["exit_code"] == 0
+    assert len(output_path.read_text(encoding="utf-8").splitlines()) == 10
+
 
 def test_run_refuses_a_dataset_its_configured_plan_does_not_use(
     project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -162,7 +365,7 @@ def test_run_refuses_a_dataset_its_configured_plan_does_not_use(
     other.write_text((project / "dataset.jsonl").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.chdir(project)
     result = cli.invoke(app, ["run", str(other)])
-    assert result.exit_code == 2 and "is bound to" in result.output
+    assert result.exit_code == 2 and "is bound to" in " ".join(result.output.split())
     empty = tmp_path / "empty"
     empty.mkdir()
     missing = cli.invoke(app, ["run", str(empty)])
@@ -210,6 +413,43 @@ def test_report_command_errors_and_options(project: Path) -> None:
     assert data["evidence"]["content"] == "withheld"
     assert all(i["execution"]["output_excerpt"] is None for i in data["evidence"]["items"])
 
+    junit = cli.invoke(
+        app,
+        [
+            "report",
+            run_id,
+            "--workspace",
+            str(project),
+            "--format",
+            "junit",
+            "--out",
+            "-",
+            "--no-content",
+        ],
+    )
+    assert junit.exit_code == 0, junit.output
+    junit_root = ET.fromstring(junit.output)
+    assert junit_root.tag == "testsuites"
+    assert int(junit_root.attrib["tests"]) > 0
+
+    sarif = cli.invoke(
+        app,
+        [
+            "report",
+            run_id,
+            "--workspace",
+            str(project),
+            "--format",
+            "sarif",
+            "--out",
+            "-",
+            "--no-content",
+        ],
+    )
+    assert sarif.exit_code == 0, sarif.output
+    sarif_data = json.loads(sarif.output)
+    assert sarif_data["version"] == "2.1.0"
+
 
 def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> None:
     runs = []
@@ -229,6 +469,16 @@ def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> 
         assert result.exit_code in {0, 1, 3}, result.output
         runs.append(_json(result.output)["run_id"])
     before = _execution_attempt_count(project)
+    policy_path = project / "regression-policy.json"
+    policy_path.write_text(
+        json.dumps(
+            {
+                "schema": "aibench.regression-policy/1",
+                "max_latency_p95_increase_ms": 100000,
+            }
+        ),
+        encoding="utf-8",
+    )
     compared = cli.invoke(
         app,
         [
@@ -239,6 +489,8 @@ def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> 
             str(project),
             "--min-paired-coverage",
             "0.85",
+            "--regression-policy",
+            str(policy_path),
             "--json",
         ],
     )
@@ -247,6 +499,8 @@ def test_compare_uses_stored_runs_and_reports_paired_coverage(project: Path) -> 
     assert report["status"] == "qualified" and report["qualified"] is True
     assert report["execution_identity"]["classification"] == "fresh_or_unknown_execution_identity"
     assert report["invocation_basis"]["zero_invocations"] is True
+    assert report["regression_gate"]["status"] == "pass"
+    assert report["_cli"]["exit_code"] == 0
     assert _execution_attempt_count(project) == before
 
 

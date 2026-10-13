@@ -1,0 +1,20 @@
+G10: safe, bounded child-run retry
+
+Final retry, interrupted-parent, and changed-test-world regressions:
+  uv run pytest tests/test_cli_run.py -k "retry or interrupted_run_resumes" tests/test_agent_worlds.py::test_retry_refuses_a_changed_test_world_seed
+  7 passed, 9 deselected
+
+Broader affected CLI/run/report/model suite, before the final review-driven parent-state and
+world-seed guards:
+  uv run pytest tests/test_cli_run.py tests/test_cli_runs.py tests/test_reports.py tests/test_models.py
+  99 passed
+
+Final static checks:
+  uv run mypy src/aibench
+  Success: no issues found in 149 source files
+  uv run ruff check src tests plugins
+  All checks passed
+  git diff --check
+  Passed (Git printed only LF-to-CRLF working-copy notices)
+
+Final independent read-only review: no findings (G10-review.md).

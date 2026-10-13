@@ -248,7 +248,7 @@ Failure explanations cite stored case evidence. A proposed next experiment shoul
 
 ### 8. Read, export, rescore, and compare results
 
-Reports are rebuilt from stored records; report generation does not rerun the app or judge. They can be emitted as JSON, Markdown, or static HTML, and include:
+Reports are rebuilt from stored records; report generation does not rerun the app or judge. They can be emitted as JSON, Markdown, static HTML, JUnit XML, or SARIF 2.1.0, and include:
 
 - run, app, policy, dataset, evaluator, and seed provenance;
 - metric values with selected/completed/pass/fail/error/not-applicable/unavailable/pending denominators;
@@ -277,8 +277,8 @@ The same services can be driven from scripts or CI. The main command groups are:
 | Initialize and check a project | init, doctor |
 | Inspect an app/repository or run a small smoke | inspect, app describe, app smoke |
 | Validate data, episodes, and plans | dataset validate, episodes validate, plan validate, plan opportunities |
-| Draft and execute | plan, benchmark, run, resume, runs status |
-| Read run history | runs list/show/status; sessions list/show/delete |
+| Draft and execute | plan, benchmark, run, resume, runs status/retry |
+| Read run history | runs list/show/status/retry; sessions list/show/delete |
 | Score and report | score, evaluate, report, compare |
 | Inspect evaluator availability | evaluators list/describe/plugin; plugins list |
 | Candidate-data lifecycle | dataset candidates generate/list/show/review/verify/promote |

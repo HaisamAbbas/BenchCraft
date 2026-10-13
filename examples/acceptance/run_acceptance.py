@@ -98,7 +98,15 @@ def main() -> int:
         child.wait(timeout=30)
         calls_at_kill = service.total_calls()
         _, listed = _aibench("runs", "list", "--workspace", str(project), "--json")
-        run_id = json.loads(listed)[0]["run_id"]
+        listed_payload = json.loads(listed)
+        listed_runs = (
+            listed_payload.get("data")
+            if isinstance(listed_payload, dict) and "data" in listed_payload
+            else listed_payload
+        )
+        if not isinstance(listed_runs, list) or not listed_runs:
+            raise SystemExit("aibench runs list returned no run records")
+        run_id = listed_runs[0]["run_id"]
         time.sleep(1.0)
         calls_while_stopped = service.total_calls() - calls_at_kill
 
@@ -119,7 +127,7 @@ def main() -> int:
 
         # 4. rescore stored outputs
         calls_before_rescore = service.total_calls()
-        _aibench(
+        rescore_exit_code, _ = _aibench(
             "evaluate",
             run_id,
             "--plan",
@@ -198,6 +206,7 @@ def main() -> int:
             "exit_code": outcome["exit_code"],
         },
         "rescore": {
+            "exit_code": rescore_exit_code,
             "application_calls_during_rescore": rescore_calls,
             "selected": rescored["selected"],
             "passes": rescored["decisions"]["pass"],

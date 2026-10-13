@@ -34,7 +34,7 @@ This differentiation is a hypothesis to validate with users, not an established 
 
 ### Explicit first-version boundaries
 
-The harness–user conversation is multi-turn from MVP. Separately, support evaluation of single-turn text applications and recorded tool activity first. Design extension points for conversations, coding environments, audio, and multimodal inputs, but do not claim support until their execution and evidence contracts exist. A general schema is cheap; trustworthy general evaluation is not.
+The harness–user conversation is multi-turn from MVP. Separately, support evaluation of single-turn text applications and recorded tool activity first. Design extension points for conversations, coding environments, audio, and multimodal inputs, but do not claim support until their execution and evidence contracts exist. The image-first `deepeval.vision_g_eval` contract accepts bounded inline PNG, JPEG, or WebP case images and recorded text or image outputs against a reviewed reference in an isolated evaluator worker. The audio-backed `deepeval.audio_g_eval` contract accepts bounded inline WAV or MP3 case audio and recorded text or audio outputs. Neither contract implies support for video, timestamped voice interactions, or DeepEval's upstream multimodal metrics. A general schema is cheap; trustworthy general evaluation is not.
 
 ## 2. Core concepts
 
@@ -436,7 +436,7 @@ Do not present an LLM's self-reported certainty as calibrated confidence. Repeat
 
 Every metric summary includes total selected, eligible, attempted, completed, error, skipped, and unavailable counts. Report eligible coverage and successful-evaluation coverage against all selected cases. Predeclare completeness gates so losing observations cannot improve a release decision.
 
-Compute means only for metrics whose semantics permit them. Use case-level macro averages by default; label claim-weighted or token-weighted alternatives. For latency show p50/p95 and failure/timeout counts. Separate successful-request latency from censored timeouts and throughput; define concurrency and load conditions.
+Compute means only for metrics whose semantics permit them. For scalar measurements, first average the available completed numeric repetitions within each case, then give each case with a completed value equal weight in the default case-macro mean. A case with more completed repetitions must not outweigh another case. If useful, show the pooled repetition-weighted mean as a separately labelled diagnostic; never present it as the default case mean. Label claim-weighted or token-weighted alternatives. For latency show p50/p95 and failure/timeout counts. Separate successful-request latency from censored timeouts and throughput; define concurrency and load conditions.
 
 For comparisons, pair by case ID/content version and repetition policy. Show differences and uncertainty using a method appropriate to the data, such as paired bootstrap at the independent case or customer/session group level. Report judge repeats separately. Do not treat dependent turns as independent samples. Correctness of a confidence interval depends on sampling assumptions; it does not validate a biased dataset.
 

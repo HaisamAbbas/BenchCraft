@@ -16,7 +16,7 @@ from typing import Any
 
 from aibench.core.hashes import bytes_hash
 from aibench.core.models import RedactionClass
-from aibench.observations.otel import Trace, normalize, parse_otlp
+from aibench.observations.otel import Trace, TraceFormatError, normalize, parse_otlp
 from aibench.services.runs import RunError
 from aibench.storage.artifacts import ArtifactStore, commit_verified_artifact
 from aibench.storage.repositories import Storage
@@ -29,7 +29,7 @@ def import_traces(
     Raises `TraceFormatError` for a file that is not a trace export."""
     if storage.get_run(run_id) is None:
         raise RunError(f"no run committed with run_id={run_id!r}")
-    data = path.read_bytes()
+    data = _read_trace_file(path, artifacts.max_bytes)
     traces = parse_otlp(data)
     import_id = "traces-" + bytes_hash(run_id.encode() + b"\0" + data)[7:23]
     ref = artifacts.write_bytes(
@@ -98,6 +98,17 @@ def import_traces(
     if added:
         storage.append_run_event(run_id, "traces_imported", summary)
     return summary
+
+
+def _read_trace_file(path: Path, max_bytes: int) -> bytes:
+    """Preflight trace size, then bound the actual read in case the file grows meanwhile."""
+    if path.stat().st_size > max_bytes:
+        raise TraceFormatError(f"trace file exceeds the {max_bytes}-byte limit")
+    with path.open("rb") as stream:
+        data = stream.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise TraceFormatError(f"trace file exceeds the {max_bytes}-byte limit")
+    return data
 
 
 def _raw_ids(observation: dict[str, Any]) -> list[str]:

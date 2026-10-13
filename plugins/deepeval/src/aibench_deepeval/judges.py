@@ -16,9 +16,12 @@ never when manifests are listed.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import importlib
 import json
+import math
 import os
 import random
 import re
@@ -90,6 +93,9 @@ _ERROR_TEXT_LIMIT = 300
 # still fails cleanly before the harness's own per-case limit. Errors that repeating cannot
 # fix (a wrong key, a bad request) are never retried.
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+# OpenRouter passes on a failure of the provider it routed to as HTTP 400 "Provider returned
+# error"; the next attempt may go to another provider.
+_UPSTREAM_FAILURE = re.compile(r'"message"\s*:\s*"Provider returned error"')
 # A provider out of credit can answer 429 like a rate limit (Z.ai, error 1113: "Insufficient
 # balance or no resource package. Please recharge."). Waiting cannot fix that: no retry.
 _OUT_OF_CREDIT = re.compile(
@@ -134,6 +140,22 @@ _THINKING_REQUIRED = re.compile(
 
 
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
+_DEEPEVAL_IMAGE_MARKER = re.compile(r"\[DEEPEVAL:IMAGE:([a-f0-9]{32})\]")
+_DEEPEVAL_RESERVED_MARKER = re.compile(r"\[DEEPEVAL:(?:IMAGE|PDF):")
+_MAX_PENDING_CALL_SETTLE_SECONDS = 5.0
+_CANCELLED_CALL_GRACE_SECONDS = 1.0
+_MAX_JUDGE_RESPONSE_BYTES = 1024 * 1024
+_MAX_REPORTED_TOKEN_COUNT = 1_000_000_000
+
+
+def _consume_task_exception(task: asyncio.Task[Any]) -> None:
+    """Retrieve a late exception if a provider task ignores cancellation past its deadline."""
+    if not task.cancelled():
+        task.exception()
+
+
+class _JudgeResponseTooLarge(RuntimeError):
+    """The provider response exceeded the judge's bounded memory allowance."""
 
 
 def _undouble_braces(text: str) -> str:
@@ -285,6 +307,8 @@ class _OpenAICompatible:
         self._retry_until = time.monotonic() + budget
         self.retries = 0
         self.calls = 0
+        self.uncertain_calls = 0
+        self.calls_without_tokens = 0
         self.tokens: dict[str, int] = {}
         # Cost of the calls answered: the provider's own figure when it gives one (OpenRouter's
         # `usage.cost`), else tokens at the prices the config states. One call with neither
@@ -295,6 +319,10 @@ class _OpenAICompatible:
         self.cost_known = True
         self._max_concurrent = int(config.get("max_concurrent_calls", _MAX_CONCURRENT_CALLS))
         self._gate: _Gate | None = None  # made on first use, in the worker's event loop
+        self._inflight_calls: set[asyncio.Task[Any]] = set()
+        self._active_requests: set[asyncio.Task[Any]] = set()
+        self._unaccounted_responses: set[asyncio.Task[Any]] = set()
+        self._cancelled_calls: set[asyncio.Task[Any]] = set()
         super().__init__(model=config["model"])  # type: ignore[call-arg]
 
     def load_model(self, *args: Any, **kwargs: Any) -> Any:
@@ -309,11 +337,21 @@ class _OpenAICompatible:
                 try:
                     response = self._post(client, prompt)
                 except _TRANSIENT:
+                    self.cost_known = False
+                    self.uncertain_calls += 1
+                    self.calls_without_tokens += 1
                     wait = self._wait(attempt, None)
                     if wait is None:
                         raise
                     time.sleep(wait)
                     continue
+                except httpx.RequestError:
+                    # The provider may have received a request before the transport failed.
+                    # Account for uncertain spend, but do not replay outside the retry set.
+                    self.cost_known = False
+                    self.uncertain_calls += 1
+                    self.calls_without_tokens += 1
+                    raise
                 wait = self._wait(attempt, response)
                 if wait is None:
                     try:
@@ -325,28 +363,86 @@ class _OpenAICompatible:
                             raise
                         self.retries += isinstance(exc, _BadJSON)
                         continue
+                self.calls += 1
+                self.calls_without_tokens += 1
+                self.cost_known = False
                 time.sleep(wait)
         raise AssertionError("unreachable: the last attempt returns or raises")
 
     async def a_generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
+        task = asyncio.current_task()
+        if task is not None:
+            self._inflight_calls.add(task)
+            task.add_done_callback(_consume_task_exception)
+        try:
+            return await self._a_generate(prompt, schema, **kwargs)
+        finally:
+            if task is not None:
+                self._inflight_calls.discard(task)
+                self._cancelled_calls.discard(task)
+                self._unaccounted_responses.discard(task)
+
+    def _mark_cancelled_call(self, task: asyncio.Task[Any]) -> None:
+        """Count a cancelled request once even if settlement and HTTP observe it together."""
+        if task in self._cancelled_calls:
+            return
+        self._cancelled_calls.add(task)
+        self.cost_known = False
+        self.uncertain_calls += 1
+        self.calls_without_tokens += 1
+
+    async def _a_generate(self, prompt: str, schema: Any = None, **kwargs: Any) -> Any:
         # A metric asks about each retrieved passage at once (12 to 16 calls for contextual
         # relevancy). Z.ai's glm-4.6 took about 25 s on each and refused every further request
         # while a few were running, so all retries were spent in seconds and the case failed.
         # The judge's calls go through a gate that lets fewer through after a refusal.
         if self._gate is None:
             self._gate = _Gate(self._max_concurrent)
+        request_task = asyncio.current_task()
         async with httpx.AsyncClient(timeout=self._timeouts()) as client:
             for attempt in range(_ATTEMPTS):
                 try:
                     async with self._gate.slot() as slot:
-                        response = await self._apost(client, prompt)
+                        if request_task is not None:
+                            self._active_requests.add(request_task)
+                        try:
+                            response = await self._apost(client, prompt)
+                            if request_task is not None:
+                                self._unaccounted_responses.add(request_task)
+                        except asyncio.CancelledError:
+                            if request_task is not None:
+                                self._mark_cancelled_call(request_task)
+                            raise
+                        except (httpx.RequestError, TimeoutError):
+                            if request_task is not None:
+                                self._unaccounted_responses.add(request_task)
+                            raise
+                        finally:
+                            if request_task is not None:
+                                self._active_requests.discard(request_task)
                         slot.refused = response.status_code == 429
+                except asyncio.CancelledError:
+                    if request_task is not None and request_task in self._unaccounted_responses:
+                        self._mark_cancelled_call(request_task)
+                    raise
                 except _TRANSIENT:
+                    self.cost_known = False
+                    self.uncertain_calls += 1
+                    self.calls_without_tokens += 1
+                    if request_task is not None:
+                        self._unaccounted_responses.discard(request_task)
                     wait = self._wait(attempt, None)
                     if wait is None:
                         raise
                     await asyncio.sleep(wait)
                     continue
+                except httpx.RequestError:
+                    self.cost_known = False
+                    self.uncertain_calls += 1
+                    self.calls_without_tokens += 1
+                    if request_task is not None:
+                        self._unaccounted_responses.discard(request_task)
+                    raise
                 wait = self._wait(attempt, response)
                 if wait is None:
                     try:
@@ -358,13 +454,84 @@ class _OpenAICompatible:
                             raise
                         self.retries += isinstance(exc, _BadJSON)
                         continue
+                    finally:
+                        if request_task is not None:
+                            self._unaccounted_responses.discard(request_task)
+                self.calls += 1
+                self.calls_without_tokens += 1
+                self.cost_known = False
+                if request_task is not None:
+                    self._unaccounted_responses.discard(request_task)
                 await asyncio.sleep(wait)
         raise AssertionError("unreachable: the last attempt returns or raises")
 
+    async def settle_pending_calls(
+        self, timeout_seconds: float = _MAX_PENDING_CALL_SETTLE_SECONDS
+    ) -> bool:
+        """Wait briefly for sibling calls left running when an upstream metric fails.
+
+        `asyncio.gather` propagates the first error without cancelling its other calls. Let
+        those bounded provider requests finish so their usage is reported. If they do not
+        settle promptly, cancel them and make cost unknown because the provider may have
+        processed a request whose usage response was not received.
+        """
+        current = asyncio.current_task()
+        pending = {task for task in self._inflight_calls if task is not current and not task.done()}
+        if not pending:
+            return True
+
+        settle_seconds = min(max(timeout_seconds, 0.0), _MAX_PENDING_CALL_SETTLE_SECONDS)
+        done, pending = await asyncio.wait(pending, timeout=settle_seconds)
+        if pending:
+            for task in pending:
+                if task in self._active_requests or task in self._unaccounted_responses:
+                    self._mark_cancelled_call(task)
+                task.cancel()
+            finished, still_running = await asyncio.wait(
+                pending, timeout=_CANCELLED_CALL_GRACE_SECONDS
+            )
+            done.update(finished)
+            for task in still_running:
+                if task in self._active_requests or task in self._unaccounted_responses:
+                    self._mark_cancelled_call(task)
+                task.add_done_callback(_consume_task_exception)
+        if done:
+            await asyncio.gather(*done, return_exceptions=True)
+        return not pending
+
     async def _apost(self, client: httpx.AsyncClient, prompt: str) -> httpx.Response:
+        async def send() -> httpx.Response:
+            async with client.stream(
+                "POST", self._url, headers=self._headers(), json=self._body(prompt)
+            ) as streamed:
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in streamed.aiter_bytes():
+                    size += len(chunk)
+                    if size > _MAX_JUDGE_RESPONSE_BYTES:
+                        self.calls += 1
+                        self.calls_without_tokens += 1
+                        self.cost_known = False
+                        raise _JudgeResponseTooLarge(
+                            f"judge response exceeded {_MAX_JUDGE_RESPONSE_BYTES} bytes"
+                        )
+                    chunks.append(chunk)
+                headers = [
+                    (name, value)
+                    for name, value in streamed.headers.multi_items()
+                    if name.lower()
+                    not in ("content-encoding", "content-length", "transfer-encoding")
+                ]
+                return httpx.Response(
+                    streamed.status_code,
+                    headers=headers,
+                    content=b"".join(chunks),
+                    request=streamed.request,
+                )
+
         try:
             return await asyncio.wait_for(
-                client.post(self._url, headers=self._headers(), json=self._body(prompt)),
+                send(),
                 self._timeout,
             )
         except TimeoutError as exc:  # asyncio's carries no text: say what ran out
@@ -375,7 +542,11 @@ class _OpenAICompatible:
         success or an error retrying cannot fix), or attempts or time are used up. A
         transient failure has no reply (`response` None)."""
         if response is not None and response.status_code not in _RETRY_STATUSES:
-            return None
+            upstream = response.status_code == 400 and _UPSTREAM_FAILURE.search(
+                response.text[:_ERROR_TEXT_LIMIT]
+            )
+            if not upstream:
+                return None
         if response is not None and _OUT_OF_CREDIT.search(response.text[:_ERROR_TEXT_LIMIT]):
             return None  # an empty balance does not refill by waiting
         last = attempt == _ATTEMPTS - 1
@@ -405,10 +576,19 @@ class _OpenAICompatible:
             "POST", self._url, headers=self._headers(), json=self._body(prompt)
         ) as streamed:
             chunks = []
+            size = 0
             for chunk in streamed.iter_bytes():
                 if time.monotonic() > deadline:
                     raise httpx.ReadTimeout(
                         f"no complete reply within {self._timeout:g} s", request=streamed.request
+                    )
+                size += len(chunk)
+                if size > _MAX_JUDGE_RESPONSE_BYTES:
+                    self.calls += 1
+                    self.calls_without_tokens += 1
+                    self.cost_known = False
+                    raise _JudgeResponseTooLarge(
+                        f"judge response exceeded {_MAX_JUDGE_RESPONSE_BYTES} bytes"
                     )
                 chunks.append(chunk)
             if time.monotonic() > deadline:
@@ -465,22 +645,54 @@ class _OpenAICompatible:
 
     def _add_cost(self, usage: dict[str, Any]) -> None:
         reported = usage.get("cost")
-        if isinstance(reported, (int, float)) and not isinstance(reported, bool):
-            self.cost_usd += float(reported)
+        if reported is not None:
+            valid_reported = isinstance(reported, (int, float)) and not isinstance(reported, bool)
+            try:
+                reported_cost = float(reported) if valid_reported else 0.0
+            except OverflowError:
+                valid_reported = False
+                reported_cost = 0.0
+            total_cost = self.cost_usd + reported_cost
+            if (
+                valid_reported
+                and math.isfinite(reported_cost)
+                and reported_cost >= 0
+                and math.isfinite(total_cost)
+            ):
+                self.cost_usd = total_cost
+            else:
+                self.cost_known = False
             return
         prompt, completion = usage.get("prompt_tokens"), usage.get("completion_tokens")
-        if self._price and isinstance(prompt, int) and isinstance(completion, int):
-            self.cost_usd += (prompt * self._price[0] + completion * self._price[1]) / 1_000_000
+        if (
+            self._price
+            and type(prompt) is int
+            and 0 <= prompt <= _MAX_REPORTED_TOKEN_COUNT
+            and type(completion) is int
+            and 0 <= completion <= _MAX_REPORTED_TOKEN_COUNT
+        ):
+            try:
+                usage_cost = (prompt * self._price[0] + completion * self._price[1]) / 1_000_000
+                total_cost = self.cost_usd + usage_cost
+            except OverflowError:
+                self.cost_known = False
+                return
+            if math.isfinite(usage_cost) and usage_cost >= 0 and math.isfinite(total_cost):
+                self.cost_usd = total_cost
+            else:
+                self.cost_known = False
             return
         self.cost_known = False
 
     def cost(self) -> float | None:
-        """What this judge's answered calls cost in US dollars, or None when unknown."""
+        """What this judge's calls cost in US dollars, or None when any spend is unknown."""
         return self.cost_usd if self.cost_known else None
 
     def _parse(self, response: httpx.Response, schema: Any) -> Any:
         self.calls += 1
         if response.status_code >= 400:
+            self.calls_without_tokens += 1
+            self.cost_known = False
             detail = response.text[:_ERROR_TEXT_LIMIT].replace(self._key, "[redacted]")
             if (
                 response.status_code == 400
@@ -490,11 +702,35 @@ class _OpenAICompatible:
                 self._thinking = "default"  # this model always thinks: stop asking it not to
                 raise _ReasoningRequired(f"judge HTTP 400: {detail}")
             raise RuntimeError(f"judge HTTP {response.status_code}: {detail}")
-        payload = response.json()
-        usage = payload.get("usage") or {}
+        try:
+            payload = response.json()
+        except (ValueError, UnicodeDecodeError):
+            self.calls_without_tokens += 1
+            self.cost_known = False
+            raise
+        if not isinstance(payload, dict):
+            self.calls_without_tokens += 1
+            self.cost_known = False
+            raise TypeError("judge response must be a JSON object")
+        usage_value = payload.get("usage")
+        if usage_value is None:
+            usage: dict[str, Any] = {}
+        elif isinstance(usage_value, dict):
+            usage = usage_value
+        else:
+            usage = {}
+            self.cost_known = False
+        complete_tokens = True
         for ours, theirs in (("input", "prompt_tokens"), ("output", "completion_tokens")):
-            if isinstance(usage.get(theirs), int):
-                self.tokens[ours] = self.tokens.get(ours, 0) + usage[theirs]
+            value = usage.get(theirs)
+            if type(value) is int and 0 <= value <= _MAX_REPORTED_TOKEN_COUNT:
+                self.tokens[ours] = self.tokens.get(ours, 0) + value
+            else:
+                complete_tokens = False
+                if value is not None:
+                    self.cost_known = False
+        if not complete_tokens:
+            self.calls_without_tokens += 1
         self._add_cost(usage)
         choice = payload["choices"][0]
         if choice.get("finish_reason") == "length":
@@ -529,8 +765,87 @@ def _judge_class() -> type:
     return type("OpenAICompatibleJudge", (_OpenAICompatible, DeepEvalBaseLLM), {})
 
 
+class _MultimodalOpenAICompatible(_OpenAICompatible):
+    """OpenAI-compatible judge that sends only registered inline image evidence."""
+
+    def supports_multimodal(self) -> bool:
+        return True
+
+    def _body(self, prompt: str) -> dict[str, Any]:
+        from deepeval.test_case.llm_test_case import _MLLM_IMAGE_REGISTRY, MLLMImage
+
+        parts: list[dict[str, Any]] = []
+        image_bytes = 0
+        image_count = 0
+        markers = list(_DEEPEVAL_IMAGE_MARKER.finditer(prompt))
+        if len(markers) != len(list(_DEEPEVAL_RESERVED_MARKER.finditer(prompt))):
+            raise ValueError("multimodal judge rejects malformed or unregistered image markers")
+
+        last_end = 0
+        for marker in markers:
+            if marker.start() > last_end:
+                parts.append({"type": "text", "text": prompt[last_end : marker.start()]})
+            item = _MLLM_IMAGE_REGISTRY.get(marker.group(1))
+            if (
+                not isinstance(item, MLLMImage)
+                or not isinstance(item.dataBase64, str)
+                or item.url is not None
+                or item.local
+            ):
+                raise ValueError("multimodal judge requires registered inline image data")
+            if item.mimeType not in {"image/png", "image/jpeg", "image/webp"}:
+                raise ValueError("multimodal judge accepts only inline PNG, JPEG, or WebP images")
+            if len(item.dataBase64) > ((4 * 1024 * 1024 + 2) // 3) * 4:
+                raise ValueError("multimodal judge image evidence exceeds its bounded request")
+            try:
+                decoded = base64.b64decode(item.dataBase64, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise ValueError("multimodal judge found invalid registered image data") from exc
+            signatures = {
+                "image/png": decoded.startswith(b"\x89PNG\r\n\x1a\n"),
+                "image/jpeg": decoded.startswith(b"\xff\xd8\xff"),
+                "image/webp": len(decoded) >= 12
+                and decoded.startswith(b"RIFF")
+                and decoded[8:12] == b"WEBP",
+            }
+            if not signatures[item.mimeType]:
+                raise ValueError(
+                    "multimodal judge found image data that does not match its MIME type"
+                )
+            image_bytes += len(decoded)
+            image_count += 1
+            if image_count > 2 or image_bytes > 4 * 1024 * 1024:
+                raise ValueError("multimodal judge image evidence exceeds its bounded request")
+            data_url = f"data:{item.mimeType};base64,{item.dataBase64}"
+            parts.append({"type": "image_url", "image_url": {"url": data_url}})
+            last_end = marker.end()
+        if last_end < len(prompt):
+            parts.append({"type": "text", "text": prompt[last_end:]})
+        if image_count == 0:
+            raise ValueError("multimodal judge prompt contains no registered inline image")
+        body = super()._body(prompt)
+        body["messages"][1]["content"] = parts
+        return body
+
+
+@cache
+def _multimodal_judge_class() -> type:
+    from deepeval.models import DeepEvalBaseLLM
+
+    return type(
+        "OpenAICompatibleMultimodalJudge",
+        (_MultimodalOpenAICompatible, DeepEvalBaseLLM),
+        {},
+    )
+
+
 def openai_compatible_judge(config: dict[str, Any]) -> Any:
     return _judge_class()(config)
+
+
+def openai_compatible_multimodal_judge(config: dict[str, Any]) -> Any:
+    """A multimodal judge for adapter-created inline `MLLMImage` placeholders only."""
+    return _multimodal_judge_class()(config)
 
 
 def build_judge(config: dict[str, Any]) -> Any:
@@ -555,11 +870,13 @@ def report_judge_usage(ctx: Any, metric: Any, judge: Any) -> None:
     (`openai_compatible`) reports them; DeepEval's native models report tokens and cost; a
     custom judge that reports nothing leaves cost unknown."""
     if getattr(judge, "counts_own_usage", False):
+        uncertain_calls = getattr(judge, "uncertain_calls", 0)
         ctx.report_usage(
             provider=judge.get_model_name(),
-            calls=judge.calls,
+            calls=None if uncertain_calls else judge.calls,
             tokens=judge.tokens,
-            cost=judge.cost() if judge.calls else None,
+            cost=judge.cost() if judge.calls or uncertain_calls else None,
+            calls_without_tokens=judge.calls_without_tokens,
         )
         return
     cost = getattr(metric, "evaluation_cost", None)

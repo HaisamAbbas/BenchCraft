@@ -1,0 +1,1252 @@
+{
+  "schema": "benchcraft.audit-implementation/1",
+  "audit_source": "REPORT.md",
+  "author_email": "HaisamAbbas@outlook.com",
+  "branch": "fix/plugin-core-match",
+  "delivery_rule": "Implement one improvement, verify, independently review with review-agent, commit and push; then begin the next improvement.",
+  "status": "active",
+  "current_item": "G22 external evidence: separate-host worker measurement and approved live-provider calibration",
+  "items": [
+    {
+      "id": "F01",
+      "priority": "P1",
+      "title": "Rescoring bypasses runtime budget enforcement",
+      "detail": "Runtime reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "96 initial affected tests passed; 15 final budget tests passed",
+        "38 additional existing report regressions passed",
+        "Mypy: 140 source files passed; Ruff src/tests/plugins passed",
+        "Plan/policy and frozen-plan limits; token/cost/time/quotas/retries/carry/cancel verified",
+        "Unicode hash mismatch identified by review and fixed"
+      ],
+      "review": "evidence/F01-review.md",
+      "commit": "1ac1a021dd436228aaf4a0e7eefe8dcd57b17aea",
+      "pushed": true
+    },
+    {
+      "id": "F02",
+      "priority": "P1",
+      "title": "Carry-forward ignores implementation compatibility and relabels old values",
+      "detail": "Runtime reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Broader carry-forward, budget, rescore, scoring, report, comparison, cache, and registry regression batch: 125 tests passed before the final runtime-identity addition",
+        "Final carry-forward, registry, and cache regression batch: 41 tests passed",
+        "Mypy: 140 source files passed; Ruff src/tests passed",
+        "Plugin package and worker dependency versions, custom import-path contents, and interpreter runtime are included in compatibility/cache identity",
+        "Unknown, incomplete, oversized, or unreadable worker identity disables carry-forward and evaluation-cache reuse",
+        "Final independent review: no findings",
+        "F02 follow-up: orphaned dist-info metadata now produces an unknown dependency identity instead of a TypeError or an empty-set fallback; Python 3.11.16 and 3.12.10 focused regression selections passed (4 each), and the clean Python 3.12.10 full suite passed (1,853 passed, 222 skipped)",
+        "Windows-target Mypy passed for 175 source files and Ruff lint passed for changed files; see implementation/F02-orphaned-metadata.md and implementation/F02-orphaned-metadata-review.md"
+      ],
+      "review": "evidence/F02-review.md",
+      "follow_up_review": "implementation/F02-orphaned-metadata-review.md",
+      "follow_up_implementation": "implementation/F02-orphaned-metadata.md",
+      "commit": "f3e542a4ec7d915f308c98ce15b08e51e577d6ef",
+      "pushed": true
+    },
+    {
+      "id": "F03",
+      "priority": "P1",
+      "title": "String false exposes a hidden fixture to the application",
+      "detail": "CLI end-to-end reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "140 affected tests passed",
+        "Mypy: 140 source files passed",
+        "Ruff src/tests/plugins: passed",
+        "Real application receives only explicit true fixtures; invalid flags dispatch nothing"
+      ],
+      "review": "evidence/F03-review.md",
+      "commit": "e5f6ec0f9ea0a662af2d4e71d04385868e6e1f9e",
+      "pushed": true
+    },
+    {
+      "id": "F04",
+      "priority": "P1",
+      "title": "Resume mixes changed application code under an unchanged identity",
+      "detail": "Engine/recovery reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Relevant resume, cache, experiment, and registry regression batch: 63 passed",
+        "Focused standard-library drift regression: 1 passed",
+        "Mypy: 140 source files passed; Ruff on all changed Python files passed",
+        "Resume identity fingerprints local source, inherited environment, executable/runtime, ordered import roots, stdlib and installed package contents",
+        "Opaque runtime/import paths require an owner environment digest; resume fails before dispatch on tracked drift",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F04-review.md",
+      "commit": "3f04a12aebef15e13de1260f8c53f835d5441c53",
+      "pushed": true
+    },
+    {
+      "id": "F05",
+      "priority": "P1",
+      "title": "Non-finite dataset input is silently changed during execution",
+      "detail": "CLI end-to-end reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "146 affected tests passed",
+        "Mypy: 140 source files passed",
+        "Ruff src/tests/plugins: passed",
+        "Zero dispatch for invalid case numbers; finite storage round trips preserved",
+        "Dataclass gap found during review and fixed before delivery"
+      ],
+      "review": "evidence/F05-review.md",
+      "commit": "299d74cac6077639f380e84d076ab7838b31b5cc",
+      "pushed": true
+    },
+    {
+      "id": "F06",
+      "priority": "P1",
+      "title": "Scoring/rescoring returns success for incomplete or failed evaluation",
+      "detail": "CLI reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "84 focused score/evaluate/rescore/report regressions passed",
+        "48 supplementary outcome, CLI chat, and conversation tests passed after review fix",
+        "Mypy: 140 source files passed; Ruff src/tests passed",
+        "Incomplete evaluator/application work exits 3; valid low scores exit 0; failed gates exit 1",
+        "Slash-command and natural-language headless rescore propagate outcome and exit code"
+      ],
+      "review": "evidence/F06-review.md",
+      "commit": "1c864dac89b5e1d8f28e219c02a8ebad00044940",
+      "pushed": true
+    },
+    {
+      "id": "F07",
+      "priority": "P1",
+      "title": "Rescore CLI shrinks selected denominators and inflates coverage",
+      "detail": "CLI/report reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "13 F07 selection tests and 43 adjacent regressions passed",
+        "Mypy: 140 source files passed; Ruff src/tests/plugins passed",
+        "CLI, session, and stored report agree for missing work, repetitions and changed bindings"
+      ],
+      "review": "evidence/F07-review.md",
+      "commit": "8050013e71befb67c26c6076c13ccfe0ad395efb",
+      "pushed": true
+    },
+    {
+      "id": "F08",
+      "priority": "P2",
+      "title": "Project settings ignore the resolved `project_root`",
+      "detail": "Config/doctor reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Related CLI, project, config, and run regression batch: 44 passed",
+        "Nested project chat/doctor/run policy-containment regression: 1 passed",
+        "Resume, fault-injection, storage-failure, agent-world, and CLI-run regressions: 46 passed",
+        "Mypy: 140 source files passed; Ruff on changed Python files and git diff --check passed",
+        "Final independent review: no actionable findings"
+      ],
+      "review": "evidence/F08-review.md",
+      "commit": "7ed24ef4653a6c3bc0c2486d6820d07f7a412e56",
+      "pushed": true
+    },
+    {
+      "id": "F09",
+      "priority": "P2",
+      "title": "Headless slash commands lose the configured provider",
+      "detail": "CLI reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "CLI chat, candidate-case, and TUI regression suites: 39 passed",
+        "Mypy: 140 source files passed; Ruff on changed Python files and git diff --check passed",
+        "Headless mock-backed case generation recorded the selected model and write_candidates tool request",
+        "Headless plugin preview and interactive ChatApp both received provider-derived judge settings",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F09-review.md",
+      "commit": "3dad5e61a4e87096839423ee566a336853b124b5",
+      "pushed": true
+    },
+    {
+      "id": "F10",
+      "priority": "P2",
+      "title": "Malformed input escapes CLI error handling and breaks JSON output",
+      "detail": "Multiple CLI reproductions",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Broad affected CLI, trace, chat, project, planner, and config batch: 89 passed, 1 skipped",
+        "Final post-review focused malformed-input and JSON error batch: 13 passed",
+        "Ruff passed; mypy found no issues in 141 source files; git diff --check passed",
+        "Malformed OTLP AnyValues, UTF-8 inputs, YAML diagnostics, slash quoting, plan errors, and planner policy errors return handled CLI errors",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F10-review.md",
+      "commit": "e8f4f8b7d759b3b69129f11e2777dec47fcf6c5a",
+      "pushed": true
+    },
+    {
+      "id": "F11",
+      "priority": "P2",
+      "title": "JSON report export omits the redaction applied to other formats",
+      "detail": "CLI/report reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Report, report-review, and conversation-hardening regression batch: 39 passed",
+        "Ruff passed; mypy found no issues in 141 source files; git diff --check passed",
+        "Strings and keys are sanitized before every report renderer; aggregate-key collisions retain their numeric values",
+        "Selected/completed denominators are unchanged",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F11-review.md",
+      "commit": "5a8e458607d63c1af8ab29b5a5e8adf29d3dde1d",
+      "pushed": true
+    },
+    {
+      "id": "F12",
+      "priority": "P2",
+      "title": "Numeric expected judge repeats are undercounted",
+      "detail": "Statistical helper reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Direct judge-statistics suite: 29 passed",
+        "Final focused comparison and statistics regressions after correcting one stale F06 exit assertion: 30 passed",
+        "Ruff passed; mypy found no issues in 141 source files; git diff --check passed",
+        "Numeric and explicit-ID expectations preserve zero, one, and multiple missing repeats; unexpected units remain outside the denominator",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F12-review.md",
+      "commit": "f976b8b8ec1a8896a5a5c984f5b9781a779a4c1d",
+      "pushed": true
+    },
+    {
+      "id": "F13",
+      "priority": "P2",
+      "title": "Standalone reports use repetition-weighted means instead of default case macro means",
+      "detail": "Aggregation reproduction and spec",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Final affected scoring, episode, report, conversation and rescore-TUI batch: 79 passed",
+        "Exact unequal-repeat/pending case reports case-macro 0.5 and repetition-weighted 0.333333; selected/completed/pending remains 4/3/1",
+        "Grouped-episode scoring distinguishes case-macro 1.333333 from repetition-weighted 1.25",
+        "Repeated 1e308 values preserve a finite mean without overflow",
+        "Ruff passed; mypy found no issues in 141 source files; git diff --check passed",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F13-review.md",
+      "commit": "a4b00d3a3308bc7ed471385e0e5decb2bd55d9b3",
+      "pushed": true
+    },
+    {
+      "id": "F14",
+      "priority": "P2",
+      "title": "The current type-check gate fails",
+      "detail": "Mypy execution",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Mypy: 140 source files passed",
+        "Ruff src/tests/plugins: passed",
+        "24 tests passed; 1 case-sensitive-filesystem test skipped"
+      ],
+      "review": "evidence/F14-review.md",
+      "commit": "68f3604d46fb8db2df95b165ccaad501f88d3184",
+      "pushed": true
+    },
+    {
+      "id": "F15",
+      "priority": "P2",
+      "title": "Some advertised size caps act after the whole response is read",
+      "detail": "Mock stream reproduction and source",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Final affected HTTP, trace, connector, and retry integration batch: 69 passed",
+        "Mypy: 142 source files passed; Ruff src/tests passed; git diff --check passed",
+        "Bounded gzip/deflate decoding, encoding negotiation, HTTP body caps, and trace-file size race verified",
+        "SSE LF/CRLF/CR compatibility and oversized retryable status handling verified",
+        "Final independent review: no findings"
+      ],
+      "review": "evidence/F15-review.md",
+      "commit": "d10a7b0ab437022b29043fc5ec0256fc2593e946",
+      "pushed": true
+    },
+    {
+      "id": "F16",
+      "priority": "P2",
+      "title": "Plugin environments retain advisory-affected dependencies",
+      "detail": "Dependency scan; exploitability unproven",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "33 unique affected tests passed; mypy: 142 source files passed; Ruff and workflow YAML checks passed",
+        "uv lock --check passed; pip-audit strict scans passed for the locked core requirements and exact installed core, DeepEval, and Ragas snapshots",
+        "Ragas audit ignores only the two documented, currently unpatched advisory IDs; text-only metric and out-of-scope path guard tests pass",
+        "Independent review found two audit-coverage gaps; strict exact-version snapshots closed both; final review found no remaining findings"
+      ],
+      "review": "evidence/F16-review.md",
+      "commit": "f513e256d9d39f1d0e158f947d0c0bd6ee5e210b",
+      "pushed": true
+    },
+    {
+      "id": "F17",
+      "priority": "P2",
+      "title": "Smoke testing rejects a changed revision of an existing application",
+      "detail": "CLI reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "48 affected CLI, smoke, scoring, and report tests passed; revision-specific regression also passed in isolation",
+        "Mypy: 142 source files passed; Ruff and git diff --check passed",
+        "Two app revisions under one ID remain frozen and reportable; each score uses the exact output-binding contract for its run",
+        "Independent review found no actionable defects"
+      ],
+      "review": "evidence/F17-review.md",
+      "commit": "6ef87fad008af50584102dd90fa27e2bd31a2a8e",
+      "pushed": true
+    },
+    {
+      "id": "F18",
+      "priority": "P2",
+      "title": "Terminal regression tests inherit capability/color flags and report false failures",
+      "detail": "Original and normalized-environment rechecks",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Terminal regression batch: 15 passed; focused capable, fallback, RGB, and NO_COLOR checks: 5 passed",
+        "Mypy: 142 source files passed; Ruff and git diff --check passed",
+        "ConPTY tests explicitly select capable terminal settings; TERM=dumb fallback test processes /help before asserting the composer hint is absent",
+        "NO_COLOR=1 rendering retains text while omitting foreground/background colors; production behavior is unchanged",
+        "Independent review found no remaining findings"
+      ],
+      "review": "evidence/F18-review.md",
+      "commit": "af23a29f781eb07b202b1828ef073972e502ac31",
+      "pushed": true
+    },
+    {
+      "id": "F19",
+      "priority": "P1",
+      "title": "Comparison ignores selected work and uses workspace-wide dataset cases as its denominator",
+      "detail": "Distinct-run CLI reproduction",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "86 affected tests passed",
+        "Mypy: 140 source files passed",
+        "Ruff src/tests/plugins: passed",
+        "CLI limits/samples/predicates/repetitions/partial/rescore selected denominators verified"
+      ],
+      "review": "evidence/F19-review.md",
+      "commit": "974a822f4ad92cc2344e67613d08ddadfa36d48c",
+      "pushed": true
+    },
+    {
+      "id": "F20",
+      "priority": "P2",
+      "title": "Synchronous DeepEval judge leaves cost known after a transport error",
+      "detail": "Supplemental 2026-10-13 implementation review; dispatched MockTransport WriteError reproduced",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "Before the fix, MockTransport dispatched one request and reproduced cost_known=true, cost 0.0, and no uncertain-call accounting",
+        "After the fix, the synchronous WriteError and related async transport regressions passed: 3 passed, 9 deselected",
+        "The report_judge_usage output records unknown cost, calls=null, and one call without tokens; the request is not retried",
+        "Ruff passed for the changed source and test files; Mypy passed for judges.py; git diff --check passed"
+      ],
+      "review": "evidence/F20-review.md",
+      "commit": "115acd225337787e7b0eb3705a53237238814c7d",
+      "pushed": true
+    },
+    {
+      "id": "F21",
+      "priority": "P2",
+      "title": "CLI error tests assume Rich never wraps text or paths",
+      "detail": "Supplemental CI reproduction; Rich whitespace/path wrapping on Windows and ANSI-split dashboard help option with TERM=xterm-256color",
+      "kind": "finding",
+      "status": "delivered",
+      "verification": [
+        "The project-run wrapped-error assertion passed: 1 passed",
+        "Both calibration outside-data-root path variants passed: 2 passed, 22 deselected",
+        "Full local run reproduced the exact wrap-only failure after 841 passed; no CLI exit-code or error behavior change was needed",
+        "git diff --check passed",
+        "Hosted run 38371903480 exposed a second Rich-output false failure: TERM=xterm-256color inserted ANSI styles within the visible --no-open option. The test now decodes terminal styling before matching; all 14 dashboard tests passed on Windows Python 3.11 and 3.12 with CI-like terminal variables. Hosted verification is pending."
+      ],
+      "review": "evidence/F21-review.md",
+      "commit": "b11f23b60528aa2d5bc8453e4c69c09781c81f41",
+      "additional_commits": [
+        "4e205882c88be5dc435ef962f391e46d99c0fa29",
+        "ab85fdfc03ce005432b53ae224474e21d40b5fbc"
+      ],
+      "pushed": true
+    },
+    {
+      "id": "G01",
+      "priority": "P1",
+      "title": "Consistent global configuration and scripting options",
+      "detail": "Implemented. Root CLI options provide --config, --policy, --json, and --non-interactive; defaults propagate to supported nested commands and command-local policy takes precedence. Commands without JSON mode retain documented output. See implementation/G01.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Global-option and project-command regression batch: 22 passed, including all 8 dedicated global-option tests",
+        "Mypy: 143 source files passed; Ruff src/tests/plugins and git diff --check passed",
+        "Root config replaces config discovery; root policy overrides project config/env; local policy overrides root policy",
+        "Root JSON and non-interactive defaults propagate through nested command groups; setup/chat/connect/plugin/benchmark prompt behavior is covered",
+        "Independent review found no actionable defects"
+      ],
+      "review": "evidence/G01-review.md",
+      "commit": "9f9767360464d7cccb8be722743e1950c33e4deb",
+      "pushed": true
+    },
+    {
+      "id": "G02",
+      "priority": "P1",
+      "title": "Stable machine-output API",
+      "detail": "Implemented. JSON commands share a versioned result envelope and structured expected-error document with process-matching exit codes. JSONL progress remains the separate G13 feature. See implementation/G02.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Focused G02 regression batch: 20 passed across output contract, global options, experiment status, planner target gates, and chat JSON paths",
+        "Broader affected CLI and connector batch: 123 passed; the one human-mode policy-details regression was fixed and passed in the focused rerun",
+        "Complete chat CLI suite: 18 passed; independent reviewer focused chat/output/global-options batch: 33 passed",
+        "Ruff src/tests/plugins passed; mypy: 144 source files passed; git diff --check passed",
+        "Root and local JSON errors, output/process exit parity, arrays/scalars, no-ANSI TTY output, WorkspaceTooNew, JSON confirmation refusal, and nonzero planner/experiment outcomes verified"
+      ],
+      "review": "evidence/G02-review.md",
+      "commit": "53de2c51c04b2e31353153709ddacd0f3da0652f",
+      "pushed": true
+    },
+    {
+      "id": "G03",
+      "priority": "P1",
+      "title": "Regression policies for CI",
+      "detail": "Implemented. compare --regression-policy evaluates metric, p95 latency, and observed application-cost tolerances with stable policy hashes and explicit strictness, coverage, and indeterminate outcomes; unknown or incomplete measurements cannot pass. See implementation/G03.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "39 regression-policy, comparison-service, and targeted TUI tests passed; CLI compare policy end-to-end test passed",
+        "Ruff src/tests/plugins passed; mypy checked 145 source files; git diff --check passed",
+        "Higher/lower metric deltas, p95 latency, complete cost, missing measurements, under-coverage precedence, strict tolerance boundaries, and JSON exit parity verified",
+        "Independent review findings on coverage exit precedence, strict thresholds, and human undetermined reasons were fixed; final re-review reported no findings"
+      ],
+      "review": "evidence/G03-review.md",
+      "commit": "40f15c654e9e9a221225a8804160b471866b7620",
+      "pushed": true
+    },
+    {
+      "id": "G04",
+      "priority": "P1",
+      "title": "Complete case-result export",
+      "detail": "Implemented. aibench export RUN_ID writes stored case and repetition evidence as JSONL or CSV, with scoring-pass selection, content withholding, and spreadsheet-formula protection; export does not invoke applications or evaluators. See implementation/G04.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "51 report, report-review, case-export, and project CLI regressions passed",
+        "Final post-review export serializer and quickstart CLI batch: 6 passed; CSV null/empty distinction regression: 5 passed",
+        "Ruff src/tests/plugins passed; mypy checked 147 source files; git diff --check passed",
+        "JSONL and CSV preserve every selected case/repetition and complete execution/metric evidence; content withholding and spreadsheet-safe CSV verified",
+        "Independent review caught partial CSV data loss; fixed and re-reviewed with no remaining findings"
+      ],
+      "review": "evidence/G04-review.md",
+      "commit": "8cbed142b267ab7e7a3994651ec51f11e78dd448",
+      "pushed": true
+    },
+    {
+      "id": "G05",
+      "priority": "P1",
+      "title": "CI report adapters",
+      "detail": "Implemented. Stored run evidence exports as JUnit XML or SARIF 2.1.0 with explicit failed, errored, and skipped mappings and --no-content support; SARIF output was schema-validated. See implementation/G05.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "35 report, report-review, CI adapter, and report CLI regressions passed; final post-review adapter and report CLI batch: 5 passed",
+        "Ruff src/tests/plugins passed; mypy checked 148 source files; git diff --check passed",
+        "JUnit status and content controls verified; SARIF 2.1.0 output validated against the official OASIS Errata 01 JSON schema in both content modes",
+        "Independent review found valid supplementary Unicode was dropped from JUnit XML; fixed and final re-review reported no findings"
+      ],
+      "review": "evidence/G05-review.md",
+      "commit": "c925f1ee697e02f88b2b42afd6e4345f7675db96",
+      "pushed": true
+    },
+    {
+      "id": "G06",
+      "priority": "P1",
+      "title": "Named baselines, tags, and searchable run history",
+      "detail": "Implemented. Run history supports searchable annotations, exact status/tag/baseline filters, pagination, and approved baseline promotion with append-only replacement history. Promotion requires a healthy completed run and passing declared gates. See implementation/G06.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Run catalog, run CLI, migration, and full comparison-service regressions: 63 passed",
+        "Ruff src/tests/plugins and Mypy 149 source files passed; git diff --check passed",
+        "Unicode-aware literal search, pagination, 999-variable metadata batching, empty filters, tags/notes, baseline approval/history, and alias comparisons verified",
+        "Independent review found two P3 boundary/UX issues; both were fixed and final review reported no findings"
+      ],
+      "review": "evidence/G06-review.md",
+      "commit": "77ae48b05da8639f1a307353759ba128bc2de185",
+      "pushed": true
+    },
+    {
+      "id": "G07",
+      "priority": "P1",
+      "title": "Convenient bounded run controls",
+      "detail": "Implemented. run accepts validated one-shot selection, concurrency, retry, timeout, budget, estimate, and cache overrides; --dry-run reports exact selected IDs, hashes, and work counts without persistence or dispatch. Advanced quotas, retry backoff, plugin settings, and gates remain plan-only. See implementation/G07.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "44 focused run-control, CLI, validation, policy, and plan-equivalence tests passed",
+        "Ruff passed for src/tests/plugins; Mypy passed for 149 source files",
+        "CLI run help smoke check and git diff --check passed",
+        "Dry-run verified exact selected IDs/effective hash parity, no database creation, and no dispatch",
+        "Non-finite wall budget rejected at model and CLI boundaries"
+      ],
+      "review": "evidence/G07-review.md",
+      "commit": "a0a84f695d7c59a7b4193e5f81ddff9c43cd090a",
+      "pushed": true
+    },
+    {
+      "id": "G08",
+      "priority": "P1",
+      "title": "Reproducibility controls and provenance",
+      "detail": "Implemented. run --run-seed and bounded application/runtime/dependency/Git provenance are recorded and checked on resume. Ignored files and external resources still require an owner-supplied revision or environment digest. See implementation/G08.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Full affected run, CLI, and recovery batch: 55 passed; final focused Git provenance batch: 6 passed; final runs-show batch: 12 passed",
+        "Ruff passed for src/tests/plugins; Mypy passed for 149 source files; git diff --check passed",
+        "Explicit engine seed, dry-run random-seed preview, output seed, JSON/human provenance, bounded tracked and untracked Git identity, resume drift refusal, and Windows junction fail-closed regression verified",
+        "Independent review found untracked-file drift and Windows junction escape; both fixed and final review reported no findings"
+      ],
+      "review": "evidence/G08-review.md",
+      "commit": "85d379d000b95a1867af4dbcae0f09f3c1718679",
+      "pushed": true
+    },
+    {
+      "id": "G09",
+      "priority": "P1",
+      "title": "Release gates in conversation drafts",
+      "detail": "Implemented. Conversation plan patches can add gates tied to stable metric identities; threshold changes require explicit authorization, and missing targets require explicit removal or retargeting. See implementation/G09.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Affected authorization, model/schema, session-controller, conversation, and quickstart batch: 139 passed; final authorization module after scope fixes: 35 passed",
+        "Ruff passed for src/tests/plugins; Mypy passed for 170 source files; git diff --check passed",
+        "Conversation-authored gates preserve stable metric identities across reorderings and enter executable plans; missing metrics fail closed; threshold, target, retarget, and removal ambiguity regressions pass",
+        "Independent read-only review found authorization edge cases; all were fixed and the final review reported no findings"
+      ],
+      "review": "evidence/G09-review.md",
+      "commit": "f1022032b83f77fdd817b9dbd5de2db117c9c146",
+      "pushed": true
+    },
+    {
+      "id": "G10",
+      "priority": "P2",
+      "title": "Retry only failed application work",
+      "detail": "**Partial.** Engine transient retries and unfinished judge rescoring exist. There is no convenient headless command creating a bounded child run from failed/selected application cases with parent lineage.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Final retry, interrupted-parent, and changed-test-world regressions: 7 passed",
+        "Broader affected CLI/run/report/model suite before final review guards: 99 passed",
+        "Mypy passed for 149 source files; Ruff src/tests/plugins and git diff --check passed",
+        "Automatic retry excludes every case with any final repetition or work-item dispatch risk; explicit retry reports effect-risk cases",
+        "Current project policy, terminal parent state, unchanged dataset and frozen world seed are revalidated; child lineage appears in manifests and reports"
+      ],
+      "review": "evidence/G10-review.md",
+      "commit": "1efb8bcd",
+      "pushed": true
+    },
+    {
+      "id": "G11",
+      "priority": "P2",
+      "title": "Headless run supervision",
+      "detail": "**Deferred/partial.** Status exists; live pause/stop controls belong to the owning terminal/session. Detached execution and durable external pause/resume/cancel requests are absent.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Affected run, CLI, migration, and engine regression batch: 86 passed",
+        "Focused supervision regressions: 6 passed",
+        "Ruff passed; mypy passed for 149 source files; git diff --check passed",
+        "Final independent review: no remaining actionable findings"
+      ],
+      "review": "evidence/G11-review.md",
+      "commit": "250a71fc",
+      "pushed": true
+    },
+    {
+      "id": "G12",
+      "priority": "P2",
+      "title": "Configuration management",
+      "detail": "**Partial.** Config files, setup, and doctor exist. There is no `config show/validate/set` workflow showing effective values and source precedence with secrets redacted, or named provider profiles.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Affected configuration, setup, planning, project, and chat regressions: 102 passed",
+        "Isolated ConPTY CLI regressions: 5 passed; run CLI regressions: 15 passed",
+        "Ruff passed; mypy passed for 150 source files; git diff --check passed",
+        "Final independent review: no remaining actionable findings"
+      ],
+      "review": "evidence/G12-review.md",
+      "commit": "35f15507",
+      "pushed": true
+    },
+    {
+      "id": "G13",
+      "priority": "P2",
+      "title": "Structured progress and durable logs",
+      "detail": "**Partial.** Terminal progress and persisted run events exist. Scripts lack a consistent JSONL event stream, log-file selection, verbosity/quiet controls, and documented noninteractive logging contract.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "56 focused CLI, output-contract, global-option, and supervision tests passed",
+        "Ruff src/tests/plugins passed; mypy passed for 151 source files",
+        "CLI help checks passed; runs events exposes the signed 64-bit cursor bound",
+        "Two initial review findings and the preflight handoff race were fixed; final independent review found no remaining actionable findings"
+      ],
+      "review": "evidence/G13-review.md",
+      "commit": "599b35e860d02a10f4898c228a8ac3caaf9dce07",
+      "pushed": true
+    },
+    {
+      "id": "G14",
+      "priority": "P2",
+      "title": "Warmup and measurement phases",
+      "detail": "**Missing; performance extension.** No bounded warmup count or exclusion phase before latency sampling. Warmup effects and spend need to be accounted explicitly.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "226 targeted tests passed across engine, recovery, CLI, reports, comparison, export, planning, and caches",
+        "Ruff src/tests passed; mypy passed for 152 source files; git diff --check passed",
+        "Warmup phase order, retries, cache bypass, budget accounting, unknown-effect recovery, comparison cost, and legacy plan hashes covered",
+        "Final independent review found no remaining actionable findings"
+      ],
+      "review": "evidence/G14-review.md",
+      "commit": "fc84d184",
+      "pushed": true
+    },
+    {
+      "id": "G15",
+      "priority": "P2",
+      "title": "Richer performance statistics",
+      "detail": "**Implemented.** Reports and comparisons expose p50/p75/p95/p99, mean and dispersion, retry-inclusive latency, successful-request throughput, and distinct warmup measurements; incomplete timing and unknown phase attribution stay explicit.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "uv run pytest tests/test_performance.py tests/test_reports.py tests/test_comparison_service.py tests/test_comparison_statistics.py tests/test_tui.py -q — 102 passed",
+        "uv run pytest tests/test_performance.py tests/test_reports.py -q — 25 passed after final report-rendering changes",
+        "Ruff src/tests passed; mypy passed for 153 source files; git diff --check passed",
+        "Recovery regressions cover phase-neutral dispatches, incomplete retry-inclusive timing, throughput, and human-readable reporting"
+      ],
+      "review": "evidence/G15-review.md",
+      "commit": "3ea1c961",
+      "pushed": true
+    },
+    {
+      "id": "G16",
+      "priority": "P2",
+      "title": "Streaming model performance",
+      "detail": "**Implemented.** Opt-in OpenAI-compatible SSE benchmarking records TTFT, receive-time inter-content-delta intervals, usage-based output tokens/sec, and completion integrity; measured and warmup reports/comparisons expose the summaries. See implementation/G16.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Independent review: 31 streaming and transport tests passed, 4 skipped; no remaining actionable findings",
+        "Focused parser, runner, report, comparison, and TUI regressions: 18 passed",
+        "Ruff src/tests and the local streaming fixture passed; mypy passed for 154 source files; git diff --check passed",
+        "Full suite collection found 1,646 tests; the broad run was stopped at 4% after several minutes and is not reported as passing"
+      ],
+      "review": "evidence/G16-review.md",
+      "commit": "6b163b9f",
+      "pushed": true
+    },
+    {
+      "id": "G17",
+      "priority": "P2",
+      "title": "Segment/slice analysis",
+      "detail": "**Implemented.** Reports independently summarize application outcomes, latency/streaming, warmups, and metric decisions by group_id or nested case metadata. Output is bounded and respects --no-content; JUnit/SARIF reject the unsupported option. See implementation/G17.md.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "59 report, report-regression, and TUI tests passed",
+        "Repeated CLI/TUI grouping, no-content privacy, sanitized and literal-marker labels, JUnit/SARIF rejection, and 101-category coalescing verified",
+        "Ruff src/tests and changed-file formatting passed; mypy passed for 155 source files; git diff --check passed",
+        "Final independent review: no remaining actionable findings"
+      ],
+      "review": "evidence/G17-review.md",
+      "commit": "9b064181",
+      "pushed": true
+    },
+    {
+      "id": "G18",
+      "priority": "P2",
+      "title": "Dataset utilities and versioned suites",
+      "detail": "**Delivered.** Validation, candidate review/promotion, episodes, content hashes, schema-aware import, bounded JSONL diff, identity-based deduplication, deterministic grouped splitting, and an immutable named suite catalog exist. Optional Parquet import requires explicit trust because PyArrow decompresses pages before row-size checks. Suites are workspace-local, integrity-checked, and can be pinned to runs by NAME@VERSION.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Importer delivery: 81 focused dataset, discovery, finite-number, and episode tests passed; 1 skipped",
+        "Ruff and formatting passed; mypy passed for 156 source files; uv lock --check and git diff --check passed",
+        "CLI help confirms repeatable field mapping and explicit --trust-parquet acknowledgement; real optional PyArrow import and oversized-row rejection covered",
+        "Diff delivery: 106 focused dataset, ingest, discovery, finite-number, and episode tests passed; 1 skipped",
+        "Ruff and formatting passed; mypy passed for 157 source files; git diff --check passed",
+        "Diff compares normalized explicit IDs, bounds records and detail output, and returns stable JSON errors and fail-on-change exit status",
+        "Deduplication delivery: 114 focused dataset, ingest, discovery, finite-number, and episode tests passed; 1 skipped",
+        "Ruff, formatting, and git diff --check passed; Mypy passed for 158 source files",
+        "Identical normalized duplicates are removed; conflicting IDs fail by default or require an explicit first/last policy; warnings remain visible",
+        "Final independent reviews found no remaining actionable findings for importer, diff, deduplication, and deterministic grouped splitting",
+        "Deterministic split delivery: 122 focused dataset/ingest/finite-number/discovery/episode tests passed; 2 skipped",
+        "Ruff and formatting passed; Mypy passed for 158 source files; git diff --check passed",
+        "Split guarantees at least one group per active ratio when possible, rejects too few independent groups, preserves group IDs, and publishes complete output atomically without replacing a racing destination",
+        "Cleanup and path-resolution failures return bounded JSON errors with retained staging paths; final independent review found no remaining actionable findings",
+        "Named suite catalog: 11 focused tests passed, 1 skipped because file-symlink creation was unavailable; 75 suite, run, storage, migration, and CLI regression tests passed, 1 skipped",
+        "Ruff on src/aibench and tests, formatting, Mypy on 160 source files, and git diff --check passed",
+        "Version snapshots use cross-process per-version locking, portable collision-safe filenames, orphan recovery, and no-follow lock file opens; run selection verifies content before dispatch",
+        "Final independent review found no actionable findings"
+      ],
+      "review": "evidence/G18-suites-review.md",
+      "commit": "cf2efc2f6c8e927d84c66d684793720bec7ac8db",
+      "pushed": true,
+      "subrequirements": [
+        {
+          "name": "schema-aware CSV, JSON, JSONL, and optional Parquet import",
+          "status": "delivered",
+          "commit": "248098964c286e1e2413a3afbb173a132f7e9901",
+          "pushed": true
+        },
+        {
+          "name": "dataset diff",
+          "status": "delivered",
+          "commit": "777ca5d52312d10925b1218354ebb69a80c44215",
+          "pushed": true
+        },
+        {
+          "name": "deduplication",
+          "status": "delivered",
+          "commit": "0ce569f6e8d2692b537965e0528b641123aa8f5d",
+          "pushed": true
+        },
+        {
+          "name": "deterministic grouped splitting",
+          "status": "delivered",
+          "commit": "bacd1d029df073ee73f7fbd0bd162bdb4aac9a1c",
+          "pushed": true
+        },
+        {
+          "name": "named suite catalog",
+          "status": "delivered",
+          "commit": "cf2efc2f6c8e927d84c66d684793720bec7ac8db",
+          "pushed": true
+        }
+      ]
+    },
+    {
+      "id": "G19",
+      "priority": "P2",
+      "title": "Workspace maintenance and portability",
+      "detail": "**Implemented.** Workspace GC, verified backup/restore and backup repair, integrity checks, portable run/session bundles, retention/usage, and absolute-path migration are delivered. Path migration previews by default and updates only workspace-rooted mutable references; external absolute paths, frozen plans, and immutable run/experiment history remain intact. It refuses moves that would change frozen-plan application or dataset resolution.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Workspace/artifact focused tests: 59 passed, 5 skipped on Windows; skips cover link creation unavailable in this environment",
+        "Mypy passed for 161 source files; Ruff lint and formatting passed; git diff --check passed",
+        "Independent G19 garbage-collection review reported no findings; see evidence/G19-gc-review.md",
+        "Workspace backup/restore CLI tests on Windows: 35 passed, 10 skipped; POSIX publication tests were skipped",
+        "Mypy: 162 source files passed; Ruff src/tests and git diff --check passed",
+        "Independent final review of backup/restore reported no actionable findings; see evidence/G19-backup-review.md",
+        "Adjacent storage batch: 45 passed, 2 skipped, 1 failed, 1 deselected; the resume identity-drift failure passed when rerun alone after commit (1 passed), and the excluded process-lock test passed alone",
+        "Full repository pytest run stopped at 4% after several minutes and was not completed",
+        "Terminal-run bundle and CLI regression batch: 90 passed, 10 skipped",
+        "Ruff lint/format and Mypy passed for changed Python modules; final independent review reported no findings; see evidence/G19-run-bundles-review.md",
+        "Portable session bundles: 19 focused tests passed and 3 POSIX-only race tests skipped on Windows; broad session/run/storage/chat batch: 111 passed, 3 skipped, and 1 unrelated recovery test deselected",
+        "Ruff lint/format, Mypy, and git diff --check passed; independent review reported no findings; POSIX ancestor-chain runtime tests remain unexecuted locally; see evidence/G19-session-bundles-review.md",
+        "Post-delivery ZIP entry-count preflight regression: 1 focused test passed; independent hotfix review found no findings; correction commit aa47f821 pushed",
+        "Workspace integrity/repair and artifact storage on Windows: 86 passed, 13 POSIX-only skips; artifact-storage file rerun: 31 passed, 3 skipped",
+        "Ruff lint/format, Mypy for changed storage and CLI modules, and git diff --check passed",
+        "Independent G19.5 review found and led to a fix for a concurrent-publication rollback race, then reported no further findings; see evidence/G19-integrity-check-review.md",
+        "G19.6 retention policy and read-only usage on Windows: combined workspace, integrity, and artifact batch passed (99 passed, 16 skipped); focused retention, usage, and extended-path tests passed (12 passed, 3 skipped)",
+        "Ruff lint/format, Mypy for three changed Python modules, and git diff --check passed; independent review found no remaining code findings after the extended-path fix; POSIX runtime cases were skipped on this Windows host; see implementation/G19-retention-review.md",
+        "G19.7 Windows migration and adjacent workspace/storage suite: 136 passed, 23 skipped; skips are POSIX-only runtime probes and platform-dependent cases",
+        "Ruff src/tests, Mypy (168 source files), changed-file formatting, and git diff --check passed",
+        "Independent final review found no remaining findings; see implementation/G19-path-migration-review.md"
+      ],
+      "review": "implementation/G19-path-migration-review.md",
+      "commit": "96f11e3a",
+      "pushed": true,
+      "subrequirements": [
+        {
+          "name": "safe artifact garbage collection CLI",
+          "status": "delivered",
+          "commit": "739abfe1a41f2d76313b4d475b830f1791941f1c",
+          "pushed": true
+        },
+        {
+          "name": "workspace backup and restore",
+          "status": "delivered",
+          "commit": "c55fa221",
+          "pushed": true,
+          "review": "evidence/G19-backup-review.md"
+        },
+        {
+          "name": "portable terminal-run bundles",
+          "status": "delivered",
+          "commit": "902a235d3f03b07ad86193ec5e9bd1a194e8d46f",
+          "pushed": true,
+          "review": "evidence/G19-run-bundles-review.md"
+        },
+        {
+          "name": "portable session bundles",
+          "status": "delivered",
+          "commit": "a6bb8ac8229e51be864eac0cd2f7be306950ac6b",
+          "pushed": true,
+          "review": "evidence/G19-session-bundles-review.md"
+        },
+        {
+          "name": "workspace integrity checks and repair",
+          "status": "delivered",
+          "commit": "2bed73a4",
+          "pushed": true,
+          "review": "evidence/G19-integrity-check-review.md"
+        },
+        {
+          "name": "retention policy and storage usage",
+          "status": "delivered",
+          "commit": "4c360163",
+          "pushed": true,
+          "review": "implementation/G19-retention-review.md"
+        },
+        {
+          "name": "absolute-path migration support",
+          "status": "delivered",
+          "commit": "96f11e3a",
+          "pushed": true,
+          "review": "implementation/G19-path-migration-review.md"
+        }
+      ]
+    },
+    {
+      "id": "G20",
+      "priority": "P2",
+      "title": "Judge repeat/calibration workflow",
+      "detail": "**Delivered.** G20.1 adds configurable repeat observations, complete case evidence and usage accounting. G20.2 adds policy-gated live model-judge calibration with reviewed labels, isolated plugin workers, data-root and evaluator-call checks, bounded invocations/timeouts, and usage reporting; unsupported policy ceilings fail closed. Calibration report v3 adds paired, same-sample image-judge comparison with bounded decision and score-difference reporting; no real provider equivalence is claimed. F12 was already delivered.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Calibration, engine policy and worker isolation batch: 55 passed, 1 skipped; Windows could not create the interpreter symlink, and escaping calibration-file targets were exercised with a resolved-path simulation",
+        "Ruff lint/format and Mypy for the changed CLI, calibration service and execution policy passed; git diff --check passed",
+        "Live CLI completed against a local fake evaluator in an isolated worker; no paid provider was contacted",
+        "Final independent review found no findings; see implementation/G20-live-calibration-review.md"
+      ],
+      "review": "implementation/G20-live-calibration-review.md",
+      "commit": "59c7fd85e3ffe474aa61cd113ff4e3cf0551d1ec",
+      "pushed": true,
+      "subrequirements": [
+        {
+          "name": "repeat measurements, full case evidence and usage reporting",
+          "status": "delivered",
+          "verification": [
+            "9 tests passed: repeats, evidence mapping, model opt-in/cap, missing evidence, malformed sizes and evaluator failures",
+            "Ruff check/format and Mypy passed for changed files"
+          ],
+          "review": "implementation/G20-calibration-core-review.md",
+          "commit": "e1236a7757db14eed1eae7d1470808d3d270ed0d",
+          "pushed": true
+        },
+        {
+          "name": "policy-gated live model-judge calibration CLI",
+          "status": "delivered",
+          "commit": "59c7fd85e3ffe474aa61cd113ff4e3cf0551d1ec",
+          "pushed": true,
+          "review": "implementation/G20-live-calibration-review.md"
+        }
+      ]
+    },
+    {
+      "id": "G21",
+      "priority": "P2",
+      "title": "Platform and release confidence",
+      "detail": "**Delivered.** Hosted run 38145775882 passed all 18 jobs on source commit af918898e8a7d14bff2b861c6b3140d3185844d9. The prior completed matrix run 38367136426 on 9611ede768725abf968d1c4914ce911f4f20e719 passed the six clean-wheel release checks and six real-package DeepEval/Ragas contract jobs, but all six core pytest jobs failed. All six per-platform JUnit artifacts uploaded with seven-day retention; their contents were inaccessible in the unauthenticated review session, and visible annotations remained generic. Hosted run 38369979240 identified the recurring dashboard CLI test with AssertionError across the core jobs. Follow-up run 38371903480 verified bounded source-location annotations and pinpointed tests/test_cli_dashboard.py:532 in all six core jobs. Local reproduction isolated the cause: TERM=xterm-256color makes Rich place ANSI style codes within the visible --no-open label, so raw substring matching fails. The test now decodes the rendered output with Rich's ANSI decoder; the full dashboard module passes on Windows Python 3.11 and 3.12 with CI-like terminal variables. Hosted run 38376283063 passed 17/18 jobs but had one Windows Python 3.11 failure at tests/test_cli_run.py:130; the restricted JUnit report leaves its cause unconfirmed. A local replay passed the exact test, all 18 tests in its module, and the 277-item suite prefix (272 passed, 5 skipped). Follow-up run 38377296862 on source commit 4be8b455 passed all 18 jobs, including all six core OS/Python suites; the current hosted matrix is green at that commit. See implementation/G21-platform-readiness.md. No live provider, external pilot, or release authorization is implied.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Hosted Actions run 38145775882 on af918898e8a7d14bff2b861c6b3140d3185844d9 passed all 18 jobs: six platform/version pytest suites, six clean-wheel release checks, and six real-package DeepEval/Ragas contract jobs; see implementation/G21-platform-readiness.md",
+        "Core suites: Ubuntu 1,745 passed / 187 skipped per Python version; Windows 1,742 / 190; macOS 1,743 / 189",
+        "Latest hosted run 38308978546 on d8fda15389e1ddb58a5cdc4c4f9ca6e150dafd65: all six clean-wheel checks and six plugin contract jobs passed; all six core jobs passed setup, dependency audits, Ruff, and Mypy but failed at Tests (pytest). Annotations expose only generic exit code 1, and the full source-commit suite has not completed locally.",
+        "Follow-up run 38351148266 on e3df04568ffc08d082b7283c2cc190bb20576ab6 repeated the same matrix outcome: all six core jobs failed at Tests (pytest), and all six release checks plus six plugin contract jobs passed. Failure annotations again provide only generic exit code 1.",
+        "Latest run 38355637698 on 2f586c7bd710d35dc73b0d959db6a1c6c334a291 again completed with all six core jobs failing at Tests (pytest), while all six release checks and six plugin contract jobs passed; annotations still provide only generic exit code 1.",
+        "Hosted run 38365229012 on a686cf9b5a7b0011a695698913526633fd300ba2 repeated the six core pytest failures with all plugin and release jobs passing. Public annotations exposed only exit code 1. The next core matrix publishes per-platform JUnit artifacts (seven-day retention); local workflow parsing and JUnit generation smoke checks passed.",
+        "Hosted run 38367136426 on 9611ede768725abf968d1c4914ce911f4f20e719 uploaded all six JUnit artifacts. All six core pytest jobs failed; the public status page still exposed only generic exit-code annotations. The report contents were inaccessible in this unauthenticated session. The content-withheld annotation follow-up passed ten local tests, Ruff lint/format checks, Mypy for the helper, and workflow/YAML validation; hosted verification is pending.",
+        "Hosted run 38369979240 on the bounded test-ID annotation revision failed with all six core jobs identifying tests.test_cli_dashboard::test_dashboard_cli_requires_existing_workspace_and_exposes_help as AssertionError.",
+        "Hosted run 38371903480 on 5287cb0df317908784845096c42191712b4eabd4 completed with six core pytest failures; every bounded annotation linked tests/test_cli_dashboard.py:532, the assertion that expects --no-open in captured help output. This verifies the source-location annotation in hosted CI.",
+        "Local reproduction with TERM=xterm-256color showed ANSI style sequences inserted inside the visible --no-open option, making the literal substring assertion fail. The dashboard test now decodes Rich-formatted output before checking visible text. All 14 dashboard tests passed on Windows with Python 3.11 and 3.12 under CI=true, GITHUB_ACTIONS=true, TERM=xterm-256color, and COLUMNS=80. Hosted run 38376283063 had one Windows Python 3.11 failure at tests/test_cli_run.py:130; the restricted JUnit report did not expose assertion values. The exact test, all 18 module tests, and the 277-item suite prefix passed locally on Windows Python 3.11.16 (272 passed, 5 skipped). Follow-up run 38377296862 passed all 18 hosted jobs on source containing this correction.",
+        "Focused local Windows 11 / Python 3.12.10 verification on current source: DeepEval metric module 45 passed, 1 skipped; judge-calibration module 23 passed, 1 skipped. These focused runs do not replace the full hosted matrix.",
+        "CI-style Windows 11 / Python 3.11.16 full-suite reproduction passed 355 tests and skipped 13 before one failure in workspace repair (Access denied opening the preview .aibench directory as an archive); that test passed alone and in 12 isolated repeats, and a traced full-suite replay passed it before interruption at 24%. Root cause is unconfirmed; the full suite did not complete.",
+        "Local Ruff, Mypy for 168 source files, and focused workspace/integrity/quickstart regressions passed; independent review found no code findings"
+      ],
+      "review": "implementation/G21-platform-readiness-review.md",
+      "follow_up_review": "implementation/G21-pytest-failure-annotations-review.md",
+      "follow_up_implementation": "implementation/G21-platform-readiness.md",
+      "commit": "af918898e8a7d14bff2b861c6b3140d3185844d9",
+      "pushed": true
+    },
+    {
+      "id": "G22",
+      "priority": "P3",
+      "title": "Advanced scale, load, and modality workflows",
+      "detail": "**Partial.** G22.1 through G22.18 are implemented and locally verified. G22.3 has reproducible one-host subprocess measurements and an opt-in HTTPS probe that waits for an operator-started worker; real cross-host throughput/failure-rate evidence remains pending until a separate host is available. G22.5/G22.8 support bounded inline image input and generated-image output; G22.9 scores text or audio outputs against bounded inline WAV/MP3 input. G22.10 scores timestamped sampled PNG/JPEG/WebP frames, with a 512 KiB imported case-sequence cap and 1 MiB per-frame / 4 MiB generated-output sequence caps; raw video decoding and continuous motion remain unsupported. G22.11 adds seven local voice metrics over stored episodes with inline PCM WAV, host-side 50-turn/7 MiB bounds, and a responsiveness proxy limited to missing assistant audio; it does not capture calls or measure live latency. G22.12 adds DeepEval upstream image-coherence, image-helpfulness, image-reference, text-to-image, and image-editing metrics over bounded inline images with a configured vision judge; retry token completeness is preserved through worker and report accounting. Paired image reports do not establish provider equivalence. The dashboard defaults to loopback and excludes answer text; G22.17 adds remote binding only with TLS 1.2 or newer and an environment-sourced minimum-length bearer token. G22.13 adds pinned DeepEval MCP-Use, MCP Task Completion, and multi-turn MCP-Use scoring over a frozen server inventory and recorded successful MCP tool events. Explicit typed MCP events count by default; untyped events require an MCP-only opt-in, and episode scoring fails closed on missing or malformed telemetry. No live MCP server or provider was contacted. Resource and prompt execution events remain unsupported because stored events do not distinguish them. G22.14 adds bounded, text-only provider-transcription accuracy over stored episodes using pinned DeepEval 4.2.5 G-Eval. Every turn needs a provider transcript; each transcript is capped at 16,000 characters and total text at 1 MiB. It does not submit audio or implement barge-in joining. The dedicated upstream beta class is absent from the pinned package. G22.15 adds local deterministic DER over recorded speaker annotations but does not diarize audio. G22.16 adds deterministic local case-level WER/CER, with 16,000-character and four-million-alignment-cell caps; reports average utterance rates, raw counts allow corpus recomputation, and bindings require explicit lower-is-better thresholds. Upstream multimodal audio metrics remain unsupported. G22.18 streams plan selection, avoids full work-graph allocation, and bounds the resumed-run case-body cache to 512 items / 4 MiB serialized JSON; all-selected compiled case snapshots still scale with the selected dataset. The opt-in 1,000-case interrupt/resume workload used 13.2 MiB traced Python allocations in 90.6 seconds; the audit sample used 17.1 MiB in 64.6 seconds, so the local memory result improved with higher elapsed time.",
+      "kind": "feature",
+      "status": "pending",
+      "verification": [],
+      "review": null,
+      "commit": null,
+      "pushed": false,
+      "subrequirements": [
+        {
+          "name": "bounded, idempotent batches for durable run work-item creation",
+          "status": "delivered",
+          "verification": [
+            "35 repository tests and 83 repository/engine/CLI integration tests passed",
+            "File-backed subprocess-kill recovery test: 1 passed; no partial rows survived an open-batch process termination",
+            "Expanded regression batch: 91 passed; one existing example-plan Git-identity assertion failed once in the combined run and passed when rerun alone",
+            "Full Windows Python 3.11.16 suite in an isolated locked environment: 1,887 passed, 47 skipped in 1,841.82 seconds; local plugin environments were present, so some clean-CI skips ran locally",
+            "Hosted run 38148411461: 17/18 jobs passed; Windows Python 3.11 full pytest step failed without an accessible test-level log; full local run did not reproduce it, hosted rerun pending",
+            "Ruff and Mypy for 168 source files passed",
+            "File-backed Windows 11 / Python 3.12.10 microbenchmark: 1,000 rows in 0.602 s with one transaction per row vs 0.022 s in batches of 500; isolated storage result, not an end-to-end capacity claim"
+          ],
+          "review": "implementation/G22.1-work-item-batches-review.md",
+          "implementation": "implementation/G22.1-work-item-batches.md",
+          "commit": "62098fd520a54600feb265f54c4cb8c398cd1fc7",
+          "pushed": true
+        },
+        {
+          "name": "bounded in-memory work queue",
+          "status": "delivered",
+          "verification": [
+            "Engine, engine-fault, and engine-review regression suites: 59 passed",
+            "Workspace CLI/restore/repair suite: 55 passed, 16 platform-specific skips",
+            "Storage repository, recovery, storage-failure, and CLI-run suite: 72 passed",
+            "Ruff passed; Mypy on the Windows target passed for all 168 source files",
+            "Scheduler pages work in groups of 500; queue, held, delayed, and in-flight evaluation reservations and retry buffers are capped at 1,000; per-case streaming throughput and end-to-end memory remain unmeasured"
+          ],
+          "review": "implementation/G22.2-queue-paging-review.md",
+          "implementation": "implementation/G22.2-queue-paging.md",
+          "commit": "d5c7ac41",
+          "pushed": true
+        },
+        {
+          "name": "distributed workers",
+          "status": "delivered",
+          "architecture_decision": "Workers connect through a coordinator API and do not share a mounted SQLite workspace.",
+          "verification": [
+            "12 focused distributed-worker tests passed, covering authenticated dispatch, full-run persistence, effect-state and lease safety, reconnect/loss handling, bounded results, CLI configuration, and missing-token refusal",
+            "Combined distributed-worker and run-CLI regression batch: 24 passed",
+            "Engine, engine-fault, and storage repository regressions: 59 passed",
+            "Ruff and git diff --check passed; Windows-target Mypy passed for all 172 source files",
+            "A separate-process Windows 11 / Python 3.12.10 loopback probe completed 100 calls at 27.22 invocations/s with capacity 1 and 72.44/s with capacity 4 on a 20 ms HTTP fixture; both had zero failures and observed app concurrency matched configured capacity",
+            "An 8-call quota probe recorded one success and seven HTTP 429 failures at a 0.01 requests/s fixture limit; reproducible commands and raw JSON evidence are in docs/engineering/evidence/22 and scripts/measure_distributed_workers.py",
+            "Six regression tests in tests/test_distributed_measurement.py plus 12 distributed-worker tests passed (18 total); they cover real CLI-worker invocation, finite-input refusal, setup-failure cleanup, and an exited-worker termination race",
+            "The probe enforces finite bounded fixture inputs and a 10-minute default measurement deadline (60-minute maximum); bounded process/coordinator/server cleanup may add up to about 60 seconds",
+            "Cross-host latency, TLS deployment, and external-network throughput/failure rates remain unmeasured; the probe calls CoordinatorRunner directly and excludes SQLite commits, evaluation, and full CLI run time; API v1 supports reset mode none only"
+          ],
+          "review": "implementation/G22.3-distributed-workers-review.md",
+          "measurement_review": "implementation/G22.3-measurement-review.md",
+          "implementation": "implementation/G22.3-distributed-workers.md",
+          "commit": "427a7c6659060c27d2dd0fd7c980031ff2f86c5a",
+          "additional_commits": [
+            "2016e9a0"
+          ],
+          "pushed": true
+        },
+        {
+          "name": "open-loop and ramping load profiles",
+          "status": "delivered",
+          "verification": [
+            "Stable focused profile, plan, CLI, engine recovery/concurrency, and report batch: 28 passed",
+            "Windows-target Mypy passed for 173 source files; Ruff on src/tests and git diff --check passed",
+            "Fixed-rate and integrated-linear-ramp schedules, CLI/dry-run overrides, cache rejection, and legacy frozen-plan hashes verified",
+            "Warmup barrier, retry exclusion, bounded concurrency back-pressure, pause clock, runner-handoff lag report, and rendered Markdown verified",
+            "An earlier combined batch reported 72 passed and four failures while files changed concurrently; three application Git-identity failures were caused by the changing worktree, and the legacy-report rendering issue was fixed; all four exact tests passed in the stable rerun",
+            "Remote worker queue latency, TLS deployment, cross-host throughput, and application-observed start time remain unmeasured"
+          ],
+          "review": "implementation/G22.4-open-loop-ramping-review.md",
+          "implementation": "implementation/G22.4-open-loop-ramping.md",
+          "commit": "325780b7f39481422c3bceb60c80ee15c7ec875d",
+          "pushed": true
+        },
+        {
+          "name": "image-first vision evaluator",
+          "status": "delivered",
+          "implementation": "implementation/G22.5-image-vision.md",
+          "verification": [
+            "Five focused vision and plugin-discovery tests passed against the real isolated DeepEval plugin worker and a local OpenAI-compatible stub",
+            "Verified image signature and size checks, URL/path refusal, insecure endpoint refusal, declared-field projection, secret forwarding, provider-error call accounting, token usage, and frozen-rule enforcement",
+            "Ruff check and formatting passed for changed source and test files; Mypy passed for the new evaluator",
+            "The first combined adapter run reported 46 passed and two failures in new-test setup/contract assertions; the exact failures were fixed and the final five-test focused/discovery batch passed",
+            "No live provider call was made; paired-comparison calculations use deterministic local fixtures and approved live provider calibration remains unmeasured",
+            "Paired calibration/score CLI batch: 36 passed, 1 skipped; seven new tests cover identity alias rejection, same-sample validation, score/decision comparisons, CLI summary, and bounded matrix size",
+            "Ruff check/format and Mypy passed for changed Python files; final independent paired-calibration review found no actionable issues"
+          ],
+          "review": "implementation/G22.5-image-vision-review.md",
+          "paired_calibration_review": "implementation/G22.5-paired-calibration-review.md",
+          "paired_calibration_commit": "3c988535",
+          "paired_calibration_pushed": true,
+          "commit": "2dccecad29bf09543345dc302301c35763b4db58",
+          "additional_commits": [
+            "5a10fdbe2f0d02ade4c5ae7e1ff6b31790989c39"
+          ],
+          "pushed": true
+        },
+        {
+          "name": "dashboard",
+          "status": "delivered",
+          "implementation": "implementation/G22.6-dashboard.md",
+          "verification": [
+            "12 local HTTP integration tests passed for stored reads, comparisons, query-only SQLite, data omission, origin checks, work-size bounds (including legacy results and trace observations), snapshot consistency across preflight/report reads, inactivity and absolute request deadlines, bounded large/chunked write-body rejection under normal and overloaded conditions, JSON overload errors, percent-encoded colon run IDs, safe error logging, method refusal and CLI help",
+            "25 report regressions and 19 run-history/comparison regressions passed",
+            "Ruff src/tests passed; Mypy passed for 175 source files; changed Python files formatted; embedded JavaScript passed Node syntax check",
+            "Independent final review reported no remaining findings",
+            "Report and comparison reuse existing services; G22.17 adds authenticated TLS remote mode; very-large-run performance remains unmeasured"
+          ],
+          "review": "implementation/G22.6-dashboard-review.md",
+          "commit": "d122670a27432bbaf755adffa8449d93418f18db",
+          "additional_commits": [
+            "198cbd87084916be20dc05a20803c6b9020a9012",
+            "48514b83108176c052cc92a3c60f08fb5c6bc2c9"
+          ],
+          "pushed": true
+        },
+        {
+          "name": "opt-in remote-worker measurement probe",
+          "status": "delivered",
+          "architecture_decision": "The coordinator serves an authenticated HTTPS API; an operator starts the worker on the separate host, which does not share coordinator SQLite storage.",
+          "verification": [
+            "Two real worker CLI subprocesses registered and completed a six-case integration measurement against a loopback coordinator API and isolated synthetic application",
+            "Remote-mode input validation rejects loopback, .localhost, unspecified, broadcast and multicast advertise hosts; invalid token-env names; missing credentials; unsafe timeouts; conflicting output paths; worker counts outside 1-64; and cases above 1000",
+            "The report distinguishes minimum worker count from the distinct registered IDs and latest capacities observed; extra workers may still register, and registration does not prove full-interval contribution",
+            "Preflight bounds each configured worker pool to capacity + 4 connections and keeps the requested aggregate at or below the coordinator's 128-connection limit; reports disclose when extra registered workers exceed that budget",
+            "Worker app config is created exclusively at a new path and contains no coordinator token; the printed worker command reads the token from the selected environment variable",
+            "The report marks host separation as operator-selected and unverified; cross-host evidence remains pending until a separate host is available",
+            "Ruff check and formatting, Mypy for the coordinator service and measurement script, CSV/JSON validation, and git diff --check passed",
+            "30 focused distributed measurement and worker tests passed after remote-command and runtime-evidence additions; these loopback tests do not prove cross-host behavior",
+            "Worker and fixture instructions run through uv run --locked from the matching checkout; uv run --locked python -m aibench worker connect --help exited successfully; Ruff, Mypy for the measurement script, formatting, and git diff --check passed",
+            "Operator guide documents a separate-host VM recommendation, coordinator TLS ingress, worker HTTPS egress, local fixture port, and the host-separation evidence limitation",
+            "The measurement worker command now opts into bounded self-reported OS family, architecture, Python version, and logical CPU count; runtime data is mapped by worker ID, excludes hostnames, and does not attest host separation"
+          ],
+          "review": "implementation/G22.7-remote-worker-probe-review.md",
+          "implementation": "implementation/G22.7-remote-worker-probe.md",
+          "commit": "cb37c574bf887329cc6bd142d67acdd47adb7056",
+          "pushed": true,
+          "additional_commits": [
+            "6c60a80d2e5978f78887f948ee6d01e23b06e21b",
+            "abbf7eef33b3f7478d535f1805fb9da90891accb"
+          ]
+        },
+        {
+          "name": "bounded inline generated-image vision evaluation",
+          "status": "delivered",
+          "verification": [
+            "Combined vision, calibration, DeepEval adapter, and metric regression batch: 75 passed, 1 skipped",
+            "Ruff check and format passed for evaluator, version, and tests; Mypy passed for the vision evaluator; git diff --check passed",
+            "HTTPRunner integration returned a generated image through JSON output selection, durable execution storage, and isolated vision scoring; malformed/remote outputs stop before judge calls",
+            "Independent review found no remaining functional or security findings; its version identity and closeout findings were resolved; see implementation/G22.8-generated-image-outputs-review.md"
+          ],
+          "review": "implementation/G22.8-generated-image-outputs-review.md",
+          "implementation": "implementation/G22.8-generated-image-outputs.md",
+          "commit": "58a027bee706d034aff4d7738910b3753875aa7e",
+          "pushed": true
+        },
+        {
+          "name": "bounded inline WAV/MP3 audio task evaluation",
+          "status": "delivered",
+          "verification": [
+            "Combined audio, vision, and DeepEval metric regression run: 53 passed; after strict WAV/MP3 validation hardening, the final audio module passed 3 tests",
+            "HTTPRunner integration carried a generated WAV through JSON output selection, durable execution storage, and isolated audio scoring; bounded text output scored, while remote output and malformed case audio made no judge call",
+            "Malformed WAV containers, byte rates, block alignment, data chunks, oversized payloads, short MP3 headers, unsupported MIME types, and remote outputs are rejected; complete WAV, raw MP3, and tagged MP3 fixtures are accepted",
+            "Ruff check/format passed for changed Python files; Mypy passed for audio.py; git diff --check passed",
+            "Independent review findings on WAV format consistency and practical ingestion/transport limits were resolved; see implementation/G22.9-audio-evaluation-review.md",
+            "Feature commit bf9a6f10528f1088fd1d19f2a9683e7928419484 was pushed to origin/fix/plugin-core-match and the remote ref was verified; no live provider call was made"
+          ],
+          "review": "implementation/G22.9-audio-evaluation-review.md",
+          "implementation": "implementation/G22.9-audio-evaluation.md",
+          "commit": "bf9a6f10528f1088fd1d19f2a9683e7928419484",
+          "pushed": true
+        },
+        {
+          "name": "timestamped sampled-video frame evaluation",
+          "status": "delivered",
+          "verification": [
+            "Focused video-frame, audio/vision/metric discovery batch: 6 passed",
+            "Decoder coverage verifies strictly increasing timestamps, exact frame shapes, image bounds, 512 KiB case aggregate and 4 MiB generated-output aggregate limits",
+            "HTTPRunner carried generated frames through output selection and durable storage into the isolated evaluator worker; ordered judge parts, usage, secret omission, and malformed/remote refusal verified",
+            "Ruff and formatting passed for changed Python files; Mypy passed for video_frames.py; git diff --check passed",
+            "Independent review found and resolved dataset-row/evaluator-limit mismatch; final review found no remaining actionable findings",
+            "Feature commit 0f8e32162c0eaae6a589d58923fec7b55e32ff46 was pushed to origin/fix/plugin-core-match; no live judge/provider call was made"
+          ],
+          "review": "implementation/G22.10-video-frames-review.md",
+          "implementation": "implementation/G22.10-video-frames.md",
+          "commit": "0f8e32162c0eaae6a589d58923fec7b55e32ff46",
+          "pushed": true
+        },
+        {
+          "name": "bounded stored voice-conversation metrics",
+          "status": "delivered",
+          "verification": [
+            "Voice integration and core episode scoring tests: 14 passed; DeepEval audio/video/vision/metric discovery tests: 4 passed",
+            "HTTPRunner integration verified persisted episode evidence through isolated local scoring; malformed, remote, and oversized audio are refused",
+            "Ruff and formatting passed; Mypy passed for all 175 core source files and voice.py; git diff --check passed",
+            "Independent final review found no remaining actionable findings after resolving history bounds, responsiveness semantics, and exact worker-JSON byte accounting; no live provider call was made",
+            "Feature commit 944a34b245f14cbec8d9aa33ce178e07ae8c4593 was pushed to origin/fix/plugin-core-match and the remote ref was verified"
+          ],
+          "review": "implementation/G22.11-voice-metrics-review.md",
+          "implementation": "implementation/G22.11-voice-metrics.md",
+          "commit": "944a34b245f14cbec8d9aa33ce178e07ae8c4593",
+          "pushed": true
+        },
+        {
+          "name": "DeepEval upstream image metric family",
+          "status": "delivered",
+          "verification": [
+            "Five pinned upstream image metrics score generated images through a bounded inline PNG/JPEG/WebP contract and an OpenAI-compatible vision judge",
+            "Final combined image-metric, worker-usage, and report regression batch: 25 passed",
+            "Ruff check passed; selected changed files passed Ruff formatting; Mypy passed for seven affected source modules; git diff --check passed",
+            "Independent review resolved retry token-completeness loss and mixed legacy/new usage aggregation; final review reported no actionable findings",
+            "No live provider request was made; full image decode and decoded-pixel bounds remain documented limits"
+          ],
+          "review": "implementation/G22.12-upstream-image-metrics-review.md",
+          "implementation": "implementation/G22.12-upstream-image-metrics.md",
+          "commit": "4ece2f80abedc67acb63c36596955a2c1883b8e3",
+          "pushed": true
+        },
+        {
+          "name": "DeepEval upstream MCP evaluator metrics",
+          "status": "delivered",
+          "verification": [
+            "All three pinned metrics were discovered with their exact field scopes and bounded retry/concurrency manifests.",
+            "Final focused run `tests/test_deepeval_mcp.py tests/test_deepeval_image_metrics.py`: 25 passed in 96.32 seconds.",
+            "Tests exercised the pinned DeepEval 4.2.5 worker with deterministic local judges; no live MCP server or provider was contacted.",
+            "Regression coverage includes typed-event provenance, explicit opt-in for untyped events, unsuccessful/request-only calls, malformed and missing episode telemetry, and evidence caps.",
+            "Dispatched `httpx.WriteError` and `httpx.DecodingError` teardown regressions verify unknown cost and call accounting while retaining successful sibling token usage.",
+            "Supplemental sync-judge `MockTransport` regression: 3 related synchronous/asynchronous transport tests passed; ambiguous sync spend is reported unknown without replay.",
+            "Ruff check and formatting passed for the 11 affected Python files; Mypy passed for the changed judge and MCP modules; `git diff --check` passed.",
+            "Final defect-first review found no remaining actionable findings; typed resource/prompt execution events and live MCP/provider validation remain unsupported."
+          ],
+          "review": "implementation/G22.13-upstream-mcp-metrics-review.md",
+          "implementation": "implementation/G22.13-upstream-mcp-metrics.md",
+          "commit": "b558d4314939de96483602516efe49f1e89c53c5",
+          "pushed": true
+        },
+        {
+          "name": "bounded recorded provider-transcription accuracy",
+          "status": "delivered",
+          "verification": [
+            "Scoped transcript, voice, and affected DeepEval manifest/version run: 14 passed in 248.84 seconds; final pinned two-exchange evaluator rerun: 1 passed in 2.95 seconds",
+            "Ruff check and formatting passed; Mypy passed for transcription_accuracy.py and voice.py; git diff --check passed",
+            "Local deterministic judge verified multi-turn scoring, complete-transcript fail-closed behavior, empty ASR marker, input bounds, and shared-judge call accounting; no live provider or audio endpoint was contacted",
+            "The broad DeepEval suite was interrupted and is not claimed as passing; the final scoped selection covered all changed manifests, voice integration/validation, and the transcript evaluator"
+          ],
+          "review": "implementation/G22.14-transcription-accuracy-review.md",
+          "implementation": "implementation/G22.14-transcription-accuracy.md",
+          "commit": "94275aa6aa01dd510cff43b597ee9887fde7938b",
+          "pushed": true
+        },
+        {
+          "name": "recorded speaker attribution and diarization error rate",
+          "status": "delivered",
+          "verification": [
+            "Final diarization evaluator and stored-voice integration selection: 5 passed in 17.55 seconds; affected DeepEval discovery/version selection: 9 passed, 84 deselected",
+            "Ruff check and formatting, Mypy on diarization.py and voice.py, and git diff --check passed",
+            "Tests cover optimal episode-wide label matching, DER components, overlap, collars, malformed and empty evidence, and declared episode, segment, speaker, and audio bounds",
+            "No live provider, audio endpoint, or model was contacted; scorer compares recorded labels and does not perform acoustic diarization"
+          ],
+          "review": "implementation/G22.15-recorded-diarization-review.md",
+          "implementation": "implementation/G22.15-recorded-diarization.md",
+          "commit": "05cc0116b6fc8cfef9b035c96939524d5ab1ce4d",
+          "pushed": true
+        },
+        {
+          "name": "deterministic word and character transcription error rates",
+          "status": "delivered",
+          "verification": [
+            "Focused WER/CER, stored-voice integration, and transcription G-Eval co-binding selection: 6 passed in 19.19 seconds",
+            "Affected DeepEval discovery/version selection: 9 passed, 84 deselected in 13.77 seconds",
+            "Ruff check and formatting, Mypy on transcript_error_rate.py and transcription_accuracy.py, and git diff --check passed",
+            "Tests cover edit components, Unicode normalization, empty hypotheses and references, utterance macro-average semantics, and dynamic-programming work limits",
+            "No live provider, audio endpoint, or judge was contacted; metrics operate on recorded text only"
+          ],
+          "review": "implementation/G22.16-transcript-error-rates-review.md",
+          "implementation": "implementation/G22.16-transcript-error-rates.md",
+          "commit": "f576f67322c457d9feb053c9e0fd409a5f9069b2",
+          "pushed": true
+        },
+        {
+          "name": "authenticated remote dashboard access",
+          "status": "delivered",
+          "verification": [
+            "Dashboard and report regression batch: 41 passed",
+            "Actual TLS listener bound to 0.0.0.0 was exercised over loopback; tests cover missing, incorrect, and correct bearer tokens, cross-origin rejection, a masked in-memory token form, and a stalled TLS handshake",
+            "Ruff check/format, MyPy for the dashboard module, CLI help, and git diff --check passed",
+            "Review cleanup commit `5a01e8e37facb00c00c6673dac988020731f20fc` fixed test-server teardown if the stalled TLS socket cannot be opened; final dashboard selection: 14 passed",
+            "No browser automation or separate-host reachability test was performed"
+          ],
+          "review": "implementation/G22.17-remote-dashboard-review.md",
+          "implementation": "implementation/G22.17-remote-dashboard.md",
+          "commit": "fecaccce6ec77424e595092b12f90bb51998fea6",
+          "additional_commits": [
+            "5a01e8e37facb00c00c6673dac988020731f20fc"
+          ],
+          "pushed": true
+        },
+        {
+          "name": "stream plan selection and bound run case-body memory",
+          "status": "delivered",
+          "verification": [
+            "Plan validation, planning regressions, ingestion, bounded case-cache, real run/rescore, and storage-backed restart selections: 60 passed",
+            "The opt-in 1,000-case HTTP workload interrupted and resumed with all executions and evaluations succeeded; final result: 13.2 MiB peak traced Python allocations in 90.6 seconds",
+            "Compared with the audit sample (17.1 MiB in 64.6 seconds), the local traced-memory result is lower and elapsed time is higher; neither measurement establishes RSS or production capacity",
+            "Ruff check/format, Windows-target Mypy for all five changed source modules, and git diff --check passed",
+            "Final defect-first review found no actionable findings; all-selected compiled case snapshots still scale with the selected dataset"
+          ],
+          "review": "implementation/G22.18-streaming-compile-case-cache-review.md",
+          "implementation": "implementation/G22.18-streaming-compile-case-cache.md",
+          "commit": "e421cdf9e63159e1a77a100d2881679877a3a5dc",
+          "pushed": true
+        },
+        {
+          "name": "G22.19 follow-on: upstream multimodal audio metric support",
+          "status": "deferred_upstream_release",
+          "verification": [
+            "Official PyPI latest release as of 2026-10-12 was DeepEval 4.2.8; inspected wheel SHA-256 1bc6ec6ad9f36427e5578a01b4a2aaa357d7ac51bb0cd726af7315304b0339f8 and found no TranscriptionAccuracyMetric symbol in packaged Python sources",
+            "Official PyPI recheck on 2026-10-13 still lists 4.2.8 with the same wheel hash; current versioned docs require provider_transcript and describe transcript comparison rather than audio-input scoring",
+            "Current DeepEval docs describe TranscriptionAccuracyMetric as text-only provider-transcript comparison, not audio input evaluation",
+            "No dependency pin was changed because no released API was available to verify and the existing adapter requires an exact package pin"
+          ],
+          "review": "implementation/G22.19-upstream-audio-release-gate-review.md",
+          "implementation": "implementation/G22.19-upstream-audio-release-gate.md",
+          "commit": "6a9e83db32510008df0f9878d5dba93c848d5db3",
+          "pushed": true
+        }
+      ]
+    },
+    {
+      "id": "G23",
+      "priority": "P2",
+      "title": "Whole-workflow cost attribution",
+      "detail": "**Delivered.** Session-run reports attribute planner usage to source user turns and show separate application, primary evaluator-pass, planner, and whole-workflow accounting. Workflow totals include all committed evaluator scoring passes, including rescoring. Partial and unknown usage, cancellation, concurrent duplicate attempts, and legacy unattributed planner usage remain explicit. Planner dollars remain unknown without provider pricing and no combined workflow budget is enforced.",
+      "kind": "feature",
+      "status": "delivered",
+      "verification": [
+        "Affected conversation, reports, TUI, storage repository, and run-bundle batch: 149 passed; after the final nested-immutability hardening, the two focused duplicate/deferred-attribution regressions passed",
+        "Ruff passed for changed source and test files; Mypy passed for six changed source modules; git diff --check passed",
+        "Independent review-agent final review found no remaining actionable findings; see implementation/G23-whole-workflow-cost-review.md"
+      ],
+      "review": "implementation/G23-whole-workflow-cost-review.md",
+      "implementation": "implementation/G23-whole-workflow-cost.md",
+      "commit": "73ee930ee6ed6d27a7daf9b31908e85678f047ec",
+      "pushed": true
+    }
+  ]
+}

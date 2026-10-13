@@ -15,9 +15,12 @@ from aibench.cli import app as app_cli
 from aibench.cli import benchmark as benchmark_cli
 from aibench.cli import cache as cache_cli
 from aibench.cli import chat as chat_cli
+from aibench.cli import config as config_cli
 from aibench.cli import connect as connect_cli
+from aibench.cli import dashboard as dashboard_cli
 from aibench.cli import dataset as dataset_cli
 from aibench.cli import experiments as experiments_cli
+from aibench.cli import export as export_cli
 from aibench.cli import inspect as inspect_cli
 from aibench.cli import integrations as integrations_cli
 from aibench.cli import langfuse as langfuse_cli
@@ -31,19 +34,33 @@ from aibench.cli import runs as runs_cli
 from aibench.cli import score as score_cli
 from aibench.cli import sessions as sessions_cli
 from aibench.cli import traces as traces_cli
+from aibench.cli import worker as worker_cli
+from aibench.cli import workspace as workspace_cli
+from aibench.cli.errors import error_document, error_exit
+from aibench.cli.global_options import (
+    GlobalOptions,
+    command_defaults,
+    current_global_options,
+    merge_default_maps,
+)
+from aibench.cli.output import Console
 from aibench.core.errors import WorkspaceTooNew
 
 app = typer.Typer(
     name="aibench",
     help="BenchCraft: evaluate AI applications in conversation. Run `benchcraft` in a project.",
     no_args_is_help=False,
+    pretty_exceptions_show_locals=False,
 )
 app.add_typer(dataset_cli.app, name="dataset")
 app.add_typer(experiments_cli.app, name="experiments")
 app.add_typer(runs_cli.app, name="runs")
 app.add_typer(sessions_cli.app, name="sessions")
 app.add_typer(traces_cli.app, name="traces")
+app.add_typer(workspace_cli.app, name="workspace")
+app.add_typer(worker_cli.app, name="worker")
 app.add_typer(connect_cli.app, name="connect")
+app.add_typer(config_cli.app, name="config")
 app.add_typer(cache_cli.app, name="cache")
 app.add_typer(openai_evals_oss_cli.app, name="openai-evals-oss")
 app.add_typer(openai_evals_api_cli.app, name="openai-evals-api")
@@ -61,16 +78,51 @@ app.command("chat")(chat_cli.chat)
 app.command("init")(project_cli.init)
 app.command("doctor")(project_cli.doctor)
 app.command("benchmark")(benchmark_cli.benchmark)
+app.command("dashboard")(dashboard_cli.serve_dashboard)
 app.command("report")(report_cli.report)
+app.command("export")(export_cli.export)
 app.command("compare")(project_cli.compare)
 app.add_typer(project_cli.plugins_app, name="plugins")
 runs_cli.app.command("status")(run_cli.status)
+runs_cli.app.command("control")(run_cli.control)
+runs_cli.app.command("retry")(run_cli.retry)
+
+console = Console()
+err_console = Console(stderr=True)
+
+_GLOBAL_CONFIG = typer.Option(
+    None, "--config", help="Project config file used in place of automatic discovery."
+)
+_GLOBAL_JSON = typer.Option(
+    False, "--json", help="Default machine-readable output for commands that support it."
+)
+_GLOBAL_NON_INTERACTIVE = typer.Option(
+    False, "--non-interactive", help="Never enter an interactive prompt or conversation."
+)
+_GLOBAL_POLICY = typer.Option(
+    None, "--policy", help="Default execution policy (a command-local --policy overrides it)."
+)
+_GLOBAL_QUIET = typer.Option(
+    False, "--quiet", help="Suppress human-readable run progress; errors and JSON remain visible."
+)
+_GLOBAL_VERBOSE = typer.Option(
+    False, "--verbose", help="Write durable run events to stderr while a run executes."
+)
 
 
 @app.command("setup")
 def setup() -> None:
     """Choose the assistant's model (saved for your user account; the key is not)."""
     from aibench import userconfig
+
+    if current_global_options().non_interactive:
+        raise error_exit(
+            "setup is interactive; run it without --non-interactive",
+            exit_code=2,
+            json_output=False,
+            console=console,
+            err_console=err_console,
+        )
 
     userconfig.run_setup(typer.echo)
 
@@ -85,6 +137,12 @@ def _program() -> str:
 def main(
     ctx: typer.Context,
     version: bool = typer.Option(False, "--version", help="Show the aibench version and exit."),
+    config: Path | None = _GLOBAL_CONFIG,
+    json_output: bool = _GLOBAL_JSON,
+    non_interactive: bool = _GLOBAL_NON_INTERACTIVE,
+    policy: Path | None = _GLOBAL_POLICY,
+    quiet: bool = _GLOBAL_QUIET,
+    verbose: bool = _GLOBAL_VERBOSE,
     continue_latest: bool = typer.Option(
         False, "--continue", "-c", help="Continue the latest session with work in it."
     ),
@@ -93,11 +151,21 @@ def main(
     ),
     new: bool = typer.Option(False, "--new", help="Start a new session."),
 ) -> None:
+    options = GlobalOptions(
+        config=config,
+        json_output=json_output,
+        non_interactive=non_interactive,
+        policy=policy,
+        quiet=quiet,
+        verbose=verbose,
+    )
+    ctx.obj = options
+    ctx.default_map = merge_default_maps(ctx.default_map, command_defaults(ctx.command, options))
     if version:
         typer.echo(f"{_program()} {__version__}")
         raise typer.Exit(code=0)
     if ctx.invoked_subcommand is None:
-        if chat_cli.interactive_terminal():
+        if chat_cli.interactive_terminal() and not non_interactive:
             # `chat` is also registered as a Typer command. Invoking its undecorated
             # callback through Click would pass Typer's OptionInfo objects as defaults;
             # supply the actual no-argument values for the bare entry point.
@@ -111,6 +179,7 @@ def main(
                 policy=None,
                 trust_local_app=False,
                 provider_config=None,
+                provider_profile=None,
                 send=None,
                 json_output=False,
                 objectives=[],
@@ -119,7 +188,9 @@ def main(
             return
         typer.echo(ctx.get_help())
         typer.echo(
-            "\nNo interactive terminal: `aibench` opens a conversation only in a terminal. "
+            "\nNo interactive terminal is available (or interactive mode is disabled): "
+            "`aibench` opens a "
+            "conversation only in an interactive terminal. "
             "For scripts, use the commands above or `aibench chat --send TEXT --json`."
         )
         raise typer.Exit(code=0)
@@ -134,7 +205,13 @@ def run() -> None:
     try:
         app()
     except WorkspaceTooNew as exc:
-        typer.echo(f"error: {exc}", err=True)
+        if "--json" in sys.argv[1:]:
+            console.print_json(
+                data=error_document(str(exc), 2),
+                cli_exit_code=2,
+            )
+        else:
+            typer.echo(f"error: {exc}", err=True)
         raise SystemExit(2) from exc
 
 

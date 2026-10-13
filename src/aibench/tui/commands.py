@@ -44,9 +44,12 @@ COMMANDS: dict[str, str] = {
     "/budget": "ceilings, committed spend and unknown accounting",
     "/app": "the application's runner: what it observes, missing evidence, resets, test worlds",
     "/world": "/world NAME|none - select one of the application's test worlds (a new draft)",
-    "/report": "/report [html|markdown|json] - the current run's report, from stored facts",
+    "/report": (
+        "/report [html|markdown|json] [--group-by FIELD ...] - the current run's report, "
+        "from stored facts"
+    ),
     "/compare": (
-        "/compare BASELINE CURRENT [--judge \"CRITERIA\"] - paired stored-run comparison; "
+        '/compare BASELINE CURRENT [--judge "CRITERIA"] - paired stored-run comparison; '
         "--judge also has a judge say which run's answers are better"
     ),
     "/integrations": "external integrations: modes, data destinations, availability",
@@ -89,6 +92,40 @@ NewSession = Callable[[], SessionController]
 JudgeSource = tuple[dict[str, Any], dict[str, str]]
 
 
+def _split_words(text: str) -> list[str]:
+    """Parse user command words without leaking shlex's raw ValueError to the CLI."""
+    try:
+        return shlex.split(text, posix=False)
+    except ValueError as exc:
+        from aibench.core.errors import ValidationError
+
+        raise ValidationError(f"invalid command quoting: {exc}") from exc
+
+
+def create_commands(
+    controller: SessionController,
+    new_session: NewSession | None = None,
+    *,
+    provider: Any = None,
+    progress: Callable[[str], None] | None = None,
+) -> Commands:
+    """Build slash commands with the configured assistant provider and plugin judge."""
+    judge: JudgeSource | None = None
+    config = getattr(provider, "config", None)
+    if config is not None and getattr(config, "base_url", None):
+        from aibench.services.plugins import judge_from_provider
+
+        api_key = str(config.api_key) if config.api_key else None
+        judge = judge_from_provider(config.base_url, config.model, api_key)
+    return Commands(
+        controller,
+        new_session,
+        judge=judge,
+        progress=progress,
+        provider=provider,
+    )
+
+
 class Commands:
     def __init__(
         self,
@@ -116,7 +153,7 @@ class Commands:
         try:
             result: CommandResult = await handler(argument.strip())
         except AibenchError as exc:
-            result = CommandResult(name, "error", {"error": str(exc)}, ok=False)
+            result = CommandResult(name, "error", {"error": str(exc)}, ok=False, exit_code=2)
         self._record(text.strip(), result, message_id)
         return result
 
@@ -210,7 +247,7 @@ class Commands:
         from aibench.services.plugins import install, plan_install, plugin_status, session_plugins
 
         root = self.controller.project_root
-        words = shlex.split(argument, posix=False)
+        words = _split_words(argument)
         if not words:
             rows = plugin_status(root, self.controller.policy())
             return CommandResult("/plugins", "plugins", {"plugins": rows})
@@ -275,7 +312,7 @@ class Commands:
             "/cases check FILE.jsonl [N... | all]  |  /cases verify FILE.jsonl N...  |  "
             '/cases add FILE.jsonl "QUESTION" "ANSWER"'
         )
-        words = shlex.split(argument, posix=False)
+        words = _split_words(argument)
         sub = words[0].lower() if words else "show"
         rest = words[1:]
         storage = self.controller.storage
@@ -396,7 +433,7 @@ class Commands:
         """`/traces [RUN_ID]`: what the run's imported traces add. `/traces import FILE
         [RUN_ID]`: attach an OpenTelemetry (OTLP/JSON) export to the run, so metrics that
         read traces (DeepEval's agent metrics) can score it with `/rescore`."""
-        words = shlex.split(argument, posix=False)
+        words = _split_words(argument)
         if not words or words[0] != "import":
             if len(words) > 1:
                 return CommandResult(
@@ -429,7 +466,14 @@ class Commands:
         report = await self.controller.rescore(
             words[0] if words else None, carry_forward=not everything
         )
-        return CommandResult("/rescore", "rescored", report)
+        exit_code = report.get("exit_code")
+        return CommandResult(
+            "/rescore",
+            "rescored",
+            report,
+            ok=exit_code in (None, 0, 1),
+            exit_code=exit_code if isinstance(exit_code, int) else None,
+        )
 
     async def _app(self, _: str) -> CommandResult:
         return CommandResult("/app", "application", self.controller.describe_application())
@@ -459,24 +503,50 @@ class Commands:
     async def _report(self, argument: str) -> CommandResult:
         """Render the current run's report from stored facts: a terminal summary, and the
         report files (HTML and JSON by default; `/report markdown` etc. to choose)."""
-        formats = tuple(argument.split()) or ("html", "json")
-        unknown = [f for f in formats if f not in FORMATS]
-        if unknown:
+        words = [_unquote(word) for word in _split_words(argument)]
+        formats: list[str] = []
+        group_by: list[str] = []
+        index = 0
+        while index < len(words):
+            word = words[index]
+            if word == "--group-by":
+                index += 1
+                if index == len(words):
+                    return CommandResult(
+                        "/report",
+                        "error",
+                        {"error": "usage: /report [html|markdown|json] [--group-by FIELD ...]"},
+                        ok=False,
+                    )
+                group_by.append(words[index])
+            elif word in FORMATS:
+                formats.append(word)
+            else:
+                return CommandResult(
+                    "/report",
+                    "error",
+                    {"error": f"unknown report option {word!r}; use html, markdown or json"},
+                    ok=False,
+                )
+            index += 1
+        if not formats:
+            formats = ["html", "json"]
+        if len(set(formats)) != len(formats):
             return CommandResult(
                 "/report",
                 "error",
-                {"error": f"unknown format {' '.join(unknown)}; use html, markdown or json"},
+                {"error": "report formats may be specified only once"},
                 ok=False,
             )
-        exported = self.controller.export_report(formats=formats)
-        facts = self.controller.report_facts(exported["run_id"])
+        exported = self.controller.export_report(formats=tuple(formats), group_by=tuple(group_by))
+        facts = self.controller.report_facts(exported["run_id"], group_by=tuple(group_by))
         return CommandResult("/report", "report", {**facts, "exported": exported["paths"]})
 
     async def _compare(self, argument: str) -> CommandResult:
         """`/compare BASELINE CURRENT`: the stored, paired comparison (no model). Adding
         `--judge "CRITERIA"` has a judge also say, case by case, which run's answer is better
         by those criteria (DeepEval's ArenaGEval, each case judged in both orders)."""
-        words = [_unquote(w) for w in shlex.split(argument, posix=False)]
+        words = [_unquote(w) for w in _split_words(argument)]
         criteria = None
         if "--judge" in words:
             at = words.index("--judge")
@@ -498,7 +568,10 @@ class Commands:
             )
         report = self.controller.compare_runs(words[0], words[1])
         if criteria is not None:
-            report = {**report, "arena": await self.controller.judge_runs(words[0], words[1], criteria)}
+            report = {
+                **report,
+                "arena": await self.controller.judge_runs(words[0], words[1], criteria),
+            }
         code = comparison_exit_code(report)
         return CommandResult(
             "/compare",

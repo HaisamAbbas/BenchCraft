@@ -8,9 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from rich.console import Console
-from rich.markup import escape
 
+from aibench.cli.errors import error_exit
+from aibench.cli.output import Console
 from aibench.core.errors import AibenchError
 from aibench.datasets.episodes import validate_episode_manifest
 
@@ -32,8 +32,9 @@ def validate(
     try:
         episode_manifest, cases = validate_episode_manifest(dataset, manifest, plan)
     except (AibenchError, OSError, ValueError) as exc:
-        err_console.print(f"[red]{escape(str(exc))}[/red]")
-        raise typer.Exit(code=2) from exc
+        raise error_exit(
+            str(exc), exit_code=2, json_output=json_output, console=console, err_console=err_console
+        ) from exc
     payload = {
         "valid": True,
         "episode_count": len(episode_manifest.episodes),

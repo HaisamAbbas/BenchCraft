@@ -8,9 +8,11 @@ pydantic and the standard library.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum
-from math import prod
+from math import isfinite, prod
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
@@ -245,7 +247,7 @@ class Fixture(FrozenModel):
 
     name: str
     content: FrozenValue = None
-    app_visible: bool = False
+    app_visible: bool = Field(default=False, strict=True)
 
 
 class Provenance(FrozenModel):
@@ -273,6 +275,33 @@ class BenchmarkCase(FrozenModel):
     duplicate_of_line: int | None = None
     source_line: int | None = None
 
+    @model_validator(mode="after")
+    def _finite_case_numbers(self) -> BenchmarkCase:
+        """Reject values JSON serialization would silently replace with null."""
+        pending: list[Any] = [self]
+        seen: set[int] = set()
+        while pending:
+            value = pending.pop()
+            if isinstance(value, float) and not isfinite(value):
+                raise ValueError("case data must not contain non-finite numbers (NaN or infinity)")
+            if isinstance(value, BaseModel):
+                children = list(value.__dict__.values())
+                if value.__pydantic_extra__:
+                    children.append(value.__pydantic_extra__)
+            elif is_dataclass(value) and not isinstance(value, type):
+                children = [getattr(value, field.name) for field in fields(value)]
+            elif isinstance(value, Mapping):
+                children = [*value.keys(), *value.values()]
+            elif isinstance(value, (list, tuple, set, frozenset)):
+                children = list(value)
+            else:
+                continue
+            identity = id(value)
+            if identity not in seen:
+                seen.add(identity)
+                pending.extend(children)
+        return self
+
     def application_input_projection(self) -> dict[str, Any]:
         """The application-visible envelope: input plus fixtures explicitly marked
         `app_visible`. Never includes `reference` or non-app-visible fixtures (01-G2).
@@ -281,7 +310,9 @@ class BenchmarkCase(FrozenModel):
         return {
             "case_id": self.case_id,
             "input": deep_unfreeze(self.input),
-            "fixtures": {f.name: deep_unfreeze(f.content) for f in self.fixtures if f.app_visible},
+            "fixtures": {
+                f.name: deep_unfreeze(f.content) for f in self.fixtures if f.app_visible is True
+            },
         }
 
 
@@ -931,6 +962,31 @@ class OpenAICompatibleTransport(FrozenModel):
     max_request_bytes: int = Field(default=1_048_576, gt=0)
     max_response_bytes: int = Field(default=4_194_304, gt=0)
 
+    @model_validator(mode="after")
+    def _stream_parameters_are_valid(self) -> OpenAICompatibleTransport:
+        parameters = deep_unfreeze(self.parameters)
+        if not isinstance(parameters, Mapping):
+            # Pydantic wraps ValueError as a validation error; TypeError escapes model_validate.
+            raise ValueError("openai_compatible parameters must be an object")  # noqa: TRY004
+        if "stream" in parameters and type(parameters["stream"]) is not bool:
+            raise ValueError("openai_compatible parameters.stream must be a boolean")
+        options = parameters.get("stream_options")
+        if options is not None and not isinstance(options, Mapping):
+            # Pydantic wraps ValueError as a validation error; TypeError escapes model_validate.
+            raise ValueError("openai_compatible parameters.stream_options must be an object")
+        if (
+            isinstance(options, Mapping)
+            and "include_usage" in options
+            and type(options["include_usage"]) is not bool
+        ):
+            raise ValueError("stream_options.include_usage must be a boolean")
+        return self
+
+    @property
+    def streaming_enabled(self) -> bool:
+        parameters = deep_unfreeze(self.parameters)
+        return isinstance(parameters, Mapping) and parameters.get("stream") is True
+
 
 class TestWorldSpec(FrozenModel):
     """A named, versioned starting state for a stateful application (§7 "State"): the seed
@@ -1058,6 +1114,7 @@ class ExecutionResult(FrozenModel):
     case_id: str
     repetition_id: int = 0
     attempt_id: int = 0
+    warmup: bool = False
     status: ExecutionStatus
     output: FrozenValue = None
     retrieved_context: tuple[str, ...] | None = None
@@ -1280,6 +1337,7 @@ class RunManifest(FrozenModel):
     environment: FrozenValue = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
     application_id: str | None = None  # added in Prompt 04; lets scoring check applicability
+    parent_run_id: str | None = None  # selective reruns preserve the run lineage
 
 
 class ArtifactRef(FrozenModel):
@@ -1314,6 +1372,7 @@ class WorkItem(FrozenModel):
     run_id: str
     task_key: str  # stable logical key; unique per run so a retried commit cannot duplicate it
     kind: str  # e.g. "execution", "evaluation"
+    warmup: bool = False
     dependency_keys: tuple[str, ...] = Field(default_factory=tuple)
     state: WorkItemState = WorkItemState.PENDING
     attempt: int = 0
@@ -1338,9 +1397,21 @@ class UsageEvent(FrozenModel):
     role: UsageRole
     provider: str | None = None
     tokens: FrozenValue = None
-    calls: int | None = None
+    calls: int | None = Field(default=None, ge=0, strict=True)
+    # Counts calls whose prompt or completion token usage was not fully reported.
+    calls_without_tokens: int | None = Field(default=None, ge=0, strict=True)
     cost: float | None = None
     recorded_at: datetime = Field(default_factory=utcnow)
+
+    @model_validator(mode="after")
+    def _tokenless_calls_within_reported_calls(self) -> UsageEvent:
+        if (
+            self.calls is not None
+            and self.calls_without_tokens is not None
+            and self.calls_without_tokens > self.calls
+        ):
+            raise ValueError("calls_without_tokens cannot exceed calls")
+        return self
 
 
 class Approval(FrozenModel):

@@ -43,6 +43,9 @@ def world(tmp_path: Path) -> Iterator[tuple[Path, Any]]:
         path = project / name
         text = path.read_text(encoding="utf-8").replace("http://127.0.0.1:8768", base)
         path.write_text(text, encoding="utf-8")
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["revision"] = "agent-world-fixture-v1"
+        path.write_text(json.dumps(config), encoding="utf-8")
     try:
         yield project, server
     finally:
@@ -217,10 +220,24 @@ def test_a_failed_turn_blocks_the_rest_of_its_episode(world: tuple[Path, Any]) -
     assert server.calls["/agent"] == 3  # the blocked turn was never sent
 
 
-def test_an_interrupted_episode_is_not_continued_on_resume(world: tuple[Path, Any]) -> None:
+def test_an_interrupted_episode_is_not_continued_on_resume(
+    world: tuple[Path, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from tests.engine_support import Harness
 
     project, server = world
+    entered_agent = threading.Event()
+    release_agent = threading.Event()
+    original_do_post = server.RequestHandlerClass.do_POST
+
+    def gate_first_agent_response(handler: Any) -> None:
+        if handler.path == "/agent" and not entered_agent.is_set():
+            entered_agent.set()
+            if not release_agent.wait(timeout=30):
+                raise AssertionError("test did not release the first agent response")
+        original_do_post(handler)
+
+    monkeypatch.setattr(server.RequestHandlerClass, "do_POST", gate_first_agent_response)
     policy = ExecutionPolicy.model_validate_json((project / "policy.json").read_text())
     h = Harness(project / "h")
     run_id = h.create(project / "episodes.plan.json", policy=policy.resolved_against(project))
@@ -228,9 +245,10 @@ def test_an_interrupted_episode_is_not_continued_on_resume(world: tuple[Path, An
     async def interrupt_after_first_turn(ctl: RunController, harness: Any) -> None:
         import asyncio
 
-        while server.calls["/agent"] < 1:
-            await asyncio.sleep(0.01)
+        assert await asyncio.to_thread(entered_agent.wait, 10)
         ctl.request("interrupt")
+        await asyncio.sleep(0.05)
+        release_agent.set()
 
     assert h.execute(run_id, during=interrupt_after_first_turn).state is RunState.INTERRUPTED
     assert h.execute(run_id).state is RunState.COMPLETED
@@ -330,4 +348,36 @@ def test_the_seed_is_frozen_with_the_run(world: tuple[Path, Any]) -> None:
     Path(ref.uri).write_bytes(b'{"flights": {}}')
     with pytest.raises(RunError, match="test world seed"):
         h.execute(run_id)
+    assert server.calls["/agent"] == 0
+
+
+def test_retry_refuses_a_changed_test_world_seed(world: tuple[Path, Any]) -> None:
+    from aibench.services.runs import RunError, compile_retry_run
+    from aibench.storage.artifacts import ArtifactStore
+    from tests.engine_support import Harness
+
+    project, server = world
+    policy = ExecutionPolicy.model_validate_json((project / "policy.json").read_text())
+    h = Harness(project / "retry")
+    run_id = h.create(project / "plan.json", policy=policy.resolved_against(project))
+    storage = Storage(Database.open_workspace(h.workspace))
+    try:
+        storage.update_run_status(run_id, "completed")
+        seed_file = project / "worlds" / "two-seats.json"
+        seed_file.write_text(
+            json.dumps({"flights": {"BA117": {"seats": 9}}, "bookings": []}),
+            encoding="utf-8",
+        )
+        with pytest.raises(RunError, match="differs from the parent's frozen seed"):
+            compile_retry_run(
+                run_id,
+                ["book-by-code"],
+                1,
+                storage=storage,
+                artifacts=ArtifactStore(h.workspace.artifacts_dir),
+                current_policy=policy.resolved_against(project).with_trusted_local(True),
+                trusted_local=True,
+            )
+    finally:
+        storage.db.close()
     assert server.calls["/agent"] == 0

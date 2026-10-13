@@ -1,0 +1,1069 @@
+{
+  "schema": "aibench.judge-calibration-report/1",
+  "set": "judge-calibration-v1",
+  "label_review": "unreviewed",
+  "label_note": "Labels were written by the implementing AI agent for Prompt 12, not by human labelers. No label has been reviewed.",
+  "bindings": {
+    "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}": {
+      "overall": {
+        "cases": 13,
+        "undecided": 0,
+        "agreement": {
+          "value": 0.7692,
+          "numerator": 10,
+          "denominator": 13
+        },
+        "false_acceptance": {
+          "value": 0.0,
+          "numerator": 0,
+          "denominator": 6
+        },
+        "false_rejection": {
+          "value": 0.4286,
+          "numerator": 3,
+          "denominator": 7
+        },
+        "repeat_stability": {
+          "value": 1.0,
+          "numerator": 13,
+          "denominator": 13
+        }
+      },
+      "by_category": {
+        "adversarial": {
+          "cases": 2,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 2
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          }
+        },
+        "correct": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "formatting": {
+          "cases": 2,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 2
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          }
+        },
+        "incomplete": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "non_text": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "paraphrase": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "subtly_wrong": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "unanswerable": {
+          "cases": 2,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          }
+        },
+        "verbose": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "wrong": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        }
+      },
+      "disagreements": [
+        {
+          "id": "normalized-paraphrase",
+          "category": "paraphrase",
+          "label": "acceptable",
+          "decision": "fail"
+        },
+        {
+          "id": "normalized-verbose_correct",
+          "category": "verbose",
+          "label": "acceptable",
+          "decision": "fail"
+        },
+        {
+          "id": "normalized-non_text_correct",
+          "category": "non_text",
+          "label": "acceptable",
+          "decision": "fail"
+        }
+      ]
+    },
+    "native.exact_match {}": {
+      "overall": {
+        "cases": 13,
+        "undecided": 0,
+        "agreement": {
+          "value": 0.6154,
+          "numerator": 8,
+          "denominator": 13
+        },
+        "false_acceptance": {
+          "value": 0.0,
+          "numerator": 0,
+          "denominator": 6
+        },
+        "false_rejection": {
+          "value": 0.7143,
+          "numerator": 5,
+          "denominator": 7
+        },
+        "repeat_stability": {
+          "value": 1.0,
+          "numerator": 13,
+          "denominator": 13
+        }
+      },
+      "by_category": {
+        "adversarial": {
+          "cases": 2,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 2
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          }
+        },
+        "correct": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "formatting": {
+          "cases": 2,
+          "undecided": 0,
+          "agreement": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 2
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          }
+        },
+        "incomplete": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "non_text": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "paraphrase": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "subtly_wrong": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "unanswerable": {
+          "cases": 2,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 2,
+            "denominator": 2
+          }
+        },
+        "verbose": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "wrong": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        }
+      },
+      "disagreements": [
+        {
+          "id": "strict-correct_case",
+          "category": "formatting",
+          "label": "acceptable",
+          "decision": "fail"
+        },
+        {
+          "id": "strict-correct_whitespace",
+          "category": "formatting",
+          "label": "acceptable",
+          "decision": "fail"
+        },
+        {
+          "id": "strict-paraphrase",
+          "category": "paraphrase",
+          "label": "acceptable",
+          "decision": "fail"
+        },
+        {
+          "id": "strict-verbose_correct",
+          "category": "verbose",
+          "label": "acceptable",
+          "decision": "fail"
+        },
+        {
+          "id": "strict-non_text_correct",
+          "category": "non_text",
+          "label": "acceptable",
+          "decision": "fail"
+        }
+      ]
+    },
+    "native.json_schema {\"schema\": {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}}": {
+      "overall": {
+        "cases": 7,
+        "undecided": 0,
+        "agreement": {
+          "value": 1.0,
+          "numerator": 7,
+          "denominator": 7
+        },
+        "false_acceptance": {
+          "value": 0.0,
+          "numerator": 0,
+          "denominator": 4
+        },
+        "false_rejection": {
+          "value": 0.0,
+          "numerator": 0,
+          "denominator": 3
+        },
+        "repeat_stability": {
+          "value": 1.0,
+          "numerator": 7,
+          "denominator": 7
+        }
+      },
+      "by_category": {
+        "adversarial": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "correct": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "formatting": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "incomplete": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "subtly_wrong": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "verbose": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "false_rejection": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        },
+        "wrong": {
+          "cases": 1,
+          "undecided": 0,
+          "agreement": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          },
+          "false_acceptance": {
+            "value": 0.0,
+            "numerator": 0,
+            "denominator": 1
+          },
+          "false_rejection": {
+            "value": null,
+            "numerator": 0,
+            "denominator": 0
+          },
+          "repeat_stability": {
+            "value": 1.0,
+            "numerator": 1,
+            "denominator": 1
+          }
+        }
+      },
+      "disagreements": []
+    }
+  },
+  "not_measured": [
+    {
+      "evaluator": "deepeval.faithfulness@1",
+      "reason": "model judge: calibration, repeat stability and order/style sensitivity need live judge calls (paid; not authorized). Its contract is covered offline by recorded-response tests (Prompt 05, tests/test_deepeval_adapter.py)."
+    },
+    {
+      "measure": "order and style sensitivity of model judges",
+      "reason": "no model judge was run; the native evaluators are deterministic, so ordering cannot affect them"
+    }
+  ],
+  "cases": [
+    {
+      "id": "strict-correct_verbatim",
+      "binding": "native.exact_match {}",
+      "category": "correct",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "strict-correct_case",
+      "binding": "native.exact_match {}",
+      "category": "formatting",
+      "label": "acceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-correct_whitespace",
+      "binding": "native.exact_match {}",
+      "category": "formatting",
+      "label": "acceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-paraphrase",
+      "binding": "native.exact_match {}",
+      "category": "paraphrase",
+      "label": "acceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-verbose_correct",
+      "binding": "native.exact_match {}",
+      "category": "verbose",
+      "label": "acceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-subtly_wrong_number",
+      "binding": "native.exact_match {}",
+      "category": "subtly_wrong",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-incomplete",
+      "binding": "native.exact_match {}",
+      "category": "incomplete",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-wrong_topic",
+      "binding": "native.exact_match {}",
+      "category": "wrong",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-injection",
+      "binding": "native.exact_match {}",
+      "category": "adversarial",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-contradiction",
+      "binding": "native.exact_match {}",
+      "category": "adversarial",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-unanswerable_refusal",
+      "binding": "native.exact_match {}",
+      "category": "unanswerable",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "strict-unanswerable_hallucination",
+      "binding": "native.exact_match {}",
+      "category": "unanswerable",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "strict-non_text_correct",
+      "binding": "native.exact_match {}",
+      "category": "non_text",
+      "label": "acceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-correct_verbatim",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "correct",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "normalized-correct_case",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "formatting",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "normalized-correct_whitespace",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "formatting",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "normalized-paraphrase",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "paraphrase",
+      "label": "acceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-verbose_correct",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "verbose",
+      "label": "acceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-subtly_wrong_number",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "subtly_wrong",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-incomplete",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "incomplete",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-wrong_topic",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "wrong",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-injection",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "adversarial",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-contradiction",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "adversarial",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-unanswerable_refusal",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "unanswerable",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "normalized-unanswerable_hallucination",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "unanswerable",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "normalized-non_text_correct",
+      "binding": "native.exact_match {\"case_sensitive\": false, \"collapse_whitespace\": true}",
+      "category": "non_text",
+      "label": "acceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "schema-valid_object",
+      "binding": "native.json_schema {\"schema\": {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}}",
+      "category": "correct",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "schema-valid_json_text",
+      "binding": "native.json_schema {\"schema\": {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}}",
+      "category": "formatting",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "schema-extra_fields",
+      "binding": "native.json_schema {\"schema\": {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}}",
+      "category": "verbose",
+      "label": "acceptable",
+      "decision": "pass",
+      "stable": true
+    },
+    {
+      "id": "schema-missing_field",
+      "binding": "native.json_schema {\"schema\": {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}}",
+      "category": "incomplete",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "schema-wrong_type",
+      "binding": "native.json_schema {\"schema\": {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}}",
+      "category": "subtly_wrong",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "schema-malformed_json_text",
+      "binding": "native.json_schema {\"schema\": {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}}",
+      "category": "wrong",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    },
+    {
+      "id": "schema-injection",
+      "binding": "native.json_schema {\"schema\": {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}}",
+      "category": "adversarial",
+      "label": "unacceptable",
+      "decision": "fail",
+      "stable": true
+    }
+  ]
+}

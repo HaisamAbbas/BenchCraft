@@ -31,8 +31,15 @@ from aibench.core.plans import (
     CaseSelection,
     ConcurrencyLimits,
     PluginEnvironmentRef,
+    ReleaseGate,
 )
-from aibench.core.sessions import BenchmarkSession, PendingQuestion, PlanPatch, SessionChoices
+from aibench.core.sessions import (
+    BenchmarkSession,
+    PendingQuestion,
+    PlanPatch,
+    SessionChoices,
+    SessionReleaseGate,
+)
 from aibench.engine.compile import freeze_plan, load_policy
 from aibench.planning.catalog import CONCEPTS
 from aibench.planning.drafts import PlanDraft, PlannerProvenance, draft_document, validate_draft
@@ -55,7 +62,12 @@ def _validation_problems(exc: PydanticValidationError) -> list[str]:
 
 
 def apply_patch(
-    choices: SessionChoices, patch: PlanPatch, project_root: Path, *, default_seed: int
+    choices: SessionChoices,
+    patch: PlanPatch,
+    project_root: Path,
+    *,
+    default_seed: int,
+    metric_bindings: tuple[str, ...] = (),
 ) -> SessionChoices:
     problems: list[str] = []
     objectives = list(choices.objectives)
@@ -133,6 +145,28 @@ def apply_patch(
                 f"(declared: {', '.join(declared) or 'none'})"
             )
 
+    gates: tuple[SessionReleaseGate, ...] = choices.gates
+    if patch.gates is not None:
+        resolved_gates: list[SessionReleaseGate] = []
+        for gate in patch.gates:
+            if gate.binding >= len(metric_bindings):
+                problems.append(
+                    f"release gate {gate.gate_id!r} refers to missing metric binding {gate.binding}"
+                )
+                continue
+            metric = metric_bindings[gate.binding]
+            occurrence = sum(1 for item in metric_bindings[: gate.binding] if item == metric)
+            resolved_gates.append(
+                SessionReleaseGate(
+                    gate_id=gate.gate_id,
+                    metric=metric,
+                    occurrence=occurrence,
+                    min_pass_rate=gate.min_pass_rate,
+                    min_completed_coverage=gate.min_completed_coverage,
+                )
+            )
+        gates = tuple(resolved_gates)
+
     if problems:
         raise PatchRejected(problems)
     try:
@@ -146,6 +180,7 @@ def apply_patch(
             budgets=budgets,
             params=params,
             rules=rules,
+            gates=gates,
             test_world=test_world,
         )
     except PydanticValidationError as exc:
@@ -274,6 +309,28 @@ def build_draft(
     )
     if choices.repetitions != proposal.repetitions:
         proposal = proposal.model_copy(update={"repetitions": choices.repetitions})
+    binding_metrics = [item.metric for item in proposal.metrics]
+    resolved_gates: list[ReleaseGate] = []
+    for gate in choices.gates:
+        matches = [index for index, metric in enumerate(binding_metrics) if metric == gate.metric]
+        if gate.occurrence >= len(matches):
+            raise PatchRejected(
+                [
+                    (
+                        f"release gate {gate.gate_id!r} targets metric {gate.metric!r}, which is "
+                        "no longer present in this draft; remove or retarget the gate explicitly"
+                    )
+                ]
+            )
+        resolved_gates.append(
+            ReleaseGate(
+                gate_id=gate.gate_id,
+                binding=matches[gate.occurrence],
+                min_pass_rate=gate.min_pass_rate,
+                min_completed_coverage=gate.min_completed_coverage,
+            )
+        )
+    ctx = replace(ctx, gates=tuple(resolved_gates))
     ctx = with_judged_concurrency(ctx, proposal, inputs.catalog)
     validation = validate_draft(proposal, ctx)
     if validation.plan is None:
@@ -307,14 +364,28 @@ def draft_summary(document: dict[str, Any], test_world: str | None = None) -> di
     for finding in findings:
         if finding.get("blocking"):
             by_kind.setdefault(finding["kind"], []).append(finding["message"])
+    metrics = [
+        {
+            "binding": index,
+            "metric": metric["metric"],
+            "objectives": metric["objective_ids"],
+            "rationale": metric["rationale"],
+        }
+        for index, metric in enumerate(document.get("rationale", []))
+    ]
+    gates = []
+    for gate in document.get("gates", []):
+        item = dict(gate)
+        binding = item.get("binding")
+        if isinstance(binding, int) and 0 <= binding < len(metrics):
+            item["metric"] = metrics[binding]["metric"]
+        gates.append(item)
     return {
         "revision": document["revision"],
         "executable": document["executable"],
         "objectives": [o["text"] for o in document.get("objectives", [])],
-        "metrics": [
-            {"metric": m["metric"], "objectives": m["objective_ids"], "rationale": m["rationale"]}
-            for m in document.get("rationale", [])
-        ],
+        "metrics": metrics,
+        "gates": gates,
         "gaps": document.get("gaps", []),
         "missing_information": by_kind.get("missing_information", []),
         "missing_permission": by_kind.get("missing_permission", []),

@@ -11,6 +11,8 @@
 - `--provider-config` names the assistant model (the planning role, §2). It is refused,
   with the reasons shown, unless the policy permits the endpoint; the session still opens
   and every slash command works without it.
+- `--provider-profile NAME` selects a saved profile instead; `aibench config profiles use
+  NAME` selects the per-user default.
 - Without a terminal, `chat` needs `--send TEXT`: one message or slash command, answered
   non-interactively (`--json` for machine output). A run or controlled experiment it starts
   is followed to its end.
@@ -28,8 +30,9 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 from pydantic import ValidationError as PydanticValidationError
-from rich.console import Console
 
+from aibench.cli.errors import error_document, error_exit
+from aibench.cli.output import Console, json_result
 from aibench.config.resolve import load_mapping_file, resolve_config
 from aibench.core.errors import AibenchError, ConfigError
 from aibench.core.models import deep_unfreeze
@@ -67,22 +70,33 @@ def interactive_terminal() -> bool:
 
 
 def _fail(message: str, code: int = EXIT_INVALID) -> typer.Exit:
-    err_console.print(f"[red]{safe(message)}[/red]")
-    return typer.Exit(code=code)
+    return error_exit(
+        message, exit_code=code, json_output=False, console=console, err_console=err_console
+    )
 
 
 def project_settings(
     root: Path, app: Path | None, dataset: Path | None, policy: Path | None
 ) -> dict[str, Path | None]:
     """The project's application, dataset, policy and plan: config file < CLI flags."""
-    config_path = next((root / n for n in CONFIG_NAMES if (root / n).is_file()), None)
+    from aibench.cli.global_options import current_global_options
+
+    global_options = current_global_options()
+    config_path = global_options.config
+    if config_path is None:
+        config_path = next((root / n for n in CONFIG_NAMES if (root / n).is_file()), None)
+    elif not config_path.is_absolute():
+        config_path = (Path.cwd() / config_path).resolve()
+    policy = policy or global_options.policy
     overrides = {
         "application_target": str(app.resolve()) if app else None,
         "dataset_path": str(dataset.resolve()) if dataset else None,
         "policy_path": str(policy.resolve()) if policy else None,
     }
     resolved = resolve_config(config_path=config_path, cli_overrides=overrides, env=os.environ)
-    base = config_path.parent if config_path else root
+    # Relative project settings belong to the configured project root. Without a config,
+    # keep honoring the explicit --project root instead of resolve_config's cwd default.
+    base = resolved.root if config_path else root
     config = resolved.config
 
     def path(value: str | None) -> Path | None:
@@ -233,6 +247,9 @@ _TRUST = typer.Option(
 _PROVIDER = typer.Option(
     None, "--provider-config", help="Assistant model config (OpenAI-compatible)."
 )
+_PROVIDER_PROFILE = typer.Option(
+    None, "--provider-profile", help="Named profile from `aibench config profiles`."
+)
 _SEND = typer.Option(None, "--send", help="Non-interactive: send one message or /command.")
 _JSON = typer.Option(False, "--json", help="With --send: machine-readable output.")
 _OBJECTIVE = typer.Option(
@@ -249,13 +266,17 @@ def chat(
     policy: Path | None = _POLICY,
     trust_local_app: bool = _TRUST,
     provider_config: Path | None = _PROVIDER,
+    provider_profile: str | None = _PROVIDER_PROFILE,
     send: str | None = _SEND,
     json_output: bool = _JSON,
     objectives: list[str] = _OBJECTIVE,
     continue_latest: bool = _CONTINUE,
 ) -> None:
     """Open the benchmark conversation for a project."""
-    if send is None and not interactive_terminal():
+    from aibench.cli.global_options import current_global_options
+
+    global_options = current_global_options()
+    if send is None and (not interactive_terminal() or global_options.non_interactive):
         raise _fail(
             "chat needs an interactive terminal; for scripts use `aibench chat --send TEXT "
             "--json` or the headless commands (aibench --help)"
@@ -269,7 +290,9 @@ def chat(
         settings = project_settings(root, app, dataset, policy)
     except AibenchError as exc:
         raise _fail(str(exc)) from exc
-    chosen = _assistant_model(provider_config, interactive=send is None)
+    chosen = _assistant_model(
+        provider_config, interactive=send is None, provider_profile=provider_profile
+    )
     workspace = Workspace.at(root)
     if settings["application"] is None and not workspace.db_path.is_file():
         # Not a BenchCraft project (e.g. the home or a system folder): explain how to
@@ -355,14 +378,21 @@ def _not_connected(root: Path) -> str:
 
 
 def _assistant_model(
-    provider_config: Path | None, *, interactive: bool
+    provider_config: Path | None, *, interactive: bool, provider_profile: str | None = None
 ) -> Path | OpenAICompatibleConfig | None:
-    """`--provider-config` when given; else the model saved by `benchcraft setup`, asking
-    for one on the first interactive start."""
+    """Explicit config/profile, then the selected saved model, prompting only on first use."""
     from aibench import userconfig
 
+    if provider_config is not None and provider_profile is not None:
+        raise _fail("use only one of --provider-config and --provider-profile")
     if provider_config is not None:
         return provider_config
+    if provider_profile is not None:
+        selected = userconfig.saved_provider(provider_profile)
+        if selected is None:
+            names = ", ".join(userconfig.provider_profile_names()) or "none"
+            raise _fail(f"provider profile {provider_profile!r} is unavailable (saved: {names})")
+        return selected
     if interactive and not userconfig.decided():
         return userconfig.run_setup(lambda line: console.print(safe(line)))
     return userconfig.saved_provider()
@@ -584,6 +614,14 @@ def _with_project_plugins(controller: SessionController, root: Path) -> SessionC
         return controller
     if result.status == "applied":
         err_console.print(f"[dim]{done} (draft revision {result.revision})[/dim]")
+        # A plugin that no longer loads leaves its metrics out of the new draft: say why
+        # here, not only when /run refuses.
+        findings = (controller.current_decision().draft or {}).get("findings", [])
+        for finding in findings:
+            if finding.get("blocking") and finding.get("subject") == "plugins":
+                err_console.print(
+                    f"[yellow]the plan cannot run: {safe(finding['message'])}[/yellow]"
+                )
     else:
         reason = safe("; ".join(result.problems) or result.status)
         err_console.print(f"[yellow]could not {failed}: {reason}[/yellow]")
@@ -610,17 +648,20 @@ async def _send(
     from aibench.services.reports import build_report
     from aibench.services.runs import run_exit_code
     from aibench.tui.app import render_result
-    from aibench.tui.commands import Commands
+    from aibench.tui.commands import create_commands
 
     live_before = set(controller.live_runs())
     experiment_tasks_before = controller.experiment_task_keys()
     command_code: int | None = None
+    command_error: str | None = None
     try:
         if text.strip().startswith("/"):
-            result = await Commands(controller, new_session).run(text)
+            result = await create_commands(controller, new_session, provider=provider).run(text)
             payload: dict[str, Any] = {"session_id": controller.session_id, **result.as_dict()}
             ok = result.ok
             command_code = result.exit_code
+            if result.kind == "error":
+                command_error = str(result.data.get("error", "command failed"))
             actions = [result.data] if result.kind == "action" else []
             if result.kind == "confirm":  # /run showed the plan first: nothing was started
                 actions = [{"state": "confirmation_required"}]
@@ -630,6 +671,13 @@ async def _send(
             outcome = await ConversationAgent(controller, provider).handle_message(text)
             payload = {"session_id": controller.session_id, "outcome": outcome.as_dict()}
             ok = outcome.stopped is None or outcome.stopped == "no assistant model is configured"
+            rescore_codes = [
+                result["exit_code"]
+                for result in outcome.rescores
+                if type(result.get("exit_code")) is int and result["exit_code"] in _EXIT_SEVERITY
+            ]
+            if rescore_codes:
+                command_code = max(rescore_codes, key=_EXIT_SEVERITY.index)
             actions = list(outcome.actions) + [
                 {"state": item.get("status", "rejected")} for item in outcome.rejected
             ]
@@ -673,7 +721,8 @@ async def _send(
         return 130
     states = {a.get("state") for a in actions}
     if run_codes:
-        code = max(run_codes, key=_EXIT_SEVERITY.index)
+        codes = [*run_codes, *([command_code] if command_code in _EXIT_SEVERITY else [])]
+        code = max(codes, key=_EXIT_SEVERITY.index)
     elif command_code is not None:
         code = command_code
     elif states & {"denied", "confirmation_required"}:
@@ -683,11 +732,13 @@ async def _send(
     else:
         code = EXIT_OK
     payload["exit_code"] = code
+    if json_output and command_error is not None:
+        payload.update(error_document(command_error, code))
     if dataset_notices:
         payload["dataset_selection"] = dataset_notices
     if json_output:
         json_payload = json.loads(json.dumps(payload, default=str))
-        print(json.dumps(sanitize_value(json_payload)))
+        print(json.dumps(json_result(sanitize_value(json_payload), exit_code=code)))
     elif dataset_notices:
         for notice in dataset_notices:
             console.print(f"[dim]{safe(notice)}[/dim]")

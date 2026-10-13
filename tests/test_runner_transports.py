@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from aibench.cli.main import app
@@ -30,6 +31,7 @@ from aibench.core.models import (
     EffectState,
     ErrorKind,
     ExecutionStatus,
+    OpenAICompatibleTransport,
 )
 from aibench.runners import InvocationContext, create_runner, load_application
 from aibench.runners.bindings import AppInputEnvelope
@@ -215,6 +217,7 @@ def test_openai_compatible_endpoint_runs_end_to_end_through_the_cli(
     assert request["authorization"] == "Bearer sk-test-secret-value"
     body = request["body"]
     assert body["model"] == "stub-1" and body["temperature"] == 0
+    assert "stream" not in body and "stream_options" not in body
     assert body["messages"][0] == {"role": "system", "content": "You answer support questions."}
     assert body["messages"][1] == {"role": "user", "content": "What is your refund policy?"}
     # The key never reaches stored captures.
@@ -222,6 +225,85 @@ def test_openai_compatible_endpoint_runs_end_to_end_through_the_cli(
         p.read_bytes() for p in (tmp_path / ".aibench" / "artifacts").rglob("*") if p.is_file()
     )
     assert b"sk-test-secret-value" not in blobs
+
+
+def test_openai_compatible_stream_records_token_timings_and_integrity(
+    tmp_path: Path, stub: Any
+) -> None:
+    app_path = _openai_app(tmp_path, stub, parameters={"stream": True})
+
+    outcome = _invoke(app_path, "What is the refund policy?")
+
+    assert outcome.status is ExecutionStatus.OK
+    assert outcome.output == "Refunds are available within 30 days of purchase."
+    assert outcome.completeness["stream_integrity"]["state"] == "observed"
+    metrics = outcome.timing["streaming"]
+    assert metrics["integrity"]["complete"] is True
+    assert metrics["time_to_first_token_ms"] >= 5
+    assert metrics["inter_token_latency_ms"]["observed_intervals"] == 1
+    assert metrics["output_tokens"] > 0
+    assert metrics["output_tokens_per_second"] > 0
+    [request] = stub.requests
+    assert request["accept"] == "text/event-stream"
+    assert request["body"]["stream"] is True
+    assert request["body"]["stream_options"] == {"include_usage": True}
+
+
+def test_openai_stream_can_disable_usage_for_compatible_providers(
+    tmp_path: Path, stub: Any
+) -> None:
+    app_path = _openai_app(
+        tmp_path,
+        stub,
+        parameters={"stream": True, "stream_options": {"include_usage": False}},
+    )
+
+    outcome = _invoke(app_path, "Do you have a warranty?")
+
+    assert outcome.status is ExecutionStatus.OK
+    assert outcome.timing["streaming"]["integrity"]["complete"] is True
+    assert outcome.timing["streaming"]["output_tokens"] is None
+    assert outcome.timing["streaming"]["output_tokens_per_second"] is None
+
+
+def test_openai_stream_without_done_marker_fails_with_partial_timings(
+    tmp_path: Path, stub: Any
+) -> None:
+    app_path = _openai_app(
+        tmp_path,
+        stub,
+        parameters={"stream": True, "drop_done_marker": True},
+    )
+
+    outcome = _invoke(app_path, "What is the refund policy?")
+
+    assert outcome.status is ExecutionStatus.ERROR
+    assert outcome.error_kind is ErrorKind.INVALID_OUTPUT
+    assert outcome.timing["streaming"]["time_to_first_token_ms"] is not None
+    assert outcome.timing["streaming"]["integrity"]["done_marker_seen"] is False
+    assert outcome.completeness["stream_integrity"]["state"] == "observed"
+    assert outcome.completeness["stream_integrity"]["detail"] == "incomplete"
+
+
+def test_openai_stream_configuration_is_strict_without_changing_serialized_defaults() -> None:
+    transport = OpenAICompatibleTransport.model_validate(
+        {
+            "base_url": "http://127.0.0.1:8767/v1",
+            "model": "stub-1",
+            "parameters": {"stream": True},
+        }
+    )
+    assert transport.streaming_enabled is True
+    assert "streaming_enabled" not in transport.model_dump(mode="json")
+
+    with pytest.raises(ValidationError, match="parameters.stream must be a boolean"):
+        OpenAICompatibleTransport.model_validate(
+            {
+                "base_url": "http://127.0.0.1:8767/v1",
+                "model": "stub-1",
+                "parameters": {"stream": "true"},
+            }
+        )
 
 
 def test_usage_is_observed_and_tool_calls_are_requests_not_effects(

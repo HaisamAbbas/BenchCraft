@@ -63,6 +63,8 @@ class SessionHarness(Harness):
         trusted: bool = True,
         policy: dict[str, Any] | None = None,
         rows: list[dict[str, Any]] | None = None,
+        environment_digest: str | None = None,
+        application_env: dict[str, str] | None = None,
     ) -> SessionController:
         if rows is not None:
             data = "data.jsonl"
@@ -71,7 +73,12 @@ class SessionHarness(Harness):
             )
         else:
             data = self.dataset(inputs)
-        app = self.cli_app()
+        app = self.cli_app(environment_digest=environment_digest)
+        if application_env:
+            app_path = self.root / app
+            config = json.loads(app_path.read_text(encoding="utf-8"))
+            config["transport"]["env"].update(application_env)
+            app_path.write_text(json.dumps(config), encoding="utf-8")
         policy_path = None
         if policy is not None:
             policy_path = self.root / "policy.json"

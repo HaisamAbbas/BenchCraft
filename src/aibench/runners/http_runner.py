@@ -20,8 +20,8 @@ import asyncio
 import json
 import os
 import ssl
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +53,7 @@ from aibench.runners.bindings import (
     completeness,
     parse_app_json,
 )
+from aibench.runners.streaming import ResponseStream, ResponseStreamResult
 from aibench.security.endpoints import EndpointPolicy, origin_of
 from aibench.security.secrets import Redactor, resolve_secret
 
@@ -266,6 +267,15 @@ class HttpRunner(BaseRunner):
     async def _invoke(
         self, envelope: AppInputEnvelope, ctx: InvocationContext
     ) -> InvocationOutcome:
+        return await self._invoke_http(envelope, ctx)
+
+    async def _invoke_http(
+        self,
+        envelope: AppInputEnvelope,
+        ctx: InvocationContext,
+        *,
+        response_stream: ResponseStream | None = None,
+    ) -> InvocationOutcome:
         clock = Stopwatch()
         t = self.transport
         try:
@@ -295,10 +305,17 @@ class HttpRunner(BaseRunner):
         headers = {
             **self._headers,
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": response_stream.accept if response_stream is not None else "application/json",
             t.correlation_header: ctx.correlation_id,
         }
-        work = asyncio.ensure_future(self._exchange(exchange, body, headers))
+        work = asyncio.ensure_future(
+            self._exchange(
+                exchange,
+                body,
+                headers,
+                on_response_chunk=response_stream.feed if response_stream is not None else None,
+            )
+        )
         failure: _ExchangeFailure | None = None
         try:
             reason = await race(work, timeout=t.timeout_seconds, cancel=ctx.cancel)
@@ -336,20 +353,43 @@ class HttpRunner(BaseRunner):
             )
         }
         dispatch = exchange.dispatch_state()
+        stream_result: ResponseStreamResult | None = None
+
+        def attach_stream(outcome: InvocationOutcome) -> InvocationOutcome:
+            nonlocal stream_result
+            if response_stream is None:
+                return outcome
+            if stream_result is None:
+                stream_result = response_stream.finish()
+            integrity = stream_result.integrity
+            return replace(
+                outcome,
+                timing={**outcome.timing, "streaming": stream_result.metrics},
+                completeness={
+                    **outcome.completeness,
+                    "stream_integrity": completeness(
+                        ObservationState.OBSERVED,
+                        "complete" if integrity["complete"] else "incomplete",
+                        value=integrity,
+                    ),
+                },
+            )
 
         def fail(
             status: ExecutionStatus, kind: ErrorKind, message: str, **kw: Any
         ) -> InvocationOutcome:
-            return self.outcome(
-                clock,
-                ctx,
-                status,
-                dispatch,
-                error_kind=kind,
-                error=message,
-                captures=captures,
-                extra=extra,
-                **kw,
+            return attach_stream(
+                self.outcome(
+                    clock,
+                    ctx,
+                    status,
+                    dispatch,
+                    error_kind=kind,
+                    error=message,
+                    captures=captures,
+                    extra=extra,
+                    **kw,
+                )
             )
 
         if reason == "cancelled":
@@ -370,20 +410,49 @@ class HttpRunner(BaseRunner):
         assert exchange.status is not None
         if not 200 <= exchange.status < 300:
             return fail(ExecutionStatus.ERROR, ErrorKind.HTTP_STATUS, f"HTTP {exchange.status}")
-        try:
-            document = parse_app_json(self.redactor.data(exchange.body))
-        except InvalidDocument as exc:
-            return fail(
-                ExecutionStatus.ERROR,
-                ErrorKind.INVALID_OUTPUT,
-                f"response is not valid JSON: {exc}",
-                output_detail="invalid",
+        if response_stream is not None:
+            stream_result = response_stream.finish()
+            if stream_result.error is not None or stream_result.document is None:
+                return fail(
+                    ExecutionStatus.ERROR,
+                    ErrorKind.INVALID_OUTPUT,
+                    stream_result.error or "stream did not produce a response document",
+                    output_detail="invalid",
+                )
+            raw_document = json.dumps(stream_result.document, ensure_ascii=False).encode("utf-8")
+            try:
+                document = parse_app_json(self.redactor.data(raw_document))
+            except InvalidDocument as exc:
+                return fail(
+                    ExecutionStatus.ERROR,
+                    ErrorKind.INVALID_OUTPUT,
+                    f"stream response is not valid JSON: {exc}",
+                    output_detail="invalid",
+                )
+        else:
+            try:
+                document = parse_app_json(self.redactor.data(exchange.body))
+            except InvalidDocument as exc:
+                return fail(
+                    ExecutionStatus.ERROR,
+                    ErrorKind.INVALID_OUTPUT,
+                    f"response is not valid JSON: {exc}",
+                    output_detail="invalid",
+                )
+        return attach_stream(
+            self.outcome_from_document(
+                clock, ctx, document, source="response_json", captures=captures, extra=extra
             )
-        return self.outcome_from_document(
-            clock, ctx, document, source="response_json", captures=captures, extra=extra
         )
 
-    async def _exchange(self, exchange: _Exchange, body: bytes, headers: dict[str, str]) -> None:
+    async def _exchange(
+        self,
+        exchange: _Exchange,
+        body: bytes,
+        headers: dict[str, str],
+        *,
+        on_response_chunk: Callable[[bytes], None] | None = None,
+    ) -> None:
         """Send the request, following only policy-approved 307/308 redirects. Raises
         `_ExchangeFailure`; records progress on `exchange` so a cancelled or timed-out call
         still reports how far it got."""
@@ -421,7 +490,9 @@ class HttpRunner(BaseRunner):
                     if response.is_redirect:
                         url = self._next_hop(response, exchange)
                         continue
-                    await self._read_body(response, exchange)
+                    await self._read_body(
+                        response, exchange, on_response_chunk=on_response_chunk
+                    )
                     return
             except httpx.TimeoutException as exc:
                 kind = ErrorKind.TRANSPORT if not exchange.dispatched else ErrorKind.TIMEOUT
@@ -464,13 +535,22 @@ class HttpRunner(BaseRunner):
         exchange.status = None
         return target
 
-    async def _read_body(self, response: httpx.Response, exchange: _Exchange) -> None:
+    async def _read_body(
+        self,
+        response: httpx.Response,
+        exchange: _Exchange,
+        *,
+        on_response_chunk: Callable[[bytes], None] | None = None,
+    ) -> None:
         limit = self.transport.max_response_bytes
         buf = bytearray()
         async for chunk in response.aiter_bytes():  # decoded: the cap bounds decompression
             exchange.total_bytes += len(chunk)
-            if len(buf) < limit:
-                buf.extend(chunk[: limit - len(buf)])
+            accepted = chunk[: max(0, limit - len(buf))]
+            if accepted:
+                buf.extend(accepted)
+                if on_response_chunk is not None:
+                    on_response_chunk(accepted)
             if exchange.total_bytes > limit:
                 exchange.truncated = True
                 break
