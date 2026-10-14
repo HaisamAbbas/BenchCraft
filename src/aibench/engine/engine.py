@@ -64,7 +64,12 @@ from aibench.engine.retry import (
 from aibench.registry import ResolvedMetric
 from aibench.runners.base import BaseRunner, ResetReport, race
 from aibench.services.execution import invoke_and_record
-from aibench.services.scoring import BindingScorer, MissingExecution, episode_prefixes
+from aibench.services.scoring import (
+    BindingScorer,
+    MissingExecution,
+    episode_prefixes,
+    worker_budget,
+)
 from aibench.storage.artifacts import ArtifactStore
 from aibench.storage.repositories import RunControlState, Storage
 
@@ -602,6 +607,9 @@ class RunEngine:
             for key in self.storage.pending_evaluation_binding_keys(self.run_id)
             if key in self._binding_by_key
         }
+        # Worker processes beyond each metric's first, shared by all of them: a metric's
+        # cases are scored at once instead of one after another (see `WorkerBudget`).
+        workers = worker_budget(self.plan.concurrency.evaluation)
         for metric in self.metrics:
             if metric.binding_hash in wanted:
                 scorer = BindingScorer(
@@ -616,6 +624,7 @@ class RunEngine:
                     application=self.application,
                     dependency_lock_hash=self.dependency_lock_hash,
                     episodes=episode_prefixes(self.cases.values()),
+                    workers=workers,
                 )
                 scorer.cache_policy_hash = self.evaluation_cache_policy
                 await scorer.open()

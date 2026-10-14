@@ -21,7 +21,7 @@ import random
 import re
 import time
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -656,8 +656,13 @@ async def score_recorded_run(
     quotas: Sequence[Quota] | None = None,
     retry: RetryPolicy | None = None,
     gates: Sequence[ReleaseGate] = (),
+    evaluation_concurrency: int | None = None,
 ) -> ScoringReport:
-    """`application` overrides the catalog lookup (the engine passes the run's frozen spec).
+    """`evaluation_concurrency`: evaluations in flight at once across all metrics (default:
+    the run's frozen plan). A rescore scored one evaluation at a time whatever the plan
+    allowed: 90 judged evaluations took 56 minutes, as long as all of them end to end.
+
+    `application` overrides the catalog lookup (the engine passes the run's frozen spec).
 
     `carry_forward`: bring the pass up to date instead of repeating it. A finished result of
     an earlier pass of this run (same stored answer, same metric settings) is carried into
@@ -673,9 +678,11 @@ async def score_recorded_run(
     resolved = registry.validate(bindings, application=application)  # raises on any problem
     frozen = (
         _plan_for_scoring(storage, artifacts, record)
-        if budgets is None or quotas is None or retry is None
+        if budgets is None or quotas is None or retry is None or evaluation_concurrency is None
         else None
     )
+    if evaluation_concurrency is None:
+        evaluation_concurrency = frozen.concurrency.evaluation if frozen else 1
     limits = budgets if budgets is not None else frozen.budgets if frozen else BudgetLimits()
     if (
         limits.max_cost_usd is not None
@@ -734,6 +741,11 @@ async def score_recorded_run(
             "retry": dispatch.retry.model_dump(mode="json"),
         },
     )
+    # Every metric at once, its cases too, sharing the plan's evaluation limit and a budget
+    # of worker processes; results are recorded in metric order as before.
+    slots = asyncio.Semaphore(max(1, evaluation_concurrency))
+    workers = worker_budget(evaluation_concurrency)
+    scorers = []
     for metric in resolved:
         scorer = BindingScorer(
             storage,
@@ -747,9 +759,14 @@ async def score_recorded_run(
             dependency_lock_hash=dependency_lock_hash,
             episodes=episodes,
             dispatch=dispatch,
+            workers=workers,
         )
         scorer.carry_from(earlier)
-        metric_results = await scorer.score_all(executions, cases, report.warnings)
+        scorers.append(scorer)
+    per_metric = await asyncio.gather(
+        *(scorer.score_all(executions, cases, report.warnings, slots) for scorer in scorers)
+    )
+    for metric, metric_results in zip(resolved, per_metric, strict=True):
         report.results.extend(metric_results)
         report.carried += sum(1 for r in metric_results if is_carried(r))
         report.summaries.append(
@@ -823,6 +840,45 @@ class MissingExecution:
     execution_id: str | None = None
 
 
+class WorkerBudget:
+    """How many extra worker processes the metrics of one pass may start, beyond each
+    metric's first. A worker serves one request at a time, so a metric with one worker
+    scored its cases one after another however many evaluations the plan allowed at once:
+    faithfulness took a minute a case, and fifteen cases a quarter of an hour. An extra
+    worker that is idle is taken over by a metric that still has cases waiting, so the
+    busy metric gets the processes the finished ones no longer need."""
+
+    def __init__(self, extra: int) -> None:
+        self.free = max(0, extra)
+        self._idle: dict[Evaluator, BindingScorer] = {}  # oldest idle first
+
+    def take(self, wanting: BindingScorer) -> bool:
+        if self.free > 0:
+            self.free -= 1
+            return True
+        for evaluator, owner in list(self._idle.items()):
+            if owner is not wanting:
+                del self._idle[evaluator]
+                owner._retire(evaluator)
+                return True
+        return False
+
+    def give(self) -> None:
+        self.free += 1
+
+    def idle(self, evaluator: Evaluator, owner: BindingScorer) -> None:
+        self._idle[evaluator] = owner
+
+    def busy(self, evaluator: Evaluator) -> None:
+        self._idle.pop(evaluator, None)
+
+
+def worker_budget(evaluation_concurrency: int) -> WorkerBudget:
+    """Extra workers for a pass: enough for every evaluation the plan allows at once to
+    have its own worker, but never more processes than that across all metrics."""
+    return WorkerBudget(evaluation_concurrency - 1)
+
+
 class BindingScorer:
     """Scores executions for one metric binding within one scoring pass. Used whole by
     `score_recorded_run`, and item by item (with engine-level retries) by the engine:
@@ -843,6 +899,7 @@ class BindingScorer:
         dependency_lock_hash: str | None = None,
         episodes: Mapping[str, tuple[BenchmarkCase, ...]] | None = None,
         dispatch: RescoreDispatch | None = None,
+        workers: WorkerBudget | None = None,
     ) -> None:
         self.storage = storage
         # Only a metric that reads the conversation gets one assembled (`episode.turns`).
@@ -872,10 +929,16 @@ class BindingScorer:
         self.prepare_error: str | None = None
         self.dispatch = dispatch
         self._opened = False
+        self._open_lock = asyncio.Lock()
         self._evaluator: Evaluator | None = None
-        # An evaluator that serves one request at a time (a worker process) takes cases
-        # in turn, so each case's time limit counts its own turn, not the line.
-        self._turn = asyncio.Lock()
+        # An evaluator that serves one request at a time (a worker process) takes cases in
+        # turn, so each case's time limit counts its own turn, not the line. With a worker
+        # budget the metric may start more of them, one per case in flight (`_lease`).
+        self.workers = workers
+        self._idle: list[Evaluator] = []
+        self._extra: set[Evaluator] = set()
+        self._pool_changed = asyncio.Condition()
+        self._retiring: set[asyncio.Task[None]] = set()
         # Finished results of earlier passes to reuse, by (case, repetition); see `carry_from`.
         self._carry: dict[
             tuple[str, int], tuple[EvaluationResult, EvaluationCompatibilityIdentity]
@@ -885,15 +948,87 @@ class BindingScorer:
         """Construct and prepare the evaluator. Construction and prepare() are evaluator
         code too: a failure there becomes a recorded error for every case it would have
         evaluated, never an aborted pass."""
-        self._opened = True
+        async with self._open_lock:  # cases scored at once must not open it twice
+            if self._opened:
+                return
+            self._opened = True
+            try:
+                self._evaluator = self.metric.factory()
+                await asyncio.wait_for(
+                    self._evaluator.prepare(deep_unfreeze(self.metric.binding.params) or {}),
+                    self.prepare_timeout_seconds,
+                )
+                self._idle.append(self._evaluator)
+            except Exception as exc:  # noqa: BLE001 - see docstring
+                self.prepare_error = f"evaluator_prepare_failed:{type(exc).__name__}: {exc}"[:500]
+
+    @contextlib.asynccontextmanager
+    async def _lease(self, evaluator: Evaluator) -> AsyncIterator[Evaluator]:
+        """The evaluator to score one case with. One that takes any number of requests at
+        once is shared. Otherwise a case takes an idle worker, or starts one more within the
+        pass's worker budget, or waits its turn for one."""
+        if not getattr(evaluator, "one_at_a_time", False):
+            yield evaluator
+            return
+        leased = await self._take()
         try:
-            self._evaluator = self.metric.factory()
+            yield leased
+        finally:
+            async with self._pool_changed:
+                if leased in self._extra and self.workers is not None:
+                    self.workers.idle(leased, self)
+                self._idle.append(leased)
+                self._pool_changed.notify()
+
+    async def _take(self) -> Evaluator:
+        while True:
+            async with self._pool_changed:
+                if self._idle:
+                    leased = self._idle.pop()
+                    if self.workers is not None:
+                        self.workers.busy(leased)
+                    return leased
+                if self.workers is None or not self.workers.take(self):
+                    await self._pool_changed.wait()
+                    continue
+            started = await self._start_extra()
+            if started is not None:
+                return started
+
+    async def _start_extra(self) -> Evaluator | None:
+        """One more worker for this metric, its budget slot already taken. A worker that
+        does not start gives the slot back; the case then waits for one that runs."""
+        evaluator: Evaluator | None = None
+        try:
+            evaluator = self.metric.factory()
             await asyncio.wait_for(
-                self._evaluator.prepare(deep_unfreeze(self.metric.binding.params) or {}),
+                evaluator.prepare(deep_unfreeze(self.metric.binding.params) or {}),
                 self.prepare_timeout_seconds,
             )
-        except Exception as exc:  # noqa: BLE001 - see docstring
-            self.prepare_error = f"evaluator_prepare_failed:{type(exc).__name__}: {exc}"[:500]
+        except Exception:  # noqa: BLE001 - the metric still has its first worker
+            if evaluator is not None:
+                self._close_later(evaluator)
+            if self.workers is not None:
+                self.workers.give()
+            self.workers = None  # do not keep trying in this pass
+            return None
+        self._extra.add(evaluator)
+        return evaluator
+
+    def _retire(self, evaluator: Evaluator) -> None:
+        """Another metric takes over this idle extra worker's slot."""
+        self._idle.remove(evaluator)
+        self._extra.discard(evaluator)
+        self._close_later(evaluator)
+
+    def _close_later(self, evaluator: Evaluator) -> None:
+        async def close() -> None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(evaluator.close(), self.timeout_seconds)
+
+        task = asyncio.ensure_future(close())
+        self._retiring.add(task)
+        task.add_done_callback(self._retiring.discard)
 
     def carry_from(self, earlier: Sequence[EvaluationResult]) -> None:
         """Offer finished results of earlier passes (oldest first): one for the same case,
@@ -1059,6 +1194,15 @@ class BindingScorer:
     async def close(self, warnings: list[str]) -> None:
         """Results are already recorded; a failed cleanup cannot change them, so it is
         reported as a warning instead of discarding the pass."""
+        for evaluator in list(self._extra):
+            if self.workers is not None:
+                self.workers.busy(evaluator)
+                self.workers.give()
+            self._idle = [idle for idle in self._idle if idle is not evaluator]
+            self._extra.discard(evaluator)
+            self._close_later(evaluator)
+        if self._retiring:
+            await asyncio.gather(*self._retiring, return_exceptions=True)
         if self._evaluator is None:
             return
         label = f"{self.manifest.evaluator_id}@{self.manifest.version}"
@@ -1072,12 +1216,17 @@ class BindingScorer:
         executions: Sequence[ExecutionResult],
         cases: dict[str, list[BenchmarkCase]],
         warnings: list[str],
+        slots: asyncio.Semaphore | None = None,
     ) -> list[EvaluationResult]:
+        """Every execution scored and finalized, in the order given. With `slots`, cases are
+        scored at once up to the pass's evaluation limit (shared with the other metrics);
+        without, one after another."""
         if self.dispatch is None:
             await self.open()
-        results = []
-        try:
-            for execution in executions:
+        turn = slots or asyncio.Semaphore(1)
+
+        async def one(execution: ExecutionResult) -> EvaluationResult:
+            async with turn:
                 result = await self.score(execution, cases.get(execution.case_id, []))
                 if self.dispatch is not None:
                     for attempt in range(1, self.dispatch.retry.max_attempts):
@@ -1090,10 +1239,12 @@ class BindingScorer:
                         )
                         result = await self.score(execution, cases.get(execution.case_id, []))
                 self.finalize(result)
-                results.append(result)
+                return result
+
+        try:
+            return list(await asyncio.gather(*(one(execution) for execution in executions)))
         finally:
             await self.close(warnings)
-        return results
 
     async def _score_one(
         self,
@@ -1178,12 +1329,9 @@ class BindingScorer:
         )
         # Held from the restart check to the end of the call, so a worker killed by one
         # case's timeout is restarted for the next case in line instead of failing it.
-        turn = (
-            self._turn if getattr(evaluator, "one_at_a_time", False) else contextlib.nullcontext()
-        )
-        async with turn:
+        async with self._lease(evaluator) as worker:
             try:
-                await asyncio.wait_for(evaluator.ensure_ready(), self.prepare_timeout_seconds)
+                await asyncio.wait_for(worker.ensure_ready(), self.prepare_timeout_seconds)
             except Exception as exc:  # noqa: BLE001 - a lost runtime is an evaluator error
                 return self._result(
                     execution,
@@ -1201,9 +1349,7 @@ class BindingScorer:
                 )
             started = time.perf_counter()
             try:
-                outcome = await asyncio.wait_for(
-                    evaluator.evaluate(view, ctx), self.timeout_seconds
-                )
+                outcome = await asyncio.wait_for(worker.evaluate(view, ctx), self.timeout_seconds)
                 outcome = self._conform(outcome)
                 raw = self._serialize_raw(outcome)
             except TimeoutError:

@@ -188,9 +188,10 @@ def apply_patch(
 
 
 # A judged metric is dozens of small model calls per case; scored one case at a time a
-# 15-case run with five of them took an hour. Three at a time is a fraction of a paid
-# endpoint's limits and, with the judge's retries, tolerable on a free one.
-JUDGED_EVALUATION_CONCURRENCY = 3
+# 15-case run with five of them took an hour. Six at a time (each metric's cases at once,
+# with a worker per case) is a fraction of a paid endpoint's limits; the judge halves its own
+# concurrency when a provider refuses (429), so a free endpoint still copes.
+JUDGED_EVALUATION_CONCURRENCY = 6
 
 
 def with_judged_concurrency(ctx: Any, proposal: Any, catalog: list[Any]) -> Any:
