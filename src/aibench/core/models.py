@@ -23,6 +23,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    model_serializer,
     model_validator,
 )
 
@@ -327,15 +328,73 @@ class DatasetManifest(FrozenModel):
     created_at: datetime = Field(default_factory=utcnow)
 
 
-class ExposedApplicationParameter(FrozenModel):
-    """An application-owned, finite environment setting safe to vary in an experiment.
+def input_template_value(value: str, value_type: str) -> Any:
+    """An exposed parameter's value as it goes into the request: allowed values are written
+    as strings (they are hashed and compared as such) and sent as the declared JSON type."""
+    if value_type == "string":
+        return value
+    if value_type == "boolean":
+        if value not in ("true", "false"):
+            raise ValueError(f"{value!r} is not a boolean (true or false)")
+        return value == "true"
+    try:
+        number: int | float = int(value) if value_type == "integer" else float(value)
+    except ValueError:
+        raise ValueError(f"{value!r} is not a valid {value_type}") from None
+    if not isfinite(number):
+        raise ValueError(f"{value!r} is not a finite number")
+    return number
 
-    Only names under the dedicated AIBENCH_TUNABLE_ prefix can be exposed. Secret and
-    host/runtime variables are never accepted as experiment parameters.
+
+def input_template_parts(pointer: str) -> list[str]:
+    """The keys of a JSON pointer into the input template ("/options/top_k")."""
+    if not pointer.startswith("/") or pointer == "/":
+        raise ValueError(f"input_field {pointer!r} must be a JSON pointer such as /mode")
+    return [part.replace("~1", "/").replace("~0", "~") for part in pointer[1:].split("/")]
+
+
+def observed_input_binding(input_binding: Any, exposed_parameters: Any) -> dict[str, Any]:
+    """The input binding as part of how an application is observed: an exposed request
+    field (`input_field`) holds the parameter's name in place of its value. A setting an
+    experiment varies is not a change to how answers are recorded; with its value in the
+    observation identity, every trial looked re-instrumented, no comparison qualified, and
+    the baseline always won."""
+    binding = deep_unfreeze(input_binding) or {}
+    if not isinstance(binding, dict):
+        return {}
+    template = binding.get("template")
+    if not isinstance(template, dict):
+        return binding
+    for parameter in deep_unfreeze(exposed_parameters) or ():
+        pointer = parameter.get("input_field") if isinstance(parameter, Mapping) else None
+        if not isinstance(pointer, str):
+            continue
+        try:
+            *parents, last = input_template_parts(pointer)
+        except ValueError:
+            continue
+        node: Any = template
+        for part in parents:
+            node = node.get(part) if isinstance(node, dict) else None
+        if isinstance(node, dict) and last in node:
+            node[last] = f"<exposed parameter {parameter.get('name')}>"
+    return binding
+
+
+class ExposedApplicationParameter(FrozenModel):
+    """An application-owned, finite setting safe to vary in an experiment: an environment
+    variable of an application BenchCraft starts, or a field of the request it sends.
+
+    Only environment names under the dedicated AIBENCH_TUNABLE_ prefix can be exposed. Secret
+    and host/runtime variables are never accepted as experiment parameters. A request field
+    (`input_field`) is a JSON pointer into `input_binding.template`: a setting an HTTP
+    application takes with each request, such as LightRAG's retrieval `mode` or `top_k`.
     """
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
-    environment_key: str = Field(pattern=r"^AIBENCH_TUNABLE_[A-Z0-9_]{1,80}$")
+    environment_key: str | None = Field(default=None, pattern=r"^AIBENCH_TUNABLE_[A-Z0-9_]{1,80}$")
+    input_field: str | None = Field(default=None, max_length=200)
+    value_type: Literal["string", "integer", "number", "boolean"] = "string"
     default_value: str = Field(max_length=256)
     allowed_values: tuple[str, ...] = Field(min_length=2, max_length=16)
     description: str = Field(min_length=1, max_length=500)
@@ -346,7 +405,30 @@ class ExposedApplicationParameter(FrozenModel):
             raise ValueError("exposed parameter allowed_values must be unique")
         if self.default_value not in self.allowed_values:
             raise ValueError("exposed parameter default_value must be in allowed_values")
+        if (self.environment_key is None) == (self.input_field is None):
+            raise ValueError(
+                f"exposed parameter {self.name!r} needs exactly one of environment_key "
+                "and input_field"
+            )
+        if self.environment_key is not None and self.value_type != "string":
+            raise ValueError("an environment variable's value is a string; omit value_type")
+        if self.input_field is not None:
+            input_template_parts(self.input_field)
+            for value in self.allowed_values:
+                input_template_value(value, self.value_type)
         return self
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_kind(self, handler: Any) -> dict[str, Any]:
+        # An environment parameter serializes as it did before request fields existed, so an
+        # application's identity (and an experiment created against it) is unchanged.
+        data: dict[str, Any] = handler(self)
+        for key, unset in (("environment_key", None), ("input_field", None)):
+            if data.get(key) is unset:
+                data.pop(key, None)
+        if data.get("value_type") == "string":
+            data.pop("value_type", None)
+        return data
 
 
 class ExperimentParameterValues(FrozenModel):
@@ -1043,22 +1125,52 @@ class ApplicationSpec(FrozenModel):
                 f"{self.runner.value!r}"
             )
         parameter_names = [parameter.name for parameter in self.exposed_parameters]
-        environment_keys = [parameter.environment_key for parameter in self.exposed_parameters]
+        by_environment = [p for p in self.exposed_parameters if p.environment_key is not None]
+        by_input = [p for p in self.exposed_parameters if p.input_field is not None]
+        environment_keys = [parameter.environment_key for parameter in by_environment]
+        input_fields = [parameter.input_field for parameter in by_input]
         if len(set(parameter_names)) != len(parameter_names):
             raise ValueError("application exposed_parameters have duplicate names")
         if len(set(environment_keys)) != len(environment_keys):
             raise ValueError("application exposed_parameters have duplicate environment keys")
-        if self.exposed_parameters:
+        if len(set(input_fields)) != len(input_fields):
+            raise ValueError("application exposed_parameters have duplicate input fields")
+        if by_environment:
             environment = getattr(self.transport, "env", None)
             if environment is None:
                 raise ValueError(
                     "exposed_parameters require a runner transport with a configured env mapping"
                 )
-            for parameter in self.exposed_parameters:
+            for parameter in by_environment:
                 if environment.get(parameter.environment_key) != parameter.default_value:
                     raise ValueError(
                         f"exposed parameter {parameter.name!r} must match its transport env "
                         "default_value"
+                    )
+        if by_input:
+            binding = self.input_binding if isinstance(self.input_binding, Mapping) else {}
+            template = binding.get("template")
+            fields_written = set((binding.get("fields") or {}).keys())
+            if not isinstance(template, Mapping) or not template:
+                raise ValueError(
+                    "an exposed parameter's input_field needs an input_binding template that "
+                    "holds its default value"
+                )
+            for parameter in by_input:
+                assert parameter.input_field is not None
+                if parameter.input_field in fields_written:
+                    raise ValueError(
+                        f"exposed parameter {parameter.name!r}: {parameter.input_field} is "
+                        "written from the case input, not a setting"
+                    )
+                current: Any = template
+                for part in input_template_parts(parameter.input_field):
+                    current = current.get(part) if isinstance(current, Mapping) else None
+                default = input_template_value(parameter.default_value, parameter.value_type)
+                if current is None or current != default or type(current) is not type(default):
+                    raise ValueError(
+                        f"exposed parameter {parameter.name!r} must match its input template "
+                        f"default_value ({parameter.input_field} is {current!r})"
                     )
         return self
 

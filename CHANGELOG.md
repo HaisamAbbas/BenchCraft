@@ -5,6 +5,21 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc38 — experiments over an HTTP application's settings
+
+- **An experiment can vary a field of an HTTP application's request.** Experiments set only
+  environment variables of an application BenchCraft starts; LightRAG, connected over HTTP,
+  takes its retrieval `mode` and `top_k` with each request, so the only way to compare them
+  was to edit the connection between runs. An exposed parameter can now name `input_field`,
+  a JSON pointer into `input_binding.template`, with a `value_type` for numbers and booleans.
+  The template must hold the default, a field written from the case input cannot be one, and
+  an environment parameter is declared and serialized exactly as before.
+- **A varied setting is not a change of instrumentation.** The request template is part of
+  how an application is observed, so with the setting's value in that identity every trial
+  looked re-instrumented, no comparison qualified, and the experiment kept its baseline. An
+  exposed field's value is left out of the observation identity; nothing else changes for an
+  application without one.
+
 ## 0.1.0rc37 — scoring in parallel
 
 A rescore of 90 judged evaluations on LightRAG took 56 minutes: as long as all of them one

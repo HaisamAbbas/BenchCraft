@@ -35,6 +35,8 @@ from aibench.core.models import (
     MetricScope,
     RedactionClass,
     deep_unfreeze,
+    input_template_parts,
+    input_template_value,
     utcnow,
 )
 from aibench.core.plans import CaseSelection
@@ -411,14 +413,24 @@ def _variant(compiled: CompiledRun, parameters: Any) -> CompiledRun:
     source = compiled.application.spec
     raw = source.model_dump(mode="json")
     transport = raw.get("transport")
-    if not isinstance(transport, dict) or not isinstance(transport.get("env"), dict):
-        raise ExperimentError("application transport no longer exposes its environment mapping")
     exposures = {item.name: item for item in source.exposed_parameters}
     parameter_values = dict(deep_unfreeze(parameters))
     for name, value in parameter_values.items():
         exposure = exposures.get(name)
         if exposure is None or value not in exposure.allowed_values:
             raise ExperimentError(f"trial uses a non-exposed application parameter {name!r}")
+        if exposure.input_field is not None:
+            # A request field: the trial's value goes into every request it sends.
+            template = (raw.get("input_binding") or {}).get("template")
+            if not isinstance(template, dict):
+                raise ExperimentError("application input template no longer holds its settings")
+            *parents, last = input_template_parts(exposure.input_field)
+            for part in parents:
+                template = template.setdefault(part, {})
+            template[last] = input_template_value(value, exposure.value_type)
+            continue
+        if not isinstance(transport, dict) or not isinstance(transport.get("env"), dict):
+            raise ExperimentError("application transport no longer exposes its environment mapping")
         transport["env"][exposure.environment_key] = value
     for exposed in raw.get("exposed_parameters", []):
         if exposed["name"] in parameter_values:

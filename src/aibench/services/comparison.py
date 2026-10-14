@@ -43,6 +43,7 @@ from aibench.core.models import (
     ExecutionStatus,
     RunManifest,
     deep_unfreeze,
+    observed_input_binding,
 )
 from aibench.core.plans import ExecutablePlan
 from aibench.engine.engine import parse_work_item_key, was_dispatched
@@ -863,7 +864,11 @@ def _application_facts(
     try:
         spec = ApplicationSpec.model_validate(raw)
         runner = spec.runner.value
-        input_binding = _digest(deep_unfreeze(spec.input_binding) or {})
+        input_binding = _digest(
+            observed_input_binding(
+                spec.input_binding, spec.model_dump(mode="json").get("exposed_parameters")
+            )
+        )
         output_binding = _digest(deep_unfreeze(spec.output_binding) or {})
         reset_policy = spec.reset_policy.value
         environment_digest = (
@@ -878,7 +883,9 @@ def _application_facts(
         )
     except Exception:  # noqa: BLE001 - retain only the safe contract fallback
         runner = _text(raw.get("runner"), default="unknown") or "unknown"
-        input_binding = _digest(raw.get("input_binding") or {})
+        input_binding = _digest(
+            observed_input_binding(raw.get("input_binding"), raw.get("exposed_parameters"))
+        )
         output_binding = _digest(raw.get("output_binding") or {})
         reset_policy = _text(raw.get("reset_policy"), default="unknown") or "unknown"
         environment_digest = _text(raw.get("environment_digest"))
