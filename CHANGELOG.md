@@ -5,6 +5,24 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc37 — scoring in parallel
+
+A rescore of 90 judged evaluations on LightRAG took 56 minutes: as long as all of them one
+after another, because they were.
+
+- **A rescore scores its metrics and their cases at once**, within the plan's evaluation
+  limit (`concurrency.evaluation`). It scored one metric after another and one case after
+  another whatever the plan allowed.
+- **A metric scores several cases at once.** A worker process serves one request at a time,
+  so a metric with one worker took its cases in turn even in a run: faithfulness, at a minute
+  a case, took a quarter of an hour for fifteen. A pass now has a budget of extra workers
+  (the evaluation limit, less one) shared by its metrics; a metric with cases waiting starts
+  one, and takes over the idle extra worker of a metric that has finished. A case's time
+  limit still kills only its own worker.
+- **Judged metrics default to six evaluations at once** (three before). The judge still
+  halves its own concurrency when a provider refuses (429). Existing sessions pick it up when
+  their plan is next refreshed.
+
 ## 0.1.0rc36 — sessions from earlier releases redraft again
 
 - **"plan-….json holds a different plan; refusing to overwrite it".** After upgrading to

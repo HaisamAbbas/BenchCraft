@@ -1928,6 +1928,7 @@ async def evaluate_run(
         quotas=plan.quotas,
         retry=plan.retry,
         gates=plan.gates,
+        evaluation_concurrency=plan.concurrency.evaluation,
     )
 
 
