@@ -30,6 +30,33 @@ coverage gates pass and its paired 95% uncertainty interval excludes zero in the
 direction. This implementation uses the existing grouped cluster bootstrap and fixed seed;
 it does not collapse unrelated metrics into a composite score.
 
+## Settings of an HTTP application
+
+An application BenchCraft does not start (one connected over HTTP) has no environment for
+an experiment to set. Its settings travel in each request instead: expose a field of the
+request template with `input_field`, a JSON pointer into `input_binding.template`, and give
+`value_type` (`string`, `integer`, `number` or `boolean`) when the request carries something
+other than a string. Allowed values are still written as strings.
+
+```json
+"input_binding": {
+  "template": {"mode": "hybrid", "top_k": 40},
+  "fields": {"/query": "/input"}
+},
+"exposed_parameters": [
+  {"name": "mode", "input_field": "/mode", "default_value": "hybrid",
+   "allowed_values": ["hybrid", "mix", "local"], "description": "retrieval mode"},
+  {"name": "top_k", "input_field": "/top_k", "value_type": "integer", "default_value": "40",
+   "allowed_values": ["20", "40", "60"], "description": "passages retrieved per question"}
+]
+```
+
+The template must hold each parameter's default value, as its declared type, and a field
+written from the case input (a destination in `fields`) cannot be a parameter. Each trial
+sends its own value. An exposed field is a setting, not part of how answers are observed:
+its value is left out of the observation identity, so trials compare as one measurement of
+different settings. A parameter has either `environment_key` or `input_field`, not both.
+
 ## Protected evaluation lifecycle
 
 Creation reserves the holdout dataset digest in the workspace before a development trial

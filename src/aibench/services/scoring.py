@@ -47,6 +47,7 @@ from aibench.core.models import (
     UsageRole,
     WorkItem,
     deep_unfreeze,
+    observed_input_binding,
 )
 from aibench.core.plans import BudgetLimits, ExecutablePlan, Quota, ReleaseGate, RetryPolicy
 from aibench.engine.budget import BudgetLedger
@@ -331,7 +332,11 @@ def _instrumentation_component(
                 "schema_version": SCHEMA_VERSION,
                 "runner": application.runner.value,
                 "requirements": requirements,
-                "input_binding": deep_unfreeze(application.input_binding) or {},
+                "input_binding": observed_input_binding(
+                    application.input_binding, application.model_dump(mode="json").get(
+                        "exposed_parameters"
+                    )
+                ),
                 "output_binding": {field: output_binding.get(field) for field in execution_fields},
                 "reset_policy": application.reset_policy.value,
                 "environment_digest": application.environment_digest,
