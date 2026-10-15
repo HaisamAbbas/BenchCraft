@@ -66,6 +66,8 @@ def _profile(
     parameters_hash: str = "sha256:parameters",
     dependency_lock_hash: str | None = None,
     uses_models: bool = False,
+    static_requires: tuple[str, ...] = (),
+    required_fields: tuple[str, ...] = (),
 ) -> tuple[str, dict[str, Any]]:
     binding = binding_hash or content_hash(
         {"evaluator_id": metric_id, "version": "1.0.0", "params": {}, "rule": None}
@@ -91,7 +93,7 @@ def _profile(
         "scope": scope,
         "aggregation": aggregation,
         "uses_models": uses_models,
-        "requires": [],
+        "requires": [{"path": path} for path in static_requires],
         "description": f"test {metric_id}",
     }
     compatibility = {
@@ -113,7 +115,7 @@ def _profile(
         "judge": judge,
         "rubric": rubric,
         "instrumentation": instrumentation,
-        "required_fields": [],
+        "required_fields": sorted(required_fields),
         "final_attempt_rule": "highest_attempt_id_per_case_and_repetition",
     }
     compatibility["compatibility_hash"] = content_hash(
@@ -453,6 +455,44 @@ def test_compatible_runs_pair_case_repetition_and_report_macro_groups(tmp_path: 
     assert {row["group_id"] for row in comparison["groups"]} == {"group-a", "group-b"}
     assert comparison["uncertainty"]["independent_unit"] == "explicit_group_id_or_case_id"
     assert comparison["direction_handling"]["generic_quality_score_calculated"] is False
+
+
+def test_a_metric_whose_requirements_depend_on_its_settings_verifies_its_identity(
+    tmp_path: Path,
+) -> None:
+    """G-Eval's criteria ("compare the answer with the expected answer") add the reference
+    answer to what it reads. The scorer records the resolved list in the metric's identity;
+    the comparison re-derived it from the metric's static description, which lacks the
+    addition, called the identity unverified, and so no comparison with G-Eval could ever
+    qualify (an experiment with a G-Eval constraint could never select a candidate, and a
+    run compared with itself said "unknown_compatibility_identity")."""
+    storage = Storage(Database.open_in_memory())
+    cases = _cases("a1", "b1")
+    profile = _profile(
+        "deepeval.g_eval",
+        static_requires=("case.input", "execution.output"),
+        required_fields=("case.input", "case.reference.answer", "execution.output"),
+        plugin_id="aibench-deepeval",
+        plugin_version="0.2.0",
+        uses_models=True,
+        dependency_lock_hash="sha256:lock",
+        judge={"kind": "configured", "digest": "sha256:judge", "verified": True},
+        rubric={"kind": "configured", "digest": "sha256:rubric", "verified": True},
+    )
+    for run_id, values in (
+        ("baseline", _values(("a1", 0, 0.8), ("b1", 0, 0.6))),
+        ("current", _values(("a1", 0, 0.9), ("b1", 0, 0.7))),
+    ):
+        _seed_run(storage, run_id, cases=cases, values=values, profile=profile)
+
+    report = compare_runs(
+        storage, ArtifactStore(tmp_path / "artifacts"), "baseline", "current", bootstrap_replicates=100
+    )
+
+    codes = {warning["code"] for warning in report["warnings"]}
+    assert "unknown_compatibility_identity" not in codes, report["warnings"]
+    assert "unknown_exact_binding" not in codes
+    assert report["status"] == "qualified", report["warnings"]
 
 
 def test_missing_and_status_losses_are_coverage_not_zero_and_gate_exit_is_one(tmp_path: Path) -> None:
