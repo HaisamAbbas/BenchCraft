@@ -5,6 +5,18 @@ whose meaning changes gets a new semantic version, and is listed under "Metric s
 Workspace schema changes are listed under "Workspace". Upgrade steps are in
 [docs/release/upgrade-and-recovery.md](docs/release/upgrade-and-recovery.md).
 
+## 0.1.0rc39 — comparisons with G-Eval can qualify
+
+- **A comparison that includes G-Eval no longer reports its identity as unknown.** G-Eval's
+  requirements depend on its settings: criteria that name the expected answer add the
+  reference answer to what it reads. The scorer records the resolved list in the metric's
+  identity; the comparison re-derived it from the metric's static description, which lacks
+  the addition, and called the identity unverified. A run compared with itself said
+  `unknown_compatibility_identity` and `unknown_exact_binding`, no comparison with a G-Eval
+  metric could qualify, and an experiment with a G-Eval constraint could never select a
+  candidate. The comparison now reads the recorded list, which is part of the identity hash
+  that is verified.
+
 ## 0.1.0rc38 — experiments over an HTTP application's settings
 
 - **An experiment can vary a field of an HTTP application's request.** Experiments set only

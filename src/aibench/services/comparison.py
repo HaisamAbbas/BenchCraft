@@ -1203,6 +1203,18 @@ def _profile_value(
             path = _text(item.get("path"))
             if path is not None:
                 required_paths.append(path)
+    # A metric's requirements can depend on its settings (G-Eval criteria that name the
+    # expected answer add it), so the scorer records the resolved list in the identity, and
+    # the metric's static description cannot reproduce it. The recorded list is part of the
+    # identity hash, which is verified below; it is what the observation actually read.
+    recorded_required = compatibility.get("required_fields")
+    if (
+        compatibility.get("schema_version") == "aibench.evaluation-identity/1"
+        and isinstance(recorded_required, Sequence)
+        and not isinstance(recorded_required, (str, bytes))
+        and all(isinstance(path, str) for path in recorded_required)
+    ):
+        required_paths = list(recorded_required)
     required_paths.sort()
     semantic_digest = _digest(
         {
